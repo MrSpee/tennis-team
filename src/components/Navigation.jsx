@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Calendar, Trophy, Table, Settings } from 'lucide-react';
+import { Home, Calendar, Trophy, Table, Settings, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import './Navigation.css';
 
@@ -15,17 +15,23 @@ function Navigation() {
       
       <NavLink to="/matches" className="nav-item">
         <Calendar size={24} />
-        <span>Spiele</span>
+        <span>Verfügbarkeit</span>
       </NavLink>
+      
+      {/* Saison-Tab vorübergehend ausgeblendet */}
+      {/* <NavLink to="/league" className="nav-item">
+        <Table size={24} />
+        <span>Saison</span>
+      </NavLink> */}
       
       <NavLink to="/rankings" className="nav-item">
         <Trophy size={24} />
         <span>Rangliste</span>
       </NavLink>
       
-      <NavLink to="/league" className="nav-item">
-        <Table size={24} />
-        <span>Tabelle</span>
+      <NavLink to="/profile" className="nav-item">
+        <User size={24} />
+        <span>Profil</span>
       </NavLink>
       
       {isCaptain && (

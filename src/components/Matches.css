@@ -1,6 +1,14 @@
 .matches-page {
   padding: 1.5rem 1rem;
-  padding-bottom: 2rem;
+  padding-bottom: 140px !important; /* Extra Platz wegen Bottom-Navigation */
+}
+
+.matches-section {
+  margin-bottom: 3rem;
+}
+
+.matches-list {
+  margin-bottom: 3rem;
 }
 
 .page-header {
@@ -131,7 +139,7 @@
   border-left: 3px solid #10b981;
 }
 
-.my-status.not-available {
+.my-status.unavailable {
   background-color: #fee2e2;
   color: #991b1b;
   border-left: 3px solid #ef4444;
@@ -229,7 +237,7 @@
   background-color: #10b981;
 }
 
-.status-dot.not-available {
+.status-dot.unavailable {
   background-color: #ef4444;
 }
 

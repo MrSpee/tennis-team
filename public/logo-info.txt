@@ -1,0 +1,12 @@
+Das Vereinslogo wurde vom Benutzer bereitgestellt.
+Es sollte als logo.png oder logo.jpg im public/ Ordner gespeichert werden.
+
+Das Logo zeigt:
+- Schwarzer Kreis mit gelbem Tennisball
+- Silhouette eines Tennisspielers
+- Text: "ROT-GELB SÜRTH" oben
+- Text: "HERREN 40" unten
+
+Für die Verwendung in der App:
+- Speichere das Bild als: public/logo.png
+- Verwende in React: <img src="/logo.png" alt="Rot-Gelb Sürth" />
