@@ -114,126 +114,174 @@ function Dashboard() {
 
   return (
     <div className="dashboard container">
-      {/* Kompakter Header */}
-      <header className="dashboard-header fade-in">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
-          <div style={{ flex: 1 }}>
-            <h1 style={{ fontSize: '1.1rem', marginBottom: '0.5rem', fontWeight: '600' }}>
-              {getGreeting()}
-            </h1>
-            
-            {/* Vereins-Info kompakt */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-              <img 
-                src="/logo.png" 
-                alt="Vereinslogo" 
-                style={{ 
-                  width: '40px', 
-                  height: '40px', 
-                  borderRadius: '50%',
-                  objectFit: 'cover'
-                }}
-                onError={(e) => {
-                  e.target.style.display = 'none';
-                }}
-              />
-              <div>
-                <div style={{ fontSize: '0.9rem', fontWeight: '600', color: '#333' }}>
-                  {teamInfo?.clubName || 'SV Rot-Gelb Sürth'}
-                </div>
-                <div style={{ fontSize: '0.8rem', color: '#666' }}>
-                  Deine Mannschaft: {teamInfo?.category || 'Herren 40'} • {teamInfo?.league || ''} {teamInfo?.group || ''}
-                </div>
-              </div>
-            </div>
-
-            {player?.ranking && (
-              <span style={{
-                display: 'inline-block',
-                padding: '0.25rem 0.5rem',
-                background: '#3498db',
-                color: 'white',
-                borderRadius: '8px',
-                fontSize: '0.75rem',
-                fontWeight: '600'
-              }}>
-                {player.ranking}
-              </span>
-            )}
-          </div>
-          <button onClick={handleLogout} className="btn-icon" title="Abmelden" style={{ flexShrink: 0 }}>
-            <LogOut size={18} />
-          </button>
-        </div>
+      {/* Header mit Logout */}
+      <header className="dashboard-header fade-in" style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+        <button onClick={handleLogout} className="btn-icon" title="Abmelden">
+          <LogOut size={18} />
+        </button>
       </header>
 
-      {/* Nächstes Spiel - Kompakt */}
-      {nextMatchAnySeason && (
-        <div className="fade-in card" style={{
-          padding: '0.75rem 1rem',
-          marginBottom: '1rem',
-          background: '#eff6ff',
-          border: '1px solid #3b82f6',
-          borderRadius: '8px'
-        }}>
-          <div style={{ fontSize: '0.75rem', color: '#1e40af', fontWeight: '600', marginBottom: '0.25rem' }}>
-            NÄCHSTES SPIEL
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ fontSize: '0.9rem', fontWeight: '600', color: '#1e40af' }}>
-              {nextMatchAnySeason.opponent}
-            </div>
-            <div style={{ fontSize: '0.85rem', color: '#1e40af' }}>
-              {getNextMatchCountdown()}
-            </div>
+      {/* 1. Vereinslogo + Name */}
+      <div className="fade-in" style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
+        <img 
+          src="/logo.png" 
+          alt="Vereinslogo" 
+          style={{ 
+            width: '60px', 
+            height: '60px', 
+            borderRadius: '50%',
+            objectFit: 'cover',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+          }}
+          onError={(e) => {
+            e.target.style.display = 'none';
+          }}
+        />
+        <div>
+          <div style={{ fontSize: '1.1rem', fontWeight: '700', color: '#1e40af' }}>
+            {teamInfo?.clubName || 'SV Rot-Gelb Sürth'}
           </div>
         </div>
-      )}
+      </div>
 
-      {/* Saison */}
+      {/* 2. Persönliche Begrüßung */}
+      <div className="fade-in" style={{ marginBottom: '1rem' }}>
+        <h1 style={{ fontSize: '1.3rem', fontWeight: '600', color: '#333', marginBottom: '0.25rem' }}>
+          {getGreeting()}
+        </h1>
+        {player?.ranking && (
+          <span style={{
+            display: 'inline-block',
+            padding: '0.25rem 0.6rem',
+            background: '#3498db',
+            color: 'white',
+            borderRadius: '8px',
+            fontSize: '0.8rem',
+            fontWeight: '600'
+          }}>
+            {player.ranking}
+          </span>
+        )}
+      </div>
+
+      {/* 3. Meine Mannschaft */}
+      <div className="fade-in" style={{ 
+        display: 'flex', 
+        alignItems: 'center', 
+        gap: '0.5rem',
+        padding: '0.75rem 1rem',
+        background: '#f9fafb',
+        borderRadius: '8px',
+        marginBottom: '1rem'
+      }}>
+        <div style={{ fontSize: '1.2rem' }}>🎾</div>
+        <div>
+          <div style={{ fontSize: '0.75rem', color: '#999', fontWeight: '600' }}>
+            MEINE MANNSCHAFT
+          </div>
+          <div style={{ fontSize: '0.9rem', fontWeight: '600', color: '#333' }}>
+            {teamInfo?.category || 'Herren 40'} • {teamInfo?.league || ''} {teamInfo?.group || ''}
+          </div>
+        </div>
+      </div>
+
+      {/* 4. Saison */}
       <div className="fade-in card" style={{ padding: '1rem', marginBottom: '1rem' }}>
         <h2 style={{ margin: 0, fontSize: '1rem', marginBottom: '0.5rem', fontWeight: '600' }}>
           Saison
         </h2>
-        <div style={{ fontSize: '0.9rem', fontWeight: '600', color: '#1e40af', marginBottom: '0.25rem' }}>
+        <div style={{ fontSize: '0.95rem', fontWeight: '600', color: '#1e40af' }}>
           {currentSeason === 'winter' ? '❄️' : '☀️'} {seasonDisplay}
-        </div>
-        <div style={{ fontSize: '0.85rem', color: '#666' }}>
-          {notPlayedThisSeason} {notPlayedThisSeason === 1 ? 'Spiel' : 'Spiele'} • {players.length} angemeldete Spieler
         </div>
       </div>
 
-      {/* TVM Link */}
+      {/* 5. TVM Link - Rechts neben Label */}
       {teamInfo?.tvmLink && (
-        <div className="fade-in" style={{ marginBottom: '1rem' }}>
-          <div style={{ fontSize: '0.85rem', color: '#666', marginBottom: '0.5rem' }}>
-            Link zur Seite:
+        <div className="fade-in" style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'space-between',
+          marginBottom: '1.5rem' 
+        }}>
+          <div style={{ fontSize: '0.8rem', color: '#999', fontWeight: '600' }}>
+            LINK ZUR SEITE:
           </div>
           <a
             href={teamInfo.tvmLink}
             target="_blank"
             rel="noopener noreferrer"
-            className="btn btn-primary"
             style={{
-              display: 'flex',
+              display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '0.5rem',
-              padding: '0.75rem',
-              fontSize: '0.9rem',
-              width: '100%'
+              gap: '0.4rem',
+              padding: '0.5rem 1rem',
+              fontSize: '0.85rem',
+              fontWeight: '600',
+              borderRadius: '8px',
+              textDecoration: 'none',
+              background: '#00843D',
+              color: 'white',
+              border: 'none'
             }}
           >
-            <ExternalLink size={16} />
-            TVM Spielbetrieb öffnen
+            <ExternalLink size={14} />
+            TVM
           </a>
         </div>
       )}
 
-      {/* Aktuelle Spiele */}
+      {/* Nächstes Spiel - Erweitert */}
+      {nextMatchAnySeason && (() => {
+        const availablePlayers = Object.entries(nextMatchAnySeason.availability || {})
+          .filter(([, data]) => data.status === 'available')
+          .map(([, data]) => data.playerName)
+          .filter(name => name && name !== 'Unbekannt');
+
+        return (
+          <div className="fade-in card" style={{
+            padding: '1rem',
+            marginBottom: '1rem',
+            background: '#eff6ff',
+            border: '1px solid #3b82f6',
+            borderRadius: '8px'
+          }}>
+            <div style={{ marginBottom: '0.75rem' }}>
+              <div style={{ fontSize: '0.75rem', color: '#1e40af', fontWeight: '600', marginBottom: '0.25rem' }}>
+                NÄCHSTES SPIEL
+              </div>
+              <div style={{ fontSize: '0.85rem', color: '#1e40af', marginBottom: '0.25rem' }}>
+                {getNextMatchCountdown()}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '0.5rem' }}>
+              <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem' }}>
+                Gegner:
+              </div>
+              <div style={{ fontSize: '0.95rem', fontWeight: '600', color: '#1e40af' }}>
+                {nextMatchAnySeason.opponent}
+              </div>
+            </div>
+
+            {availablePlayers.length > 0 && (
+              <div>
+                <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem' }}>
+                  Es spielen aktuell:
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#065f46' }}>
+                  {availablePlayers.join(', ')}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Spiele der laufenden Saison */}
       <section className="dashboard-section fade-in">
         <h2 style={{ fontSize: '1rem', marginBottom: '1rem' }}>
-          Aktuelle Spiele ({notPlayedThisSeason})
+          Spiele der laufenden Saison ({notPlayedThisSeason})
         </h2>
         {upcomingMatches.length > 0 ? (
           <div className="matches-preview">
