@@ -7,7 +7,7 @@ import './Dashboard.css';
 
 function Dashboard() {
   const { currentUser, logout, player } = useAuth();
-  const { matches, players, leagueStandings, teamInfo } = useData();
+  const { matches, players, teamInfo } = useData();
 
   const now = new Date();
   
@@ -71,8 +71,6 @@ function Dashboard() {
     await logout();
     // Navigation passiert automatisch durch ProtectedRoute wenn isAuthenticated=false
   };
-
-  const yourTeam = leagueStandings.find(team => team.team === 'Your Team');
 
   // Tageszeit-abhängige Begrüßung
   const getGreeting = () => {
@@ -144,7 +142,7 @@ function Dashboard() {
                   {teamInfo?.clubName || 'SV Rot-Gelb Sürth'}
                 </div>
                 <div style={{ fontSize: '0.8rem', color: '#666' }}>
-                  Deine Mannschaft: {teamInfo?.category || 'Herren 40'}
+                  Deine Mannschaft: {teamInfo?.category || 'Herren 40'} • {teamInfo?.league || ''} {teamInfo?.group || ''}
                 </div>
               </div>
             </div>
@@ -192,67 +190,45 @@ function Dashboard() {
         </div>
       )}
 
-      {/* Aktuelle Saison Info */}
+      {/* Saison */}
       <div className="fade-in card" style={{ padding: '1rem', marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-          <h2 style={{ margin: 0, fontSize: '1.1rem' }}>
-            {currentSeason === 'winter' ? '❄️' : '☀️'} {seasonDisplay}
-          </h2>
-          {teamInfo?.tvmLink && (
-            <a
-              href={teamInfo.tvmLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.25rem',
-                padding: '0.4rem 0.75rem',
-                background: '#3b82f6',
-                color: 'white',
-                borderRadius: '6px',
-                textDecoration: 'none',
-                fontSize: '0.75rem',
-                fontWeight: '500'
-              }}
-            >
-              <ExternalLink size={14} />
-              TVM
-            </a>
-          )}
+        <h2 style={{ margin: 0, fontSize: '1rem', marginBottom: '0.5rem', fontWeight: '600' }}>
+          Saison
+        </h2>
+        <div style={{ fontSize: '0.9rem', fontWeight: '600', color: '#1e40af', marginBottom: '0.25rem' }}>
+          {currentSeason === 'winter' ? '❄️' : '☀️'} {seasonDisplay}
         </div>
-        
-        <div style={{ fontSize: '0.85rem', color: '#666', marginBottom: '0.5rem' }}>
-          {teamInfo?.league} {teamInfo?.group} • {teamInfo?.region}
-        </div>
-
-        {/* Kompakte Stats */}
-        <div style={{ 
-          display: 'grid', 
-          gridTemplateColumns: '1fr 1fr 1fr', 
-          gap: '0.5rem',
-          marginTop: '0.75rem'
-        }}>
-          <div style={{ textAlign: 'center', padding: '0.5rem', background: '#f9fafb', borderRadius: '6px' }}>
-            <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#1e40af' }}>
-              {notPlayedThisSeason}
-            </div>
-            <div style={{ fontSize: '0.7rem', color: '#666' }}>Spiele</div>
-          </div>
-          <div style={{ textAlign: 'center', padding: '0.5rem', background: '#f9fafb', borderRadius: '6px' }}>
-            <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#065f46' }}>
-              {players.length}
-            </div>
-            <div style={{ fontSize: '0.7rem', color: '#666' }}>Spieler</div>
-          </div>
-          <div style={{ textAlign: 'center', padding: '0.5rem', background: '#f9fafb', borderRadius: '6px' }}>
-            <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#92400e' }}>
-              {yourTeam?.position || '-'}
-            </div>
-            <div style={{ fontSize: '0.7rem', color: '#666' }}>Platz</div>
-          </div>
+        <div style={{ fontSize: '0.85rem', color: '#666' }}>
+          {notPlayedThisSeason} {notPlayedThisSeason === 1 ? 'Spiel' : 'Spiele'} • {players.length} angemeldete Spieler
         </div>
       </div>
+
+      {/* TVM Link */}
+      {teamInfo?.tvmLink && (
+        <div className="fade-in" style={{ marginBottom: '1rem' }}>
+          <div style={{ fontSize: '0.85rem', color: '#666', marginBottom: '0.5rem' }}>
+            Link zur Seite:
+          </div>
+          <a
+            href={teamInfo.tvmLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-primary"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
+              padding: '0.75rem',
+              fontSize: '0.9rem',
+              width: '100%'
+            }}
+          >
+            <ExternalLink size={16} />
+            TVM Spielbetrieb öffnen
+          </a>
+        </div>
+      )}
 
       {/* Aktuelle Spiele */}
       <section className="dashboard-section fade-in">
