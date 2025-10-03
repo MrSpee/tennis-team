@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
-import { Calendar, MapPin, Users, MessageCircle, Check, X } from 'lucide-react';
+import { Calendar, MapPin, Users, MessageCircle, Check, X, Download } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import './Matches.css';
@@ -48,11 +48,65 @@ function Matches() {
     return match.availability[player.id];
   };
 
+  // Kalender-Download (iCal/ICS Format)
+  const downloadCalendarEvent = (match) => {
+    const startDate = new Date(match.date);
+    const endDate = new Date(startDate.getTime() + 4 * 60 * 60 * 1000); // +4 Stunden
+    
+    // Format: YYYYMMDDTHHMMSS
+    const formatICalDate = (date) => {
+      return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+    };
+
+    const icsContent = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Platzhirsch//Tennis Team App//DE',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'BEGIN:VEVENT',
+      `DTSTART:${formatICalDate(startDate)}`,
+      `DTEND:${formatICalDate(endDate)}`,
+      `DTSTAMP:${formatICalDate(new Date())}`,
+      `UID:${match.id}@platzhirsch.app`,
+      `SUMMARY:Medenspiel gegen ${match.opponent}`,
+      `DESCRIPTION:Medenspiel ${match.location === 'Home' ? 'Heimspiel' : 'Auswärtsspiel'} gegen ${match.opponent}\\n\\n${match.playersNeeded} Spieler benötigt\\n\\nDu hast zugesagt!`,
+      match.venue ? `LOCATION:${match.venue}` : '',
+      'STATUS:CONFIRMED',
+      'SEQUENCE:0',
+      'BEGIN:VALARM',
+      'TRIGGER:-PT24H',
+      'DESCRIPTION:Medenspiel morgen!',
+      'ACTION:DISPLAY',
+      'END:VALARM',
+      'END:VEVENT',
+      'END:VCALENDAR'
+    ].filter(line => line).join('\r\n');
+
+    // Download als .ics Datei
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Medenspiel_${match.opponent.replace(/\s/g, '_')}_${format(match.date, 'dd-MM-yyyy')}.ics`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="matches-page container">
-      <header className="page-header fade-in">
-        <h1>Meine Verfügbarkeit</h1>
-        <p>Gib deine Verfügbarkeit für die kommenden Spiele an</p>
+      <header className="page-header fade-in" style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        marginBottom: '1.5rem'
+      }}>
+        <h1 style={{ fontSize: '1.1rem', fontWeight: '600', margin: 0 }}>
+          Meine Verfügbarkeit
+        </h1>
+        <Calendar size={24} color="#10b981" style={{ flexShrink: 0 }} />
       </header>
 
       <section className="matches-section fade-in">
@@ -128,21 +182,47 @@ function Matches() {
                       marginBottom: '0.75rem',
                       border: `2px solid ${myStatus.status === 'available' ? '#10b981' : '#ef4444'}`
                     }}>
-                      <div style={{ fontSize: '0.75rem', color: '#666', fontWeight: '600', marginBottom: '0.25rem' }}>
-                        DEIN FEEDBACK:
-                      </div>
-                      <div style={{ 
-                        fontSize: '0.9rem', 
-                        fontWeight: '600',
-                        color: myStatus.status === 'available' ? '#065f46' : '#991b1b'
-                      }}>
-                        {myStatus.status === 'available' ? '✓ Verfügbar' : myStatus.status === 'maybe' ? '? Vielleicht' : '✗ Nicht verfügbar'}
-                      </div>
-                      {myStatus.comment && (
-                        <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.25rem', fontStyle: 'italic' }}>
-                          💬 {myStatus.comment}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontSize: '0.75rem', color: '#666', fontWeight: '600', marginBottom: '0.25rem' }}>
+                            DEIN FEEDBACK:
+                          </div>
+                          <div style={{ 
+                            fontSize: '0.9rem', 
+                            fontWeight: '600',
+                            color: myStatus.status === 'available' ? '#065f46' : '#991b1b'
+                          }}>
+                            {myStatus.status === 'available' ? '✓ Verfügbar' : myStatus.status === 'maybe' ? '? Vielleicht' : '✗ Nicht verfügbar'}
+                          </div>
+                          {myStatus.comment && (
+                            <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.25rem', fontStyle: 'italic' }}>
+                              💬 {myStatus.comment}
+                            </div>
+                          )}
                         </div>
-                      )}
+                        {myStatus.status === 'available' && (
+                          <button
+                            onClick={() => downloadCalendarEvent(match)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              padding: '0.4rem 0.6rem',
+                              background: '#10b981',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '0.75rem',
+                              fontWeight: '600',
+                              cursor: 'pointer'
+                            }}
+                            title="In Kalender speichern"
+                          >
+                            <Download size={14} />
+                            Kalender
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
 
