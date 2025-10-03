@@ -1,0 +1,206 @@
+.rankings-page {
+  padding: 1.5rem 1rem;
+  padding-bottom: 2rem;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+}
+
+.rankings-controls {
+  margin-bottom: 1.5rem;
+}
+
+.sort-buttons {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.rankings-info {
+  margin-bottom: 1.5rem;
+  background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%);
+  border: none;
+}
+
+.rankings-info h3 {
+  font-size: 1.125rem;
+  color: var(--gray-900);
+  margin-bottom: 0.5rem;
+}
+
+.rankings-info p {
+  color: var(--gray-700);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.rankings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.ranking-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.ranking-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.ranking-position {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 60px;
+}
+
+.trophy-icon {
+  font-size: 1.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.position-number {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--gray-600);
+}
+
+.player-info {
+  flex: 1;
+}
+
+.player-info h3 {
+  font-size: 1.125rem;
+  color: var(--gray-900);
+  margin-bottom: 0.5rem;
+}
+
+.player-stats {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.ranking-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: white;
+}
+
+.points-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  background-color: var(--gray-100);
+  color: var(--gray-700);
+}
+
+.ranking-details {
+  display: none;
+}
+
+.rankings-legend {
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+}
+
+.rankings-legend h3 {
+  font-size: 1.125rem;
+  color: var(--gray-900);
+  margin-bottom: 1rem;
+}
+
+.legend-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.9375rem;
+  color: var(--gray-700);
+}
+
+.legend-color {
+  width: 24px;
+  height: 24px;
+  border-radius: 0.375rem;
+  flex-shrink: 0;
+}
+
+@media (min-width: 768px) {
+  .ranking-card {
+    gap: 1.5rem;
+  }
+
+  .ranking-position {
+    min-width: 80px;
+  }
+
+  .position-number {
+    font-size: 1.5rem;
+  }
+
+  .ranking-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    min-width: 180px;
+  }
+
+  .detail-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.875rem;
+  }
+
+  .detail-label {
+    color: var(--gray-600);
+  }
+
+  .detail-value {
+    font-weight: 600;
+    color: var(--gray-900);
+  }
+
+  .legend-items {
+    flex-direction: row;
+    justify-content: space-around;
+  }
+}
+
+@media (max-width: 640px) {
+  .player-info h3 {
+    font-size: 1rem;
+  }
+
+  .ranking-position {
+    min-width: 50px;
+  }
+
+  .trophy-icon {
+    font-size: 1.25rem;
+  }
+
+  .position-number {
+    font-size: 1rem;
+  }
+}
