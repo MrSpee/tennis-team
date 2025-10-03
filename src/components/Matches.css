@@ -1,0 +1,282 @@
+.matches-page {
+  padding: 1.5rem 1rem;
+  padding-bottom: 2rem;
+}
+
+.page-header {
+  margin-bottom: 2rem;
+}
+
+.page-header h1 {
+  font-size: 1.875rem;
+  color: var(--gray-900);
+  margin-bottom: 0.5rem;
+}
+
+.page-header p {
+  color: var(--gray-600);
+  font-size: 1rem;
+}
+
+.matches-section {
+  margin-bottom: 2.5rem;
+}
+
+.matches-section h2 {
+  font-size: 1.25rem;
+  color: var(--gray-900);
+  margin-bottom: 1rem;
+  font-weight: 600;
+}
+
+.matches-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.match-card {
+  position: relative;
+}
+
+.match-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  gap: 1rem;
+}
+
+.match-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.match-title h3 {
+  font-size: 1.25rem;
+  color: var(--gray-900);
+}
+
+.season-badge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.season-badge.winter {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.season-badge.summer {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.match-details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.detail-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--gray-700);
+  font-size: 0.9375rem;
+}
+
+.detail-item svg {
+  color: var(--gray-500);
+  flex-shrink: 0;
+}
+
+.availability-stats {
+  display: flex;
+  gap: 1rem;
+  padding: 0.75rem;
+  background-color: var(--gray-50);
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.stat-item {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.875rem;
+  color: var(--gray-700);
+}
+
+.stat-item svg {
+  color: var(--gray-500);
+}
+
+.my-status {
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+  font-size: 0.9375rem;
+}
+
+.my-status.available {
+  background-color: #d1fae5;
+  color: #065f46;
+  border-left: 3px solid #10b981;
+}
+
+.my-status.not-available {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border-left: 3px solid #ef4444;
+}
+
+.status-comment {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+  font-weight: normal;
+  opacity: 0.9;
+}
+
+.availability-actions {
+  margin-top: 1rem;
+}
+
+.availability-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.availability-form textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.form-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.form-buttons .btn {
+  flex: 1;
+  min-width: 120px;
+}
+
+.btn-full {
+  width: 100%;
+}
+
+.availability-details {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--gray-200);
+}
+
+.availability-details summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--gray-700);
+  padding: 0.5rem;
+  margin: -0.5rem;
+  border-radius: 0.375rem;
+  transition: background-color 0.2s;
+}
+
+.availability-details summary:hover {
+  background-color: var(--gray-50);
+}
+
+.availability-list {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.availability-item {
+  padding: 0.75rem;
+  background-color: var(--gray-50);
+  border-radius: 0.5rem;
+}
+
+.availability-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  color: var(--gray-900);
+  margin-bottom: 0.25rem;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.available {
+  background-color: #10b981;
+}
+
+.status-dot.not-available {
+  background-color: #ef4444;
+}
+
+.availability-status-text {
+  font-size: 0.875rem;
+  color: var(--gray-600);
+  margin-bottom: 0.25rem;
+}
+
+.availability-comment {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.375rem;
+  font-size: 0.875rem;
+  color: var(--gray-600);
+  margin-top: 0.5rem;
+  font-style: italic;
+}
+
+.availability-comment svg {
+  margin-top: 0.125rem;
+  flex-shrink: 0;
+}
+
+.past-match {
+  opacity: 0.7;
+}
+
+.past-badge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background-color: var(--gray-200);
+  color: var(--gray-700);
+}
+
+@media (max-width: 640px) {
+  .match-details-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-buttons {
+    flex-direction: column;
+  }
+
+  .form-buttons .btn {
+    width: 100%;
+  }
+}

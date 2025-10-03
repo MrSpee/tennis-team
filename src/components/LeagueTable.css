@@ -1,0 +1,229 @@
+.league-page {
+  padding: 1.5rem 1rem;
+  padding-bottom: 2rem;
+}
+
+.league-info {
+  margin-bottom: 1.5rem;
+  background: linear-gradient(135deg, #fef3c7 0%, #fed7aa 100%);
+  border: none;
+}
+
+.league-info h3 {
+  font-size: 1.125rem;
+  color: var(--gray-900);
+  margin-bottom: 0.5rem;
+}
+
+.league-info p {
+  color: var(--gray-700);
+  font-size: 0.9375rem;
+  margin-bottom: 1rem;
+}
+
+.info-stats {
+  display: flex;
+  gap: 2rem;
+}
+
+.info-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.stat-label {
+  font-size: 0.875rem;
+  color: var(--gray-600);
+}
+
+.stat-value {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--gray-900);
+}
+
+.table-container {
+  background: white;
+  border-radius: 1rem;
+  overflow: hidden;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+  margin-bottom: 1.5rem;
+}
+
+.league-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.league-table thead {
+  background: var(--primary);
+  color: white;
+}
+
+.league-table th {
+  padding: 1rem 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.league-table tbody tr {
+  border-bottom: 1px solid var(--gray-200);
+  transition: background-color 0.2s;
+}
+
+.league-table tbody tr:hover {
+  background-color: var(--gray-50);
+}
+
+.league-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.league-table td {
+  padding: 1rem 0.75rem;
+}
+
+.position-col {
+  width: 60px;
+}
+
+.team-col {
+  min-width: 200px;
+}
+
+.stat-col {
+  width: 60px;
+  text-align: center;
+  font-weight: 500;
+}
+
+.position-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.position {
+  font-weight: 700;
+  font-size: 1.125rem;
+  color: var(--gray-700);
+}
+
+.trend-up {
+  color: var(--success);
+}
+
+.trend-down {
+  color: var(--danger);
+}
+
+.team-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  color: var(--gray-900);
+}
+
+.team-badge {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  background-color: var(--primary);
+  color: white;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.your-team {
+  background-color: #d1fae5 !important;
+}
+
+.your-team:hover {
+  background-color: #a7f3d0 !important;
+}
+
+.stat-wins {
+  color: var(--success);
+}
+
+.stat-losses {
+  color: var(--danger);
+}
+
+.stat-points {
+  font-weight: 700;
+  color: var(--gray-900);
+  font-size: 1.125rem;
+}
+
+.table-legend {
+  margin-bottom: 1rem;
+}
+
+.table-legend h3 {
+  font-size: 1.125rem;
+  color: var(--gray-900);
+  margin-bottom: 1rem;
+}
+
+.legend-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: 1rem;
+}
+
+.legend-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.legend-item strong {
+  color: var(--gray-900);
+  font-size: 0.875rem;
+}
+
+.legend-item span {
+  color: var(--gray-600);
+  font-size: 0.75rem;
+}
+
+.standings-note {
+  background-color: #dbeafe;
+  border: 1px solid #93c5fd;
+  font-size: 0.9375rem;
+}
+
+.standings-note p {
+  color: var(--gray-700);
+  line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .league-table th,
+  .league-table td {
+    padding: 0.75rem 0.5rem;
+    font-size: 0.875rem;
+  }
+
+  .team-col {
+    min-width: 150px;
+  }
+
+  .stat-col {
+    width: 45px;
+  }
+
+  .team-badge {
+    display: none;
+  }
+
+  .info-stats {
+    gap: 1rem;
+  }
+}
