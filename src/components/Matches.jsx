@@ -64,21 +64,90 @@ function Matches() {
               const myStatus = getAvailabilityStatus(match);
               const availableCount = Object.values(match.availability || {})
                 .filter(a => a.status === 'available').length;
-              const notAvailableCount = Object.values(match.availability || {})
-                .filter(a => a.status === 'unavailable').length;
+
+              const availablePlayers = Object.entries(match.availability || {})
+                .filter(([, data]) => data.status === 'available')
+                .map(([, data]) => data.playerName)
+                .filter(name => name && name !== 'Unbekannt');
+              
+              const missingPlayers = match.playersNeeded - availableCount;
 
               return (
-                <div key={match.id} className="match-card card">
-                  <div className="match-header">
-                    <div className="match-title">
-                      <h3>{match.opponent}</h3>
-                      <span className={`season-badge ${match.season}`}>
+                <div key={match.id} className="match-card card" style={{
+                  border: '2px solid #e5e7eb',
+                  borderRadius: '12px',
+                  padding: '1rem',
+                  marginBottom: '1rem'
+                }}>
+                  {/* Gegner */}
+                  <div style={{ marginBottom: '0.5rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                      <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '700' }}>
+                        {match.opponent}
+                      </h3>
+                      <span className={`season-badge ${match.season}`} style={{ fontSize: '0.7rem' }}>
                         {match.season === 'winter' ? 'Winter' : 'Sommer'}
                       </span>
                     </div>
+                    
+                    {/* Es spielen: */}
+                    {availablePlayers.length > 0 && (
+                      <div style={{ fontSize: '0.85rem', color: '#065f46', marginBottom: '0.5rem' }}>
+                        Es spielen: {availablePlayers.join(', ')}
+                      </div>
+                    )}
                   </div>
 
-                  <div className="match-details-grid">
+                  {/* Status-Meldung */}
+                  <div style={{
+                    padding: '0.5rem 0.75rem',
+                    background: availableCount >= match.playersNeeded ? '#d1fae5' : availableCount > 0 ? '#fef3c7' : '#fee2e2',
+                    borderRadius: '6px',
+                    marginBottom: '0.75rem'
+                  }}>
+                    <div style={{ 
+                      fontSize: '0.85rem', 
+                      fontWeight: '600',
+                      color: availableCount >= match.playersNeeded ? '#065f46' : availableCount > 0 ? '#92400e' : '#991b1b'
+                    }}>
+                      {availableCount >= match.playersNeeded 
+                        ? '✅ Wir sind ausreichend! Der MF darf sich seine Premium-Mannschaft zusammenstellen.'
+                        : availableCount > 0
+                        ? `⚠️ Es fehlen noch ${missingPlayers} Spieler!`
+                        : '❌ Noch keine Rückmeldungen!'
+                      }
+                    </div>
+                  </div>
+
+                  {/* Dein Feedback */}
+                  {myStatus && (
+                    <div style={{
+                      padding: '0.5rem 0.75rem',
+                      background: myStatus.status === 'available' ? '#d1fae5' : '#fee2e2',
+                      borderRadius: '6px',
+                      marginBottom: '0.75rem',
+                      border: `2px solid ${myStatus.status === 'available' ? '#10b981' : '#ef4444'}`
+                    }}>
+                      <div style={{ fontSize: '0.75rem', color: '#666', fontWeight: '600', marginBottom: '0.25rem' }}>
+                        DEIN FEEDBACK:
+                      </div>
+                      <div style={{ 
+                        fontSize: '0.9rem', 
+                        fontWeight: '600',
+                        color: myStatus.status === 'available' ? '#065f46' : '#991b1b'
+                      }}>
+                        {myStatus.status === 'available' ? '✓ Verfügbar' : myStatus.status === 'maybe' ? '? Vielleicht' : '✗ Nicht verfügbar'}
+                      </div>
+                      {myStatus.comment && (
+                        <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.25rem', fontStyle: 'italic' }}>
+                          💬 {myStatus.comment}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Spiel-Details */}
+                  <div className="match-details-grid" style={{ marginBottom: '0.75rem' }}>
                     <div className="detail-item">
                       <Calendar size={18} />
                       <span>{format(match.date, 'EEEE, dd. MMMM yyyy', { locale: de })}</span>
@@ -108,34 +177,7 @@ function Matches() {
                         </a>
                       </div>
                     )}
-                    <div className="detail-item">
-                      <Users size={18} />
-                      <span>{match.playersNeeded} Spieler benötigt</span>
-                    </div>
                   </div>
-
-                  <div className="availability-stats">
-                    <div className="stat-item">
-                      <Check size={16} />
-                      <span>{availableCount} verfügbar</span>
-                    </div>
-                    <div className="stat-item">
-                      <X size={16} />
-                      <span>{notAvailableCount} abgesagt</span>
-                    </div>
-                  </div>
-
-                    {myStatus && (
-                      <div className={`my-status ${myStatus.status}`}>
-                        <strong>Deine Antwort:</strong> {myStatus.status === 'available' ? 'Verfügbar' : myStatus.status === 'maybe' ? 'Vielleicht' : 'Nicht verfügbar'}
-                      {myStatus.comment && (
-                        <div className="status-comment">
-                          <MessageCircle size={14} />
-                          <span>{myStatus.comment}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
 
                   <div className="availability-actions">
                     {selectedMatch === match.id ? (
@@ -184,7 +226,7 @@ function Matches() {
 
                   {Object.keys(match.availability || {}).length > 0 && (
                     <details className="availability-details">
-                      <summary>Alle Antworten anzeigen ({Object.keys(match.availability).length})</summary>
+                      <summary>Feedback Spieler ({Object.keys(match.availability).length})</summary>
                       <div className="availability-list">
                         {Object.entries(match.availability).map(([playerId, data]) => (
                           <div key={playerId} className="availability-item">
