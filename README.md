@@ -2,20 +2,15 @@
 
 A modern Progressive Web App for organizing tennis team matches, managing player availability, and tracking rankings.
 
-## 🆕 **NEU: Supabase-Integration!**
+## 🎾 **Tennis Team Organizer - Supabase Edition**
 
-Diese App ist jetzt in **zwei Versionen** verfügbar:
+Diese App verwendet **Supabase** als Backend für professionelle Team-Verwaltung:
 
-### 📱 localStorage-Version (aktuell aktiv)
-- ✅ Schnelles lokales Testing
-- ✅ Keine Konfiguration nötig
-- ❌ Nur Single-User (Daten im Browser)
-
-### ☁️ Supabase-Version (empfohlen für Produktion)
+### ☁️ **Supabase-Integration**
 - ✅ **Zentrale Datenbank** - alle Spieler sehen dieselben Daten
 - ✅ **Echtzeit-Synchronisation** - Änderungen sofort sichtbar
 - ✅ **Multi-User** - mehrere Spieler gleichzeitig
-- ✅ **Professionelle Auth** - Email/Passwort statt Codes
+- ✅ **Professionelle Auth** - Email/Passwort Login
 - ✅ **Kostenlos** für kleine Teams!
 
 **🚀 Schnellstart Supabase (10 Min):** Siehe [SUPABASE_QUICKSTART.md](SUPABASE_QUICKSTART.md)
@@ -51,7 +46,13 @@ Diese App ist jetzt in **zwei Versionen** verfügbar:
 # Install dependencies
 npm install
 
-# Start development server (localStorage-Version)
+# 1. Supabase-Projekt erstellen auf https://supabase.com
+# 2. SQL-Schema ausführen (SUPABASE_SCHEMA.sql)
+# 3. .env erstellen mit Ihren Keys
+cp .env.example .env
+# → .env bearbeiten und Keys eintragen
+
+# Start development server
 npm run dev
 
 # Build for production
@@ -61,37 +62,18 @@ npm run build
 npm run preview
 ```
 
-### 🔄 Zu Supabase-Version wechseln
-
-**Siehe ausführliche Anleitungen:**
+### 📖 **Setup-Anleitungen:**
 - 📖 [SUPABASE_QUICKSTART.md](SUPABASE_QUICKSTART.md) - 10 Minuten Setup
 - 📖 [SUPABASE_SETUP.md](SUPABASE_SETUP.md) - Detaillierte Anleitung
-- 📖 [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) - Migration & Troubleshooting
+- 📖 [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) - Troubleshooting
 
-**Kurzversion:**
-```bash
-# 1. Supabase-Projekt erstellen auf https://supabase.com
-# 2. SQL-Schema ausführen (SUPABASE_SCHEMA.sql)
-# 3. Supabase installieren
-npm install @supabase/supabase-js
+## 🔑 **Login**
 
-# 4. .env erstellen mit Ihren Keys
-cp .env.example .env
-# → .env bearbeiten und Keys eintragen
+Die App verwendet **Email/Passwort Authentication** über Supabase:
 
-# 5. Supabase-Version aktivieren
-sed -i '' "s/import App from '.\/App.jsx'/import App from '.\/App-Supabase.jsx'/" src/main.jsx
-
-# 6. Starten
-npm run dev
-```
-
-## 🔑 Access Codes
-
-For demonstration purposes, use these codes:
-
-- **Team Captain**: `1234` - Full access including admin panel
-- **Player**: `5678` - Standard player access
+- **Team Captain**: Vollzugriff inklusive Admin-Panel
+- **Spieler**: Standard Spieler-Zugriff
+- **Neue Benutzer**: Registrierung über Login-Seite
 
 ## 📱 Installing as PWA
 
@@ -200,12 +182,11 @@ npm run build
 
 ## 📝 Data Persistence
 
-The app uses `localStorage` to persist data:
-- Match data
-- Player availability responses
-- League standings
-
-Data persists across sessions but is device-specific.
+The app uses **Supabase** for data persistence:
+- ✅ **Zentrale Datenbank** - Daten sind überall verfügbar
+- ✅ **Echtzeit-Sync** - Änderungen sofort sichtbar
+- ✅ **Backup** - Automatische Datensicherung
+- ✅ **Multi-Device** - Daten auf allen Geräten synchron
 
 ## 🎨 Color Scheme
 

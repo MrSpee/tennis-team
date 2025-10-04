@@ -1,6 +1,7 @@
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { LogOut, ExternalLink } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import './Dashboard.css';
@@ -8,8 +9,20 @@ import './Dashboard.css';
 function Dashboard() {
   const { currentUser, logout, player } = useAuth();
   const { matches, players, teamInfo } = useData();
+  
+  // State für Live-Timer
+  const [currentTime, setCurrentTime] = useState(new Date());
 
-  const now = new Date();
+  // Timer für Live-Updates (alle 30 Sekunden)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 30000); // Aktualisiert alle 30 Sekunden
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const now = currentTime;
   
   // Aktuelle Saison bestimmen (Winter: Sep-Apr, Sommer: Mai-Aug)
   // Winter läuft von September bis April (überspannt Jahreswechsel)
@@ -105,6 +118,28 @@ function Dashboard() {
     const diffTime = nextMatchAnySeason.date - now;
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
+    // Wenn weniger als 2 Tage (48 Stunden) entfernt, zeige genauen Timer
+    if (diffTime <= 48 * 60 * 60 * 1000) {
+      const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
+      const diffMinutes = Math.floor((diffTime % (1000 * 60 * 60)) / (1000 * 60));
+      const diffSeconds = Math.floor((diffTime % (1000 * 60)) / 1000);
+
+      if (diffDays === 0) {
+        // Heute: Zeige Stunden und Minuten
+        if (diffHours === 0) {
+          return `🔥 In ${diffMinutes}m ${diffSeconds}s - HEUTE!`;
+        }
+        return `🔥 In ${diffHours}h ${diffMinutes}m - HEUTE!`;
+      } else if (diffDays === 1) {
+        // Morgen: Zeige Stunden und Minuten
+        return `⚡ In ${diffHours}h ${diffMinutes}m - MORGEN!`;
+      } else {
+        // Weniger als 2 Tage: Zeige genauen Timer
+        return `⏰ In ${diffHours}h ${diffMinutes}m`;
+      }
+    }
+
+    // Normale Anzeige für Spiele > 2 Tage
     if (diffDays === 0) return '🔥 HEUTE ist Spieltag!';
     if (diffDays === 1) return '⚡ MORGEN ist Spieltag!';
     if (diffDays <= 3) return `⏰ In ${diffDays} Tagen`;
@@ -114,12 +149,12 @@ function Dashboard() {
 
   return (
     <div className="dashboard container">
-      {/* Header mit Logout */}
-      <header className="dashboard-header fade-in" style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+      {/* Logout Button - jetzt ohne eigenen Header */}
+      <div className="fade-in" style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem', paddingTop: '1rem' }}>
         <button onClick={handleLogout} className="btn-icon" title="Abmelden">
           <LogOut size={18} />
         </button>
-      </header>
+      </div>
 
       {/* 1. Vereinslogo + Name */}
       <div className="fade-in" style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
@@ -185,51 +220,50 @@ function Dashboard() {
         </div>
       </div>
 
-      {/* 4. Saison */}
+      {/* 4. Saison mit TVM Link */}
       <div className="fade-in card" style={{ padding: '1rem', marginBottom: '1rem' }}>
-        <h2 style={{ margin: 0, fontSize: '1rem', marginBottom: '0.5rem', fontWeight: '600' }}>
-          Saison
-        </h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+          <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: '600' }}>
+            Saison
+          </h2>
+          {teamInfo?.tvmLink && (
+            <a
+              href={teamInfo.tvmLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.4rem',
+                padding: '0.4rem 0.8rem',
+                fontSize: '0.8rem',
+                fontWeight: '600',
+                borderRadius: '6px',
+                textDecoration: 'none',
+                background: '#00843D',
+                color: 'white',
+                border: 'none',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.background = '#006b32';
+                e.target.style.transform = 'translateY(-1px)';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.background = '#00843D';
+                e.target.style.transform = 'translateY(0)';
+              }}
+            >
+              <ExternalLink size={12} />
+              TVM
+            </a>
+          )}
+        </div>
         <div style={{ fontSize: '0.95rem', fontWeight: '600', color: '#1e40af' }}>
           {currentSeason === 'winter' ? '❄️' : '☀️'} {seasonDisplay}
         </div>
       </div>
-
-      {/* 5. TVM Link - Rechts neben Label */}
-      {teamInfo?.tvmLink && (
-        <div className="fade-in" style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'space-between',
-          marginBottom: '1.5rem' 
-        }}>
-          <div style={{ fontSize: '0.8rem', color: '#999', fontWeight: '600' }}>
-            LINK ZUR SEITE:
-          </div>
-          <a
-            href={teamInfo.tvmLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.4rem',
-              padding: '0.5rem 1rem',
-              fontSize: '0.85rem',
-              fontWeight: '600',
-              borderRadius: '8px',
-              textDecoration: 'none',
-              background: '#00843D',
-              color: 'white',
-              border: 'none'
-            }}
-          >
-            <ExternalLink size={14} />
-            TVM
-          </a>
-        </div>
-      )}
 
       {/* Nächstes Spiel - Erweitert */}
       {nextMatchAnySeason && (() => {
