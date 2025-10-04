@@ -294,6 +294,30 @@ export function AuthProvider({ children }) {
   };
 
   /**
+   * Passwort ändern - Supabase Auth
+   */
+  const changePassword = async (newPassword) => {
+    console.log('🔵 Password change started');
+    
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword
+      });
+
+      if (error) {
+        console.error('❌ Password change error:', error);
+        return { success: false, error: error.message };
+      }
+
+      console.log('✅ Password changed successfully');
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Password change error:', error);
+      return { success: false, error: error.message };
+    }
+  };
+
+  /**
    * Logout - NUR Supabase, KEIN localStorage
    */
   const logout = async () => {
@@ -325,6 +349,7 @@ export function AuthProvider({ children }) {
     logout,
     updateProfile,
     completeProfile,
+    changePassword,
     isCaptain: player?.role === 'captain',
   };
 

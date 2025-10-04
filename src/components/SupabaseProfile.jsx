@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
+import PasswordChange from './PasswordChange';
 import './Profile.css';
 
 function SupabaseProfile() {
@@ -43,6 +44,7 @@ function SupabaseProfile() {
   const [isViewingOtherPlayer, setIsViewingOtherPlayer] = useState(false);
   const [isLoadingOtherPlayer, setIsLoadingOtherPlayer] = useState(false);
   const [currentBucket, setCurrentBucket] = useState('profile-images');
+  const [showPasswordChange, setShowPasswordChange] = useState(false);
 
   // Funktion zum Laden anderer Spieler-Profile
   const loadOtherPlayerProfile = async (playerName) => {
@@ -406,13 +408,21 @@ function SupabaseProfile() {
       
       <div className="profile-header">
         <h1>👤 {isSetup ? 'Profil einrichten' : 'Mein Profil'}</h1>
-        {!isEditing && !isSetup && (
-          <button 
-            className="btn-edit"
-            onClick={() => setIsEditing(true)}
-          >
-            ✏️ Bearbeiten
-          </button>
+        {!isEditing && !isSetup && !isViewingOtherPlayer && (
+          <div className="profile-actions">
+            <button 
+              className="btn-edit"
+              onClick={() => setIsEditing(true)}
+            >
+              ✏️ Bearbeiten
+            </button>
+            <button 
+              className="btn-password"
+              onClick={() => setShowPasswordChange(true)}
+            >
+              🔐 Passwort ändern
+            </button>
+          </div>
         )}
       </div>
 
@@ -724,6 +734,11 @@ function SupabaseProfile() {
             }, null, 2)}
           </pre>
         </details>
+      )}
+
+      {/* Passwort-Änderungsmodal */}
+      {showPasswordChange && (
+        <PasswordChange onClose={() => setShowPasswordChange(false)} />
       )}
     </div>
   );
