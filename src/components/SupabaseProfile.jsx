@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
-import PasswordChange from './PasswordChange';
+import PasswordReset from './PasswordReset';
 import './Profile.css';
 
 function SupabaseProfile() {
@@ -44,7 +44,7 @@ function SupabaseProfile() {
   const [isViewingOtherPlayer, setIsViewingOtherPlayer] = useState(false);
   const [isLoadingOtherPlayer, setIsLoadingOtherPlayer] = useState(false);
   const [currentBucket, setCurrentBucket] = useState('profile-images');
-  const [showPasswordChange, setShowPasswordChange] = useState(false);
+  const [showPasswordReset, setShowPasswordReset] = useState(false);
 
   // Funktion zum Laden anderer Spieler-Profile
   const loadOtherPlayerProfile = async (playerName) => {
@@ -418,9 +418,9 @@ function SupabaseProfile() {
             </button>
             <button 
               className="btn-password"
-              onClick={() => setShowPasswordChange(true)}
+              onClick={() => setShowPasswordReset(true)}
             >
-              🔐 Passwort ändern
+              🔐 Passwort zurücksetzen
             </button>
           </div>
         )}
@@ -733,9 +733,9 @@ function SupabaseProfile() {
         </details>
       )}
 
-      {/* Passwort-Änderungsmodal */}
-      {showPasswordChange && (
-        <PasswordChange onClose={() => setShowPasswordChange(false)} />
+      {/* Passwort-Reset-Modal */}
+      {showPasswordReset && (
+        <PasswordReset onClose={() => setShowPasswordReset(false)} />
       )}
     </div>
   );

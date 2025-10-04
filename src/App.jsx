@@ -9,6 +9,7 @@ import LeagueTable from './components/LeagueTable';
 import AdminPanel from './components/AdminPanel';
 import SupabaseProfile from './components/SupabaseProfile';
 import PlayerProfileSimple from './components/PlayerProfileSimple';
+import PasswordResetPage from './components/PasswordResetPage';
 import Navigation from './components/Navigation';
 import Header from './components/Header';
 import ScrollToTop from './components/ScrollToTop';
@@ -125,6 +126,8 @@ function AppContent() {
               <PlayerProfileSimple />
             </ProtectedRoute>
           } />
+          
+          <Route path="/password-reset" element={<PasswordResetPage />} />
           
           <Route path="/admin" element={
             <CaptainRoute>

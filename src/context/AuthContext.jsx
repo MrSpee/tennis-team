@@ -294,26 +294,36 @@ export function AuthProvider({ children }) {
   };
 
   /**
-   * Passwort ändern - Supabase Auth
+   * Passwort-Reset per Email anfordern
    */
-  const changePassword = async (newPassword) => {
-    console.log('🔵 Password change started');
+  const requestPasswordReset = async () => {
+    console.log('🔵 Requesting password reset email...');
     
+    if (!currentUser?.email) {
+      console.error('❌ No user email found');
+      return { success: false, error: 'Ups! Keine E-Mail-Adresse gefunden. Bitte melde dich nochmal an, dann klappt\'s! 🤔' };
+    }
+
     try {
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword
+      // Sende Reset-Email über Supabase
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(currentUser.email, {
+        redirectTo: `${window.location.origin}/password-reset`
       });
-
-      if (error) {
-        console.error('❌ Password change error:', error);
-        return { success: false, error: error.message };
+      
+      if (resetError) {
+        console.error('❌ Email reset error:', resetError);
+        return { success: false, error: `Hmm, da ist was schiefgelaufen: ${resetError.message}. Versuch's nochmal oder frag den Captain! 🤷‍♂️` };
       }
-
-      console.log('✅ Password changed successfully');
-      return { success: true };
+      
+      console.log('✅ Password reset email sent to:', currentUser.email);
+      return { 
+        success: true, 
+        message: `🎉 Perfekt! Eine magische E-Mail ist auf dem Weg zu ${currentUser.email}. Schau mal in dein Postfach (und auch im Spam-Ordner, falls sie sich verirrt hat 😄) und folge den Anweisungen!`,
+        email: currentUser.email
+      };
     } catch (error) {
-      console.error('❌ Password change error:', error);
-      return { success: false, error: error.message };
+      console.error('❌ Email reset exception:', error);
+      return { success: false, error: `Oops! Da ist ein Fehler aufgetreten: ${error.message}. Keine Panik, versuch's einfach nochmal! 😅` };
     }
   };
 
@@ -349,7 +359,7 @@ export function AuthProvider({ children }) {
     logout,
     updateProfile,
     completeProfile,
-    changePassword,
+    requestPasswordReset,
     isCaptain: player?.role === 'captain',
   };
 
