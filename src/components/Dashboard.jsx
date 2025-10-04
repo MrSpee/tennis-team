@@ -27,18 +27,6 @@ function Dashboard() {
       '🌟 Bin am Ball!'
     ];
     
-    const maybeTexts = [
-      '🤔 Bin noch unsicher',
-      '❓ Vielleicht dabei',
-      '🤷‍♂️ Mal schauen',
-      '⏰ Bin noch unentschieden',
-      '🤞 Hoffe, es klappt',
-      '📅 Prüfe noch Termine',
-      '🔄 Bin noch am Überlegen',
-      '💭 Bin noch unsicher',
-      '🤨 Weiß noch nicht',
-      '⏳ Entscheide noch'
-    ];
     
     const unavailableTexts = [
       '😔 Leider nicht dabei',
@@ -55,8 +43,6 @@ function Dashboard() {
 
     if (status === 'available') {
       return availableTexts[Math.floor(Math.random() * availableTexts.length)];
-    } else if (status === 'maybe') {
-      return maybeTexts[Math.floor(Math.random() * maybeTexts.length)];
     } else {
       return unavailableTexts[Math.floor(Math.random() * unavailableTexts.length)];
     }

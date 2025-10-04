@@ -29,18 +29,6 @@ function Matches() {
       '🌟 Bin am Ball!'
     ];
     
-    const maybeTexts = [
-      '🤔 Bin noch unsicher',
-      '❓ Vielleicht dabei',
-      '🤷‍♂️ Mal schauen',
-      '⏰ Bin noch unentschieden',
-      '🤞 Hoffe, es klappt',
-      '📅 Prüfe noch Termine',
-      '🔄 Bin noch am Überlegen',
-      '💭 Bin noch unsicher',
-      '🤨 Weiß noch nicht',
-      '⏳ Entscheide noch'
-    ];
     
     const unavailableTexts = [
       '😔 Leider nicht dabei',
@@ -57,8 +45,6 @@ function Matches() {
 
     if (status === 'available') {
       return availableTexts[Math.floor(Math.random() * availableTexts.length)];
-    } else if (status === 'maybe') {
-      return maybeTexts[Math.floor(Math.random() * maybeTexts.length)];
     } else {
       return unavailableTexts[Math.floor(Math.random() * unavailableTexts.length)];
     }
@@ -253,7 +239,7 @@ function Matches() {
                           <div style={{ 
                             fontSize: '0.9rem', 
                             fontWeight: '600',
-                            color: myStatus.status === 'available' ? '#065f46' : myStatus.status === 'maybe' ? '#d97706' : '#991b1b'
+                            color: myStatus.status === 'available' ? '#065f46' : '#991b1b'
                           }}>
                             {getAvailabilityText(myStatus.status)}
                           </div>
@@ -347,13 +333,6 @@ function Matches() {
                             😔 Kann nicht
                           </button>
                           <button
-                            onClick={() => handleAvailability(match.id, 'maybe')}
-                            className="btn btn-warning"
-                          >
-                            <MessageCircle size={18} />
-                            🤔 Bin unsicher
-                          </button>
-                          <button
                             onClick={() => {
                               setSelectedMatch(null);
                               setComment('');
@@ -385,7 +364,7 @@ function Matches() {
                               {data.playerName || 'Unbekannter Spieler'}
                             </div>
                             <div className="availability-status-text">
-                              {data.status === 'available' ? 'Verfügbar' : data.status === 'maybe' ? 'Vielleicht' : 'Nicht verfügbar'}
+                              {data.status === 'available' ? 'Verfügbar' : 'Nicht verfügbar'}
                             </div>
                             {data.comment && (
                               <div className="availability-comment">

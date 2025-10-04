@@ -9,9 +9,7 @@ function AdminPanel() {
   const { isCaptain } = useAuth();
   const { matches, teamInfo, players, addMatch, updateMatch, deleteMatch, updateTeamInfo } = useData();
   const navigate = useNavigate();
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [showTeamSetup, setShowTeamSetup] = useState(false);
-  const [showSeasonManager, setShowSeasonManager] = useState(false);
+  const [activeTab, setActiveTab] = useState('matches'); // 'matches', 'season', 'players', 'team'
   const [editingMatchId, setEditingMatchId] = useState(null);
   const [editFormData, setEditFormData] = useState({});
   const [formData, setFormData] = useState({
@@ -162,45 +160,108 @@ function AdminPanel() {
         <Shield size={32} color="var(--primary)" />
       </header>
 
-      <div className="admin-actions fade-in">
-        <button
-          onClick={() => {
-            setShowSeasonManager(!showSeasonManager);
-            setShowTeamSetup(false);
-            setShowAddForm(false);
+      {/* Card-Tab Navigation */}
+      <div className="admin-tabs fade-in" style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gap: '1rem',
+        marginBottom: '2rem'
+      }}>
+        <div 
+          className={`admin-tab-card ${activeTab === 'matches' ? 'active' : ''}`}
+          onClick={() => setActiveTab('matches')}
+          style={{
+            background: activeTab === 'matches' ? 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' : '#f8fafc',
+            color: activeTab === 'matches' ? 'white' : '#374151',
+            padding: '1.5rem',
+            borderRadius: '12px',
+            cursor: 'pointer',
+            border: activeTab === 'matches' ? 'none' : '2px solid #e2e8f0',
+            transition: 'all 0.3s ease',
+            textAlign: 'center'
           }}
-          className="btn btn-info"
-          style={{ background: '#8b5cf6', borderColor: '#8b5cf6' }}
         >
-          <Calendar size={20} />
-          {showSeasonManager ? 'Schließen' : 'Saison-Verwaltung'}
-        </button>
-        <button
-          onClick={() => {
-            setShowTeamSetup(!showTeamSetup);
-            setShowAddForm(false);
-            setShowSeasonManager(false);
+          <Calendar size={24} style={{ marginBottom: '0.5rem' }} />
+          <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem', fontWeight: '600' }}>
+            Spiele-Verwaltung
+          </h3>
+          <p style={{ margin: 0, fontSize: '0.875rem', opacity: 0.9 }}>
+            {upcomingMatches.length} kommende Spiele
+          </p>
+        </div>
+
+        <div 
+          className={`admin-tab-card ${activeTab === 'season' ? 'active' : ''}`}
+          onClick={() => setActiveTab('season')}
+          style={{
+            background: activeTab === 'season' ? 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)' : '#f8fafc',
+            color: activeTab === 'season' ? 'white' : '#374151',
+            padding: '1.5rem',
+            borderRadius: '12px',
+            cursor: 'pointer',
+            border: activeTab === 'season' ? 'none' : '2px solid #e2e8f0',
+            transition: 'all 0.3s ease',
+            textAlign: 'center'
           }}
-          className="btn btn-secondary"
         >
-          <Settings size={20} />
-          {showTeamSetup ? 'Schließen' : 'Team-Setup'}
-        </button>
-        <button
-          onClick={() => {
-            setShowAddForm(!showAddForm);
-            setShowTeamSetup(false);
-            setShowSeasonManager(false);
+          <Calendar size={24} style={{ marginBottom: '0.5rem' }} />
+          <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem', fontWeight: '600' }}>
+            Saison-Verwaltung
+          </h3>
+          <p style={{ margin: 0, fontSize: '0.875rem', opacity: 0.9 }}>
+            Winter/Sommer Saisons
+          </p>
+        </div>
+
+        <div 
+          className={`admin-tab-card ${activeTab === 'players' ? 'active' : ''}`}
+          onClick={() => setActiveTab('players')}
+          style={{
+            background: activeTab === 'players' ? 'linear-gradient(135deg, #059669 0%, #047857 100%)' : '#f8fafc',
+            color: activeTab === 'players' ? 'white' : '#374151',
+            padding: '1.5rem',
+            borderRadius: '12px',
+            cursor: 'pointer',
+            border: activeTab === 'players' ? 'none' : '2px solid #e2e8f0',
+            transition: 'all 0.3s ease',
+            textAlign: 'center'
           }}
-          className="btn btn-primary"
         >
-          <Plus size={20} />
-          {showAddForm ? 'Abbrechen' : 'Neues Spiel hinzufügen'}
-        </button>
+          <Users size={24} style={{ marginBottom: '0.5rem' }} />
+          <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem', fontWeight: '600' }}>
+            Spieler-Übersicht
+          </h3>
+          <p style={{ margin: 0, fontSize: '0.875rem', opacity: 0.9 }}>
+            {players?.length || 0} Spieler
+          </p>
+        </div>
+
+        <div 
+          className={`admin-tab-card ${activeTab === 'team' ? 'active' : ''}`}
+          onClick={() => setActiveTab('team')}
+          style={{
+            background: activeTab === 'team' ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' : '#f8fafc',
+            color: activeTab === 'team' ? 'white' : '#374151',
+            padding: '1.5rem',
+            borderRadius: '12px',
+            cursor: 'pointer',
+            border: activeTab === 'team' ? 'none' : '2px solid #e2e8f0',
+            transition: 'all 0.3s ease',
+            textAlign: 'center'
+          }}
+        >
+          <Settings size={24} style={{ marginBottom: '0.5rem' }} />
+          <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem', fontWeight: '600' }}>
+            Team-Setup
+          </h3>
+          <p style={{ margin: 0, fontSize: '0.875rem', opacity: 0.9 }}>
+            Liga & Konfiguration
+          </p>
+        </div>
       </div>
 
       {/* Saison-Verwaltung */}
-      {showSeasonManager && (
+      {activeTab === 'season' && (
         <div className="add-match-form fade-in card">
           <h2>📅 Saison-Verwaltung</h2>
           <p style={{ color: '#666', marginBottom: '1.5rem' }}>
@@ -233,8 +294,7 @@ function AdminPanel() {
                 </div>
                 <button
                   onClick={() => {
-                    setShowTeamSetup(true);
-                    setShowSeasonManager(false);
+                    setActiveTab('team');
                   }}
                   className="btn btn-primary"
                   style={{ whiteSpace: 'nowrap' }}
@@ -341,8 +401,7 @@ function AdminPanel() {
                           season: s.season,
                           seasonYear: s.seasonYear
                         });
-                        setShowTeamSetup(true);
-                        setShowSeasonManager(false);
+                        setActiveTab('team');
                       }}
                       className="btn btn-success"
                       style={{ width: '100%', marginTop: '0.5rem' }}
@@ -365,9 +424,138 @@ function AdminPanel() {
         </div>
       )}
 
-      {showAddForm && (
+      {/* Spiele-Verwaltung */}
+      {activeTab === 'matches' && (
+        <div className="matches-management-card fade-in card">
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            marginBottom: '1.5rem',
+            paddingBottom: '1rem',
+            borderBottom: '2px solid #e2e8f0'
+          }}>
+            <h2 style={{ margin: 0 }}>🎾 Spiele-Verwaltung</h2>
+            <button
+              onClick={() => setActiveTab('add-match')}
+              className="btn btn-primary"
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <Plus size={18} />
+              Neues Spiel
+            </button>
+          </div>
+          
+          {/* Kommende Spiele Liste */}
+          <div className="upcoming-matches-section">
+            <h3 style={{ marginBottom: '1rem', color: '#374151' }}>Kommende Spiele ({upcomingMatches.length})</h3>
+            {upcomingMatches.length > 0 ? (
+              <div className="admin-matches-list">
+                {upcomingMatches.map(match => {
+                  const availableCount = Object.values(match.availability || {})
+                    .filter(av => av.status === 'available').length;
+                  const totalResponses = Object.keys(match.availability || {}).length;
+                  const totalPlayers = players.length;
+                  const missingResponses = totalPlayers - totalResponses;
+
+                  return (
+                    <div key={match.id} className="match-card" style={{
+                      background: 'white',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '8px',
+                      padding: '1rem',
+                      marginBottom: '1rem'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                        <div>
+                          <h4 style={{ margin: '0 0 0.25rem 0', color: '#1f2937' }}>
+                            🎾 {match.opponent} {match.location === 'Home' ? '(H)' : '(A)'}
+                          </h4>
+                          <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                            📅 {new Date(match.date).toLocaleDateString('de-DE')} um {match.time}
+                            {match.venue && <span> • {match.venue}</span>}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button
+                            onClick={() => {
+                              setEditingMatchId(match.id);
+                              setEditFormData({
+                                opponent: match.opponent,
+                                date: match.date,
+                                time: match.time,
+                                location: match.location,
+                                venue: match.venue || '',
+                                season: match.season,
+                                playersNeeded: match.playersNeeded
+                              });
+                            }}
+                            className="btn btn-sm"
+                            style={{ background: '#3b82f6', color: 'white', padding: '0.375rem 0.75rem' }}
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteMatch(match.id)}
+                            className="btn btn-sm"
+                            style={{ background: '#ef4444', color: 'white', padding: '0.375rem 0.75rem' }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div style={{ 
+                        background: '#f8fafc', 
+                        padding: '0.75rem', 
+                        borderRadius: '6px',
+                        fontSize: '0.875rem'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                          <span>✅ Verfügbar: <strong>{availableCount}</strong></span>
+                          <span>👥 Benötigt: <strong>{match.playersNeeded}</strong></span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>📊 Rückmeldungen: <strong>{totalResponses}/{totalPlayers}</strong></span>
+                          {missingResponses > 0 && (
+                            <span style={{ color: '#f59e0b' }}>⚠️ {missingResponses} fehlen</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="empty-state" style={{ textAlign: 'center', padding: '2rem', color: '#6b7280' }}>
+                <Calendar size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                <p>Keine kommenden Spiele geplant</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Neues Spiel hinzufügen */}
+      {activeTab === 'add-match' && (
         <div className="add-match-form fade-in card">
-          <h2>Neues Spiel erstellen</h2>
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            marginBottom: '1.5rem',
+            paddingBottom: '1rem',
+            borderBottom: '2px solid #e2e8f0'
+          }}>
+            <h2 style={{ margin: 0 }}>➕ Neues Spiel erstellen</h2>
+            <button
+              onClick={() => setActiveTab('matches')}
+              className="btn btn-secondary"
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              ← Zurück
+            </button>
+          </div>
           <form onSubmit={handleSubmit}>
             <div className="form-grid">
               <div className="form-group">
@@ -484,7 +672,7 @@ function AdminPanel() {
               </button>
               <button
                 type="button"
-                onClick={() => setShowAddForm(false)}
+                onClick={() => setActiveTab('matches')}
                 className="btn btn-secondary"
               >
                 Abbrechen
@@ -494,7 +682,8 @@ function AdminPanel() {
         </div>
       )}
 
-      {showTeamSetup && (
+      {/* Team-Setup */}
+      {activeTab === 'team' && (
         <div className="add-match-form fade-in card">
           <h2>⚙️ Team-Setup</h2>
           <p style={{ color: '#666', marginBottom: '0.5rem' }}>
@@ -680,7 +869,7 @@ function AdminPanel() {
               </button>
               <button
                 type="button"
-                onClick={() => setShowTeamSetup(false)}
+                onClick={() => setActiveTab('season')}
                 className="btn btn-secondary"
               >
                 Abbrechen
@@ -690,344 +879,381 @@ function AdminPanel() {
         </div>
       )}
 
-      <div className="matches-management fade-in">
-        <h2>Kommende Spiele ({upcomingMatches.length})</h2>
-        {upcomingMatches.length > 0 ? (
-          <div className="admin-matches-list">
-            {upcomingMatches.map(match => {
-              const availableCount = Object.values(match.availability || {})
-                .filter(a => a.status === 'available').length;
-              const totalResponses = Object.keys(match.availability || {}).length;
-              const totalPlayers = players.length; // Echte Spieleranzahl aus DB
-              const missingResponses = totalPlayers - totalResponses; // Fehlende Rückmeldungen
-
-              return (
-                <div key={match.id} className="admin-match-card card">
-                  <div className="admin-match-header">
-                    <div>
-                      <h3>{match.opponent}</h3>
-                      <p className="match-meta">
-                        {new Date(match.date).toLocaleDateString('de-DE', {
-                          weekday: 'long',
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric'
-                        })} um {new Date(match.date).toLocaleTimeString('de-DE', {
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })} Uhr
-                      </p>
-                      {match.venue && (
-                        <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.25rem' }}>
-                          📍 {match.venue}
-                        </p>
-                      )}
+      {/* Spieler-Übersicht */}
+      {activeTab === 'players' && (
+        <div className="add-match-form fade-in card">
+          <h2>👥 Spieler-Übersicht</h2>
+          <p style={{ color: '#666', marginBottom: '1.5rem' }}>
+            Übersicht aller angemeldeten Spieler mit Kontaktdaten und Verfügbarkeits-Statistiken
+          </p>
+          
+          {players && players.length > 0 ? (
+            <div className="players-overview">
+              <div className="players-stats" style={{ 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+                gap: '1rem', 
+                marginBottom: '2rem' 
+              }}>
+                <div className="stat-card" style={{ 
+                  background: '#f0f9ff', 
+                  padding: '1rem', 
+                  borderRadius: '8px', 
+                  border: '1px solid #0ea5e9' 
+                }}>
+                  <div style={{ fontSize: '2rem', fontWeight: 'bold', color: '#0ea5e9' }}>
+                    {players.length}
                     </div>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <button
-                        onClick={() => {
-                          if (editingMatchId === match.id) {
-                            setEditingMatchId(null);
-                            setEditFormData({});
-                          } else {
-                            setEditingMatchId(match.id);
-                            // Initialisiere Formular mit aktuellen Werten
-                            setEditFormData({
-                              opponent: match.opponent,
-                              date: match.date.toISOString().split('T')[0],
-                              time: match.date.toTimeString().slice(0, 5),
-                              location: match.location,
-                              venue: match.venue || ''
-                            });
-                          }
-                        }}
-                        className="btn-icon"
-                        title="Spiel bearbeiten"
-                        style={{
-                          background: '#3b82f6',
-                          color: 'white',
-                          padding: '0.5rem',
-                          borderRadius: '8px'
-                        }}
-                      >
-                        {editingMatchId === match.id ? <Calendar size={18} /> : <Edit2 size={18} />}
-                      </button>
-                      <button
-                        onClick={() => handleDelete(match.id)}
-                        className="btn-icon btn-danger-icon"
-                        title="Spiel löschen"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+                  <div style={{ color: '#0369a1' }}>Gesamt Spieler</div>
                     </div>
-                  </div>
-
-                  {/* Edit-Formular */}
-                  {editingMatchId === match.id && (
-                    <div style={{
-                      marginTop: '1rem',
+                <div className="stat-card" style={{ 
+                  background: '#f0fdf4', 
                       padding: '1rem',
-                      background: '#f9fafb',
                       borderRadius: '8px',
-                      border: '1px solid #e5e7eb'
-                    }}>
-                      <h4 style={{ marginBottom: '1rem', fontSize: '1rem' }}>
-                        ✏️ Spiel bearbeiten
-                      </h4>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                        <div>
-                          <label style={{ fontSize: '0.85rem', fontWeight: '600', marginBottom: '0.25rem', display: 'block' }}>
-                            Gegner
-                          </label>
-                          <input
-                            type="text"
-                            value={editFormData.opponent || ''}
-                            onChange={(e) => setEditFormData({ ...editFormData, opponent: e.target.value })}
-                            placeholder="Gegner-Name"
-                            style={{ width: '100%', padding: '0.5rem' }}
-                          />
+                  border: '1px solid #22c55e' 
+                }}>
+                  <div style={{ fontSize: '2rem', fontWeight: 'bold', color: '#22c55e' }}>
+                    {players.filter(p => p.is_active).length}
                         </div>
-                        <div>
-                          <label style={{ fontSize: '0.85rem', fontWeight: '600', marginBottom: '0.25rem', display: 'block' }}>
-                            Datum
-                          </label>
-                          <input
-                            type="date"
-                            value={editFormData.date || ''}
-                            onChange={(e) => setEditFormData({ ...editFormData, date: e.target.value })}
-                            style={{ width: '100%', padding: '0.5rem' }}
-                          />
+                  <div style={{ color: '#15803d' }}>Aktive Spieler</div>
                         </div>
-                        <div>
-                          <label style={{ fontSize: '0.85rem', fontWeight: '600', marginBottom: '0.25rem', display: 'block' }}>
-                            Uhrzeit
-                          </label>
-                          <input
-                            type="time"
-                            value={editFormData.time || ''}
-                            onChange={(e) => setEditFormData({ ...editFormData, time: e.target.value })}
-                            style={{ width: '100%', padding: '0.5rem' }}
-                          />
+                <div className="stat-card" style={{ 
+                  background: '#fef3c7', 
+                  padding: '1rem', 
+                  borderRadius: '8px', 
+                  border: '1px solid #f59e0b' 
+                }}>
+                  <div style={{ fontSize: '2rem', fontWeight: 'bold', color: '#f59e0b' }}>
+                    {upcomingMatches.length}
                         </div>
-                        <div>
-                          <label style={{ fontSize: '0.85rem', fontWeight: '600', marginBottom: '0.25rem', display: 'block' }}>
-                            Heim/Auswärts
-                          </label>
-                          <select
-                            value={editFormData.location || 'Home'}
-                            onChange={(e) => setEditFormData({ ...editFormData, location: e.target.value })}
-                            style={{ width: '100%', padding: '0.5rem' }}
-                          >
-                            <option value="Home">Heimspiel</option>
-                            <option value="Away">Auswärtsspiel</option>
-                          </select>
+                  <div style={{ color: '#d97706' }}>Kommende Spiele</div>
                         </div>
-                        <div style={{ gridColumn: '1 / -1' }}>
-                          <label style={{ fontSize: '0.85rem', fontWeight: '600', marginBottom: '0.25rem', display: 'block' }}>
-                            <MapPin size={14} style={{ display: 'inline', marginRight: '0.25rem' }} />
-                            Spielstätte
-                          </label>
-                          <input
-                            type="text"
-                            value={editFormData.venue || ''}
-                            onChange={(e) => setEditFormData({ ...editFormData, venue: e.target.value })}
-                            placeholder="z.B. TC München-Ost, Ismaninger Str. 98, München"
-                            style={{ width: '100%', padding: '0.5rem' }}
-                          />
-                          <small style={{ color: '#666', fontSize: '0.75rem', marginTop: '0.25rem', display: 'block' }}>
-                            💡 Vollständige Adresse für Google Maps
-                          </small>
                         </div>
+
+              <div className="players-table" style={{ 
+                background: 'white', 
+                borderRadius: '8px', 
+                overflow: 'hidden', 
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)' 
+              }}>
+                <div className="table-header" style={{ 
+                  background: '#f8fafc', 
+                  padding: '1rem', 
+                  borderBottom: '1px solid #e2e8f0',
+                  display: 'grid',
+                  gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 1fr',
+                  gap: '1rem',
+                  fontWeight: '600',
+                  color: '#374151'
+                }}>
+                  <div>👤 Name & E-Mail</div>
+                  <div>📱 Telefon</div>
+                  <div>🏆 Rang</div>
+                  <div>📊 Verfügbar</div>
+                  <div>📅 Letzte Aktivität</div>
+                  <div>⚙️ Aktionen</div>
                       </div>
-                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-                        <button
-                          onClick={async () => {
-                            console.log('📝 Updating match...');
-                            
-                            const dateTime = new Date(`${editFormData.date}T${editFormData.time}`);
-                            
-                            const result = await updateMatch(match.id, {
-                              opponent: editFormData.opponent,
-                              date: dateTime,
-                              location: editFormData.location,
-                              venue: editFormData.venue,
-                              season: match.season,
-                              playersNeeded: match.playersNeeded
-                            });
+                
+                {players.map(player => {
+                  // Verfügbarkeits-Statistik für diesen Spieler aus Supabase-Daten
+                  const playerAvailability = upcomingMatches.reduce((acc, match) => {
+                    // Verwende die bereits transformierten Daten: match.availability[player.id]
+                    const availability = match.availability?.[player.id];
+                    if (availability?.status) {
+                      console.log(`📊 ${player.name}: Match ${match.id} -> ${availability.status}`);
+                      acc[availability.status] = (acc[availability.status] || 0) + 1;
+                    }
+                    return acc;
+                  }, {});
+                  
+                  console.log(`🎯 ${player.name} Verfügbarkeit:`, playerAvailability);
 
-                            if (result.success) {
-                              alert('✅ Spiel erfolgreich aktualisiert!');
-                              setEditingMatchId(null);
-                              setEditFormData({});
-                            } else {
-                              alert('❌ Fehler beim Aktualisieren: ' + (result.error || 'Unbekannter Fehler'));
-                            }
-                          }}
-                          className="btn btn-success"
-                          style={{ flex: 1 }}
-                        >
-                          💾 Speichern
-                        </button>
-                        <button
-                          onClick={() => {
-                            setEditingMatchId(null);
-                            setEditFormData({});
-                          }}
-                          className="btn btn-secondary"
-                          style={{ flex: 1 }}
-                        >
-                          Abbrechen
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                  const totalResponses = Object.values(playerAvailability).reduce((sum, count) => sum + count, 0);
+                  const availableResponses = playerAvailability.available || 0;
+                  const availabilityPercentage = upcomingMatches.length > 0 ? Math.round((availableResponses / upcomingMatches.length) * 100) : 0;
+                  
+                  // Zusätzliche Statistiken aus Supabase-Daten
+                  const availableCount = playerAvailability.available || 0;
+                  const unavailableCount = playerAvailability.unavailable || 0;
+                  const noResponseCount = upcomingMatches.length - totalResponses;
 
-                  <div className="admin-match-info">
-                    <div className="info-item">
-                      <MapPin size={16} />
-                      <span>{match.location === 'Home' ? 'Heimspiel' : 'Auswärtsspiel'}</span>
-                    </div>
-                    <div className="info-item">
-                      <Users size={16} />
-                      <span>{match.playersNeeded} Spieler benötigt</span>
-                    </div>
-                    <div className="info-item">
-                      <span className={`season-indicator ${match.season}`}>
-                        {match.season === 'winter' ? 'Winter' : 'Sommer'}
-                      </span>
-                    </div>
-                  </div>
+                  // Format phone number for WhatsApp
+                  const formatPhoneForWhatsApp = (phone) => {
+                    if (!phone) return null;
+                    return phone.replace(/\D/g, '');
+                  };
 
-                  <div className="admin-match-stats">
-                    <div className="stat-box">
-                      <div className="stat-number">{availableCount}</div>
-                      <div className="stat-text">Verfügbar</div>
-                    </div>
-                    <div className="stat-box">
-                      <div className="stat-number">{totalResponses}</div>
-                      <div className="stat-text">Antworten</div>
-                    </div>
-                    <div className="stat-box">
-                      <div className="stat-number">{missingResponses}</div>
-                      <div className="stat-text">Ausstehend</div>
-                    </div>
-                  </div>
-
-                  {availableCount < match.playersNeeded && (
-                    <div className="warning-banner">
-                      ⚠️ Noch {match.playersNeeded - availableCount} Spieler fehlen!
-                    </div>
-                  )}
-
-                  {/* Fehlende Rückmeldungen mit WhatsApp-Links */}
-                  {(() => {
-                    const respondedPlayerIds = Object.keys(match.availability || {});
-                    const notRespondedPlayers = players.filter(p => 
-                      !respondedPlayerIds.includes(p.id)
-                    );
-                    
-                    return notRespondedPlayers.length > 0 && (
-                      <div style={{
-                        marginTop: '1rem',
-                        padding: '0.75rem',
-                        background: '#fff9e6',
-                        borderRadius: '8px',
-                        border: '1px solid #ffc107'
-                      }}>
-                        <div style={{ 
-                          fontSize: '0.85rem', 
-                          fontWeight: '600', 
-                          marginBottom: '0.5rem',
-                          color: '#856404'
-                        }}>
-                          📢 Fehlende Rückmeldungen ({notRespondedPlayers.length}):
-                        </div>
-                        <div style={{ 
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
-                          gap: '0.5rem'
-                        }}>
-                          {notRespondedPlayers.map(p => {
-                            const phoneNumber = p.phone?.replace(/[^0-9+]/g, '');
-                            const hasPhone = phoneNumber && phoneNumber.length > 5;
+                  const whatsappPhone = formatPhoneForWhatsApp(player.phone);
                             
                             return (
-                              <div key={p.id} style={{
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                padding: '0.5rem',
-                                background: 'white',
-                                borderRadius: '6px',
-                                gap: '0.35rem'
-                              }}>
-                                <span style={{ 
-                                  fontSize: '0.8rem', 
-                                  fontWeight: '500',
-                                  textAlign: 'center',
-                                  lineHeight: '1.2'
-                                }}>
-                                  {p.name}
-                                </span>
-                                {hasPhone ? (
-                                  <a
-                                    href={`https://wa.me/${phoneNumber}?text=${encodeURIComponent(`Hi ${p.name.split(' ')[0]}! 🎾\n\nKannst du bitte deine Verfügbarkeit angeben?\n\n📅 ${new Date(match.date).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' })} um ${new Date(match.date).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr\n🏟️ ${match.opponent}\n📍 ${match.location === 'Home' ? 'Heimspiel' : 'Auswärtsspiel'}\n\nDanke! 👍`)}`}
+                    <div 
+                      key={player.id || player.name} 
+                      className="table-row" 
+                        style={{
+                        padding: '1rem', 
+                        borderBottom: '1px solid #f1f5f9',
+                        display: 'grid',
+                        gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 1fr',
+                        gap: '1rem',
+                        alignItems: 'center'
+                      }}
+                    >
+                      {/* Name & E-Mail */}
+                      <div>
+                        <div style={{ fontWeight: '600', color: '#1f2937', marginBottom: '0.25rem' }}>
+                          {player.name}
+                      </div>
+                        <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                          {player.email}
+                    </div>
+                  </div>
+
+                      {/* Telefon */}
+                        <div>
+                        {player.phone ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                            <span style={{ fontSize: '0.875rem' }}>{player.phone}</span>
+                            {whatsappPhone && (
+                              <a 
+                                href={`https://wa.me/${whatsappPhone}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     style={{
-                                      display: 'flex',
+                                  display: 'inline-flex',
                                       alignItems: 'center',
-                                      justifyContent: 'center',
                                       gap: '0.25rem',
-                                      width: '100%',
-                                      padding: '0.35rem',
+                                  padding: '0.25rem 0.5rem',
                                       background: '#25D366',
                                       color: 'white',
                                       borderRadius: '4px',
                                       textDecoration: 'none',
                                       fontSize: '0.75rem',
-                                      fontWeight: '600'
+                                  fontWeight: '500'
                                     }}
                                   >
-                                    <MessageCircle size={14} />
+                                <MessageCircle size={12} />
                                     WhatsApp
                                   </a>
-                                ) : (
+                            )}
+                        </div>
+                        ) : (
+                          <span style={{ color: '#9ca3af', fontSize: '0.875rem' }}>Nicht angegeben</span>
+                        )}
+                        </div>
+
+                      {/* Rang */}
+                        <div>
                                   <span style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    gap: '0.25rem',
-                                    width: '100%',
-                                    padding: '0.35rem',
-                                    background: '#e5e7eb',
-                                    color: '#9ca3af',
+                          background: '#f3f4f6', 
+                          padding: '0.25rem 0.5rem', 
                                     borderRadius: '4px',
-                                    fontSize: '0.75rem',
-                                    cursor: 'not-allowed'
+                          fontSize: '0.875rem',
+                          fontWeight: '500'
                                   }}>
-                                    <MessageCircle size={14} style={{ opacity: 0.4 }} />
-                                    Keine Nr.
+                          {player.ranking || 'N/A'}
                                   </span>
+                        </div>
+
+                      {/* Verfügbarkeit */}
+                        <div>
+                        <div style={{ 
+                          fontSize: '0.875rem', 
+                          fontWeight: '600', 
+                          marginBottom: '0.25rem',
+                          color: availabilityPercentage >= 70 ? '#22c55e' : availabilityPercentage >= 40 ? '#f59e0b' : '#ef4444'
+                        }}>
+                          {availabilityPercentage}%
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: '#6b7280', lineHeight: '1.4' }}>
+                          <div>✅ {availableCount} verfügbar</div>
+                          <div>❌ {unavailableCount} nicht verfügbar</div>
+                          {noResponseCount > 0 && (
+                            <div style={{ color: '#9ca3af' }}>⏳ {noResponseCount} keine Rückmeldung</div>
                                 )}
-                              </div>
-                            );
-                          })}
                         </div>
                       </div>
-                    );
-                  })()}
-                </div>
+
+                      {/* Letzte Aktivität */}
+                      <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                        {player.updated_at ? new Date(player.updated_at).toLocaleDateString('de-DE') : 'N/A'}
+                      </div>
+
+                      {/* Aktionen */}
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button
+                          onClick={() => navigate(`/player/${encodeURIComponent(player.name)}`)}
+                          style={{
+                            padding: '0.375rem 0.75rem',
+                            background: '#3b82f6',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            fontSize: '0.75rem',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem'
+                          }}
+                        >
+                          <ExternalLink size={12} />
+                          Profil
+                        </button>
+                      </div>
+                    </div>
               );
             })}
+              </div>
+
+              {/* Verfügbarkeits-Log */}
+              <div style={{ 
+                marginTop: '1.5rem', 
+                padding: '1.5rem', 
+                background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)', 
+                borderRadius: '12px', 
+                border: '1px solid #f59e0b' 
+              }}>
+                <h4 style={{ margin: '0 0 1rem 0', color: '#92400e', fontSize: '1.1rem' }}>📝 Verfügbarkeits-Log</h4>
+                <div style={{ 
+                  background: 'white', 
+                  borderRadius: '8px', 
+                  padding: '1rem',
+                  maxHeight: '300px',
+                  overflowY: 'auto'
+                }}>
+                  {(() => {
+                    const logs = JSON.parse(localStorage.getItem('availability_logs') || '[]');
+                    return logs.length > 0 ? (
+                      <div style={{ fontSize: '0.875rem' }}>
+                        {logs.slice(0, 20).map((log, index) => (
+                          <div key={index} style={{ 
+                            display: 'flex', 
+                            justifyContent: 'space-between', 
+                            alignItems: 'center',
+                            padding: '0.5rem 0',
+                            borderBottom: index < logs.slice(0, 20).length - 1 ? '1px solid #f3f4f6' : 'none'
+                          }}>
+                            <div>
+                              <span style={{ fontWeight: '600', color: '#374151' }}>
+                                {log.playerName}
+                              </span>
+                              <span style={{ color: '#6b7280', marginLeft: '0.5rem' }}>
+                                {log.status === 'available' ? '✅' : '❌'} {log.status === 'available' ? 'verfügbar' : 'nicht verfügbar'}
+                              </span>
+                              <span style={{ color: '#9ca3af', marginLeft: '0.5rem' }}>
+                                für {log.matchInfo}
+                              </span>
+                              {log.comment && (
+                                <div style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                                  💬 {log.comment}
+                    </div>
+                              )}
+                    </div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+                              {new Date(log.timestamp).toLocaleString('de-DE')}
+                    </div>
+                  </div>
+                        ))}
+                        {logs.length > 20 && (
+                          <div style={{ textAlign: 'center', color: '#6b7280', marginTop: '0.5rem', fontSize: '0.75rem' }}>
+                            ... und {logs.length - 20} weitere Einträge
+                    </div>
+                        )}
+                    </div>
+                    ) : (
+                      <div style={{ textAlign: 'center', color: '#6b7280', padding: '1rem' }}>
+                        Noch keine Verfügbarkeits-Änderungen geloggt
+                    </div>
+                    );
+                  })()}
+                  </div>
+                    </div>
+
+              {/* Team-Statistiken aus Supabase-Daten */}
+                      <div style={{
+                marginTop: '1.5rem', 
+                padding: '1.5rem', 
+                background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)', 
+                borderRadius: '12px', 
+                border: '1px solid #e2e8f0' 
+              }}>
+                <h4 style={{ margin: '0 0 1rem 0', color: '#374151', fontSize: '1.1rem' }}>📈 Team-Statistiken (Live-Daten)</h4>
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+                  gap: '1rem' 
+                }}>
+                  <div style={{ 
+                    background: 'white', 
+                    padding: '1rem', 
+                        borderRadius: '8px',
+                    border: '1px solid #e2e8f0' 
+                  }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#3b82f6', marginBottom: '0.25rem' }}>
+                      {Math.round(players.reduce((sum, p) => {
+                        const playerAvailability = upcomingMatches.reduce((acc, match) => {
+                          const availability = match.availability?.[p.id];
+                          if (availability?.status) acc[availability.status] = (acc[availability.status] || 0) + 1;
+                          return acc;
+                        }, {});
+                        const availableResponses = playerAvailability.available || 0;
+                        return sum + (upcomingMatches.length > 0 ? (availableResponses / upcomingMatches.length) * 100 : 0);
+                      }, 0) / players.length)}%
+                    </div>
+                    <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Durchschnittliche Verfügbarkeit</div>
+                  </div>
+                  
+                        <div style={{ 
+                    background: 'white', 
+                    padding: '1rem', 
+                    borderRadius: '8px', 
+                    border: '1px solid #e2e8f0' 
+                  }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#22c55e', marginBottom: '0.25rem' }}>
+                      {players.filter(p => p.phone && p.ranking).length}
+                        </div>
+                    <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Vollständige Profile</div>
+                  </div>
+                  
+                        <div style={{ 
+                    background: 'white', 
+                    padding: '1rem', 
+                    borderRadius: '8px', 
+                    border: '1px solid #e2e8f0' 
+                  }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#f59e0b', marginBottom: '0.25rem' }}>
+                      {players.filter(p => p.is_active).length}/{players.length}
+                    </div>
+                    <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Aktive Spieler</div>
+                  </div>
+                  
+                  <div style={{ 
+                                background: 'white',
+                    padding: '1rem', 
+                    borderRadius: '8px', 
+                    border: '1px solid #e2e8f0' 
+                  }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#8b5cf6', marginBottom: '0.25rem' }}>
+                      {upcomingMatches.reduce((sum, match) => {
+                        return sum + Object.values(match.availability || {}).filter(av => av.status === 'available').length;
+                      }, 0)}
+                              </div>
+                    <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Gesamt verfügbar</div>
+                        </div>
+                      </div>
+                </div>
           </div>
         ) : (
-          <div className="empty-state card">
-            <Calendar size={48} color="var(--gray-400)" />
-            <p>Keine kommenden Spiele geplant</p>
+            <div className="empty-state" style={{ 
+              textAlign: 'center', 
+              padding: '2rem', 
+              color: '#6b7280' 
+            }}>
+              <Users size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+              <p>Keine Spieler gefunden</p>
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

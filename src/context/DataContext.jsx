@@ -364,6 +364,11 @@ export function DataProvider({ children }) {
     console.log('🔵 DataContext - updateMatchAvailability:', { matchId, playerId, status, comment });
     
     try {
+      // Hole Spieler- und Match-Informationen für Logging
+      const player = players.find(p => p.id === playerId);
+      const match = matches.find(m => m.id === matchId);
+      const playerName = player?.name || 'Unbekannter Spieler';
+      const matchInfo = match ? `${match.opponent} (${new Date(match.date).toLocaleDateString('de-DE')})` : 'Unbekanntes Match';
       // Prüfe ob Eintrag existiert
       const { data: existing, error: selectError } = await supabase
         .from('match_availability')
@@ -409,6 +414,30 @@ export function DataProvider({ children }) {
       console.log('🔵 Reloading matches...');
       await loadMatches();
       console.log('✅ Matches reloaded');
+      
+      // Logging für Admin-Bereich
+      const logEntry = {
+        timestamp: new Date().toISOString(),
+        playerName,
+        matchInfo,
+        status,
+        comment: comment || null,
+        action: existing ? 'updated' : 'created'
+      };
+      
+      console.log('📝 Verfügbarkeits-Log:', logEntry);
+      
+      // Speichere Log in localStorage für Admin-Anzeige
+      const existingLogs = JSON.parse(localStorage.getItem('availability_logs') || '[]');
+      existingLogs.unshift(logEntry);
+      
+      // Behalte nur die letzten 100 Einträge
+      if (existingLogs.length > 100) {
+        existingLogs.splice(100);
+      }
+      
+      localStorage.setItem('availability_logs', JSON.stringify(existingLogs));
+      
       return { success: true };
     } catch (error) {
       console.error('❌ Error updating availability:', error);

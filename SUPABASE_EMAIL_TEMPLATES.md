@@ -158,14 +158,8 @@ Diese Templates können Sie in Ihrem Supabase Dashboard unter **Authentication >
 
 ### 3. Redirect URL konfigurieren:
 ```
-https://ihre-domain.com/password-reset
+https://ihre-domain.com/profile?password_reset=true
 ```
-
-### 4. Wichtige Hinweise:
-- **Alle Templates sind jetzt komplett auf Deutsch** 🇩🇪
-- **Keine englischen Texte mehr** in den E-Mails
-- **Lustige und motivierende Sprache** mit Tennis-Bezug
-- **Templates funktionieren sofort** nach dem Kopieren
 
 ## 🎨 Anpassungen
 
