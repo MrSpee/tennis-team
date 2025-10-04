@@ -98,17 +98,30 @@ function Matches() {
       return;
     }
 
-    console.log('🔵 Setting availability - matchId:', matchId, 'playerId:', player.id, 'status:', status);
+    console.log('🔵 Setting availability - matchId:', matchId, 'playerId:', player.id, 'status:', status, 'comment:', comment);
     
-    const result = await updateMatchAvailability(matchId, player.id, status, comment);
-    
-    if (result.success) {
-      console.log('✅ Availability set successfully');
-      setComment('');
-      setSelectedMatch(null);
-    } else {
-      console.error('❌ Error setting availability:', result.error);
-      alert('❌ Fehler: ' + result.error);
+    try {
+      const result = await updateMatchAvailability(matchId, player.id, status, comment);
+      
+      if (result.success) {
+        console.log('✅ Availability set successfully');
+        
+        // UI State zurücksetzen
+        setComment('');
+        setSelectedMatch(null);
+        
+        // Kurze Verzögerung für bessere UX
+        setTimeout(() => {
+          console.log('🔄 UI updated after availability change');
+        }, 100);
+        
+      } else {
+        console.error('❌ Error setting availability:', result.error);
+        alert('❌ Fehler: ' + result.error);
+      }
+    } catch (error) {
+      console.error('❌ Exception in handleAvailability:', error);
+      alert('❌ Unerwarteter Fehler beim Setzen der Verfügbarkeit. Bitte versuche es erneut.');
     }
   };
 

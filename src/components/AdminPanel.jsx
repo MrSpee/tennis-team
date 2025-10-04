@@ -7,7 +7,7 @@ import './AdminPanel.css';
 
 function AdminPanel() {
   const { isCaptain } = useAuth();
-  const { matches, teamInfo, players, addMatch, updateMatch, deleteMatch, updateTeamInfo } = useData();
+  const { matches, teamInfo, players, addMatch, updateMatch, deleteMatch, updateTeamInfo, importHistoricalAvailabilityLogs } = useData();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('matches'); // 'matches', 'season', 'players', 'team'
   const [editingMatchId, setEditingMatchId] = useState(null);
@@ -1037,7 +1037,7 @@ function AdminPanel() {
                                     WhatsApp
                                   </a>
                             )}
-                        </div>
+                      </div>
                         ) : (
                           <span style={{ color: '#9ca3af', fontSize: '0.875rem' }}>Nicht angegeben</span>
                         )}
@@ -1054,7 +1054,7 @@ function AdminPanel() {
                                   }}>
                           {player.ranking || 'N/A'}
                                   </span>
-                        </div>
+                    </div>
 
                       {/* Verfügbarkeit */}
                         <div>
@@ -1065,20 +1065,20 @@ function AdminPanel() {
                           color: availabilityPercentage >= 70 ? '#22c55e' : availabilityPercentage >= 40 ? '#f59e0b' : '#ef4444'
                         }}>
                           {availabilityPercentage}%
-                        </div>
+                    </div>
                         <div style={{ fontSize: '0.75rem', color: '#6b7280', lineHeight: '1.4' }}>
                           <div>✅ {availableCount} verfügbar</div>
                           <div>❌ {unavailableCount} nicht verfügbar</div>
                           {noResponseCount > 0 && (
                             <div style={{ color: '#9ca3af' }}>⏳ {noResponseCount} keine Rückmeldung</div>
                                 )}
-                        </div>
-                      </div>
+                    </div>
+                  </div>
 
                       {/* Letzte Aktivität */}
                       <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
                         {player.updated_at ? new Date(player.updated_at).toLocaleDateString('de-DE') : 'N/A'}
-                      </div>
+                    </div>
 
                       {/* Aktionen */}
                       <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -1100,11 +1100,11 @@ function AdminPanel() {
                           <ExternalLink size={12} />
                           Profil
                         </button>
-                      </div>
+                    </div>
                     </div>
               );
             })}
-              </div>
+                  </div>
 
               {/* Erweiterte Verfügbarkeits-Log für Captain/MF */}
               <div style={{ 
@@ -1147,18 +1147,86 @@ function AdminPanel() {
                     >
                       {logLimit === 50 ? 'Alle anzeigen' : 'Weniger anzeigen'}
                     </button>
-                  </div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          console.log('🔄 Starting historical data import...');
+                          const result = await importHistoricalAvailabilityLogs();
+                          
+                          if (result.success) {
+                            alert(`✅ Import erfolgreich!\n\n${result.imported} neue Einträge importiert\nInsgesamt: ${result.total} Log-Einträge\n\nSeite wird neu geladen...`);
+                            window.location.reload();
+                          } else {
+                            alert(`❌ Import fehlgeschlagen: ${result.error}`);
+                          }
+                        } catch (error) {
+                          console.error('❌ Import error:', error);
+                          alert(`❌ Fehler beim Import: ${error.message}`);
+                        }
+                      }}
+                      style={{
+                        padding: '0.25rem 0.5rem',
+                        border: '1px solid #059669',
+                        borderRadius: '4px',
+                        fontSize: '0.75rem',
+                        background: '#f0fdf4',
+                        color: '#059669',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      📥 Historie importieren
+                    </button>
+                    <button
+                      onClick={() => {
+                        // Test-Log hinzufügen
+                        const testLog = {
+                          timestamp: new Date().toISOString(),
+                          playerName: 'Test-Spieler',
+                          playerId: 'test-id',
+                          matchInfo: 'Test-Match (01.01.2025)',
+                          matchId: 'test-match-id',
+                          status: 'available',
+                          comment: 'Test-Kommentar',
+                          action: 'created'
+                        };
+                        const existingLogs = JSON.parse(localStorage.getItem('availability_logs') || '[]');
+                        existingLogs.unshift(testLog);
+                        localStorage.setItem('availability_logs', JSON.stringify(existingLogs));
+                        console.log('🧪 Test-Log hinzugefügt:', testLog);
+                        alert('Test-Log hinzugefügt! Seite wird neu geladen...');
+                        window.location.reload();
+                      }}
+                      style={{
+                        padding: '0.25rem 0.5rem',
+                        border: '1px solid #dc2626',
+                        borderRadius: '4px',
+                        fontSize: '0.75rem',
+                        background: '#fef2f2',
+                        color: '#dc2626',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      🧪 Test-Log
+                    </button>
+                    </div>
                 </div>
                 
-                <div style={{ 
+                      <div style={{
                   background: 'white', 
-                  borderRadius: '8px', 
+                        borderRadius: '8px',
                   padding: '1rem',
                   maxHeight: '400px',
                   overflowY: 'auto'
                 }}>
                   {(() => {
                     const allLogs = JSON.parse(localStorage.getItem('availability_logs') || '[]');
+                    
+                    // Debug: Zeige localStorage Status
+                    console.log('🔍 AdminPanel - localStorage logs:', {
+                      totalLogs: allLogs.length,
+                      latestLog: allLogs[0],
+                      localStorageKey: 'availability_logs'
+                    });
                     
                     // Filter anwenden
                     let filteredLogs = allLogs;
@@ -1201,9 +1269,9 @@ function AdminPanel() {
                         
                         {displayLogs.map((log, index) => (
                           <div key={index} style={{ 
-                            display: 'flex', 
+                                display: 'flex',
                             justifyContent: 'space-between', 
-                            alignItems: 'center',
+                                alignItems: 'center',
                             padding: '0.75rem 0',
                             borderBottom: index < displayLogs.length - 1 ? '1px solid #f3f4f6' : 'none',
                             background: index % 2 === 0 ? '#fefefe' : 'transparent',
@@ -1231,6 +1299,18 @@ function AdminPanel() {
                                     fontWeight: '500'
                                   }}>
                                     GEÄNDERT
+                                  </span>
+                                )}
+                                {log.action === 'imported' && (
+                                  <span style={{ 
+                                    background: '#dbeafe', 
+                                    color: '#1e40af', 
+                                    padding: '0.125rem 0.25rem', 
+                                    borderRadius: '3px',
+                                    fontSize: '0.625rem',
+                                    fontWeight: '500'
+                                  }}>
+                                    IMPORTIERT
                                   </span>
                                 )}
                               </div>

@@ -384,6 +384,75 @@ function Dashboard() {
                 </div>
               </div>
             )}
+            
+            {/* Live-Ticker Button für nächstes Spiel */}
+            <div style={{ 
+              marginTop: '1rem', 
+              display: 'flex', 
+              gap: '0.5rem' 
+            }}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate(`/ergebnisse/${nextMatchAnySeason.id}`);
+                }}
+                style={{
+                  flex: '0 0 auto',
+                  padding: '0.5rem',
+                  background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '0.8rem',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.25rem',
+                  transition: 'all 0.2s ease',
+                  minWidth: '120px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.transform = 'translateY(-1px)';
+                  e.target.style.boxShadow = '0 4px 8px rgba(239, 68, 68, 0.3)';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.transform = 'translateY(0)';
+                  e.target.style.boxShadow = 'none';
+                }}
+              >
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '24px',
+                  height: '24px',
+                  background: 'rgba(255, 255, 255, 0.2)',
+                  borderRadius: '6px'
+                }}>
+                  📡
+                </div>
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  lineHeight: '1.2'
+                }}>
+                  <span style={{
+                    fontWeight: '700',
+                    fontSize: '0.85rem',
+                    letterSpacing: '0.3px'
+                  }}>Ergebnisdienst</span>
+                  <span style={{
+                    fontWeight: '500',
+                    fontSize: '0.7rem',
+                    opacity: '0.9',
+                    marginTop: '1px'
+                  }}>Live-Ticker</span>
+                </div>
+              </button>
+            </div>
           </div>
         );
       })()}
@@ -412,7 +481,7 @@ function Dashboard() {
                   key={match.id} 
                   className="match-preview-card card"
                   onClick={() => navigate(`/matches?match=${match.id}`)}
-                  style={{ cursor: 'pointer' }}
+                  style={{ cursor: 'pointer', position: 'relative' }}
                   title="Klicken für Verfügbarkeit setzen"
                 >
                   <div className="match-preview-header">
@@ -423,20 +492,23 @@ function Dashboard() {
                       <div className="date-month">
                         {format(match.date, 'MMM', { locale: de })}
                       </div>
-                      <div className="date-year" style={{ fontSize: '0.75rem', color: 'white', fontWeight: 'bold', marginTop: '2px' }}>
+                      <div className="date-year">
                         {format(match.date, 'yyyy')}
                       </div>
                     </div>
                     <div className="match-info">
                       <h3>{match.opponent}</h3>
                       <p className="match-details">
-                        {format(match.date, 'EEEE, dd. MMMM yyyy', { locale: de })} • {format(match.date, 'HH:mm')} Uhr
+                        {format(match.date, 'EEEE, dd. MMMM yyyy', { locale: de })}
                       </p>
-                      <p className="match-details" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                      <p className="match-details">
+                        {format(match.date, 'HH:mm')} Uhr
+                      </p>
+                      <p className="match-details">
                         {match.location === 'Home' ? '🏠 Heimspiel' : '✈️ Auswärtsspiel'}
                       </p>
                       {match.venue && (
-                        <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.25rem' }}>
+                        <p className="match-details">
                           📍 {match.venue}
                         </p>
                       )}
@@ -447,6 +519,45 @@ function Dashboard() {
                     <span className="badge badge-danger">{notAvailableCount} nicht verfügbar</span>
                     <span className="badge badge-warning">{notRespondedPlayers.length} ausstehend</span>
                   </div>
+                  
+                  {/* Live-Ticker Button */}
+                  {/* Floating Live-Ticker Button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation(); // Verhindere das Klicken auf die Match-Card
+                      navigate(`/ergebnisse/${match.id}`);
+                    }}
+                    style={{
+                      position: 'absolute',
+                      top: '1rem',
+                      right: '1rem',
+                      width: '40px',
+                      height: '40px',
+                      background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '50%',
+                      fontSize: '1.2rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.2s ease',
+                      boxShadow: '0 2px 8px rgba(239, 68, 68, 0.3)',
+                      zIndex: 10
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.transform = 'scale(1.1)';
+                      e.target.style.boxShadow = '0 4px 12px rgba(239, 68, 68, 0.4)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.transform = 'scale(1)';
+                      e.target.style.boxShadow = '0 2px 8px rgba(239, 68, 68, 0.3)';
+                    }}
+                    title="Live-Ticker öffnen"
+                  >
+                    📡
+                  </button>
                 </div>
               );
             })}

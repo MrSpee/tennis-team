@@ -12,6 +12,9 @@ import AdminPanel from './components/AdminPanel';
 import SupabaseProfile from './components/SupabaseProfile';
 import PlayerProfileSimple from './components/PlayerProfileSimple';
 import PasswordResetPage from './components/PasswordResetPage';
+import LiveResults from './components/LiveResults';
+import LiveResultsWithDB from './components/LiveResultsWithDB';
+import LiveResultsOverview from './components/LiveResultsOverview';
 import Navigation from './components/Navigation';
 import Header from './components/Header';
 import ScrollToTop from './components/ScrollToTop';
@@ -130,6 +133,31 @@ function AppContent() {
           } />
           
           <Route path="/password-reset" element={<PasswordResetPage />} />
+          
+          <Route path="/ergebnisse/:matchId" element={
+            <ProtectedRoute>
+              <LiveResultsOverview />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/ergebnisse/:matchId/edit" element={
+            <ProtectedRoute>
+              <LiveResultsWithDB />
+            </ProtectedRoute>
+          } />
+          
+          {/* Legacy routes for backward compatibility */}
+          <Route path="/live-results/:matchId" element={
+            <ProtectedRoute>
+              <LiveResultsOverview />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/live-results/:matchId/edit" element={
+            <ProtectedRoute>
+              <LiveResultsWithDB />
+            </ProtectedRoute>
+          } />
           
           <Route path="/admin" element={
             <CaptainRoute>

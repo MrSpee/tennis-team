@@ -415,6 +415,10 @@ export function DataProvider({ children }) {
       await loadMatches();
       console.log('✅ Matches reloaded');
       
+      // Zusätzlich: Force ein Re-render der Komponenten
+      // Das kann helfen, wenn die UI nicht aktualisiert wird
+      console.log('🔄 Triggering component re-render...');
+      
       // Erweiterte Logging für Admin-Bereich
       const logEntry = {
         timestamp: new Date().toISOString(),
@@ -428,18 +432,27 @@ export function DataProvider({ children }) {
         previousStatus: existing ? 'unknown' : null // Könnte erweitert werden um vorherigen Status zu tracken
       };
       
-      console.log('📝 Verfügbarkeits-Log:', logEntry);
+      console.log('📝 Verfügbarkeits-Log Entry:', logEntry);
       
       // Speichere Log in localStorage für Admin-Anzeige
-      const existingLogs = JSON.parse(localStorage.getItem('availability_logs') || '[]');
-      existingLogs.unshift(logEntry);
-      
-      // Erweitert: Behalte mehr Einträge für bessere Nachverfolgung (500 statt 100)
-      if (existingLogs.length > 500) {
-        existingLogs.splice(500);
+      try {
+        const existingLogs = JSON.parse(localStorage.getItem('availability_logs') || '[]');
+        existingLogs.unshift(logEntry);
+        
+        // Erweitert: Behalte mehr Einträge für bessere Nachverfolgung (500 statt 100)
+        if (existingLogs.length > 500) {
+          existingLogs.splice(500);
+        }
+        
+        localStorage.setItem('availability_logs', JSON.stringify(existingLogs));
+        console.log('✅ Log saved to localStorage. Total logs:', existingLogs.length);
+        
+        // Debug: Zeige gespeicherte Logs
+        const savedLogs = JSON.parse(localStorage.getItem('availability_logs') || '[]');
+        console.log('🔍 Current localStorage logs:', savedLogs.slice(0, 3));
+      } catch (logError) {
+        console.error('❌ Error saving log to localStorage:', logError);
       }
-      
-      localStorage.setItem('availability_logs', JSON.stringify(existingLogs));
       
       return { success: true };
     } catch (error) {
@@ -485,6 +498,91 @@ export function DataProvider({ children }) {
       return { success: true, data };
     } catch (error) {
       console.error('Error updating player profile:', error);
+      return { success: false, error: error.message };
+    }
+  };
+
+  /**
+   * Importiere alle historischen Verfügbarkeits-Daten aus der Datenbank
+   */
+  const importHistoricalAvailabilityLogs = async () => {
+    try {
+      console.log('🔍 Importing historical availability data...');
+      
+      // Lade alle Verfügbarkeits-Daten mit Spieler- und Match-Informationen
+      const { data: availabilityData, error } = await supabase
+        .from('match_availability')
+        .select(`
+          *,
+          players!match_availability_player_id_fkey (
+            name
+          ),
+          matches!match_availability_match_id_fkey (
+            opponent,
+            match_date
+          )
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('❌ Error loading historical data:', error);
+        return { success: false, error: error.message };
+      }
+
+      console.log('📊 Found historical availability records:', availabilityData?.length || 0);
+
+      // Konvertiere zu Log-Format
+      const historicalLogs = availabilityData?.map(record => ({
+        timestamp: record.created_at || new Date().toISOString(),
+        playerName: record.players?.name || 'Unbekannter Spieler',
+        playerId: record.player_id,
+        matchInfo: record.matches ? `${record.matches.opponent} (${new Date(record.matches.match_date).toLocaleDateString('de-DE')})` : 'Unbekanntes Match',
+        matchId: record.match_id,
+        status: record.status,
+        comment: record.comment || null,
+        action: 'imported', // Kennzeichnung als importierte historische Daten
+        originalId: record.id
+      })) || [];
+
+      console.log('📝 Converted to log format:', historicalLogs.length, 'entries');
+
+      // Merge mit bestehenden Logs (vermeide Duplikate)
+      const existingLogs = JSON.parse(localStorage.getItem('availability_logs') || '[]');
+      const existingIds = new Set(existingLogs.map(log => log.originalId || `${log.playerId}-${log.matchId}`));
+      
+      const newLogs = historicalLogs.filter(log => !existingIds.has(log.originalId || `${log.playerId}-${log.matchId}`));
+      
+      console.log('🔄 Merging logs:', {
+        existing: existingLogs.length,
+        historical: historicalLogs.length,
+        new: newLogs.length
+      });
+
+      // Kombiniere und sortiere nach Timestamp
+      const allLogs = [...existingLogs, ...newLogs].sort((a, b) => 
+        new Date(b.timestamp) - new Date(a.timestamp)
+      );
+
+      // Behalte nur die letzten 500 Einträge
+      if (allLogs.length > 500) {
+        allLogs.splice(500);
+      }
+
+      localStorage.setItem('availability_logs', JSON.stringify(allLogs));
+      
+      console.log('✅ Historical data imported successfully:', {
+        totalLogs: allLogs.length,
+        newImports: newLogs.length
+      });
+
+      return { 
+        success: true, 
+        imported: newLogs.length,
+        total: allLogs.length
+      };
+
+    } catch (error) {
+      console.error('❌ Error in importHistoricalAvailabilityLogs:', error);
       return { success: false, error: error.message };
     }
   };
@@ -603,7 +701,8 @@ export function DataProvider({ children }) {
     setLeagueStandings,
     getPlayerProfile,
     updatePlayerProfile,
-    updateTeamInfo
+    updateTeamInfo,
+    importHistoricalAvailabilityLogs
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
