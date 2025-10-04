@@ -33,7 +33,14 @@ export function AuthProvider({ children }) {
     const checkSession = async () => {
       try {
         console.log('🔵 Checking for existing session...');
-        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        // Timeout für Session-Check um Hängen zu vermeiden
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Session check timeout')), 5000)
+        );
+        
+        const { data: { session }, error } = await Promise.race([sessionPromise, timeoutPromise]);
         
         if (error) {
           console.error('❌ Error getting session:', error);
@@ -55,6 +62,9 @@ export function AuthProvider({ children }) {
         setInitialCheckDone(true);
       } catch (error) {
         console.error('❌ Error checking session:', error);
+        if (error.message === 'Session check timeout') {
+          console.warn('⚠️ Session check timed out - continuing without session');
+        }
         setLoading(false);
         setInitialCheckDone(true);
       }
