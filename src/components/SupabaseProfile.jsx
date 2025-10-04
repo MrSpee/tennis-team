@@ -426,18 +426,6 @@ function SupabaseProfile() {
         )}
       </div>
 
-      {successMessage && (
-        <div className="success-message" style={{
-          padding: '1rem',
-          marginBottom: '1rem',
-          backgroundColor: '#d4edda',
-          border: '1px solid #c3e6cb',
-          borderRadius: '8px',
-          color: '#155724'
-        }}>
-          {successMessage}
-        </div>
-      )}
 
       {errorMessage && (
         <div className="error-message" style={{
@@ -699,23 +687,32 @@ function SupabaseProfile() {
 
         {isEditing && (
           <div className="form-actions">
-            {!isSetup && (
+            <div className="form-actions-left">
+              {successMessage && (
+                <div className="success-message-inline">
+                  {successMessage}
+                </div>
+              )}
+            </div>
+            <div className="form-actions-right">
+              {!isSetup && (
+                <button 
+                  type="button" 
+                  className="btn-cancel"
+                  onClick={handleCancel}
+                  disabled={isSaving}
+                >
+                  Abbrechen
+                </button>
+              )}
               <button 
-                type="button" 
-                className="btn-cancel"
-                onClick={handleCancel}
+                type="submit" 
+                className="btn-save"
                 disabled={isSaving}
               >
-                Abbrechen
+                {isSaving ? '⏳ Speichert...' : '💾 Speichern'}
               </button>
-            )}
-            <button 
-              type="submit" 
-              className="btn-save"
-              disabled={isSaving}
-            >
-              {isSaving ? '⏳ Speichert...' : '💾 Speichern'}
-            </button>
+            </div>
           </div>
         )}
       </form>
