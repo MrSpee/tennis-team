@@ -64,7 +64,7 @@ Diese Templates können Sie in Ihrem Supabase Dashboard unter **Authentication >
     </div>
     
     <div class="footer">
-        <p>🎾 Platzhirsch - Tennis Team App - Let's play! 🚀</p>
+        <p>🎾 Platzhirsch - Tennis Team App - Los geht's! 🚀</p>
         <p>Diese E-Mail wurde automatisch generiert. Falls du Fragen hast, schreib uns einfach! 😊</p>
     </div>
 </body>
@@ -75,7 +75,7 @@ Diese Templates können Sie in Ihrem Supabase Dashboard unter **Authentication >
 
 ### Betreff (Subject):
 ```
-🎾 Willkommen im Tennis Team! Let's go! 🚀
+🎾 Willkommen im Tennis Team! Los geht's! 🚀
 ```
 
 ### HTML Template:
@@ -100,18 +100,18 @@ Diese Templates können Sie in Ihrem Supabase Dashboard unter **Authentication >
     <div class="header">
         <div class="tennis-icon">🎾</div>
         <h1>Willkommen im Team, Tennis-Star! 🌟</h1>
-        <p>Let's go! Zeit für dein erstes Match! 🚀</p>
+        <p>Los geht's! Zeit für dein erstes Match! 🚀</p>
     </div>
     
     <div class="content">
         <h2>Hey du cooler Tennis-Spieler! 👋</h2>
         
-        <p>Mega, dass du dabei bist! 🎉 Du bist jetzt offiziell Teil des coolsten Tennis-Teams ever! Aber bevor wir loslegen können, musst du noch schnell deine E-Mail-Adresse bestätigen - das ist wie das Aufwärmen vor dem Match! 😄</p>
+        <p>Mega, dass du dabei bist! 🎉 Du bist jetzt offiziell Teil des coolsten Tennis-Teams überhaupt! Aber bevor wir loslegen können, musst du noch schnell deine E-Mail-Adresse bestätigen - das ist wie das Aufwärmen vor dem Match! 😄</p>
         
         <p>Klicke einfach auf den Button und dann kann's losgehen:</p>
         
         <div style="text-align: center;">
-            <a href="{{ .ConfirmationURL }}" class="button">🎯 E-Mail bestätigen - Let's play!</a>
+            <a href="{{ .ConfirmationURL }}" class="button">🎯 E-Mail bestätigen - Los geht's!</a>
         </div>
         
         <p><strong>🎾 Nach der Bestätigung erwartet dich:</strong></p>
@@ -135,7 +135,7 @@ Diese Templates können Sie in Ihrem Supabase Dashboard unter **Authentication >
     </div>
     
     <div class="footer">
-        <p>🎾 Tennis Team App - Let's play! 🚀</p>
+        <p>🎾 Tennis Team App - Los geht's! 🚀</p>
         <p>Diese E-Mail wurde automatisch generiert. Falls du Fragen hast, schreib uns einfach! 😊</p>
     </div>
 </body>
@@ -158,8 +158,14 @@ Diese Templates können Sie in Ihrem Supabase Dashboard unter **Authentication >
 
 ### 3. Redirect URL konfigurieren:
 ```
-https://ihre-domain.com/profile?password_reset=true
+https://ihre-domain.com/password-reset
 ```
+
+### 4. Wichtige Hinweise:
+- **Alle Templates sind jetzt komplett auf Deutsch** 🇩🇪
+- **Keine englischen Texte mehr** in den E-Mails
+- **Lustige und motivierende Sprache** mit Tennis-Bezug
+- **Templates funktionieren sofort** nach dem Kopieren
 
 ## 🎨 Anpassungen
 

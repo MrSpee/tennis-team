@@ -140,7 +140,22 @@ function Dashboard() {
   // Tageszeit-abhängige Begrüßung
   const getGreeting = () => {
     const hour = new Date().getHours();
-    const firstName = (player?.name || currentUser?.name || 'Spieler').split(' ')[0];
+    
+    // Korrekte Namens-Abfrage für Supabase
+    let playerName = player?.name;
+    if (!playerName && currentUser) {
+      playerName = currentUser.user_metadata?.name || currentUser.email?.split('@')[0] || 'Spieler';
+    }
+    
+    const firstName = (playerName || 'Spieler').split(' ')[0];
+    
+    console.log('🔵 Greeting debug:', { 
+      playerName: player?.name, 
+      userMetadata: currentUser?.user_metadata?.name,
+      email: currentUser?.email,
+      finalName: playerName,
+      firstName 
+    });
     
     if (hour < 6) return `Gute Nacht, ${firstName}! 🌙`;
     if (hour < 11) return `Guten Morgen, ${firstName}! ☀️`;

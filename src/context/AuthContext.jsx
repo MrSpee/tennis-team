@@ -134,13 +134,31 @@ export function AuthProvider({ children }) {
         if (user) {
           console.log('📝 Creating player entry for user:', user.email);
           
+          // Bessere Namens-Generierung für neue Spieler
+          let playerName = user.user_metadata?.name;
+          console.log('🔵 Name from user_metadata:', playerName);
+          
+          if (!playerName) {
+            // Extrahiere Namen aus E-Mail (vor dem @)
+            const emailName = user.email?.split('@')[0];
+            console.log('🔵 Email name extracted:', emailName);
+            
+            // Ersetze Punkte und Unterstriche mit Leerzeichen und kapitalisiere
+            playerName = emailName?.replace(/[._]/g, ' ')
+              .split(' ')
+              .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+              .join(' ') || 'Neuer Spieler';
+            
+            console.log('🔵 Generated player name:', playerName);
+          }
+          
           // Erstelle Player-Eintrag
           const { data: newPlayer, error: insertError } = await supabase
             .from('players')
             .insert({
               user_id: user.id,
               email: user.email,
-              name: user.user_metadata?.name || 'Neuer Spieler',
+              name: playerName,
               phone: user.user_metadata?.phone || null,
               ranking: user.user_metadata?.ranking || null,
               role: 'player',
