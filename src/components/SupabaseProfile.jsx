@@ -168,23 +168,51 @@ function SupabaseProfile() {
     setIsUploading(true);
     setErrorMessage('');
 
+    // Prüfe ob Storage Bucket existiert
+    try {
+      const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
+      console.log('📦 Available buckets:', buckets);
+      
+      const profileImagesBucket = buckets?.find(bucket => bucket.name === 'profile-images');
+      if (!profileImagesBucket) {
+        setErrorMessage('Storage Bucket "profile-images" existiert nicht. Führen Sie das SQL-Script aus.');
+        setIsUploading(false);
+        return;
+      }
+      console.log('✅ Profile-images bucket found:', profileImagesBucket);
+    } catch (error) {
+      console.error('❌ Error checking buckets:', error);
+      setErrorMessage('Fehler beim Prüfen der Storage-Buckets.');
+      setIsUploading(false);
+      return;
+    }
+
     try {
       // Erstelle einen eindeutigen Dateinamen
       const fileExt = file.name.split('.').pop();
       const fileName = `${currentUser.id}_${Date.now()}.${fileExt}`;
       const filePath = `profile-images/${fileName}`;
 
+      console.log('🔄 Starting upload:', { fileName, filePath, fileSize: file.size });
+
       // Upload zu Supabase Storage
       const { error: uploadError } = await supabase.storage
-        .from('public')
+        .from('profile-images')
         .upload(filePath, file);
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.error('❌ Upload error:', uploadError);
+        throw uploadError;
+      }
+
+      console.log('✅ Upload successful, getting public URL...');
 
       // Hole die öffentliche URL
       const { data } = supabase.storage
-        .from('public')
+        .from('profile-images')
         .getPublicUrl(filePath);
+
+      console.log('✅ Public URL:', data.publicUrl);
 
       setProfile(prev => ({
         ...prev,
@@ -193,8 +221,8 @@ function SupabaseProfile() {
 
       setSuccessMessage('Bild erfolgreich hochgeladen!');
     } catch (error) {
-      console.error('Upload error:', error);
-      setErrorMessage('Fehler beim Hochladen des Bildes.');
+      console.error('❌ Upload error:', error);
+      setErrorMessage(`Fehler beim Hochladen: ${error.message}`);
     } finally {
       setIsUploading(false);
     }
