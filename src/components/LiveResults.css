@@ -116,12 +116,18 @@
   margin-bottom: 2rem;
   box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
   margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
 }
 
 .header-content {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 1rem;
+  width: 100%;
 }
 
 .header-top {
@@ -129,6 +135,7 @@
   align-items: center;
   justify-content: center;
   gap: 2rem;
+  width: 100%;
 }
 
 .header-center {
@@ -136,6 +143,7 @@
   flex-direction: column;
   align-items: center;
   gap: 0.75rem;
+  width: 100%;
 }
 
 /* Old live-indicator styles removed - using full-width version now */
@@ -232,6 +240,8 @@
   font-size: 0.9rem;
   cursor: pointer;
   transition: all 0.2s ease;
+  align-self: flex-start;
+  margin-bottom: 1rem;
 }
 
 .back-button:hover {
@@ -596,16 +606,20 @@
     flex-direction: column;
     gap: 1rem;
     justify-content: center;
+    align-items: center;
   }
   
   .header-center {
     order: 2;
+    width: 100%;
+    align-items: center;
   }
   
   .back-button {
     order: 1;
     align-self: center;
     justify-content: center;
+    margin-bottom: 0;
   }
   
   .btn-update {
@@ -615,6 +629,8 @@
     min-width: auto;
     padding: 0.75rem 1rem;
     font-size: 0.85rem;
+    width: 100%;
+    max-width: 280px;
   }
   
   .modern-time {
@@ -636,6 +652,11 @@
   
   .match-card {
     padding: 1rem;
+  }
+  
+  .match-info {
+    align-items: left;
+    flex-direction: row;
   }
   
   .player-row {
@@ -673,10 +694,17 @@
 
   .total-score-card {
     padding: 1rem;
+    margin: 1rem 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
   }
 
   .score-display-large {
     gap: 1rem;
+    width: 100%;
+    justify-content: center;
   }
 
   .score-number {
@@ -685,14 +713,24 @@
   
   .score-title {
     font-size: 0.9rem;
+    width: 100%;
+    justify-content: center;
   }
   
   .team-name {
     font-size: 0.7rem;
+    text-align: center;
+  }
+  
+  .team-score {
+    flex: 1;
+    align-items: center;
   }
   
   .score-status {
     font-size: 0.8rem;
+    width: 100%;
+    text-align: center;
   }
   
   .btn-primary {
@@ -742,6 +780,10 @@
   text-align: center;
   box-shadow: 0 4px 12px rgba(30, 64, 175, 0.2);
   border: 1px solid #3b82f6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
 }
 
 .total-score-card * {
@@ -756,6 +798,7 @@
   font-size: 1rem;
   font-weight: 600;
   margin-bottom: 1rem;
+  width: 100%;
 }
 
 .score-display-large {
@@ -764,6 +807,7 @@
   justify-content: center;
   gap: 2rem;
   margin-bottom: 1rem;
+  width: 100%;
 }
 
 .team-score {
@@ -771,12 +815,14 @@
   flex-direction: column;
   align-items: center;
   gap: 0.5rem;
+  flex: 1;
 }
 
 .team-name {
   font-size: 0.8rem;
   opacity: 0.9;
   font-weight: 500;
+  text-align: center;
 }
 
 .score-number {
@@ -862,11 +908,40 @@
   border-color: rgba(239, 68, 68, 0.2);
 }
 
-/* Gewinner-Färbung - überschreibt die Standard-Farben */
+/* Gewinner-Färbung - nur bei finalen Ergebnissen */
 .player-row.winner {
   background: #f0fdf4 !important;
-  border-color: #22c55e !important;
-  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.15);
+  border: 4px solid #ffd700 !important;
+  border-radius: 12px !important;
+  box-shadow: 
+    0 0 20px rgba(255, 215, 0, 0.6),
+    0 0 40px rgba(255, 215, 0, 0.3),
+    0 4px 12px rgba(34, 197, 94, 0.15);
+  position: relative;
+}
+
+.player-row.winner::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  background: linear-gradient(45deg, #ffd700, #ffed4e, #ffd700, #ffed4e);
+  border-radius: 14px;
+  z-index: -1;
+  animation: goldGlow 2s ease-in-out infinite alternate;
+}
+
+@keyframes goldGlow {
+  0% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
 }
 
 .player-row.winner .player-name {
@@ -878,7 +953,7 @@
   border-color: #22c55e;
 }
 
-/* Verlierer-Färbung - zartes Lachs */
+/* Verlierer-Färbung - nur bei finalen Ergebnissen */
 .player-row.loser {
   background: #fef7f0 !important;
   border-color: #f59e0b !important;
@@ -894,17 +969,6 @@
   border-color: #f59e0b;
 }
 
-/* Pokal-Icon für Gewinner */
-.trophy-icon {
-  margin-left: 0.5rem;
-  font-size: 1.2rem;
-  animation: bounce 2s infinite;
-  display: inline-block;
-  vertical-align: middle;
-  position: relative;
-  z-index: 10;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
-}
 
 @keyframes bounce {
   0%, 20%, 50%, 80%, 100% {
@@ -977,6 +1041,9 @@
   color: #1f2937;
   font-size: 0.95rem;
   line-height: 1.2;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .player-status {
@@ -1037,15 +1104,17 @@
 
 .match-header {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
   margin-bottom: 1rem;
+  gap: 1rem;
 }
 
 .match-info {
   display: flex;
-  align-items: center;
+  align-items: left;
   gap: 1rem;
+  flex-direction: row;
 }
 
 .match-number {

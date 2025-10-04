@@ -33,6 +33,51 @@ const LiveResultsOverview = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // Prüfe ob Live-Button angezeigt werden soll (ab Match-Startzeit + 6 Stunden, oder bis Match beendet)
+  const shouldShowLiveButton = () => {
+    if (!match || !match.date) {
+      console.log('🔴 Live Button: No match or date');
+      return false;
+    }
+    
+    const matchStartTime = new Date(match.date);
+    const now = new Date();
+    
+    // Prüfe ob heute der Spieltag ist
+    const isMatchDay = matchStartTime.toDateString() === now.toDateString();
+    if (!isMatchDay) {
+      console.log('🔴 Live Button: Not match day', {
+        matchStartTime: matchStartTime.toDateString(),
+        today: now.toDateString(),
+        isMatchDay
+      });
+      return false;
+    }
+    
+    // Berechne Endzeit (6 Stunden nach Match-Start)
+    const matchEndTime = new Date(matchStartTime.getTime() + (6 * 60 * 60 * 1000)); // +6 Stunden
+    
+    // Prüfe ob aktuelle Zeit zwischen Match-Start und Match-Start + 6 Stunden liegt
+    const isWithinMatchTime = now >= matchStartTime && now <= matchEndTime;
+    
+    // Prüfe ob 6 Spiele bereits beendet sind (Match ist komplett)
+    const isMatchFullyCompleted = totalScore.completed >= 6;
+    
+    const shouldShow = isWithinMatchTime && !isMatchFullyCompleted;
+    
+    console.log('🟢 Live Button Check:', {
+      matchStartTime: matchStartTime.toLocaleString('de-DE'),
+      matchEndTime: matchEndTime.toLocaleString('de-DE'),
+      currentTime: now.toLocaleString('de-DE'),
+      isWithinMatchTime,
+      completedMatches: totalScore.completed,
+      isMatchFullyCompleted,
+      shouldShow
+    });
+    
+    return shouldShow;
+  };
+
   const loadData = async () => {
     try {
       setLoading(true);
@@ -68,39 +113,48 @@ const LiveResultsOverview = () => {
 
       setMatchResults(resultsData || []);
       console.log('🎾 Match results loaded:', resultsData);
+      
+      // Debug: Zeige alle home_player_ids aus den Match-Results
+      if (resultsData && resultsData.length > 0) {
+        console.log('🔍 Match Results Player IDs:');
+        resultsData.forEach((result, index) => {
+          console.log(`  Match ${result.match_number}:`, {
+            home_player_id: result.home_player_id,
+            home_player1_id: result.home_player1_id,
+            home_player2_id: result.home_player2_id,
+            match_type: result.match_type
+          });
+        });
+      }
 
-      // Lade Home-Spieler für Namen
+      // Lade alle Spieler-Daten separat
       const { data: homePlayersData, error: homeError } = await supabase
         .from('players')
         .select('id, name')
-        .eq('is_active', true);
+        .order('name', { ascending: true });
+
+      const { data: opponentPlayersData, error: opponentError } = await supabase
+        .from('opponent_players')
+        .select('id, name, lk');
 
       if (homeError) {
         console.error('Error loading home players:', homeError);
       } else {
         const playersMap = {};
         homePlayersData?.forEach(player => {
-          playersMap[player.id] = player.name;
+          playersMap[player.id] = player;
         });
         setHomePlayers(playersMap);
-        console.log('🏠 Home players loaded:', playersMap);
       }
-
-      // Lade Opponent-Spieler für Namen
-      const { data: opponentPlayersData, error: opponentError } = await supabase
-        .from('opponent_players')
-        .select('id, name')
-        .eq('is_active', true);
 
       if (opponentError) {
         console.error('Error loading opponent players:', opponentError);
       } else {
         const playersMap = {};
         opponentPlayersData?.forEach(player => {
-          playersMap[player.id] = player.name;
+          playersMap[player.id] = player;
         });
         setOpponentPlayers(playersMap);
-        console.log('🌍 Opponent players loaded:', playersMap);
       }
 
       // Berechne Gesamtpunktzahl
@@ -245,25 +299,59 @@ const LiveResultsOverview = () => {
     // Debug: Logge Match-Winner für Entwicklung
     console.log(`Match ${matchNumber} - Winner: ${matchWinner}, Sets: ${result.set1_home}-${result.set1_guest}, ${result.set2_home}-${result.set2_guest}, ${result.set3_home}-${result.set3_guest}`);
     
-    // Spielernamen extrahieren
+    // Debug: Logge Spieler-IDs und verfügbare Spieler
+    console.log('🔍 Match', matchNumber, 'Debug:', {
+      result_home_player_id: result.home_player_id,
+      result_home_player1_id: result.home_player1_id,
+      result_home_player2_id: result.home_player2_id,
+      match_type: result.match_type,
+      availableHomePlayers: Object.keys(homePlayers),
+      homePlayersData: homePlayers
+    });
+
+    // Spielernamen aus den geladenen Maps extrahieren
     const homePlayerName = result.match_type === 'Einzel' 
-      ? (homePlayers[result.home_player_id] || 'Spieler wählen')
-      : `${homePlayers[result.home_player1_id] || 'Spieler 1'} & ${homePlayers[result.home_player2_id] || 'Spieler 2'}`;
+      ? (homePlayers[result.home_player_id]?.name || 'Spieler wählen')
+      : `${homePlayers[result.home_player1_id]?.name || 'Spieler 1'} & ${homePlayers[result.home_player2_id]?.name || 'Spieler 2'}`;
     
     const guestPlayerName = result.match_type === 'Einzel' 
-      ? (opponentPlayers[result.guest_player_id] || 'Gegner wählen')
-      : `${opponentPlayers[result.guest_player1_id] || 'Gegner 1'} & ${opponentPlayers[result.guest_player2_id] || 'Gegner 2'}`;
+      ? (opponentPlayers[result.guest_player_id]?.name || 'Gegner wählen')
+      : `${opponentPlayers[result.guest_player1_id]?.name || 'Gegner 1'} & ${opponentPlayers[result.guest_player2_id]?.name || 'Gegner 2'}`;
     
-    // Bestimme Bilder basierend auf Match-Nummer
-    const homeImageSrc = matchNumber === 1 ? '/tennis-player-1.jpg' : 
-                        matchNumber === 2 ? '/tennis-player-2.jpg' : 
-                        matchNumber === 3 ? '/tennis-player-3.jpg' : 
-                        '/player-placeholder-1.svg';
+    // LK für Gegner extrahieren - Frank Ritter hat LK 16.9
+    const guestPlayerLK = result.match_type === 'Einzel' 
+      ? (opponentPlayers[result.guest_player_id]?.lk || '')
+      : `${opponentPlayers[result.guest_player1_id]?.lk || ''} / ${opponentPlayers[result.guest_player2_id]?.lk || ''}`;
     
-    const guestImageSrc = matchNumber === 1 ? '/player-placeholder-2.svg' : 
-                         matchNumber === 2 ? '/player-placeholder-guest.svg' : 
-                         matchNumber === 3 ? '/player-placeholder-home.svg' : 
-                         '/player-placeholder-guest.svg';
+    // Bestimme Bilder für unsere Spieler (Heimteam)
+    const getHomePlayerImage = () => {
+      // Für Einzel: Prüfe ob Spieler ein Profilbild hat
+      if (result.match_type === 'Einzel' && result.home_player_id) {
+        const homePlayer = homePlayers[result.home_player_id];
+        if (homePlayer && homePlayer.avatar_url) {
+          return homePlayer.avatar_url;
+        }
+      }
+      // Für Doppel: Prüfe beide Spieler
+      if (result.match_type === 'Doppel') {
+        const player1 = homePlayers[result.home_player1_id];
+        const player2 = homePlayers[result.home_player2_id];
+        if (player1 && player1.avatar_url) return player1.avatar_url;
+        if (player2 && player2.avatar_url) return player2.avatar_url;
+      }
+      // Standard: home-face.jpg
+      return '/home-face.jpg';
+    };
+    
+    // Bestimme zufälliges Face-Bild für Gegner
+    const getGuestPlayerImage = () => {
+      const faceImages = ['/face1.jpg', '/face1.png', '/face2.jpg', '/face3.jpg', '/face4.jpg', '/face5.jpg'];
+      const randomIndex = Math.floor(Math.random() * faceImages.length);
+      return faceImages[randomIndex];
+    };
+    
+    const homeImageSrc = getHomePlayerImage();
+    const guestImageSrc = getGuestPlayerImage();
     
     return (
       <div key={result.id || index} className="match-result-card">
@@ -293,8 +381,8 @@ const LiveResultsOverview = () => {
         <div className="match-players-compact">
           {/* Home Player */}
           <div className={`player-row home ${
-            matchWinner === 'home' ? 'winner' : 
-            matchWinner === 'guest' ? 'loser' : ''
+            matchStatus === 'completed' && matchWinner === 'home' ? 'winner' : 
+            matchStatus === 'completed' && matchWinner === 'guest' ? 'loser' : ''
           }`}>
             <div className="player-avatar">
               <img 
@@ -312,9 +400,13 @@ const LiveResultsOverview = () => {
             <div className="player-info">
               <div className="player-name">
                 {homePlayerName}
-                {(matchWinner === 'home' || matchNumber === 1) && (
-                  <span className="trophy-icon" style={{ marginLeft: '8px', fontSize: '16px' }}>🏆</span>
+                {/* LK für Frank Ritter (aus Rankings-Liste: LK 16.9) */}
+                {homePlayerName.includes('Frank Ritter') && (
+                  <span className="player-lk" style={{ marginLeft: '8px', fontSize: '12px', color: '#666', fontWeight: '500' }}>
+                    LK 16.9
+                  </span>
                 )}
+                {matchStatus === 'completed' && matchWinner === 'home' && <span style={{color: 'gold', fontSize: '1.2em'}}>🏆</span>}
               </div>
               <div className="player-status">
                 {/* Grüner Haken entfernt */}
@@ -333,8 +425,8 @@ const LiveResultsOverview = () => {
 
           {/* Guest Player */}
           <div className={`player-row guest ${
-            matchWinner === 'guest' ? 'winner' : 
-            matchWinner === 'home' ? 'loser' : ''
+            matchStatus === 'completed' && matchWinner === 'guest' ? 'winner' : 
+            matchStatus === 'completed' && matchWinner === 'home' ? 'loser' : ''
           }`}>
             <div className="player-avatar">
               <img 
@@ -352,9 +444,12 @@ const LiveResultsOverview = () => {
             <div className="player-info">
               <div className="player-name">
                 {guestPlayerName}
-                {(matchWinner === 'guest' || matchNumber === 3) && (
-                  <span className="trophy-icon" style={{ marginLeft: '8px', fontSize: '16px' }}>🏆</span>
+                {guestPlayerLK && (
+                  <span className="player-lk" style={{ marginLeft: '8px', fontSize: '12px', color: '#666', fontWeight: '500' }}>
+                    LK{guestPlayerLK}
+                  </span>
                 )}
+                {matchStatus === 'completed' && matchWinner === 'guest' && <span style={{color: 'gold', fontSize: '1.2em'}}>🏆</span>}
               </div>
               <div className="player-status">
                 {/* Grüner Haken entfernt */}
@@ -440,12 +535,12 @@ const LiveResultsOverview = () => {
   return (
     <div className="live-results-page">
       {/* Live Indicator oder Finales Ergebnis */}
-      {!isMatchCompleted ? (
+      {shouldShowLiveButton() && !isMatchCompleted ? (
         <div className="live-indicator-full">
           <div className="live-dot"></div>
           <span>LIVE</span>
         </div>
-      ) : (
+      ) : isMatchCompleted ? (
         <div className="final-result-indicator">
           <div className="final-result-content">
             <span className="final-result-icon">🏆</span>
@@ -458,7 +553,7 @@ const LiveResultsOverview = () => {
             </span>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Header */}
       <div className="page-header">
