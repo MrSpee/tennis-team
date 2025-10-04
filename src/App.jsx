@@ -3,7 +3,9 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { DataProvider } from './context/DataContext';
 import { Analytics } from '@vercel/analytics/react';
 import { SpeedInsights } from '@vercel/speed-insights/react';
+import { isSupabaseConfigured } from './lib/supabaseClient';
 import SupabaseLogin from './components/SupabaseLogin';
+import ConfigError from './components/ConfigError';
 import Dashboard from './components/Dashboard';
 import Matches from './components/Matches';
 import Rankings from './components/Rankings';
@@ -145,6 +147,11 @@ function AppContent() {
 }
 
 function App() {
+  // Prüfe Supabase-Konfiguration
+  if (!isSupabaseConfigured()) {
+    return <ConfigError />;
+  }
+
   return (
     <AuthProvider>
       <DataProvider>

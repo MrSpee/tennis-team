@@ -21,7 +21,9 @@ export function AuthProvider({ children }) {
     console.log('🔵 AuthContext - Supabase configured:', configured);
     
     if (!configured) {
-      console.error('❌ Supabase nicht konfiguriert! Prüfe .env Datei');
+      console.error('❌ Supabase nicht konfiguriert! Prüfe Umgebungsvariablen');
+      console.error('🔧 Für Vercel: Environment Variables in Dashboard setzen');
+      console.error('🔧 Für lokal: .env Datei mit VITE_SUPABASE_URL und VITE_SUPABASE_ANON_KEY erstellen');
       setLoading(false);
       setInitialCheckDone(true);
       return;
