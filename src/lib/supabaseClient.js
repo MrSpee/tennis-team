@@ -13,11 +13,8 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error('Siehe SUPABASE_SETUP.md für Details');
 }
 
-// Erstelle Supabase Client mit Fallback
-export const supabase = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co', 
-  supabaseAnonKey || 'placeholder-key', 
-  {
+// Erstelle Supabase Client
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     autoRefreshToken: true,
     persistSession: true,

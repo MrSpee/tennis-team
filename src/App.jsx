@@ -1,10 +1,9 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { DataProvider } from './context/DataContext';
-import { isSupabaseConfigured } from './lib/supabaseClient';
-import AnalyticsWrapper from './components/AnalyticsWrapper';
+import { Analytics } from '@vercel/analytics/react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import SupabaseLogin from './components/SupabaseLogin';
-import ConfigError from './components/ConfigError';
 import Dashboard from './components/Dashboard';
 import Matches from './components/Matches';
 import Rankings from './components/Rankings';
@@ -146,16 +145,12 @@ function AppContent() {
 }
 
 function App() {
-  // Prüfe Supabase-Konfiguration
-  if (!isSupabaseConfigured()) {
-    return <ConfigError />;
-  }
-
   return (
     <AuthProvider>
       <DataProvider>
         <AppContent />
-        <AnalyticsWrapper />
+        <Analytics />
+        <SpeedInsights />
       </DataProvider>
     </AuthProvider>
   );
