@@ -448,7 +448,7 @@ const LiveResultsOverview = () => {
                     LK{guestPlayerLK}
                   </span>
                 )}
-                {matchStatus === 'completed' && matchWinner === 'guest' && <span style={{color: 'gold', fontSize: '1.2em'}}>🏆</span>}
+                {matchStatus === 'completed' && matchWinner === 'guest' && <span style={{fontSize: '1.2em'}}>🤡</span>}
               </div>
               <div className="player-status">
                 {/* Grüner Haken entfernt */}

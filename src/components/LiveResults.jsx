@@ -275,18 +275,18 @@ const LiveResults = () => {
         {match.type === 'Einzel' ? (
           <>
             <div className="player-row">
-              <span className="player-label">🏠 Heim:</span>
+              <span className="player-label">🏆 Heim:</span>
               {renderPlayerSelect(match.id, 'homePlayer', 'Heim-Spieler wählen', homePlayers)}
             </div>
             <div className="player-row">
-              <span className="player-label">✈️ Gast:</span>
+              <span className="player-label">🤡 Gast:</span>
               {renderPlayerSelect(match.id, 'guestPlayer', 'Gast-Spieler wählen', opponentPlayers, true)}
             </div>
           </>
         ) : (
           <>
             <div className="player-row">
-              <span className="player-label">🏠 Heim:</span>
+              <span className="player-label">🏆 Heim:</span>
               <div className="team-selection">
                 {renderPlayerSelect(match.id, 'homePlayer1', 'Spieler 1', homePlayers)}
                 <span className="team-plus">+</span>
@@ -294,7 +294,7 @@ const LiveResults = () => {
               </div>
             </div>
             <div className="player-row">
-              <span className="player-label">✈️ Gast:</span>
+              <span className="player-label">🤡 Gast:</span>
               <div className="team-selection">
                 {renderPlayerSelect(match.id, 'guestPlayer1', 'Spieler 1', opponentPlayers, true)}
                 <span className="team-plus">+</span>

@@ -647,12 +647,12 @@ const LiveResultsWithDB = () => {
         {matchData.type === 'Einzel' ? (
           <div className="player-selection">
             <div className="player-info">
-              <div className="player-icon">🏠</div>
+              <div className="player-icon">🏆</div>
               {renderPlayerSelect(matchData, 'homePlayer', matchData.homePlayer)}
             </div>
             <div className="vs">vs</div>
             <div className="player-info">
-              <div className="player-icon">🏆</div>
+              <div className="player-icon">🤡</div>
               {renderPlayerSelect(matchData, 'guestPlayer', matchData.guestPlayer)}
             </div>
           </div>
@@ -660,7 +660,7 @@ const LiveResultsWithDB = () => {
           <div className="player-selection">
             <div className="team-players">
               <div className="team-players-inline">
-                <div className="player-icon">🏠</div>
+                <div className="player-icon">🏆</div>
                 {renderPlayerSelect(matchData, 'homePlayer1', matchData.homePlayers[0])}
                 <span className="and">und</span>
                 {renderPlayerSelect(matchData, 'homePlayer2', matchData.homePlayers[1])}
@@ -669,7 +669,7 @@ const LiveResultsWithDB = () => {
             <div className="vs">vs</div>
             <div className="team-players">
               <div className="team-players-inline">
-                <div className="player-icon">🏆</div>
+                <div className="player-icon">🤡</div>
                 {renderPlayerSelect(matchData, 'guestPlayer1', matchData.guestPlayers[0])}
                 <span className="and">und</span>
                 {renderPlayerSelect(matchData, 'guestPlayer2', matchData.guestPlayers[1])}
