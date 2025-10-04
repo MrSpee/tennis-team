@@ -149,34 +149,41 @@ function Dashboard() {
 
   return (
     <div className="dashboard container">
-      {/* Logout Button - jetzt ohne eigenen Header */}
-      <div className="fade-in" style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem', paddingTop: '1rem' }}>
+      {/* 1. Vereinslogo + Name + Logout Button auf gleicher Höhe */}
+      <div className="fade-in" style={{ 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'space-between',
+        marginBottom: '1.5rem', 
+        paddingTop: '1rem'
+      }}>
+        {/* Links: Vereinslogo + Name */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1 }}>
+          <img 
+            src="/logo.png" 
+            alt="Vereinslogo" 
+            style={{ 
+              width: '60px', 
+              height: '60px', 
+              borderRadius: '50%',
+              objectFit: 'cover',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+            }}
+            onError={(e) => {
+              e.target.style.display = 'none';
+            }}
+          />
+          <div>
+            <div style={{ fontSize: '1.1rem', fontWeight: '700', color: '#1e40af' }}>
+              {teamInfo?.clubName || 'SV Rot-Gelb Sürth'}
+            </div>
+          </div>
+        </div>
+        
+        {/* Rechts: Logout Button */}
         <button onClick={handleLogout} className="btn-icon" title="Abmelden">
           <LogOut size={18} />
         </button>
-      </div>
-
-      {/* 1. Vereinslogo + Name */}
-      <div className="fade-in" style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
-        <img 
-          src="/logo.png" 
-          alt="Vereinslogo" 
-          style={{ 
-            width: '60px', 
-            height: '60px', 
-            borderRadius: '50%',
-            objectFit: 'cover',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-          }}
-          onError={(e) => {
-            e.target.style.display = 'none';
-          }}
-        />
-        <div>
-          <div style={{ fontSize: '1.1rem', fontWeight: '700', color: '#1e40af' }}>
-            {teamInfo?.clubName || 'SV Rot-Gelb Sürth'}
-          </div>
-        </div>
       </div>
 
       {/* 2. Persönliche Begrüßung */}

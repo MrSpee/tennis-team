@@ -34,6 +34,57 @@ body {
   line-height: 1.6;
 }
 
+/* Mobile: Weißer Hintergrund für bessere Header-Integration */
+@media (max-width: 768px) {
+  body {
+    background-color: white;
+  }
+}
+
+/* Einheitliche Seiten-Überschriften */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+}
+
+.page-header h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--gray-900);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.page-header p {
+  color: var(--gray-600);
+  font-size: 0.9375rem;
+  margin: 0.25rem 0 0 0;
+  line-height: 1.4;
+}
+
+/* Responsive Überschriften */
+@media (max-width: 768px) {
+  .page-header h1 {
+    font-size: 1.25rem;
+  }
+  
+  .page-header p {
+    font-size: 0.875rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .page-header h1 {
+    font-size: 1.125rem;
+  }
+  
+  .page-header p {
+    font-size: 0.8125rem;
+  }
+}
+
 #root {
   min-height: 100vh;
 }

@@ -10,56 +10,28 @@
   border-bottom: 2px solid rgba(255, 255, 255, 0.1);
 }
 
+/* Fix für mobile Geräte - verhindert dass der Header zu breit wird */
+@media (max-width: 768px) {
+  .app-header {
+    margin: 0;
+    padding: 0;
+    border-radius: 0;
+  }
+}
+
 .header-content {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   padding: 1rem 1.5rem;
   max-width: 1200px;
   margin: 0 auto;
   min-height: 70px;
 }
 
-/* Icon Bereich */
-.header-icon {
-  flex: 0 0 auto;
-  margin-right: 1rem;
-}
-
-.app-icon {
-  width: 45px;
-  height: 45px;
-  border-radius: 50%;
-  object-fit: cover;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  transition: all 0.3s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-.app-icon:hover {
-  transform: translateY(-2px) scale(1.05);
-  border-color: rgba(255, 255, 255, 0.5);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.icon-fallback {
-  width: 45px;
-  height: 45px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.15);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.5rem;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  backdrop-filter: blur(10px);
-}
-
-/* Slogan Bereich */
+/* Slogan Bereich - jetzt zentriert */
 .header-slogan {
-  flex: 1;
   text-align: center;
-  margin: 0 1rem;
 }
 
 .header-slogan h1 {
@@ -80,11 +52,6 @@
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
-/* Rechte Seite */
-.header-right {
-  flex: 0 0 auto;
-  width: 45px; /* Gleiche Breite wie Icon für Balance */
-}
 
 /* Responsive Design */
 @media (max-width: 768px) {
@@ -100,15 +67,6 @@
   .header-slogan p {
     font-size: 0.8rem;
   }
-  
-  .app-icon {
-    width: 40px;
-    height: 40px;
-  }
-  
-  .header-right {
-    width: 40px;
-  }
 }
 
 @media (max-width: 480px) {
@@ -123,15 +81,6 @@
   
   .header-slogan p {
     font-size: 0.75rem;
-  }
-  
-  .app-icon {
-    width: 35px;
-    height: 35px;
-  }
-  
-  .header-right {
-    width: 35px;
   }
 }
 

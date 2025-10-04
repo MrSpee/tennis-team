@@ -33,11 +33,6 @@
   margin-bottom: 2rem;
 }
 
-.add-match-form h2 {
-  font-size: 1.5rem;
-  color: var(--gray-900);
-  margin-bottom: 1.5rem;
-}
 
 .form-grid {
   display: grid;

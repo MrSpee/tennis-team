@@ -97,16 +97,12 @@ function Matches() {
 
   return (
     <div className="matches-page container">
-      <header className="page-header fade-in" style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center',
-        marginBottom: '1.5rem'
-      }}>
-        <h1 style={{ fontSize: '1.1rem', fontWeight: '600', margin: 0 }}>
-          Meine Verfügbarkeit
-        </h1>
-        <Calendar size={24} color="#10b981" style={{ flexShrink: 0 }} />
+      <header className="page-header fade-in">
+        <div>
+          <h1>Meine Verfügbarkeit</h1>
+          <p>Verfügbarkeit für kommende Spiele angeben</p>
+        </div>
+        <Calendar size={32} color="var(--primary)" />
       </header>
 
       <section className="matches-section fade-in">
