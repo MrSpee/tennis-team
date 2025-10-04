@@ -479,9 +479,8 @@ function Dashboard() {
               return (
                 <div 
                   key={match.id} 
-                  className="match-preview-card card"
+                  className="match-preview-card"
                   onClick={() => navigate(`/matches?match=${match.id}`)}
-                  style={{ cursor: 'pointer', position: 'relative' }}
                   title="Klicken für Verfügbarkeit setzen"
                 >
                   <div className="match-preview-header">
@@ -496,63 +495,36 @@ function Dashboard() {
                         {format(match.date, 'yyyy')}
                       </div>
                     </div>
-                    <div className="match-info">
-                      <h3>{match.opponent}</h3>
-                      <p className="match-details">
+                    <div className="dashboard-match-info">
+                      <h3 className="match-team">{match.opponent}</h3>
+                      <p className="dashboard-match-detail">
                         {format(match.date, 'EEEE, dd. MMMM yyyy', { locale: de })}
                       </p>
-                      <p className="match-details">
+                      <p className="dashboard-match-detail">
                         {format(match.date, 'HH:mm')} Uhr
                       </p>
-                      <p className="match-details">
+                      <p className="dashboard-match-detail">
                         {match.location === 'Home' ? '🏠 Heimspiel' : '✈️ Auswärtsspiel'}
                       </p>
                       {match.venue && (
-                        <p className="match-details">
+                        <p className="dashboard-match-detail">
                           📍 {match.venue}
                         </p>
                       )}
                     </div>
                   </div>
+
                   <div className="match-preview-stats">
-                    <span className="badge badge-success">{availableCount} verfügbar</span>
-                    <span className="badge badge-danger">{notAvailableCount} nicht verfügbar</span>
-                    <span className="badge badge-warning">{notRespondedPlayers.length} ausstehend</span>
+                    <span className="badge success">{availableCount} verfügbar</span>
+                    <span className="badge danger">{notAvailableCount} nicht verfügbar</span>
+                    <span className="badge warning">{notRespondedPlayers.length} ausstehend</span>
                   </div>
-                  
-                  {/* Live-Ticker Button */}
-                  {/* Floating Live-Ticker Button */}
+
                   <button
+                    className="live-ticker-btn"
                     onClick={(e) => {
-                      e.stopPropagation(); // Verhindere das Klicken auf die Match-Card
+                      e.stopPropagation();
                       navigate(`/ergebnisse/${match.id}`);
-                    }}
-                    style={{
-                      position: 'absolute',
-                      top: '1rem',
-                      right: '1rem',
-                      width: '40px',
-                      height: '40px',
-                      background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '50%',
-                      fontSize: '1.2rem',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      transition: 'all 0.2s ease',
-                      boxShadow: '0 2px 8px rgba(239, 68, 68, 0.3)',
-                      zIndex: 10
-                    }}
-                    onMouseEnter={(e) => {
-                      e.target.style.transform = 'scale(1.1)';
-                      e.target.style.boxShadow = '0 4px 12px rgba(239, 68, 68, 0.4)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.target.style.transform = 'scale(1)';
-                      e.target.style.boxShadow = '0 2px 8px rgba(239, 68, 68, 0.3)';
                     }}
                     title="Live-Ticker öffnen"
                   >

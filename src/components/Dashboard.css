@@ -1,6 +1,8 @@
 .dashboard {
   padding: 1.5rem 1rem;
   max-width: 1200px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .dashboard-header {
@@ -98,113 +100,144 @@
 }
 
 .match-preview-card {
-  transition: transform 0.2s, box-shadow 0.2s;
-  background: #f8f9fa;
-  border-radius: 12px;
-  overflow: hidden;
   position: relative;
+  background: #fff;
+  border-radius: 1rem;
+  padding: 1.5rem;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  transition: transform 0.2s, box-shadow 0.2s;
+  cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .match-preview-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.12);
 }
 
 .match-preview-header {
   display: flex;
-  margin-bottom: 0;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
 }
 
 .match-date {
-  background: #5CB85C;
-  color: white;
-  border-radius: 0;
-  padding: 1rem 0.75rem;
   text-align: center;
   min-width: 70px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
+  flex-shrink: 0;
+  background: #f3f4f6;
+  border-radius: 0.75rem;
+  padding: 0.5rem;
 }
 
 .date-day {
-  font-size: 1.75rem;
-  font-weight: 700;
+  font-size: 1.8rem;
+  font-weight: bold;
+  color: #111827;
   line-height: 1;
-  margin-bottom: 0.25rem;
 }
 
-.date-month {
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  font-weight: 600;
-  margin-bottom: 0.25rem;
-}
-
+.date-month,
 .date-year {
-  font-size: 0.7rem;
-  font-weight: 600;
-  opacity: 0.9;
+  font-size: 0.8rem;
+  color: #6b7280;
+  display: block;
 }
 
-.match-info {
+/* Dashboard-spezifische Klassennamen - keine Konflikte mit globalen Styles */
+.dashboard-match-info {
   flex: 1;
-  background: white;
-  padding: 1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.35rem;
+  min-width: 0;
+  overflow: hidden;
 }
 
-.match-info h3 {
-  font-size: 1.1rem;
-  color: #2c3e50;
-  margin-bottom: 0;
-  font-weight: 700;
-}
-
-.match-details {
-  color: #666;
-  font-size: 0.85rem;
+.dashboard-match-info h3 {
   margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #1f2937;
   line-height: 1.3;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  display: block;
+}
+
+.dashboard-match-detail {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #4b5563;
+  line-height: 1.5;
+  display: block;
+  width: 100%;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
 }
 
 .match-preview-stats {
+  margin-top: 1rem;
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
-  padding: 1rem;
-  background: white;
-  margin-top: 0;
 }
 
 .badge {
-  padding: 0.25rem 0.75rem;
-  border-radius: 20px;
-  font-size: 0.75rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
   font-weight: 600;
-  text-align: center;
-  white-space: nowrap;
+  color: #fff;
 }
 
-.badge-success {
-  background: #E6F7E6;
-  color: #15803d;
-  border: 1px solid #BBF7D0;
+.badge.success,
+.badge-success { 
+  background: #10b981;
+  color: #fff;
+  border: none;
 }
 
-.badge-danger {
-  background: #FEEAEA;
-  color: #dc2626;
-  border: 1px solid #FECACA;
+.badge.danger,
+.badge-danger { 
+  background: #ef4444;
+  color: #fff;
+  border: none;
 }
 
-.badge-warning {
-  background: #FFF8E1;
-  color: #d97706;
-  border: 1px solid #FEF3C7;
+.badge.warning,
+.badge-warning { 
+  background: #f59e0b;
+  color: #111;
+  border: none;
+}
+
+.live-ticker-btn {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: white;
+  font-size: 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 3px 8px rgba(239,68,68,0.3);
+  transition: transform 0.2s;
+  cursor: pointer;
+}
+
+.live-ticker-btn:hover {
+  transform: scale(1.1);
 }
 
 .empty-state {
@@ -220,6 +253,9 @@
 @media (max-width: 640px) {
   .dashboard {
     padding: 1rem;
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
   }
 
   .dashboard-header h1 {
@@ -230,11 +266,135 @@
     grid-template-columns: 1fr;
   }
 
+  .matches-preview {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Match Card Mobile Optimierung */
+  .match-preview-card {
+    padding: 1rem;
+    border-radius: 0.75rem;
+    margin: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .match-preview-header {
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: nowrap;
+  }
+
   .match-date {
-    min-width: 50px;
+    min-width: 60px;
+    max-width: 60px;
+    padding: 0.4rem;
+    border-radius: 0.5rem;
   }
 
   .date-day {
-    font-size: 1.25rem;
+    font-size: 1.5rem;
+    line-height: 1;
+  }
+
+  .date-month {
+    font-size: 0.7rem;
+    margin-top: 0.1rem;
+  }
+
+  .date-year {
+    font-size: 0.65rem;
+  }
+
+  .dashboard-match-info {
+    gap: 0.3rem;
+    flex: 1;
+    min-width: 0;
+    padding-right: 2.5rem;
+  }
+
+  .dashboard-match-info h3 {
+    font-size: 0.95rem;
+    line-height: 1.2;
+  }
+
+  .dashboard-match-detail {
+    font-size: 0.75rem;
+    line-height: 1.4;
+  }
+
+  .match-preview-stats {
+    margin-top: 0.75rem;
+    gap: 0.4rem;
+  }
+
+  .badge {
+    padding: 0.3rem 0.6rem;
+    font-size: 0.7rem;
+  }
+
+  .live-ticker-btn {
+    width: 38px;
+    height: 38px;
+    top: 0.75rem;
+    right: 0.75rem;
+    font-size: 1.1rem;
+  }
+}
+
+/* Noch kleinere Devices */
+@media (max-width: 375px) {
+  .dashboard {
+    padding: 0.75rem;
+    max-width: 100vw;
+  }
+
+  .match-preview-card {
+    padding: 0.875rem;
+    width: 100%;
+  }
+
+  .match-preview-header {
+    gap: 0.5rem;
+  }
+
+  .match-date {
+    min-width: 50px;
+    max-width: 50px;
+    padding: 0.3rem;
+  }
+
+  .date-day {
+    font-size: 1.3rem;
+  }
+
+  .date-month,
+  .date-year {
+    font-size: 0.6rem;
+  }
+
+  .dashboard-match-info {
+    padding-right: 2.25rem;
+  }
+
+  .dashboard-match-info h3 {
+    font-size: 0.9rem;
+  }
+
+  .dashboard-match-detail {
+    font-size: 0.7rem;
+    line-height: 1.3;
+  }
+
+  .badge {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.65rem;
+  }
+
+  .live-ticker-btn {
+    width: 36px;
+    height: 36px;
+    font-size: 1rem;
   }
 }

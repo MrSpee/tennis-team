@@ -194,6 +194,8 @@ button {
   margin: 0 auto;
   padding: 0 1rem;
   padding-bottom: 120px; /* Platz für Bottom-Navigation */
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .btn {
@@ -322,12 +324,27 @@ label {
 
 /* Responsive */
 @media (max-width: 768px) {
+  .container {
+    padding: 0 0.75rem;
+    padding-bottom: 120px;
+    overflow-x: hidden;
+  }
+  
   .card {
     padding: 1rem;
+    width: 100%;
+    box-sizing: border-box;
   }
   
   .btn {
     padding: 0.625rem 1.25rem;
     font-size: 0.9375rem;
+  }
+}
+
+@media (max-width: 375px) {
+  .container {
+    padding: 0 0.5rem;
+    padding-bottom: 120px;
   }
 }
