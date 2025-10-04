@@ -46,7 +46,8 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 1.5rem;
+  margin: 2rem 0 1.5rem 0; /* Mehr Whitespace oben */
+  padding-top: 1rem; /* Zusätzlicher Abstand zum Header */
 }
 
 .page-header h1 {
@@ -64,8 +65,37 @@ body {
   line-height: 1.4;
 }
 
+/* Relatives Schriftgrößen-System */
+.page-header h1 {
+  font-size: 1.5rem; /* Basis-Größe = 100% */
+}
+
+/* Alle anderen Titel auf Seiten - max 75% der Überschrift-Größe */
+.page-header ~ * h2,
+.section-title,
+.card h2,
+.card h3,
+.matches-section h2,
+.rankings-info h3,
+.admin-match-header h3 {
+  font-size: 1.125rem; /* 75% von 1.5rem */
+  max-width: 75%; /* Sicherstellen dass es nicht größer wird */
+}
+
+/* Kleinere Titel - 60% der Überschrift-Größe */
+.card h4,
+.detail-title,
+.info-label {
+  font-size: 0.9rem; /* 60% von 1.5rem */
+}
+
 /* Responsive Überschriften */
 @media (max-width: 768px) {
+  .page-header {
+    margin: 1.5rem 0 1.25rem 0;
+    padding-top: 0.75rem;
+  }
+  
   .page-header h1 {
     font-size: 1.25rem;
   }
@@ -73,15 +103,54 @@ body {
   .page-header p {
     font-size: 0.875rem;
   }
+  
+  /* Relativ anpassen */
+  .page-header ~ * h2,
+  .section-title,
+  .card h2,
+  .card h3,
+  .matches-section h2,
+  .rankings-info h3,
+  .admin-match-header h3 {
+    font-size: 0.9375rem; /* 75% von 1.25rem */
+  }
+  
+  .card h4,
+  .detail-title,
+  .info-label {
+    font-size: 0.75rem; /* 60% von 1.25rem */
+  }
 }
 
 @media (max-width: 480px) {
+  .page-header {
+    margin: 1.25rem 0 1rem 0;
+    padding-top: 0.5rem;
+  }
+  
   .page-header h1 {
     font-size: 1.125rem;
   }
   
   .page-header p {
     font-size: 0.8125rem;
+  }
+  
+  /* Relativ anpassen */
+  .page-header ~ * h2,
+  .section-title,
+  .card h2,
+  .card h3,
+  .matches-section h2,
+  .rankings-info h3,
+  .admin-match-header h3 {
+    font-size: 0.84375rem; /* 75% von 1.125rem */
+  }
+  
+  .card h4,
+  .detail-title,
+  .info-label {
+    font-size: 0.675rem; /* 60% von 1.125rem */
   }
 }
 

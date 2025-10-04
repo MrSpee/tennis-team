@@ -188,7 +188,7 @@ function Dashboard() {
 
       {/* 2. Persönliche Begrüßung */}
       <div className="fade-in" style={{ marginBottom: '1rem' }}>
-        <h1 style={{ fontSize: '1.3rem', fontWeight: '600', color: '#333', marginBottom: '0.25rem' }}>
+        <h1 className="section-title" style={{ color: '#333', marginBottom: '0.25rem' }}>
           {getGreeting()}
         </h1>
         {player?.ranking && (
@@ -230,7 +230,7 @@ function Dashboard() {
       {/* 4. Saison mit TVM Link */}
       <div className="fade-in card" style={{ padding: '1rem', marginBottom: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-          <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: '600' }}>
+          <h2 className="detail-title" style={{ margin: 0, fontWeight: '600' }}>
             Saison
           </h2>
           {teamInfo?.tvmLink && (
@@ -321,7 +321,7 @@ function Dashboard() {
 
       {/* Spiele der laufenden Saison */}
       <section className="dashboard-section fade-in">
-        <h2 style={{ fontSize: '1rem', marginBottom: '1rem' }}>
+        <h2 className="section-title" style={{ marginBottom: '1rem' }}>
           Spiele der laufenden Saison ({notPlayedThisSeason})
         </h2>
         {upcomingMatches.length > 0 ? (

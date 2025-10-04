@@ -54,7 +54,6 @@
 }
 
 .matches-management h2 {
-  font-size: 1.25rem;
   color: var(--gray-900);
   margin-bottom: 1rem;
   font-weight: 600;
@@ -79,7 +78,6 @@
 }
 
 .admin-match-header h3 {
-  font-size: 1.25rem;
   color: var(--gray-900);
   margin-bottom: 0.25rem;
 }

@@ -17,7 +17,6 @@
 }
 
 .matches-section h2 {
-  font-size: 1.25rem;
   color: var(--gray-900);
   margin-bottom: 1rem;
   font-weight: 600;
@@ -49,7 +48,6 @@
 }
 
 .match-title h3 {
-  font-size: 1.25rem;
   color: var(--gray-900);
 }
 

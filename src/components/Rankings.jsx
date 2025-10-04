@@ -42,6 +42,58 @@ function Rankings() {
     return '#f59e0b'; // Orange
   };
 
+  // Flaggen-Funktion für Länder
+  const getCountryFlag = (countryCode) => {
+    const flags = {
+      'GER': '🇩🇪',
+      'FRA': '🇫🇷', 
+      'ROU': '🇷🇴',
+      'USA': '🇺🇸',
+      'GBR': '🇬🇧',
+      'ITA': '🇮🇹',
+      'ESP': '🇪🇸',
+      'NED': '🇳🇱',
+      'BEL': '🇧🇪',
+      'AUT': '🇦🇹',
+      'SUI': '🇨🇭',
+      'POL': '🇵🇱',
+      'CZE': '🇨🇿',
+      'HUN': '🇭🇺',
+      'SVK': '🇸🇰',
+      'CRO': '🇭🇷',
+      'SRB': '🇷🇸',
+      'BUL': '🇧🇬',
+      'GRE': '🇬🇷',
+      'TUR': '🇹🇷',
+      'RUS': '🇷🇺',
+      'UKR': '🇺🇦',
+      'DEN': '🇩🇰',
+      'SWE': '🇸🇪',
+      'NOR': '🇳🇴',
+      'FIN': '🇫🇮',
+      'POR': '🇵🇹',
+      'BRA': '🇧🇷',
+      'ARG': '🇦🇷',
+      'CHI': '🇨🇱',
+      'COL': '🇨🇴',
+      'MEX': '🇲🇽',
+      'CAN': '🇨🇦',
+      'AUS': '🇦🇺',
+      'NZL': '🇳🇿',
+      'JPN': '🇯🇵',
+      'KOR': '🇰🇷',
+      'CHN': '🇨🇳',
+      'IND': '🇮🇳',
+      'RSA': '🇿🇦',
+      'EGY': '🇪🇬',
+      'MAR': '🇲🇦',
+      'TUN': '🇹🇳',
+      'ALG': '🇩🇿'
+    };
+    
+    return flags[countryCode] || '🌍'; // Fallback zu Weltkugel
+  };
+
   return (
     <div className="rankings-page container">
       <header className="page-header fade-in">
@@ -107,8 +159,9 @@ function Rankings() {
                   >
                     LK {player.lk}
                   </span>
-                  <span className="points-badge" style={{ background: '#6b7280' }}>
-                    {player.nation}
+                  <span className="points-badge">
+                    <span className="flag-emoji">{getCountryFlag(player.nation)}</span>
+                    <span>{player.nation}</span>
                   </span>
                 </div>
               </div>
@@ -168,8 +221,9 @@ function Rankings() {
                         Kein LK
                       </span>
                     )}
-                    <span className="points-badge" style={{ background: '#10b981' }}>
-                      ✓ Angemeldet
+                    <span className="points-badge">
+                      <span className="flag-emoji">{getCountryFlag(player.nation || 'GER')}</span>
+                      <span>✓ Angemeldet</span>
                     </span>
                   </div>
                 </div>
