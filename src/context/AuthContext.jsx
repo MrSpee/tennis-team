@@ -256,7 +256,22 @@ export function AuthProvider({ children }) {
         .update({
           name: profileData.name,
           phone: profileData.phone || null,
-          ranking: profileData.ranking || null
+          ranking: profileData.ranking || null,
+          profile_image: profileData.profileImage || null,
+          favorite_shot: profileData.favoriteShot || null,
+          tennis_motto: profileData.tennisMotto || null,
+          fun_fact: profileData.funFact || null,
+          worst_tennis_memory: profileData.worstTennisMemory || null,
+          best_tennis_memory: profileData.bestTennisMemory || null,
+          superstition: profileData.superstition || null,
+          pre_match_routine: profileData.preMatchRoutine || null,
+          favorite_opponent: profileData.favoriteOpponent || null,
+          dream_match: profileData.dreamMatch || null,
+          birth_date: profileData.birthDate || null,
+          address: profileData.address || null,
+          emergency_contact: profileData.emergencyContact || null,
+          emergency_phone: profileData.emergencyPhone || null,
+          notes: profileData.notes || null
         })
         .eq('id', player.id)
         .select()

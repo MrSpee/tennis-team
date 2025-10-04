@@ -2,15 +2,67 @@ import { useState } from 'react';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { Calendar, MapPin, Users, MessageCircle, Check, X, Download } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import './Matches.css';
 
 function Matches() {
+  const navigate = useNavigate();
   const { player } = useAuth();
   const { matches, updateMatchAvailability } = useData();
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [comment, setComment] = useState('');
+
+  // Motivierende Verfügbarkeits-Texte
+  const getAvailabilityText = (status) => {
+    const availableTexts = [
+      '🎾 Ich bin dabei!',
+      '🔥 Bin am Start!',
+      '⚡ Count me in!',
+      '🚀 Ich komme!',
+      '💪 Bin bereit!',
+      '🎯 Absolut dabei!',
+      '🏆 Ich spiele mit!',
+      '✨ Bin dabei!',
+      '🎪 Ich mache mit!',
+      '🌟 Bin am Ball!'
+    ];
+    
+    const maybeTexts = [
+      '🤔 Bin noch unsicher',
+      '❓ Vielleicht dabei',
+      '🤷‍♂️ Mal schauen',
+      '⏰ Bin noch unentschieden',
+      '🤞 Hoffe, es klappt',
+      '📅 Prüfe noch Termine',
+      '🔄 Bin noch am Überlegen',
+      '💭 Bin noch unsicher',
+      '🤨 Weiß noch nicht',
+      '⏳ Entscheide noch'
+    ];
+    
+    const unavailableTexts = [
+      '😔 Leider nicht dabei',
+      '❌ Kann nicht',
+      '🚫 Bin verhindert',
+      '😢 Muss absagen',
+      '⛔ Leider nicht möglich',
+      '😞 Bin nicht verfügbar',
+      '🙁 Kann nicht mitspielen',
+      '😓 Muss passen',
+      '😔 Leider nicht',
+      '❌ Muss absagen'
+    ];
+
+    if (status === 'available') {
+      return availableTexts[Math.floor(Math.random() * availableTexts.length)];
+    } else if (status === 'maybe') {
+      return maybeTexts[Math.floor(Math.random() * maybeTexts.length)];
+    } else {
+      return unavailableTexts[Math.floor(Math.random() * unavailableTexts.length)];
+    }
+  };
 
   const upcomingMatches = matches
     .filter(m => m.date > new Date())
@@ -142,8 +194,23 @@ function Matches() {
                     
                     {/* Es spielen: */}
                     {availablePlayers.length > 0 && (
-                      <div style={{ fontSize: '0.85rem', color: '#065f46', marginBottom: '0.5rem' }}>
-                        Es spielen: {availablePlayers.join(', ')}
+                      <div style={{ marginBottom: '0.5rem' }}>
+                        <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem' }}>
+                          Es spielen:
+                        </div>
+                        <div className="player-badges">
+                          {availablePlayers.map((playerName, index) => (
+                            <span 
+                              key={index} 
+                              className="player-badge"
+                              onClick={() => navigate(`/player/${encodeURIComponent(playerName)}`)}
+                              style={{ cursor: 'pointer' }}
+                              title={`Profil von ${playerName} anzeigen`}
+                            >
+                              {playerName}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -186,9 +253,9 @@ function Matches() {
                           <div style={{ 
                             fontSize: '0.9rem', 
                             fontWeight: '600',
-                            color: myStatus.status === 'available' ? '#065f46' : '#991b1b'
+                            color: myStatus.status === 'available' ? '#065f46' : myStatus.status === 'maybe' ? '#d97706' : '#991b1b'
                           }}>
-                            {myStatus.status === 'available' ? '✓ Verfügbar' : myStatus.status === 'maybe' ? '? Vielleicht' : '✗ Nicht verfügbar'}
+                            {getAvailabilityText(myStatus.status)}
                           </div>
                           {myStatus.comment && (
                             <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.25rem', fontStyle: 'italic' }}>
@@ -270,14 +337,21 @@ function Matches() {
                             className="btn btn-success"
                           >
                             <Check size={18} />
-                            Verfügbar
+                            🎾 Bin dabei!
                           </button>
                           <button
                             onClick={() => handleAvailability(match.id, 'unavailable')}
                             className="btn btn-danger"
                           >
                             <X size={18} />
-                            Nicht verfügbar
+                            😔 Kann nicht
+                          </button>
+                          <button
+                            onClick={() => handleAvailability(match.id, 'maybe')}
+                            className="btn btn-warning"
+                          >
+                            <MessageCircle size={18} />
+                            🤔 Bin unsicher
                           </button>
                           <button
                             onClick={() => {

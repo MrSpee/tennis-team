@@ -8,6 +8,7 @@ import Rankings from './components/Rankings';
 import LeagueTable from './components/LeagueTable';
 import AdminPanel from './components/AdminPanel';
 import SupabaseProfile from './components/SupabaseProfile';
+import PlayerProfileSimple from './components/PlayerProfileSimple';
 import Navigation from './components/Navigation';
 import Header from './components/Header';
 import ScrollToTop from './components/ScrollToTop';
@@ -116,6 +117,12 @@ function AppContent() {
           <Route path="/profile" element={
             <ProtectedRoute>
               <SupabaseProfile />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/player/:playerName" element={
+            <ProtectedRoute>
+              <PlayerProfileSimple />
             </ProtectedRoute>
           } />
           

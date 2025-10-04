@@ -154,6 +154,32 @@ body {
   }
 }
 
+/* Spieler-Badges für "Es spielen:" */
+.player-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.player-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  background-color: var(--primary);
+  color: white;
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.player-badge:hover {
+  background-color: var(--primary-dark);
+  transform: translateY(-1px);
+}
+
 #root {
   min-height: 100vh;
 }

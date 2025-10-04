@@ -2,13 +2,65 @@ import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { LogOut, ExternalLink } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import './Dashboard.css';
 
 function Dashboard() {
+  const navigate = useNavigate();
   const { currentUser, logout, player } = useAuth();
   const { matches, players, teamInfo } = useData();
+
+  // Motivierende Verfügbarkeits-Texte
+  const getAvailabilityText = (status) => {
+    const availableTexts = [
+      '🎾 Ich bin dabei!',
+      '🔥 Bin am Start!',
+      '⚡ Count me in!',
+      '🚀 Ich komme!',
+      '💪 Bin bereit!',
+      '🎯 Absolut dabei!',
+      '🏆 Ich spiele mit!',
+      '✨ Bin dabei!',
+      '🎪 Ich mache mit!',
+      '🌟 Bin am Ball!'
+    ];
+    
+    const maybeTexts = [
+      '🤔 Bin noch unsicher',
+      '❓ Vielleicht dabei',
+      '🤷‍♂️ Mal schauen',
+      '⏰ Bin noch unentschieden',
+      '🤞 Hoffe, es klappt',
+      '📅 Prüfe noch Termine',
+      '🔄 Bin noch am Überlegen',
+      '💭 Bin noch unsicher',
+      '🤨 Weiß noch nicht',
+      '⏳ Entscheide noch'
+    ];
+    
+    const unavailableTexts = [
+      '😔 Leider nicht dabei',
+      '❌ Kann nicht',
+      '🚫 Bin verhindert',
+      '😢 Muss absagen',
+      '⛔ Leider nicht möglich',
+      '😞 Bin nicht verfügbar',
+      '🙁 Kann nicht mitspielen',
+      '😓 Muss passen',
+      '😔 Leider nicht',
+      '❌ Muss absagen'
+    ];
+
+    if (status === 'available') {
+      return availableTexts[Math.floor(Math.random() * availableTexts.length)];
+    } else if (status === 'maybe') {
+      return maybeTexts[Math.floor(Math.random() * maybeTexts.length)];
+    } else {
+      return unavailableTexts[Math.floor(Math.random() * unavailableTexts.length)];
+    }
+  };
   
   // State für Live-Timer
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -310,8 +362,18 @@ function Dashboard() {
                 <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem' }}>
                   Es spielen aktuell:
                 </div>
-                <div style={{ fontSize: '0.85rem', color: '#065f46' }}>
-                  {availablePlayers.join(', ')}
+                <div className="player-badges">
+                  {availablePlayers.map((playerName, index) => (
+                    <span 
+                      key={index} 
+                      className="player-badge"
+                              onClick={() => navigate(`/player/${encodeURIComponent(playerName)}`)}
+                      style={{ cursor: 'pointer' }}
+                      title={`Profil von ${playerName} anzeigen`}
+                    >
+                      {playerName}
+                    </span>
+                  ))}
                 </div>
               </div>
             )}
