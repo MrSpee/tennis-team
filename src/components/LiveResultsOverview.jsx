@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Edit, Trophy, Clock, CheckCircle, PlayCircle } from 'lucide-react';
+import { ArrowLeft, Edit, Clock, CheckCircle, PlayCircle } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useData } from '../context/DataContext';
 import './LiveResults.css';
@@ -22,6 +22,7 @@ const LiveResultsOverview = () => {
 
   useEffect(() => {
     loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchId]);
 
   // Timer für Live-Updates (alle 30 Sekunden)
@@ -117,7 +118,7 @@ const LiveResultsOverview = () => {
       // Debug: Zeige alle home_player_ids aus den Match-Results
       if (resultsData && resultsData.length > 0) {
         console.log('🔍 Match Results Player IDs:');
-        resultsData.forEach((result, index) => {
+        resultsData.forEach((result) => {
           console.log(`  Match ${result.match_number}:`, {
             home_player_id: result.home_player_id,
             home_player1_id: result.home_player1_id,
@@ -127,10 +128,10 @@ const LiveResultsOverview = () => {
         });
       }
 
-      // Lade alle Spieler-Daten separat
+      // Lade alle Spieler-Daten separat (mit Profilbild!)
       const { data: homePlayersData, error: homeError } = await supabase
         .from('players')
-        .select('id, name')
+        .select('id, name, profile_image')
         .order('name', { ascending: true });
 
       const { data: opponentPlayersData, error: opponentError } = await supabase
@@ -328,16 +329,18 @@ const LiveResultsOverview = () => {
       // Für Einzel: Prüfe ob Spieler ein Profilbild hat
       if (result.match_type === 'Einzel' && result.home_player_id) {
         const homePlayer = homePlayers[result.home_player_id];
-        if (homePlayer && homePlayer.avatar_url) {
-          return homePlayer.avatar_url;
+        console.log('🖼️ Checking image for:', homePlayer?.name, 'profile_image:', homePlayer?.profile_image);
+        if (homePlayer && homePlayer.profile_image) {
+          return homePlayer.profile_image;
         }
       }
       // Für Doppel: Prüfe beide Spieler
       if (result.match_type === 'Doppel') {
         const player1 = homePlayers[result.home_player1_id];
         const player2 = homePlayers[result.home_player2_id];
-        if (player1 && player1.avatar_url) return player1.avatar_url;
-        if (player2 && player2.avatar_url) return player2.avatar_url;
+        console.log('🖼️ Checking images for doubles:', player1?.name, player1?.profile_image, '&', player2?.name, player2?.profile_image);
+        if (player1 && player1.profile_image) return player1.profile_image;
+        if (player2 && player2.profile_image) return player2.profile_image;
       }
       // Standard: home-face.jpg
       return '/home-face.jpg';
@@ -591,28 +594,43 @@ const LiveResultsOverview = () => {
           </div>
       </div>
 
-      {/* Gesamtpunktzahl */}
-      <div className="total-score-card">
-        <div className="score-title">
-          <Trophy className="trophy-icon" />
-          Aktueller Stand
+      {/* Gesamtpunktzahl - Neues modernes Design */}
+      <div className="mh-wrap">
+        <div className="mh-headline">
+          <h1 className="mh-title">Aktueller Stand</h1>
         </div>
-        <div className="score-display-large">
-          <div className="team-score home">
-            <span className="team-name">🏠 {teamInfo?.teamName || 'Unser Team'}</span>
-            <span className="score-number">{totalScore.home}</span>
+
+        <section className="mh-card" role="region" aria-label="Scoreboard">
+          <div className="mh-glow mh-glow-right" />
+          <div className="mh-glow mh-glow-left" />
+
+          <div className="mh-match-title">
+            <strong>{teamInfo?.teamName || 'Heim'}</strong> vs. <strong>{match?.opponent || 'Gegner'}</strong>
           </div>
-          <div className="score-separator">:</div>
-          <div className="team-score guest">
-            <span className="team-name">🌍 {match?.opponent || 'Gegner'}</span>
-            <span className="score-number">{totalScore.guest}</span>
+
+          <div className="mh-scoregrid">
+            <div className="mh-center">
+              <div className="mh-score-pill" aria-live="polite">
+                <div className="mh-score-bg" />
+                <div className="mh-score">{totalScore.home}</div>
+              </div>
+              <div className="mh-sep" aria-hidden>:</div>
+              <div className="mh-score-pill" aria-live="polite">
+                <div className="mh-score-bg" />
+                <div className="mh-score">{totalScore.guest}</div>
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="score-status">
-          {totalScore.home > totalScore.guest ? `🏠 ${teamInfo?.teamName || 'Heim'} führt` :
-           totalScore.guest > totalScore.home ? `🌍 ${match?.opponent || 'Gast'} führt` :
-           '⚖️ Unentschieden'}
-        </div>
+
+          <div className="mh-status">
+            <span className="mh-trophy" aria-hidden>🏆</span>
+            <span className="mh-status-text">
+              {totalScore.home === totalScore.guest ? 'Unentschieden' :
+               totalScore.home > totalScore.guest ? 'Heim führt' :
+               'Auswärts führt'}
+            </span>
+          </div>
+        </section>
       </div>
 
       {/* Match-Ergebnisse */}

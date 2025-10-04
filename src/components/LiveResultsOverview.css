@@ -286,13 +286,13 @@
   gap: 0.25rem;
 }
 
-.player-name {
+.live-overview .player-name {
   font-weight: 600;
   color: #1f2937;
   font-size: 0.95rem;
 }
 
-.player-lk {
+.live-overview .player-lk {
   font-size: 0.8rem;
   color: #6b7280;
   font-style: italic;
