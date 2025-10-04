@@ -1,8 +1,9 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { DataProvider } from './context/DataContext';
-import { Analytics } from '@vercel/analytics/react';
-import { SpeedInsights } from '@vercel/speed-insights/react';
+// Analytics temporär deaktiviert bis Vercel richtig konfiguriert ist
+// import { Analytics } from '@vercel/analytics/react';
+// import { SpeedInsights } from '@vercel/speed-insights/react';
 import SupabaseLogin from './components/SupabaseLogin';
 import Dashboard from './components/Dashboard';
 import Matches from './components/Matches';
@@ -149,8 +150,9 @@ function App() {
     <AuthProvider>
       <DataProvider>
         <AppContent />
-        <Analytics />
-        <SpeedInsights />
+        {/* Analytics temporär deaktiviert - verursacht ERR_BLOCKED_BY_CLIENT */}
+        {/* <Analytics />
+        <SpeedInsights /> */}
       </DataProvider>
     </AuthProvider>
   );
