@@ -77,16 +77,16 @@ function SupabaseProfile() {
           emergencyContact: '',
           emergencyPhone: '',
           notes: '',
-          profileImage: data.profileImage || '',
-          favoriteShot: data.favoriteShot || '',
-          tennisMotto: data.tennisMotto || '',
-          funFact: data.funFact || '',
-          worstTennisMemory: data.worstTennisMemory || '',
-          bestTennisMemory: data.bestTennisMemory || '',
+          profileImage: data.profile_image || '',
+          favoriteShot: data.favorite_shot || '',
+          tennisMotto: data.tennis_motto || '',
+          funFact: data.fun_fact || '',
+          worstTennisMemory: data.worst_tennis_memory || '',
+          bestTennisMemory: data.best_tennis_memory || '',
           superstition: data.superstition || '',
-          preMatchRoutine: data.preMatchRoutine || '',
-          favoriteOpponent: data.favoriteOpponent || '',
-          dreamMatch: data.dreamMatch || ''
+          preMatchRoutine: data.pre_match_routine || '',
+          favoriteOpponent: data.favorite_opponent || '',
+          dreamMatch: data.dream_match || ''
         });
         setViewingPlayer(data);
       }
@@ -120,16 +120,16 @@ function SupabaseProfile() {
         emergencyContact: '',
         emergencyPhone: '',
         notes: '',
-        profileImage: player.profileImage || '',
-        favoriteShot: player.favoriteShot || '',
-        tennisMotto: player.tennisMotto || '',
-        funFact: player.funFact || '',
-        worstTennisMemory: player.worstTennisMemory || '',
-        bestTennisMemory: player.bestTennisMemory || '',
+        profileImage: player.profile_image || '',
+        favoriteShot: player.favorite_shot || '',
+        tennisMotto: player.tennis_motto || '',
+        funFact: player.fun_fact || '',
+        worstTennisMemory: player.worst_tennis_memory || '',
+        bestTennisMemory: player.best_tennis_memory || '',
         superstition: player.superstition || '',
-        preMatchRoutine: player.preMatchRoutine || '',
-        favoriteOpponent: player.favoriteOpponent || '',
-        dreamMatch: player.dreamMatch || ''
+        preMatchRoutine: player.pre_match_routine || '',
+        favoriteOpponent: player.favorite_opponent || '',
+        dreamMatch: player.dream_match || ''
       });
     } else if (currentUser && !authLoading) {
       // Neuer User - initialisiere mit Auth-Daten
@@ -169,69 +169,86 @@ function SupabaseProfile() {
     setIsUploading(true);
     setErrorMessage('');
 
-    // Prüfe ob Storage Bucket existiert und verwende Fallback
-    try {
-      const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
-      console.log('📦 Available buckets:', buckets);
-      
-      const profileImagesBucket = buckets?.find(bucket => bucket.name === 'profile-images');
-      const publicBucket = buckets?.find(bucket => bucket.name === 'public');
-      
-      if (!profileImagesBucket && !publicBucket) {
-        setErrorMessage('Keine Storage-Buckets verfügbar. Prüfen Sie die Supabase-Konfiguration.');
-        setIsUploading(false);
-        return;
-      }
-      
-      // Verwende profile-images falls vorhanden, sonst public
-      const bucketName = profileImagesBucket ? 'profile-images' : 'public';
-      console.log('✅ Using bucket:', bucketName);
-      
-      // Aktualisiere den Bucket-Namen für den Upload
-      setCurrentBucket(bucketName);
-    } catch (error) {
-      console.error('❌ Error checking buckets:', error);
-      setErrorMessage('Fehler beim Prüfen der Storage-Buckets.');
-      setIsUploading(false);
-      return;
-    }
-
-    try {
-      // Erstelle einen eindeutigen Dateinamen
+    // Upload-Versuch mit Fallback
+    const uploadToBucket = async (bucketName) => {
       const fileExt = file.name.split('.').pop();
       const fileName = `${currentUser.id}_${Date.now()}.${fileExt}`;
-      const filePath = `profile-images/${fileName}`;
+      const filePath = bucketName === 'profile-images' ? fileName : `profile-images/${fileName}`;
 
-      console.log('🔄 Starting upload:', { fileName, filePath, fileSize: file.size });
+      console.log(`🔄 Uploading to ${bucketName}:`, { fileName, filePath, fileSize: file.size });
 
-      // Upload zu Supabase Storage
       const { error: uploadError } = await supabase.storage
-        .from(currentBucket)
+        .from(bucketName)
         .upload(filePath, file);
 
       if (uploadError) {
-        console.error('❌ Upload error:', uploadError);
         throw uploadError;
       }
 
-      console.log('✅ Upload successful, getting public URL...');
-
-      // Hole die öffentliche URL
       const { data } = supabase.storage
-        .from(currentBucket)
+        .from(bucketName)
         .getPublicUrl(filePath);
 
-      console.log('✅ Public URL:', data.publicUrl);
+      return data.publicUrl;
+    };
 
+    try {
+      let publicUrl;
+      
+      // Versuche zuerst profile-images
+      try {
+        console.log('🔄 Attempting upload to profile-images bucket...');
+        publicUrl = await uploadToBucket('profile-images');
+        setCurrentBucket('profile-images');
+      } catch (error) {
+        console.warn('⚠️ profile-images failed, trying public bucket...', error.message);
+        
+        // Fallback zu public bucket
+        try {
+          publicUrl = await uploadToBucket('public');
+          setCurrentBucket('public');
+        } catch (publicError) {
+          console.error('❌ Both buckets failed');
+          throw new Error(`Upload fehlgeschlagen: ${error.message}. Fallback: ${publicError.message}`);
+        }
+      }
+
+      console.log('✅ Upload successful, URL:', publicUrl);
+
+      // Aktualisiere State
       setProfile(prev => ({
         ...prev,
-        profileImage: data.publicUrl
+        profileImage: publicUrl
       }));
 
-      setSuccessMessage('Bild erfolgreich hochgeladen!');
+      // Speichere SOFORT in die Datenbank
+      try {
+        console.log('💾 Saving image URL to database...');
+        const result = await updateProfile({
+          ...profile,
+          profileImage: publicUrl
+        });
+        
+        if (result.success) {
+          console.log('✅ Image URL saved to database');
+          setSuccessMessage(`Bild erfolgreich hochgeladen und gespeichert! (Bucket: ${currentBucket})`);
+        } else {
+          console.error('❌ Failed to save image URL:', result.error);
+          setSuccessMessage(`Bild hochgeladen, aber Fehler beim Speichern: ${result.error}`);
+        }
+      } catch (saveError) {
+        console.error('❌ Error saving image URL:', saveError);
+        setSuccessMessage(`Bild hochgeladen, aber Fehler beim Speichern: ${saveError.message}`);
+      }
     } catch (error) {
       console.error('❌ Upload error:', error);
-      setErrorMessage(`Fehler beim Hochladen: ${error.message}`);
+      if (error.message.includes('Bucket not found') || error.message.includes('bucket not found')) {
+        setErrorMessage('Storage-Bucket nicht gefunden. Prüfen Sie den Bucket-Namen.');
+      } else if (error.message.includes('new row violates row-level security policy')) {
+        setErrorMessage('RLS-Policy blockiert Upload. Versuchen Sie es mit einem anderen Bild.');
+      } else {
+        setErrorMessage(`Upload-Fehler: ${error.message}`);
+      }
     } finally {
       setIsUploading(false);
     }
@@ -378,6 +395,7 @@ function SupabaseProfile() {
           {errorMessage}
         </div>
       )}
+
 
       <form onSubmit={handleSubmit} className="profile-form">
         {/* Profilbild */}

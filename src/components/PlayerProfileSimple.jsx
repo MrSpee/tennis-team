@@ -330,8 +330,8 @@ function PlayerProfileSimple() {
           <div className="info-card">
             <div className="info-icon">ℹ️</div>
             <div className="info-content">
-              <h3>Profil noch nicht vollständig</h3>
-              <p>Dieser Spieler hat sein Profil noch nicht vollständig ausgefüllt. Kontaktiere ihn, um mehr über ihn zu erfahren!</p>
+              <h3>🎭 Geheimnisvoller Tennis-Spieler</h3>
+              <p>Dieser Spieler hüllt sich noch in Schweigen! 🕵️‍♂️ Frag ihn doch mal nach seinem Lieblingsschlag oder seinem Tennis-Motto - er wird sich freuen! 😄</p>
             </div>
           </div>
         </section>
