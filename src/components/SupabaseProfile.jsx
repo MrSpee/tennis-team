@@ -42,6 +42,7 @@ function SupabaseProfile() {
   const [viewingPlayer, setViewingPlayer] = useState(null);
   const [isViewingOtherPlayer, setIsViewingOtherPlayer] = useState(false);
   const [isLoadingOtherPlayer, setIsLoadingOtherPlayer] = useState(false);
+  const [currentBucket, setCurrentBucket] = useState('profile-images');
 
   // Funktion zum Laden anderer Spieler-Profile
   const loadOtherPlayerProfile = async (playerName) => {
@@ -168,18 +169,26 @@ function SupabaseProfile() {
     setIsUploading(true);
     setErrorMessage('');
 
-    // Prüfe ob Storage Bucket existiert
+    // Prüfe ob Storage Bucket existiert und verwende Fallback
     try {
       const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
       console.log('📦 Available buckets:', buckets);
       
       const profileImagesBucket = buckets?.find(bucket => bucket.name === 'profile-images');
-      if (!profileImagesBucket) {
-        setErrorMessage('Storage Bucket "profile-images" existiert nicht. Führen Sie das SQL-Script aus.');
+      const publicBucket = buckets?.find(bucket => bucket.name === 'public');
+      
+      if (!profileImagesBucket && !publicBucket) {
+        setErrorMessage('Keine Storage-Buckets verfügbar. Prüfen Sie die Supabase-Konfiguration.');
         setIsUploading(false);
         return;
       }
-      console.log('✅ Profile-images bucket found:', profileImagesBucket);
+      
+      // Verwende profile-images falls vorhanden, sonst public
+      const bucketName = profileImagesBucket ? 'profile-images' : 'public';
+      console.log('✅ Using bucket:', bucketName);
+      
+      // Aktualisiere den Bucket-Namen für den Upload
+      setCurrentBucket(bucketName);
     } catch (error) {
       console.error('❌ Error checking buckets:', error);
       setErrorMessage('Fehler beim Prüfen der Storage-Buckets.');
@@ -197,7 +206,7 @@ function SupabaseProfile() {
 
       // Upload zu Supabase Storage
       const { error: uploadError } = await supabase.storage
-        .from('profile-images')
+        .from(currentBucket)
         .upload(filePath, file);
 
       if (uploadError) {
@@ -209,7 +218,7 @@ function SupabaseProfile() {
 
       // Hole die öffentliche URL
       const { data } = supabase.storage
-        .from('profile-images')
+        .from(currentBucket)
         .getPublicUrl(filePath);
 
       console.log('✅ Public URL:', data.publicUrl);
