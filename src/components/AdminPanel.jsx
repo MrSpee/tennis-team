@@ -12,6 +12,8 @@ function AdminPanel() {
   const [activeTab, setActiveTab] = useState('matches'); // 'matches', 'season', 'players', 'team'
   const [editingMatchId, setEditingMatchId] = useState(null);
   const [editFormData, setEditFormData] = useState({});
+  const [logFilter, setLogFilter] = useState('all'); // Filter für Verfügbarkeits-Log
+  const [logLimit, setLogLimit] = useState(50); // Anzahl der angezeigten Log-Einträge
   const [formData, setFormData] = useState({
     opponent: '',
     date: '',
@@ -1104,7 +1106,7 @@ function AdminPanel() {
             })}
               </div>
 
-              {/* Verfügbarkeits-Log */}
+              {/* Erweiterte Verfügbarkeits-Log für Captain/MF */}
               <div style={{ 
                 marginTop: '1.5rem', 
                 padding: '1.5rem', 
@@ -1112,61 +1114,174 @@ function AdminPanel() {
                 borderRadius: '12px', 
                 border: '1px solid #f59e0b' 
               }}>
-                <h4 style={{ margin: '0 0 1rem 0', color: '#92400e', fontSize: '1.1rem' }}>📝 Verfügbarkeits-Log</h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <h4 style={{ margin: 0, color: '#92400e', fontSize: '1.1rem' }}>📝 Verfügbarkeits-Log (Captain/MF)</h4>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <select 
+                      onChange={(e) => setLogFilter(e.target.value)}
+                      value={logFilter}
+                      style={{
+                        padding: '0.25rem 0.5rem',
+                        border: '1px solid #d97706',
+                        borderRadius: '4px',
+                        fontSize: '0.75rem',
+                        background: 'white'
+                      }}
+                    >
+                      <option value="all">Alle Änderungen</option>
+                      <option value="available">Nur Zusagen</option>
+                      <option value="unavailable">Nur Absagen</option>
+                      <option value="today">Heute</option>
+                      <option value="week">Diese Woche</option>
+                    </select>
+                    <button
+                      onClick={() => setLogLimit(logLimit === 50 ? 200 : 50)}
+                      style={{
+                        padding: '0.25rem 0.5rem',
+                        border: '1px solid #d97706',
+                        borderRadius: '4px',
+                        fontSize: '0.75rem',
+                        background: 'white',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {logLimit === 50 ? 'Alle anzeigen' : 'Weniger anzeigen'}
+                    </button>
+                  </div>
+                </div>
+                
                 <div style={{ 
                   background: 'white', 
                   borderRadius: '8px', 
                   padding: '1rem',
-                  maxHeight: '300px',
+                  maxHeight: '400px',
                   overflowY: 'auto'
                 }}>
                   {(() => {
-                    const logs = JSON.parse(localStorage.getItem('availability_logs') || '[]');
-                    return logs.length > 0 ? (
+                    const allLogs = JSON.parse(localStorage.getItem('availability_logs') || '[]');
+                    
+                    // Filter anwenden
+                    let filteredLogs = allLogs;
+                    
+                    if (logFilter === 'available') {
+                      filteredLogs = allLogs.filter(log => log.status === 'available');
+                    } else if (logFilter === 'unavailable') {
+                      filteredLogs = allLogs.filter(log => log.status === 'unavailable');
+                    } else if (logFilter === 'today') {
+                      const today = new Date().toDateString();
+                      filteredLogs = allLogs.filter(log => new Date(log.timestamp).toDateString() === today);
+                    } else if (logFilter === 'week') {
+                      const weekAgo = new Date();
+                      weekAgo.setDate(weekAgo.getDate() - 7);
+                      filteredLogs = allLogs.filter(log => new Date(log.timestamp) >= weekAgo);
+                    }
+                    
+                    // Limit anwenden
+                    const displayLogs = filteredLogs.slice(0, logLimit);
+                    
+                    return allLogs.length > 0 ? (
                       <div style={{ fontSize: '0.875rem' }}>
-                        {logs.slice(0, 20).map((log, index) => (
+                        {/* Statistik-Header */}
+                        <div style={{ 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center',
+                          padding: '0.5rem 0',
+                          borderBottom: '2px solid #f59e0b',
+                          marginBottom: '0.5rem',
+                          fontWeight: '600',
+                          color: '#92400e'
+                        }}>
+                          <span>📊 {filteredLogs.length} von {allLogs.length} Einträgen</span>
+                          <span>
+                            ✅ {filteredLogs.filter(log => log.status === 'available').length} Zusagen • 
+                            ❌ {filteredLogs.filter(log => log.status === 'unavailable').length} Absagen
+                          </span>
+                        </div>
+                        
+                        {displayLogs.map((log, index) => (
                           <div key={index} style={{ 
                             display: 'flex', 
                             justifyContent: 'space-between', 
                             alignItems: 'center',
-                            padding: '0.5rem 0',
-                            borderBottom: index < logs.slice(0, 20).length - 1 ? '1px solid #f3f4f6' : 'none'
+                            padding: '0.75rem 0',
+                            borderBottom: index < displayLogs.length - 1 ? '1px solid #f3f4f6' : 'none',
+                            background: index % 2 === 0 ? '#fefefe' : 'transparent',
+                            borderRadius: '4px',
+                            margin: '0.125rem 0'
                           }}>
-                            <div>
-                              <span style={{ fontWeight: '600', color: '#374151' }}>
-                                {log.playerName}
-                              </span>
-                              <span style={{ color: '#6b7280', marginLeft: '0.5rem' }}>
-                                {log.status === 'available' ? '✅' : '❌'} {log.status === 'available' ? 'verfügbar' : 'nicht verfügbar'}
-                              </span>
-                              <span style={{ color: '#9ca3af', marginLeft: '0.5rem' }}>
-                                für {log.matchInfo}
-                              </span>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                                <span style={{ fontWeight: '600', color: '#374151' }}>
+                                  {log.playerName}
+                                </span>
+                                <span style={{ 
+                                  color: log.status === 'available' ? '#059669' : '#dc2626',
+                                  fontWeight: '500'
+                                }}>
+                                  {log.status === 'available' ? '✅ Zusage' : '❌ Absage'}
+                                </span>
+                                {log.action === 'updated' && (
+                                  <span style={{ 
+                                    background: '#fef3c7', 
+                                    color: '#92400e', 
+                                    padding: '0.125rem 0.25rem', 
+                                    borderRadius: '3px',
+                                    fontSize: '0.625rem',
+                                    fontWeight: '500'
+                                  }}>
+                                    GEÄNDERT
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ color: '#6b7280', fontSize: '0.8rem', marginBottom: '0.25rem' }}>
+                                🎾 {log.matchInfo}
+                              </div>
                               {log.comment && (
-                                <div style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                                <div style={{ 
+                                  color: '#6b7280', 
+                                  fontSize: '0.75rem', 
+                                  background: '#f9fafb',
+                                  padding: '0.25rem 0.5rem',
+                                  borderRadius: '3px',
+                                  border: '1px solid #e5e7eb'
+                                }}>
                                   💬 {log.comment}
-                    </div>
+                                </div>
                               )}
-                    </div>
-                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+                            </div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem', textAlign: 'right', minWidth: '120px' }}>
                               {new Date(log.timestamp).toLocaleString('de-DE')}
-                    </div>
-                  </div>
+                            </div>
+                          </div>
                         ))}
-                        {logs.length > 20 && (
-                          <div style={{ textAlign: 'center', color: '#6b7280', marginTop: '0.5rem', fontSize: '0.75rem' }}>
-                            ... und {logs.length - 20} weitere Einträge
-                    </div>
+                        
+                        {filteredLogs.length > logLimit && (
+                          <div style={{ 
+                            textAlign: 'center', 
+                            color: '#6b7280', 
+                            marginTop: '0.5rem', 
+                            fontSize: '0.75rem',
+                            padding: '0.5rem',
+                            background: '#f3f4f6',
+                            borderRadius: '4px'
+                          }}>
+                            ... und {filteredLogs.length - logLimit} weitere Einträge
+                          </div>
                         )}
-                    </div>
+                      </div>
                     ) : (
-                      <div style={{ textAlign: 'center', color: '#6b7280', padding: '1rem' }}>
-                        Noch keine Verfügbarkeits-Änderungen geloggt
-                    </div>
+                      <div style={{ textAlign: 'center', color: '#6b7280', padding: '2rem' }}>
+                        <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📝</div>
+                        <div>Noch keine Verfügbarkeits-Änderungen geloggt</div>
+                        <div style={{ fontSize: '0.75rem', marginTop: '0.5rem' }}>
+                          Änderungen werden automatisch erfasst sobald Spieler ihre Verfügbarkeit setzen
+                        </div>
+                      </div>
                     );
                   })()}
-                  </div>
-                    </div>
+                </div>
+              </div>
 
               {/* Team-Statistiken aus Supabase-Daten */}
                       <div style={{

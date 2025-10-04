@@ -333,13 +333,19 @@ function Dashboard() {
           .filter(name => name && name !== 'Unbekannt');
 
         return (
-          <div className="fade-in card" style={{
-            padding: '1rem',
-            marginBottom: '1rem',
-            background: '#eff6ff',
-            border: '1px solid #3b82f6',
-            borderRadius: '8px'
-          }}>
+          <div 
+            className="fade-in card" 
+            onClick={() => navigate(`/matches?match=${nextMatchAnySeason.id}`)}
+            style={{
+              padding: '1rem',
+              marginBottom: '1rem',
+              background: '#eff6ff',
+              border: '1px solid #3b82f6',
+              borderRadius: '8px',
+              cursor: 'pointer'
+            }}
+            title="Klicken für Verfügbarkeit setzen"
+          >
             <div style={{ marginBottom: '0.75rem' }}>
               <div style={{ fontSize: '0.75rem', color: '#1e40af', fontWeight: '600', marginBottom: '0.25rem' }}>
                 NÄCHSTES SPIEL
@@ -402,7 +408,13 @@ function Dashboard() {
               );
 
               return (
-                <div key={match.id} className="match-preview-card card">
+                <div 
+                  key={match.id} 
+                  className="match-preview-card card"
+                  onClick={() => navigate(`/matches?match=${match.id}`)}
+                  style={{ cursor: 'pointer' }}
+                  title="Klicken für Verfügbarkeit setzen"
+                >
                   <div className="match-preview-header">
                     <div className="match-date">
                       <div className="date-day">

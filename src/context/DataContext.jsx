@@ -415,14 +415,17 @@ export function DataProvider({ children }) {
       await loadMatches();
       console.log('✅ Matches reloaded');
       
-      // Logging für Admin-Bereich
+      // Erweiterte Logging für Admin-Bereich
       const logEntry = {
         timestamp: new Date().toISOString(),
         playerName,
+        playerId,
         matchInfo,
+        matchId,
         status,
         comment: comment || null,
-        action: existing ? 'updated' : 'created'
+        action: existing ? 'updated' : 'created',
+        previousStatus: existing ? 'unknown' : null // Könnte erweitert werden um vorherigen Status zu tracken
       };
       
       console.log('📝 Verfügbarkeits-Log:', logEntry);
@@ -431,9 +434,9 @@ export function DataProvider({ children }) {
       const existingLogs = JSON.parse(localStorage.getItem('availability_logs') || '[]');
       existingLogs.unshift(logEntry);
       
-      // Behalte nur die letzten 100 Einträge
-      if (existingLogs.length > 100) {
-        existingLogs.splice(100);
+      // Erweitert: Behalte mehr Einträge für bessere Nachverfolgung (500 statt 100)
+      if (existingLogs.length > 500) {
+        existingLogs.splice(500);
       }
       
       localStorage.setItem('availability_logs', JSON.stringify(existingLogs));

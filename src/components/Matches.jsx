@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { Calendar, MapPin, Users, MessageCircle, Check, X, Download } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import './Matches.css';
@@ -13,6 +13,40 @@ function Matches() {
   const { matches, updateMatchAvailability } = useData();
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [comment, setComment] = useState('');
+  const [searchParams] = useSearchParams();
+
+  // Verarbeite URL-Parameter für spezifisches Match
+  useEffect(() => {
+    const matchId = searchParams.get('match');
+    if (matchId && matches.length > 0) {
+      const targetMatch = matches.find(m => m.id === matchId);
+      if (targetMatch) {
+        // Wähle das Match aus
+        setSelectedMatch(targetMatch);
+        
+        // Scrolle zum Match nach einem kurzen Delay (damit die Seite geladen ist)
+        setTimeout(() => {
+          const element = document.getElementById(`match-${matchId}`);
+          if (element) {
+            element.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'center' 
+            });
+            // Hervorhebung für bessere Sichtbarkeit
+            element.style.boxShadow = '0 0 20px rgba(59, 130, 246, 0.5)';
+            setTimeout(() => {
+              element.style.boxShadow = '';
+            }, 3000);
+          }
+        }, 500);
+        
+        // Entferne den Parameter aus der URL (optional)
+        const newUrl = new URL(window.location);
+        newUrl.searchParams.delete('match');
+        window.history.replaceState({}, '', newUrl);
+      }
+    }
+  }, [searchParams, matches]);
 
   // Motivierende Verfügbarkeits-Texte
   const getAvailabilityText = (status) => {
@@ -161,12 +195,17 @@ function Matches() {
               const missingPlayers = match.playersNeeded - availableCount;
 
               return (
-                <div key={match.id} className="match-card card" style={{
-                  border: '2px solid #e5e7eb',
-                  borderRadius: '12px',
-                  padding: '1rem',
-                  marginBottom: '1rem'
-                }}>
+                <div 
+                  key={match.id} 
+                  id={`match-${match.id}`}
+                  className="match-card card" 
+                  style={{
+                    border: '2px solid #e5e7eb',
+                    borderRadius: '12px',
+                    padding: '1rem',
+                    marginBottom: '1rem'
+                  }}
+                >
                   {/* Gegner */}
                   <div style={{ marginBottom: '0.5rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
@@ -347,8 +386,14 @@ function Matches() {
                       <button
                         onClick={() => setSelectedMatch(match.id)}
                         className="btn btn-primary btn-full"
+                        style={{
+                          background: myStatus ? '#f8f9fa' : '#3b82f6',
+                          color: myStatus ? '#374151' : 'white',
+                          border: myStatus ? '2px solid #e5e7eb' : 'none',
+                          fontWeight: '600'
+                        }}
                       >
-                        {myStatus ? 'Verfügbarkeit ändern' : 'Verfügbarkeit angeben'}
+                        {myStatus ? '✅ Zusage | 🚫 Absage' : 'Verfügbarkeit angeben'}
                       </button>
                     )}
                   </div>
