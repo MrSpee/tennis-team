@@ -44,3 +44,4 @@ LIMIT 5;
 -- 1. Prüfe ob alle UUID-Felder entweder gültige UUIDs oder NULL enthalten
 -- 2. Leere Strings ("") sind nicht erlaubt für UUID-Felder
 -- 3. Verwende NULL für fehlende Werte
+

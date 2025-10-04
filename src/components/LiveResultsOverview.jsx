@@ -412,15 +412,11 @@ const LiveResultsOverview = () => {
                 {/* Grüner Haken entfernt */}
               </div>
             </div>
-            {matchStatus !== 'pending' && (
-              <div className="player-scores">
-                <span className="score-number">{result.set1_home || '0'}</span>
-                <span className="score-number">{result.set2_home || '0'}</span>
-                {result.set3_home !== null && (
-                  <span className="score-number tiebreak">{result.set3_home}</span>
-                )}
-              </div>
-            )}
+            <div className="player-scores">
+              <span className="score-number">{result.set1_home || '0'}</span>
+              <span className="score-number">{result.set2_home || '0'}</span>
+              <span className="score-number">{result.set3_home || '0'}</span>
+            </div>
           </div>
 
           {/* Guest Player */}
@@ -455,15 +451,11 @@ const LiveResultsOverview = () => {
                 {/* Grüner Haken entfernt */}
               </div>
             </div>
-            {matchStatus !== 'pending' && (
-              <div className="player-scores">
-                <span className="score-number">{result.set1_guest || '0'}</span>
-                <span className="score-number">{result.set2_guest || '0'}</span>
-                {result.set3_guest !== null && (
-                  <span className="score-number tiebreak">{result.set3_guest}</span>
-                )}
-              </div>
-            )}
+            <div className="player-scores">
+              <span className="score-number">{result.set1_guest || '0'}</span>
+              <span className="score-number">{result.set2_guest || '0'}</span>
+              <span className="score-number">{result.set3_guest || '0'}</span>
+            </div>
           </div>
         </div>
 
