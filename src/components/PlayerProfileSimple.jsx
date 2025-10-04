@@ -16,8 +16,10 @@ function PlayerProfileSimple() {
   const [isOwnProfile, setIsOwnProfile] = useState(false);
 
   useEffect(() => {
-    loadPlayerProfile();
-  }, [playerName]);
+    if (playerName) {
+      loadPlayerProfile();
+    }
+  }, [playerName, currentUser]);
 
   const loadPlayerProfile = async () => {
     if (!playerName) {
