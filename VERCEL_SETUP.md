@@ -40,8 +40,17 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 - ✅ **Lösung:** Siehe Anleitung oben
 
 ### Analytics funktioniert nicht
-- ✅ **Ursache:** Normal bei fehlender Supabase-Konfiguration
+- ✅ **Ursache:** Analytics lädt nur in echter Vercel-Produktion
 - ✅ **Lösung:** Erst Supabase konfigurieren, dann Analytics aktiviert sich automatisch
+
+### Fehlermeldungen in Konsole (normal)
+```
+Failed to load resource: net::ERR_BLOCKED_BY_CLIENT
+[Vercel Web Analytics] Failed to load script
+[Vercel Speed Insights] Failed to load script
+```
+- ✅ **Ursache:** Analytics lädt nur in Vercel-Produktion
+- ✅ **Lösung:** Diese Fehler sind normal und verschwinden nach Vercel-Deployment
 
 ## 📱 PWA Features
 - ✅ **Manifest:** Automatisch konfiguriert
