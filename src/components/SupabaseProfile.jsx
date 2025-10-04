@@ -154,15 +154,27 @@ function SupabaseProfile() {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Validiere Dateityp
-    if (!file.type.startsWith('image/')) {
-      setErrorMessage('Bitte wählen Sie eine gültige Bilddatei aus.');
+    console.log('📱 Mobile upload detected:', {
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+      lastModified: file.lastModified,
+      userAgent: navigator.userAgent
+    });
+
+    // Validiere Dateityp - iPhone kann verschiedene MIME-Types haben
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif'];
+    const isValidType = validTypes.includes(file.type.toLowerCase()) || file.type.startsWith('image/');
+    
+    if (!isValidType) {
+      setErrorMessage(`Dateityp nicht unterstützt: ${file.type}. Erlaubt: JPEG, PNG, GIF, WebP, HEIC`);
       return;
     }
 
-    // Validiere Dateigröße (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      setErrorMessage('Das Bild ist zu groß. Maximal 5MB erlaubt.');
+    // Validiere Dateigröße (max 10MB für iPhone - HEIC-Dateien sind oft größer)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      setErrorMessage(`Das Bild ist zu groß (${Math.round(file.size / 1024 / 1024)}MB). Maximal 10MB erlaubt.`);
       return;
     }
 
@@ -171,11 +183,37 @@ function SupabaseProfile() {
 
     // Upload-Versuch mit Fallback
     const uploadToBucket = async (bucketName) => {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${currentUser.id}_${Date.now()}.${fileExt}`;
-      const filePath = bucketName === 'profile-images' ? fileName : `profile-images/${fileName}`;
+      // iPhone-kompatible Dateinamen-Generierung
+      let fileExt = file.name.split('.').pop()?.toLowerCase();
+      
+      // iPhone-spezifische Extensions handhaben
+      if (file.type === 'image/heic' || file.type === 'image/heif') {
+        fileExt = 'jpg'; // Konvertiere HEIC zu JPG für bessere Kompatibilität
+      }
+      
+      // Fallback falls keine Extension
+      if (!fileExt || fileExt === '') {
+        if (file.type.includes('jpeg') || file.type.includes('jpg')) {
+          fileExt = 'jpg';
+        } else if (file.type.includes('png')) {
+          fileExt = 'png';
+        } else {
+          fileExt = 'jpg'; // Standard
+        }
+      }
+      
+      // Sichere Dateinamen-Generierung (entferne Sonderzeichen)
+      const safeFileName = `${currentUser.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
+      const filePath = bucketName === 'profile-images' ? safeFileName : `profile-images/${safeFileName}`;
 
-      console.log(`🔄 Uploading to ${bucketName}:`, { fileName, filePath, fileSize: file.size });
+      console.log(`🔄 Uploading to ${bucketName}:`, { 
+        originalFileName: file.name,
+        safeFileName, 
+        filePath, 
+        fileSize: file.size,
+        fileType: file.type,
+        fileExt 
+      });
 
       const { error: uploadError } = await supabase.storage
         .from(bucketName)
@@ -246,6 +284,14 @@ function SupabaseProfile() {
         setErrorMessage('Storage-Bucket nicht gefunden. Prüfen Sie den Bucket-Namen.');
       } else if (error.message.includes('new row violates row-level security policy')) {
         setErrorMessage('RLS-Policy blockiert Upload. Versuchen Sie es mit einem anderen Bild.');
+      } else if (error.message.includes('file size') || error.message.includes('too large')) {
+        setErrorMessage('Datei zu groß. Versuchen Sie ein kleineres Bild oder komprimieren Sie es.');
+      } else if (error.message.includes('network') || error.message.includes('timeout') || error.message.includes('fetch')) {
+        setErrorMessage('Netzwerk-Fehler. Prüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.');
+      } else if (error.message.includes('unauthorized') || error.message.includes('403') || error.message.includes('401')) {
+        setErrorMessage('Berechtigung verweigert. Bitte melden Sie sich erneut an.');
+      } else if (error.message.includes('CORS') || error.message.includes('cross-origin')) {
+        setErrorMessage('CORS-Fehler. Versuchen Sie es mit einem anderen Browser oder Gerät.');
       } else {
         setErrorMessage(`Upload-Fehler: ${error.message}`);
       }
@@ -425,7 +471,8 @@ function SupabaseProfile() {
               <input
                 type="file"
                 id="profileImage"
-                accept="image/*"
+                accept="image/*,image/heic,image/heif"
+                capture="environment"
                 onChange={handleImageUpload}
                 disabled={!isEditing || isUploading}
                 style={{ display: 'none' }}
