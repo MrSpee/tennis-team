@@ -16,7 +16,8 @@ function PlayerProfileSimple() {
   const [isOwnProfile, setIsOwnProfile] = useState(false);
 
   useEffect(() => {
-    if (playerName) {
+    // Warte bis currentUser geladen ist, bevor wir das Profil laden
+    if (playerName && currentUser) {
       loadPlayerProfile();
     }
   }, [playerName, currentUser]);

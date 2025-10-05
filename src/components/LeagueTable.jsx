@@ -57,7 +57,6 @@ function LeagueTable() {
             )}
           </p>
         </div>
-        <Table size={32} color="var(--primary)" />
       </header>
 
       {/* Spielplan-Übersicht */}

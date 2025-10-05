@@ -159,7 +159,6 @@ function AdminPanel() {
           <h1>Admin Panel</h1>
           <p>Spiele verwalten und Team organisieren</p>
         </div>
-        <Shield size={32} color="var(--primary)" />
       </header>
 
       {/* Card-Tab Navigation */}

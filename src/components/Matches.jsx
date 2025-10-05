@@ -187,7 +187,6 @@ function Matches() {
           <h1>Meine Verfügbarkeit</h1>
           <p>Verfügbarkeit für kommende Spiele angeben</p>
         </div>
-        <Calendar size={32} color="var(--primary)" />
       </header>
 
       <section className="matches-section fade-in">

@@ -101,7 +101,6 @@ function Rankings() {
           <h1>Spieler-Rangliste</h1>
           <p>Offizielle Tennisverband Rankings</p>
         </div>
-        <Trophy size={32} color="var(--primary)" />
       </header>
 
       <div className="rankings-controls fade-in">
@@ -123,32 +122,14 @@ function Rankings() {
         </div>
       </div>
 
-      <div className="rankings-info fade-in card">
-        <h3>📊 Leistungsklassen (LK)</h3>
-        <p>Die Leistungsklasse (LK) ist das offizielle Ranking-System des Deutschen Tennis Bundes (DTB). 
-        Niedrigere Zahlen bedeuten ein höheres Spielniveau. LK 1-4 sind Profi-Niveau, 
-        LK 5-25 Amateur-Niveau.</p>
-      </div>
-
       <div className="rankings-list fade-in">
         {sortBy === 'tvm' ? (
           // TVM Meldeliste - Hardcoded
           tvmMeldeliste.map((player) => (
             <div key={player.position} className="ranking-card card">
-              <div className="ranking-position">
-                <div style={{ 
-                  fontSize: '0.7rem', 
-                  color: '#3b82f6', 
-                  fontWeight: 'bold',
-                  marginBottom: '0.25rem' 
-                }}>
-                  TVM
-                </div>
-                <div className="position-number">#{player.position}</div>
-              </div>
-
-              <div className="player-info">
-                <h3>
+              <div className="ranking-card-header">
+                <div className="position-badge">#{player.position}</div>
+                <h3 className="player-name-large">
                   {player.name}
                   {player.mf && <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem', color: '#f59e0b' }}>⭐ MF</span>}
                 </h3>
@@ -165,22 +146,10 @@ function Rankings() {
                   </span>
                 </div>
               </div>
-
-              <div className="ranking-details">
-                <div className="detail-row">
-                  <span className="detail-label">Position:</span>
-                  <span className="detail-value">#{player.position} von 12</span>
-                </div>
-                <div className="detail-row">
-                  <span className="detail-label">Leistungsklasse:</span>
-                  <span className="detail-value">LK {player.lk}</span>
-                </div>
-                {player.mf && (
-                  <div className="detail-row">
-                    <span className="detail-label">Rolle:</span>
-                    <span className="detail-value">Mannschaftsführer</span>
-                  </div>
-                )}
+              
+              <div className="form-indicator">
+                <span className="form-label">Formkurve:</span>
+                <span className="form-trend neutral">-</span>
               </div>
             </div>
           ))
@@ -196,15 +165,11 @@ function Rankings() {
           ) : (
             registeredPlayers.map((player, index) => (
               <div key={player.id} className="ranking-card card">
-                <div className="ranking-position">
-                  {index === 0 && <div className="trophy-icon">🏆</div>}
-                  {index === 1 && <div className="trophy-icon">🥈</div>}
-                  {index === 2 && <div className="trophy-icon">🥉</div>}
-                  <div className="position-number">#{index + 1}</div>
-                </div>
-
-                <div className="player-info">
-                  <h3>
+                <div className="ranking-card-header">
+                  <div className="position-badge">
+                    {index === 0 ? '🏆' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`}
+                  </div>
+                  <h3 className="player-name-large">
                     {player.name}
                     {player.role === 'captain' && <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem', color: '#f59e0b' }}>⭐ Captain</span>}
                   </h3>
@@ -227,16 +192,10 @@ function Rankings() {
                     </span>
                   </div>
                 </div>
-
-                <div className="ranking-details">
-                  <div className="detail-row">
-                    <span className="detail-label">Leistungsklasse:</span>
-                    <span className="detail-value">{player.ranking || 'Nicht angegeben'}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Status:</span>
-                    <span className="detail-value">In App registriert</span>
-                  </div>
+                
+                <div className="form-indicator">
+                  <span className="form-label">Formkurve:</span>
+                  <span className="form-trend neutral">-</span>
                 </div>
               </div>
             ))
