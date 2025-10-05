@@ -16,11 +16,12 @@ function PlayerProfileSimple() {
   const [isOwnProfile, setIsOwnProfile] = useState(false);
 
   useEffect(() => {
-    // Warte bis currentUser geladen ist, bevor wir das Profil laden
-    if (playerName && currentUser) {
+    // ProtectedRoute garantiert bereits, dass User eingeloggt ist
+    if (playerName) {
       loadPlayerProfile();
     }
-  }, [playerName, currentUser]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerName]);
 
   const loadPlayerProfile = async () => {
     if (!playerName) {

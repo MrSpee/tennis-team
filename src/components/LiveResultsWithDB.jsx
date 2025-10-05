@@ -3,13 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, MessageCircle, Save } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { getOpponentPlayers } from '../services/liveResultsService';
-import { useAuth } from '../context/AuthContext';
 import './LiveResults.css';
 
 const LiveResultsWithDB = () => {
   const { matchId } = useParams();
   const navigate = useNavigate();
-  const { currentUser } = useAuth();
 
   // State für echte Daten
   const [match, setMatch] = useState(null);
@@ -24,12 +22,12 @@ const LiveResultsWithDB = () => {
 
   // Lade echte Daten aus der Datenbank
   useEffect(() => {
-    // Warte bis currentUser geladen ist, bevor wir Daten laden
-    if (matchId && currentUser) {
+    // ProtectedRoute garantiert bereits, dass User eingeloggt ist
+    if (matchId) {
       loadData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matchId, currentUser]);
+  }, [matchId]);
 
   const loadData = async () => {
     try {
@@ -720,7 +718,7 @@ const LiveResultsWithDB = () => {
     return (
       <div className="live-results-page">
         <div className="error">Fehler: {error}</div>
-        <button onClick={() => navigate('/dashboard')}>Zurück zur Übersicht</button>
+        <button onClick={() => navigate(`/ergebnisse/${matchId}`)}>Zurück zur Übersicht</button>
       </div>
     );
   }
@@ -732,7 +730,7 @@ const LiveResultsWithDB = () => {
         <div className="header-content">
           <div className="header-top">
             <button 
-              onClick={() => navigate('/dashboard')}
+              onClick={() => navigate(`/ergebnisse/${matchId}`)}
               className="back-button"
             >
               <ArrowLeft size={16} />
@@ -766,7 +764,7 @@ const LiveResultsWithDB = () => {
       {/* Navigation */}
       <div className="footer-navigation">
         <button 
-          onClick={() => navigate('/dashboard')}
+          onClick={() => navigate(`/ergebnisse/${matchId}`)}
           className="back-to-overview"
         >
           <ArrowLeft size={16} />

@@ -3,14 +3,12 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Edit, Clock, CheckCircle, PlayCircle } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useData } from '../context/DataContext';
-import { useAuth } from '../context/AuthContext';
 import './LiveResults.css';
 
 const LiveResultsOverview = () => {
   const { matchId } = useParams();
   const navigate = useNavigate();
   const { teamInfo } = useData();
-  const { currentUser } = useAuth();
 
   // State für Daten
   const [match, setMatch] = useState(null);
@@ -23,12 +21,12 @@ const LiveResultsOverview = () => {
   const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
-    // Warte bis currentUser geladen ist, bevor wir Daten laden
-    if (matchId && currentUser) {
+    // ProtectedRoute garantiert bereits, dass User eingeloggt ist
+    if (matchId) {
       loadData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matchId, currentUser]);
+  }, [matchId]);
 
   // Timer für Live-Updates (alle 30 Sekunden)
   useEffect(() => {
