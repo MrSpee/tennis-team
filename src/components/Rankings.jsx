@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Users, List } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { supabase } from '../lib/supabaseClient';
 import './Rankings.css';
 
 function Rankings() {
+  const navigate = useNavigate();
   const { players, matches } = useData();
   const [sortBy, setSortBy] = useState('registered'); // 'tvm', 'registered', or 'aufsteiger'
   
@@ -379,8 +381,33 @@ function Rankings() {
               result.home_player1_id === player.id ||
               result.home_player2_id === player.id;
             
-            if (!isPlayerInvolved || result.winner !== 'home') {
-              continue; // Spieler nicht beteiligt oder verloren
+            if (!isPlayerInvolved) {
+              continue; // Spieler nicht beteiligt
+            }
+            
+            // Prüfe Gewinner (entweder aus DB oder berechnet aus Sätzen)
+            let matchWinner = result.winner;
+            
+            // Falls winner null, berechne aus Sätzen
+            if (!matchWinner) {
+              const homeSets = [
+                result.set1_home > result.set1_guest ? 1 : 0,
+                result.set2_home > result.set2_guest ? 1 : 0,
+                result.set3_home > result.set3_guest ? 1 : 0
+              ].filter(s => s === 1).length;
+              
+              const guestSets = [
+                result.set1_guest > result.set1_home ? 1 : 0,
+                result.set2_guest > result.set2_home ? 1 : 0,
+                result.set3_guest > result.set3_home ? 1 : 0
+              ].filter(s => s === 1).length;
+              
+              if (homeSets >= 2) matchWinner = 'home';
+              else if (guestSets >= 2) matchWinner = 'guest';
+            }
+            
+            if (matchWinner !== 'home') {
+              continue; // Verloren oder kein Ergebnis
             }
             
             // Spieler hat gewonnen!
@@ -585,6 +612,14 @@ function Rankings() {
       
       const improvementStatement = getImprovementStatement(seasonImprovement, player.last_lk_update);
       
+      // Sortiere matchDetails: Einzel zuerst, dann Doppel
+      matchDetails.sort((a, b) => {
+        if (a.matchType !== b.matchType) {
+          return a.matchType === 'Einzel' ? -1 : 1; // Einzel vor Doppel
+        }
+        return 0; // Behalte ursprüngliche Reihenfolge bei gleichem Typ
+      });
+      
       // Zeige Berechnung im Akkordeon
       setLkCalculations(prev => ({
         ...prev,
@@ -598,7 +633,7 @@ function Rankings() {
           newLK: newLK,
           seasonImprovement: seasonImprovement,
           improvementStatement: improvementStatement,
-          matchDetails: matchDetails // Detaillierte Match-Infos
+          matchDetails: matchDetails // Detaillierte Match-Infos (sortiert: Einzel vor Doppel)
         }
       }));
       
@@ -828,12 +863,26 @@ function Rankings() {
                         <span>🎾 {matchStats.available}/{matchStats.total}</span>
                       </span>
                       {matchStats.wins > 0 && (
-                        <span className="wins-losses-badge wins-only">
+                        <span 
+                          className="wins-losses-badge wins-only clickable"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/results?view=spieler&player=${player.id}`);
+                          }}
+                          title="Zur Spieler-Übersicht springen"
+                        >
                           ✅ {matchStats.wins} {matchStats.wins === 1 ? 'Sieg' : 'Siege'}
                         </span>
                       )}
                       {matchStats.losses > 0 && (
-                        <span className="wins-losses-badge losses-only">
+                        <span 
+                          className="wins-losses-badge losses-only clickable"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/results?view=spieler&player=${player.id}`);
+                          }}
+                          title="Zur Spieler-Übersicht springen"
+                        >
                           ❌ {matchStats.losses} {matchStats.losses === 1 ? 'Niederlage' : 'Niederlagen'}
                     </span>
                       )}

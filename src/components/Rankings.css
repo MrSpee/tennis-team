@@ -895,3 +895,14 @@
     font-size: 0.75rem;
   }
 }
+
+/* Klickbare Badges für Navigation */
+.wins-losses-badge.clickable {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.wins-losses-badge.clickable:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
