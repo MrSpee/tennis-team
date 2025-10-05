@@ -169,35 +169,51 @@ function Dashboard() {
 
     const now = new Date();
     const diffTime = nextMatchAnySeason.date - now;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
+    const diffMinutes = Math.floor((diffTime % (1000 * 60 * 60)) / (1000 * 60));
+    const diffSeconds = Math.floor((diffTime % (1000 * 60)) / 1000);
 
-    // Wenn weniger als 2 Tage (48 Stunden) entfernt, zeige genauen Timer
-    if (diffTime <= 48 * 60 * 60 * 1000) {
-      const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
-      const diffMinutes = Math.floor((diffTime % (1000 * 60 * 60)) / (1000 * 60));
-      const diffSeconds = Math.floor((diffTime % (1000 * 60)) / 1000);
-
-      if (diffDays === 0) {
-        // Heute: Zeige Stunden und Minuten
-        if (diffHours === 0) {
-          return `🔥 In ${diffMinutes}m ${diffSeconds}s - HEUTE!`;
-        }
-        return `🔥 In ${diffHours}h ${diffMinutes}m - HEUTE!`;
-      } else if (diffDays === 1) {
-        // Morgen: Zeige Stunden und Minuten
-        return `⚡ In ${diffHours}h ${diffMinutes}m - MORGEN!`;
-      } else {
-        // Weniger als 2 Tage: Zeige genauen Timer
-        return `⏰ In ${diffHours}h ${diffMinutes}m`;
+    // Heute: Weniger als 24 Stunden
+    if (diffHours < 24) {
+      if (diffHours === 0) {
+        return `🔥 In ${diffMinutes}m ${diffSeconds}s - HEUTE!`;
       }
+      return `🔥 In ${diffHours}h ${diffMinutes}m - HEUTE!`;
     }
 
-    // Normale Anzeige für Spiele > 2 Tage
-    if (diffDays === 0) return '🔥 HEUTE ist Spieltag!';
-    if (diffDays === 1) return '⚡ MORGEN ist Spieltag!';
+    // Morgen: Zwischen 24 und 48 Stunden
+    if (diffHours < 48) {
+      return `⚡ In ${diffHours}h ${diffMinutes}m - MORGEN!`;
+    }
+
+    // Für mehr als 2 Tage: Zeige Tage
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     if (diffDays <= 3) return `⏰ In ${diffDays} Tagen`;
     if (diffDays <= 7) return `📅 In ${diffDays} Tagen`;
     return `📆 In ${diffDays} Tagen`;
+  };
+  
+  // Motivationsspruch basierend auf Countdown
+  const getMotivationQuote = () => {
+    if (!nextMatchAnySeason) return '';
+    
+    const now = new Date();
+    const diffTime = nextMatchAnySeason.date - now;
+    const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
+    
+    if (diffHours < 2) {
+      return '💪 Gleich geht\'s los! Gebt alles!';
+    } else if (diffHours < 12) {
+      return '🎯 Heute zeigen wir, was wir drauf haben!';
+    } else if (diffHours < 24) {
+      return '🔥 Noch heute ist der große Tag!';
+    } else if (diffHours < 48) {
+      return '⚡ Morgen wird es ernst - bereite dich vor!';
+    } else if (diffHours < 72) {
+      return '🎾 Bald ist Spieltag - mentale Vorbereitung läuft!';
+    } else {
+      return '🌟 Wir freuen uns aufs nächste Match!';
+    }
   };
 
   return (
@@ -350,8 +366,20 @@ function Dashboard() {
               <div style={{ fontSize: '0.75rem', color: '#1e40af', fontWeight: '600', marginBottom: '0.25rem' }}>
                 NÄCHSTES SPIEL
               </div>
-              <div style={{ fontSize: '0.85rem', color: '#1e40af', marginBottom: '0.25rem' }}>
+              <div style={{ fontSize: '0.85rem', color: '#1e40af', marginBottom: '0.5rem' }}>
                 {getNextMatchCountdown()}
+              </div>
+              <div style={{ 
+                fontSize: '0.8rem', 
+                color: '#059669', 
+                fontWeight: '600',
+                fontStyle: 'italic',
+                padding: '0.5rem',
+                background: 'rgba(5, 150, 105, 0.1)',
+                borderRadius: '6px',
+                borderLeft: '3px solid #059669'
+              }}>
+                {getMotivationQuote()}
               </div>
             </div>
 
