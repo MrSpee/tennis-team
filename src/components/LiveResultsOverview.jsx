@@ -39,12 +39,12 @@ const LiveResultsOverview = () => {
 
   // Prüfe ob Live-Button angezeigt werden soll (ab Match-Startzeit + 6 Stunden, oder bis Match beendet)
   const shouldShowLiveButton = () => {
-    if (!match || !match.date) {
+    if (!match || !match.match_date) {
       console.log('🔴 Live Button: No match or date');
       return false;
     }
     
-    const matchStartTime = new Date(match.date);
+    const matchStartTime = new Date(match.match_date);
     const now = new Date();
     
     // Prüfe ob heute der Spieltag ist
