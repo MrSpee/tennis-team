@@ -154,12 +154,23 @@ const Results = () => {
       if (guest >= 10 && guest >= home + 2) return 'guest';
       return null;
     } else {
+      // Tiebreak-Sieg: 7:6 oder 6:7
+      if ((home === 7 && guest === 6) || (guest === 7 && home === 6)) {
+        return home > guest ? 'home' : 'guest';
+      }
+      
+      // Normaler Satzgewinn ohne Tiebreak: 7:5 oder besser
       if ((home === 7 && guest <= 5) || (guest === 7 && home <= 5)) {
         return home > guest ? 'home' : 'guest';
       }
+      
+      // Normaler Satz gewonnen (6:0, 6:1, 6:2, 6:3, 6:4)
       if (home >= 6 && home >= guest + 2) return 'home';
       if (guest >= 6 && guest >= home + 2) return 'guest';
+      
+      // Tiebreak wird gerade gespielt (6:6)
       if (home === 6 && guest === 6) return null;
+      
       return null;
     }
   };
@@ -355,16 +366,49 @@ const Results = () => {
               const score = matchScores[match.id];
               const status = getMatchStatus(match);
               
-              const outcome = score && score.completed > 0 
-                ? (score.home > score.guest ? 'win' : score.home < score.guest ? 'loss' : 'draw')
-                : (status === 'live' ? 'live' : 'upcoming');
+              // Prüfe ob das Medenspiel komplett abgeschlossen ist (alle 6 bzw. 9 Spiele)
+              const expectedTotal = match.season === 'summer' ? 9 : 6;
+              const isMedenspieleCompleted = score && score.completed >= expectedTotal;
               
-              const outcomeClass = outcome === 'win' ? 'result-win' : 
-                                   outcome === 'loss' ? 'result-loss' : 
-                                   outcome === 'draw' ? 'result-draw' : 
-                                   outcome === 'live' ? 'result-live' :
-                                   'result-upcoming';
-              const outcomeLabel = outcome === 'win' ? '🏆 Sieg' : outcome === 'loss' ? '🏆 Niederlage' : outcome === 'draw' ? '🏆 Remis' : '';
+              // Outcome basierend auf Medenspiel-Status
+              let outcome, outcomeClass, outcomeLabel;
+              
+              if (!score || score.completed === 0) {
+                // Keine Ergebnisse
+                outcome = status === 'live' ? 'live' : 'upcoming';
+                outcomeClass = outcome === 'live' ? 'result-live' : 'result-upcoming';
+                outcomeLabel = '';
+              } else if (isMedenspieleCompleted) {
+                // ALLE Spiele abgeschlossen → Finaler Sieger
+                if (score.home > score.guest) {
+                  outcome = 'win';
+                  outcomeClass = 'result-win';
+                  outcomeLabel = '🏆 Sieg';
+                } else if (score.home < score.guest) {
+                  outcome = 'loss';
+                  outcomeClass = 'result-loss';
+                  outcomeLabel = '🏆 Niederlage';
+                } else {
+                  outcome = 'draw';
+                  outcomeClass = 'result-draw';
+                  outcomeLabel = '🏆 Remis';
+                }
+              } else {
+                // Spiel läuft noch (1-5 Spiele bei Winter, 1-8 bei Sommer)
+                if (score.home > score.guest) {
+                  outcome = 'leading';
+                  outcomeClass = 'result-leading';
+                  outcomeLabel = '🏠 Heim führt';
+                } else if (score.home < score.guest) {
+                  outcome = 'trailing';
+                  outcomeClass = 'result-trailing';
+                  outcomeLabel = '✈️ Gast führt';
+                } else {
+                  outcome = 'tied';
+                  outcomeClass = 'result-tied';
+                  outcomeLabel = '⚖️ Unentschieden';
+                }
+              }
 
               return (
                 <article 

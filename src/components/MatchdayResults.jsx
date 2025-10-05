@@ -230,20 +230,24 @@ const MatchdayResults = () => {
       return null;
     } else {
       // Normaler Satz: Bis 6 Spiele, mindestens 2 Spiele Vorsprung
-      // Tiebreak bei 6-6: Bis 7 Punkte
+      // Tiebreak bei 6-6: Einer muss 7 erreichen
       
-      // Tiebreak erkannt
+      // Tiebreak-Sieg: 7:6 oder 6:7
+      if ((home === 7 && guest === 6) || (guest === 7 && home === 6)) {
+        return home > guest ? 'home' : 'guest';
+      }
+      
+      // Normaler Satzgewinn ohne Tiebreak: 7:5 oder besser
       if ((home === 7 && guest <= 5) || (guest === 7 && home <= 5)) {
         return home > guest ? 'home' : 'guest';
       }
       
-      // Normaler Satz gewonnen
+      // Normaler Satz gewonnen (6:0, 6:1, 6:2, 6:3, 6:4)
       if (home >= 6 && home >= guest + 2) return 'home';
       if (guest >= 6 && guest >= home + 2) return 'guest';
       
-      // Tiebreak bei 6-6
+      // Tiebreak wird gerade gespielt (6:6)
       if (home === 6 && guest === 6) {
-        // Tiebreak wird gespielt - noch kein Gewinner
         return null;
       }
       
@@ -398,11 +402,31 @@ const MatchdayResults = () => {
       return '/home-face.jpg';
     };
     
-    // Bestimme zufälliges Face-Bild für Gegner
+    // Bestimme konsistentes Face-Bild für Gegner (basierend auf Spieler-ID)
     const getGuestPlayerImage = () => {
       const faceImages = ['/face1.jpg', '/face1.png', '/face2.jpg', '/face3.jpg', '/face4.jpg', '/face5.jpg'];
-      const randomIndex = Math.floor(Math.random() * faceImages.length);
-      return faceImages[randomIndex];
+      
+      // Für Einzel: Nutze guest_player_id
+      let playerId = result.guest_player_id;
+      
+      // Für Doppel: Nutze guest_player1_id
+      if (result.match_type === 'Doppel' && result.guest_player1_id) {
+        playerId = result.guest_player1_id;
+      }
+      
+      // Generiere konsistenten Index aus der Spieler-ID (Hash)
+      if (playerId) {
+        let hash = 0;
+        for (let i = 0; i < playerId.length; i++) {
+          hash = ((hash << 5) - hash) + playerId.charCodeAt(i);
+          hash = hash & hash; // Convert to 32bit integer
+        }
+        const index = Math.abs(hash) % faceImages.length;
+        return faceImages[index];
+      }
+      
+      // Fallback: face1.jpg
+      return '/face1.jpg';
     };
     
     const homeImageSrc = getHomePlayerImage();

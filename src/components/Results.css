@@ -137,6 +137,21 @@
   animation: pulse-accent 2s ease-in-out infinite;
 }
 
+.result-leading .mr-accent {
+  background: linear-gradient(180deg, #10b981, #22c55e);
+  opacity: 0.7;
+}
+
+.result-trailing .mr-accent {
+  background: linear-gradient(180deg, #ef4444, #fb7185);
+  opacity: 0.7;
+}
+
+.result-tied .mr-accent {
+  background: linear-gradient(180deg, #f59e0b, #fbbf24);
+  opacity: 0.7;
+}
+
 @keyframes pulse-accent {
   0%, 100% {
     opacity: 1;
@@ -311,6 +326,27 @@
   box-shadow: 0 8px 20px rgba(220, 38, 38, 0.18);
 }
 
+.result-leading .mr-score-box {
+  background: #ecfdf5;
+  border-color: #10b981;
+  box-shadow: 0 8px 20px rgba(16, 185, 129, 0.12);
+  opacity: 0.9;
+}
+
+.result-trailing .mr-score-box {
+  background: #fff1f2;
+  border-color: #ef4444;
+  box-shadow: 0 8px 20px rgba(239, 68, 68, 0.12);
+  opacity: 0.9;
+}
+
+.result-tied .mr-score-box {
+  background: #fffbeb;
+  border-color: #f59e0b;
+  box-shadow: 0 8px 20px rgba(245, 158, 11, 0.12);
+  opacity: 0.9;
+}
+
 .mr-score-box.upcoming {
   background: #f3f4f6;
   border-color: #d1d5db;
@@ -361,6 +397,21 @@
 
 .mr-outcome.draw {
   color: #92400e;
+}
+
+.mr-outcome.leading {
+  color: #059669;
+  font-weight: 700;
+}
+
+.mr-outcome.trailing {
+  color: #dc2626;
+  font-weight: 700;
+}
+
+.mr-outcome.tied {
+  color: #d97706;
+  font-weight: 700;
 }
 
 
