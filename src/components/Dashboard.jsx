@@ -104,15 +104,23 @@ function Dashboard() {
   });
   
   // Alle zukünftigen Spiele der aktuellen Saison
+  // Spiele bleiben bis 12 Stunden nach Startzeit sichtbar
   const upcomingMatches = matches
-    .filter(m => m.date > now && m.season === currentSeason)
+    .filter(m => {
+      const matchEndTime = new Date(m.date.getTime() + (12 * 60 * 60 * 1000)); // +12 Stunden
+      return matchEndTime > now && m.season === currentSeason;
+    })
     .sort((a, b) => a.date - b.date);
 
   console.log('🔵 Upcoming matches for', currentSeason, ':', upcomingMatches.length);
 
   // Für Countdown: Das allernächste Spiel (egal welche Saison)
+  // Bleibt auch 12 Stunden nach Start sichtbar
   const nextMatchAnySeason = matches
-    .filter(m => m.date > now)
+    .filter(m => {
+      const matchEndTime = new Date(m.date.getTime() + (12 * 60 * 60 * 1000)); // +12 Stunden
+      return matchEndTime > now;
+    })
     .sort((a, b) => a.date - b.date)[0];
   
   const notPlayedThisSeason = upcomingMatches.length;
@@ -173,6 +181,28 @@ function Dashboard() {
     const diffMinutes = Math.floor((diffTime % (1000 * 60 * 60)) / (1000 * 60));
     const diffSeconds = Math.floor((diffTime % (1000 * 60)) / 1000);
 
+    // Spiel hat bereits begonnen (negative Zeit)
+    if (diffHours < 0) {
+      const elapsedTime = Math.abs(diffTime);
+      const elapsedHours = Math.floor(elapsedTime / (1000 * 60 * 60));
+      const elapsedMinutes = Math.floor((elapsedTime % (1000 * 60 * 60)) / (1000 * 60));
+      const startTime = format(nextMatchAnySeason.date, 'HH:mm');
+      
+      // Debug: Zeige tatsächliche Zeiten
+      console.log('⏰ Zeitvergleich:', {
+        jetzt: now.toLocaleString('de-DE'),
+        spielStart: nextMatchAnySeason.date.toLocaleString('de-DE'),
+        diffTime,
+        elapsedHours,
+        elapsedMinutes
+      });
+      
+      if (elapsedHours === 0) {
+        return `🎾 Spiel begann um ${startTime} Uhr (vor ${elapsedMinutes}m)`;
+      }
+      return `🎾 Spiel begann um ${startTime} Uhr (vor ${elapsedHours}h ${elapsedMinutes}m)`;
+    }
+
     // Heute: Weniger als 24 Stunden
     if (diffHours < 24) {
       if (diffHours === 0) {
@@ -200,7 +230,37 @@ function Dashboard() {
     const now = new Date();
     const diffTime = nextMatchAnySeason.date - now;
     const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
+    const hoursAfterStart = Math.abs(diffHours); // Positive Stunden nach Start
     
+    // Spiel läuft bereits (negative diffHours = Startzeit ist vorbei)
+    if (diffHours < 0) {
+      const duringMatchTexts = [
+        '🎾 Das Spiel läuft! Drückt die Daumen!',
+        '🔥 Jetzt wird gespielt! Los geht\'s Team!',
+        '⚡ Action auf dem Platz! Kämpft bis zum Ende!',
+        '💪 Volles Risiko! Zeigt was ihr könnt!',
+        '🏆 Das Match ist im Gange - Sieg ist möglich!',
+        '🎯 Jetzt heißt es Vollgas geben!',
+        '🌟 Die Jungs sind auf dem Court - Daumen drücken!',
+        '🚀 Es geht um jeden Punkt! Auf geht\'s!'
+      ];
+      
+      // Nach 6 Stunden andere Texte (wahrscheinlich Match vorbei)
+      if (hoursAfterStart > 6) {
+        const afterMatchTexts = [
+          '📊 Wie lief\'s? Schau dir die Ergebnisse an!',
+          '🎾 Match vorbei - hoffentlich erfolgreich!',
+          '💭 Zeit für die Analyse - wie war das Spiel?',
+          '🏆 Ergebnisse prüfen und feiern (hoffentlich)!',
+          '⚡ Nachbesprechung - was können wir besser machen?'
+        ];
+        return afterMatchTexts[Math.floor(Math.random() * afterMatchTexts.length)];
+      }
+      
+      return duringMatchTexts[Math.floor(Math.random() * duringMatchTexts.length)];
+    }
+    
+    // Spiel steht noch bevor
     if (diffHours < 2) {
       return '💪 Gleich geht\'s los! Gebt alles!';
     } else if (diffHours < 12) {
@@ -208,7 +268,7 @@ function Dashboard() {
     } else if (diffHours < 24) {
       return '🔥 Noch heute ist der große Tag!';
     } else if (diffHours < 48) {
-      return '⚡ Morgen wird es ernst - bereite dich vor!';
+      return '⚡ Morgen wird es ernst - bereitet euch vor!';
     } else if (diffHours < 72) {
       return '🎾 Bald ist Spieltag - mentale Vorbereitung läuft!';
     } else {
