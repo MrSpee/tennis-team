@@ -103,6 +103,14 @@
   background: #f9fafb;
   border-radius: 8px;
   border-top: 1px solid #e5e7eb;
+  gap: 1rem;
+}
+
+.form-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
 }
 
 .form-label {
@@ -115,6 +123,30 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.magic-button {
+  padding: 0.5rem 1rem;
+  background: linear-gradient(135deg, #a855f7, #9333ea);
+  color: white;
+  border: none;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(168, 85, 247, 0.3);
+  white-space: nowrap;
+}
+
+.magic-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(168, 85, 247, 0.4);
+  background: linear-gradient(135deg, #9333ea, #7e22ce);
+}
+
+.magic-button:active {
+  transform: translateY(0);
 }
 
 .form-trend {
@@ -271,6 +303,11 @@
   
   .form-indicator {
     padding: 0.5rem;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  
+  .form-content {
     flex-direction: column;
     gap: 0.5rem;
     align-items: flex-start;
@@ -294,5 +331,10 @@
   
   .form-emoji {
     font-size: 1rem;
+  }
+  
+  .magic-button {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.75rem;
   }
 }

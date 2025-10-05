@@ -199,6 +199,173 @@ function Rankings() {
     return '#f59e0b'; // Orange
   };
 
+  // ==========================================
+  // LK-BERECHNUNGS-FUNKTIONEN (M40/H40)
+  // ==========================================
+  
+  const SEASON_START = new Date('2025-09-29'); // Saison-Start
+  const AGE_CLASS_FACTOR = 0.8; // M40/H40
+  
+  // Punktewert P (quadratische Approximation)
+  const pointsP = (diff) => {
+    if (diff <= -4) return 10;
+    if (diff >= 4) return 110;
+    
+    if (diff < 0) {
+      const t = (diff + 4) / 4;
+      return 10 + 40 * (t * t);
+    }
+    const t = diff / 4;
+    return 50 + 60 * (t * t);
+  };
+  
+  // Hürdenwert H
+  const hurdleH = (ownLK) => {
+    return 50 + 12.5 * (25 - ownLK);
+  };
+  
+  // Match-Verbesserung berechnen
+  const calcMatchImprovement = (ownLK, oppLK, isTeamMatch = true) => {
+    const diff = ownLK - oppLK;
+    const P = pointsP(diff);
+    const A = AGE_CLASS_FACTOR;
+    const H = hurdleH(ownLK);
+    
+    let improvement = (P * A) / H;
+    
+    if (isTeamMatch) improvement *= 1.1; // +10% Mannschaftsspiel-Bonus
+    
+    return Math.max(0, Number(improvement.toFixed(3)));
+  };
+  
+  // Wöchentlicher Abbau seit Saison-Start
+  const getWeeklyDecay = () => {
+    const now = new Date();
+    const diffTime = now - SEASON_START;
+    const weeks = Math.floor(diffTime / (7 * 24 * 60 * 60 * 1000));
+    return 0.025 * weeks;
+  };
+  
+  // Sichtbare LK (1 Nachkommastelle, abgeschnitten)
+  const visibleLK = (begleitLK) => {
+    return Math.floor(begleitLK * 10) / 10;
+  };
+  
+  // LK für einen Spieler neu berechnen
+  const calculatePlayerLK = async (player) => {
+    try {
+      console.log('🔮 Berechne LK für:', player.name);
+      
+      // Start-LK
+      const startLK = parseFloat(player.season_start_lk?.replace('LK ', '') || '25');
+      let begleitLK = startLK;
+      
+      console.log('📊 Start-LK:', startLK);
+      
+      // Lade alle Matches der aktuellen Saison
+      const now = new Date();
+      const currentMonth = now.getMonth();
+      const currentSeason = (currentMonth >= 4 && currentMonth <= 7) ? 'summer' : 'winter';
+      
+      const seasonMatches = matches.filter(m => m.season === currentSeason);
+      
+      // Lade alle match_results wo der Spieler beteiligt war
+      let totalImprovements = 0;
+      let matchesPlayed = 0;
+      
+      for (const match of seasonMatches) {
+        const { data: resultsData, error } = await supabase
+          .from('match_results')
+          .select('*, opponent_players!guest_player_id(lk), opponent_players!guest_player1_id(lk)')
+          .eq('match_id', match.id)
+          .or(`home_player_id.eq.${player.id},home_player1_id.eq.${player.id},home_player2_id.eq.${player.id}`);
+        
+        if (!error && resultsData) {
+          for (const result of resultsData) {
+            if (result.winner === 'home') {
+              // Spieler hat gewonnen!
+              matchesPlayed++;
+              
+              // Hole Gegner-LK
+              let oppLK = 25; // Fallback
+              if (result.match_type === 'Einzel') {
+                const oppData = await supabase
+                  .from('opponent_players')
+                  .select('lk')
+                  .eq('id', result.guest_player_id)
+                  .single();
+                if (oppData.data?.lk) {
+                  oppLK = parseFloat(oppData.data.lk.replace('LK', '').trim());
+                }
+              } else {
+                // Doppel: Durchschnitt der beiden Gegner
+                const opp1Data = await supabase
+                  .from('opponent_players')
+                  .select('lk')
+                  .eq('id', result.guest_player1_id)
+                  .single();
+                const opp2Data = await supabase
+                  .from('opponent_players')
+                  .select('lk')
+                  .eq('id', result.guest_player2_id)
+                  .single();
+                
+                const lk1 = parseFloat(opp1Data.data?.lk?.replace('LK', '').trim() || '25');
+                const lk2 = parseFloat(opp2Data.data?.lk?.replace('LK', '').trim() || '25');
+                oppLK = (lk1 + lk2) / 2;
+              }
+              
+              const improvement = calcMatchImprovement(begleitLK, oppLK, true);
+              begleitLK -= improvement;
+              totalImprovements += improvement;
+              
+              console.log(`  ✅ Sieg gegen LK ${oppLK.toFixed(1)} → -${improvement.toFixed(3)}`);
+            }
+          }
+        }
+      }
+      
+      // Wöchentlicher Abbau
+      const decay = getWeeklyDecay();
+      begleitLK = Math.min(25, begleitLK + decay);
+      
+      console.log('📈 Gesamt-Verbesserung:', totalImprovements.toFixed(3));
+      console.log('📉 Wöchentlicher Abbau:', decay.toFixed(3));
+      console.log('🎯 Neue Begleit-LK:', begleitLK.toFixed(3));
+      
+      // Sichtbare LK (1 Nachkommastelle)
+      const newLK = visibleLK(begleitLK);
+      console.log('✨ Neue sichtbare LK:', newLK.toFixed(1));
+      
+      // In Datenbank speichern
+      const { error: updateError } = await supabase
+        .from('players')
+        .update({ current_lk: `LK ${newLK.toFixed(1)}` })
+        .eq('id', player.id);
+      
+      if (updateError) {
+        console.error('❌ Error updating LK:', updateError);
+        alert('Fehler beim Speichern der LK!');
+        return;
+      }
+      
+      alert(`🎾 Neue LK für ${player.name}: LK ${newLK.toFixed(1)}\n\n` +
+            `📊 Details:\n` +
+            `Start: LK ${startLK}\n` +
+            `Matches: ${matchesPlayed}\n` +
+            `Verbesserung: -${totalImprovements.toFixed(3)}\n` +
+            `Abbau: +${decay.toFixed(3)}\n` +
+            `Begleit-LK: ${begleitLK.toFixed(3)}`);
+      
+      // Lade Spieler neu
+      window.location.reload();
+      
+    } catch (error) {
+      console.error('❌ Error calculating LK:', error);
+      alert('Fehler bei der LK-Berechnung!');
+    }
+  };
+
   return (
     <div className="rankings-page container">
       <header className="page-header fade-in">
@@ -233,7 +400,7 @@ function Rankings() {
           <p style={{ margin: 0, color: '#78350f', fontSize: '0.85rem', lineHeight: '1.6' }}>
             Anhand eurer Medenspiel-Ergebnisse berechnet. Wer grad on fire ist, sieht man hier! 🔥
           </p>
-        </div>
+      </div>
       )}
 
       <div className="rankings-list fade-in">
@@ -256,7 +423,7 @@ function Rankings() {
                   </span>
                 </div>
               </div>
-              
+
               <div className="form-indicator">
                 <span className="form-label">Formkurve:</span>
                 <span className="form-trend neutral">-</span>
@@ -278,17 +445,17 @@ function Rankings() {
               const matchStats = getPlayerMatchStats(player.id);
               
               return (
-                <div key={player.id} className="ranking-card card">
+              <div key={player.id} className="ranking-card card">
                   <div className="ranking-card-header">
                     <h3 className="player-name-large">
                       <span className="position-number">{position}</span> - {player.name}
-                      {player.role === 'captain' && <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem', color: '#f59e0b' }}>⭐ Captain</span>}
-                    </h3>
-                    <div className="player-stats">
+                    {player.role === 'captain' && <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem', color: '#f59e0b' }}>⭐ Captain</span>}
+                  </h3>
+                  <div className="player-stats">
                       {player.current_lk || player.ranking ? (
                         <>
-                          <span 
-                            className="ranking-badge"
+                      <span 
+                        className="ranking-badge"
                             style={{ backgroundColor: getRankingColor(player.current_lk || player.ranking) }}
                             title="Aktuelle Live-LK"
                           >
@@ -300,15 +467,15 @@ function Rankings() {
                               title="Saison-Start LK"
                             >
                               Start: {player.season_start_lk}
-                            </span>
+                      </span>
                           )}
                         </>
-                      ) : (
-                        <span className="ranking-badge" style={{ backgroundColor: '#ccc' }}>
-                          Kein LK
-                        </span>
-                      )}
-                      <span className="points-badge">
+                    ) : (
+                      <span className="ranking-badge" style={{ backgroundColor: '#ccc' }}>
+                        Kein LK
+                      </span>
+                    )}
+                    <span className="points-badge">
                         <span>🎾 {matchStats.available}/{matchStats.total}</span>
                       </span>
                       {matchStats.wins > 0 && (
@@ -319,27 +486,39 @@ function Rankings() {
                       {matchStats.losses > 0 && (
                         <span className="wins-losses-badge losses-only">
                           ❌ {matchStats.losses} {matchStats.losses === 1 ? 'Niederlage' : 'Niederlagen'}
-                        </span>
+                    </span>
                       )}
                     </div>
                   </div>
                   
                   <div className="form-indicator">
-                    <span className="form-label">Form:</span>
-                    <div className="form-display">
-                      {(() => {
-                        const form = getPlayerForm(matchStats.wins, matchStats.losses);
-                        return (
-                          <>
-                            <span className={`form-trend ${form.trend}`}>
-                              {form.icon}
-                            </span>
-                            <span className="form-text">{form.text}</span>
-                            <span className="form-emoji">{form.emoji}</span>
-                          </>
-                        );
-                      })()}
-                    </div>
+                    <div className="form-content">
+                      <span className="form-label">Form:</span>
+                      <div className="form-display">
+                        {(() => {
+                          const form = getPlayerForm(matchStats.wins, matchStats.losses);
+                          return (
+                            <>
+                              <span className={`form-trend ${form.trend}`}>
+                                {form.icon}
+                              </span>
+                              <span className="form-text">{form.text}</span>
+                              <span className="form-emoji">{form.emoji}</span>
+                            </>
+                          );
+                        })()}
+                </div>
+                  </div>
+                    <button 
+                      className="magic-button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        calculatePlayerLK(player);
+                      }}
+                      title="LK neu berechnen"
+                    >
+                      🔮 LK
+                    </button>
                   </div>
                 </div>
               );
