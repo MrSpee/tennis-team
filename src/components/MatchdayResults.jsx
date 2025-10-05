@@ -28,17 +28,33 @@ const MatchdayResults = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchId]);
 
-  // Timer für Live-Updates und Countdown (jede Sekunde für präzisen Countdown)
+  // Timer für Live-Updates und Countdown (nur wenn Spiel nicht abgeschlossen)
   useEffect(() => {
+    // Prüfe ob Spiel abgeschlossen ist
+    const hasAnyInProgress = matchResults.some(result => {
+      const matchWinner = calculateMatchWinnerFromSets(result);
+      const hasStarted = result.set1_home > 0 || result.set1_guest > 0;
+      return hasStarted && matchWinner === null;
+    });
+    
+    const completed = totalScore.completed;
+    const isMedenspielCompleted = completed >= 6 && !hasAnyInProgress;
+    
+    // Timer nur starten, wenn Spiel NICHT abgeschlossen ist
+    if (isMedenspielCompleted) {
+      console.log('✅ Medenspiel abgeschlossen - Timer gestoppt');
+      return; // Kein Timer!
+    }
+    
     const interval = setInterval(() => {
       setCurrentTime(new Date());
     }, 1000); // Aktualisiert jede Sekunde
 
     return () => clearInterval(interval);
-  }, []);
+  }, [matchResults, totalScore]);
 
   // Countdown-Funktion für Match-Start
-  const getMatchCountdown = () => {
+  const getMatchCountdown = (isCompleted) => {
     if (!match || !match.match_date) {
       return 'Kein Datum verfügbar';
     }
@@ -47,6 +63,11 @@ const MatchdayResults = () => {
     const now = currentTime;
     const diffTime = matchStartTime - now;
     const diffSeconds = Math.floor(diffTime / 1000);
+    
+    // Spiel ist abgeschlossen - zeige finale Zeit
+    if (isCompleted) {
+      return `✅ Medenspiel beendet`;
+    }
     
     // Spiel hat bereits begonnen (negative Zeit)
     if (diffSeconds < 0) {
@@ -89,7 +110,6 @@ const MatchdayResults = () => {
   // Prüfe ob Live-Button angezeigt werden soll (ab Match-Startzeit + 6 Stunden, oder bis Match beendet)
   const shouldShowLiveButton = () => {
     if (!match || !match.match_date) {
-      console.log('🔴 Live Button: No match or date');
       return false;
     }
     
@@ -99,11 +119,6 @@ const MatchdayResults = () => {
     // Prüfe ob heute der Spieltag ist
     const isMatchDay = matchStartTime.toDateString() === now.toDateString();
     if (!isMatchDay) {
-      console.log('🔴 Live Button: Not match day', {
-        matchStartTime: matchStartTime.toDateString(),
-        today: now.toDateString(),
-        isMatchDay
-      });
       return false;
     }
     
@@ -116,19 +131,7 @@ const MatchdayResults = () => {
     // Prüfe ob 6 Spiele bereits beendet sind (Match ist komplett)
     const isMatchFullyCompleted = totalScore.completed >= 6;
     
-    const shouldShow = isWithinMatchTime && !isMatchFullyCompleted;
-    
-    console.log('🟢 Live Button Check:', {
-      matchStartTime: matchStartTime.toLocaleString('de-DE'),
-      matchEndTime: matchEndTime.toLocaleString('de-DE'),
-      currentTime: now.toLocaleString('de-DE'),
-      isWithinMatchTime,
-      completedMatches: totalScore.completed,
-      isMatchFullyCompleted,
-      shouldShow
-    });
-    
-    return shouldShow;
+    return isWithinMatchTime && !isMatchFullyCompleted;
   };
 
   const loadData = async () => {
@@ -352,19 +355,6 @@ const MatchdayResults = () => {
     const isCompleted = matchWinner !== null;
     const hasStarted = result.set1_home > 0 || result.set1_guest > 0;
     const matchStatus = isCompleted ? 'completed' : (hasStarted ? 'in_progress' : (result.status || 'pending'));
-    
-    // Debug: Logge Match-Winner für Entwicklung
-    console.log(`Match ${matchNumber} - Winner: ${matchWinner}, Sets: ${result.set1_home}-${result.set1_guest}, ${result.set2_home}-${result.set2_guest}, ${result.set3_home}-${result.set3_guest}`);
-    
-    // Debug: Logge Spieler-IDs und verfügbare Spieler
-    console.log('🔍 Match', matchNumber, 'Debug:', {
-      result_home_player_id: result.home_player_id,
-      result_home_player1_id: result.home_player1_id,
-      result_home_player2_id: result.home_player2_id,
-      match_type: result.match_type,
-      availableHomePlayers: Object.keys(homePlayers),
-      homePlayersData: homePlayers
-    });
 
     // Spielernamen aus den geladenen Maps extrahieren
     const homePlayerName = result.match_type === 'Einzel' 
@@ -385,7 +375,6 @@ const MatchdayResults = () => {
       // Für Einzel: Prüfe ob Spieler ein Profilbild hat
       if (result.match_type === 'Einzel' && result.home_player_id) {
         const homePlayer = homePlayers[result.home_player_id];
-        console.log('🖼️ Checking image for:', homePlayer?.name, 'profile_image:', homePlayer?.profile_image);
         if (homePlayer && homePlayer.profile_image) {
           return homePlayer.profile_image;
         }
@@ -394,7 +383,6 @@ const MatchdayResults = () => {
       if (result.match_type === 'Doppel') {
         const player1 = homePlayers[result.home_player1_id];
         const player2 = homePlayers[result.home_player2_id];
-        console.log('🖼️ Checking images for doubles:', player1?.name, player1?.profile_image, '&', player2?.name, player2?.profile_image);
         if (player1 && player1.profile_image) return player1.profile_image;
         if (player2 && player2.profile_image) return player2.profile_image;
       }
@@ -601,13 +589,37 @@ const MatchdayResults = () => {
   const matchWinner = totalScore.home > totalScore.guest ? 'home' : 
                      totalScore.guest > totalScore.home ? 'guest' : 'tie';
   
-  // Debug: Logge den Status
-  console.log('Medenspiel Status:', {
-    completed: totalScore.completed,
-    hasAnyInProgressMatch,
-    isMatchCompleted,
-    totalScore: `${totalScore.home}:${totalScore.guest}`
-  });
+  // Humorvoller Status-Text basierend auf Gesamtergebnis
+  const getOverallMatchStatus = () => {
+    if (!isMatchCompleted) {
+      // Spiel läuft noch
+      if (totalScore.home === totalScore.guest) {
+        return 'Unentschieden';
+      }
+      return totalScore.home > totalScore.guest ? 'Heim führt' : 'Auswärts führt';
+    }
+    
+    // Spiel ist abgeschlossen
+    const diff = Math.abs(totalScore.home - totalScore.guest);
+    
+    if (matchWinner === 'tie') {
+      return '3:3 - Unentschieden! Spannend bis zum Ende!';
+    }
+    
+    if (matchWinner === 'home') {
+      // Wir haben gewonnen
+      if (diff >= 5) return `${totalScore.home}:${totalScore.guest} - Dominanter Sieg! 💪`;
+      if (diff >= 3) return `${totalScore.home}:${totalScore.guest} - Deutlicher Sieg! 🎉`;
+      if (diff === 2) return `${totalScore.home}:${totalScore.guest} - Verdienter Sieg! 🏆`;
+      return `${totalScore.home}:${totalScore.guest} - Knapper Sieg! 😅`;
+    }
+    
+    // Wir haben verloren
+    if (diff >= 5) return `${totalScore.home}:${totalScore.guest} - Herbe Niederlage... 😢`;
+    if (diff >= 3) return `${totalScore.home}:${totalScore.guest} - Deutliche Niederlage 😔`;
+    if (diff === 2) return `${totalScore.home}:${totalScore.guest} - Verloren, aber nicht chancenlos 💪`;
+    return `${totalScore.home}:${totalScore.guest} - Knapp verloren 😬`;
+  };
 
   return (
     <div className="live-results-page">
@@ -646,7 +658,7 @@ const MatchdayResults = () => {
             <div className="header-center">
               <div className="modern-time">
                 <div className="countdown-display">
-                  {getMatchCountdown()}
+                  {getMatchCountdown(isMatchCompleted)}
                 </div>
                 <div className="date-display-small">
                   {match?.match_date && new Date(match.match_date).toLocaleDateString('de-DE', {
@@ -702,11 +714,14 @@ const MatchdayResults = () => {
           </div>
 
           <div className="mh-status">
-            <span className="mh-trophy" aria-hidden>🏆</span>
+            <span className="mh-trophy" aria-hidden>
+              {isMatchCompleted 
+                ? (matchWinner === 'home' ? '🏆' : matchWinner === 'guest' ? '😢' : '🤝')
+                : '🏆'
+              }
+            </span>
             <span className="mh-status-text">
-              {totalScore.home === totalScore.guest ? 'Unentschieden' :
-               totalScore.home > totalScore.guest ? 'Heim führt' :
-               'Auswärts führt'}
+              {getOverallMatchStatus()}
             </span>
           </div>
         </section>

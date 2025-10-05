@@ -25,6 +25,34 @@
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* Mobile: Buttons untereinander und zentriert */
+@media (max-width: 640px) {
+  .sort-buttons {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+  
+  .sort-buttons .btn {
+    width: 100%;
+    justify-content: center;
+  }
+  
+  /* Reihenfolge: Team intim -> Aufsteiger -> TVM */
+  .btn-team-intim {
+    order: 1;
+  }
+  
+  .btn-aufsteiger {
+    order: 2;
+  }
+  
+  .btn-tvm {
+    order: 3;
+  }
 }
 
 .rankings-info {
@@ -147,6 +175,470 @@
 
 .magic-button:active {
   transform: translateY(0);
+}
+
+/* LK-Berechnung Akkordeon - Neues cleanes Design */
+.lk-calculation-accordion {
+  margin-top: 1.5rem;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border: 2px solid #3b82f6;
+  border-radius: 16px;
+  padding: 1.5rem;
+  animation: slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.15);
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: 500px;
+  }
+}
+
+.accordion-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid rgba(59, 130, 246, 0.3);
+}
+
+.accordion-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.accordion-icon {
+  font-size: 1.5rem;
+  animation: bounce-small 2s infinite;
+}
+
+.accordion-header h4 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #1e40af;
+}
+
+.close-accordion {
+  background: #ef4444;
+  color: white;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+}
+
+.close-accordion:hover {
+  background: #dc2626;
+  transform: rotate(90deg) scale(1.1);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+}
+
+.accordion-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* Result Box - Highlight */
+.calc-result-box {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: white;
+  padding: 1.25rem;
+  border-radius: 12px;
+  border: 3px solid #10b981;
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.2);
+}
+
+.calc-result-icon {
+  font-size: 2.5rem;
+  animation: bounce-small 1.5s infinite;
+}
+
+.calc-result-content {
+  flex: 1;
+}
+
+.result-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+}
+
+.result-value {
+  font-size: 2rem;
+  font-weight: 900;
+  color: #10b981;
+  text-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+}
+
+/* Improvement Statement */
+.improvement-statement {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border-radius: 8px;
+  border: 1px solid #f59e0b;
+}
+
+.statement-icon {
+  font-size: 1.2rem;
+}
+
+.statement-text {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #92400e;
+}
+
+.statement-emoji {
+  font-size: 1.1rem;
+}
+
+/* Details Section */
+.calc-section-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #1e40af;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.calc-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 1rem;
+  border-radius: 10px;
+}
+
+.calc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  background: white;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.calc-row:hover {
+  background: #f9fafb;
+  transform: translateX(4px);
+}
+
+.calc-row.highlight {
+  background: #ecfdf5;
+  border: 1px solid #10b981;
+}
+
+.calc-row.success-row {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  border: 2px solid #10b981;
+}
+
+.calc-row.highlight-improvement {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border: 2px solid #f59e0b;
+}
+
+.calc-label {
+  font-size: 0.85rem;
+  color: #4b5563;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.calc-value {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.calc-value.success {
+  color: #059669;
+  font-size: 1.1rem;
+}
+
+.calc-value.decay {
+  color: #dc2626;
+}
+
+.calc-value.technical {
+  font-family: 'Courier New', monospace;
+  color: #6366f1;
+  background: #f3f4f6;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+}
+
+/* Divider */
+.calc-divider {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #cbd5e1, transparent);
+  margin: 0.5rem 0;
+}
+
+/* Info Box */
+.calc-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  background: rgba(59, 130, 246, 0.1);
+  padding: 0.75rem;
+  border-radius: 8px;
+  border-left: 3px solid #3b82f6;
+  margin-top: 0.5rem;
+}
+
+.info-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.info-text {
+  font-size: 0.8rem;
+  color: #1e40af;
+  line-height: 1.5;
+}
+
+/* Match Details Section */
+.match-details-section {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.match-detail-card {
+  background: white;
+  border: 2px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.match-detail-card:hover {
+  border-color: #3b82f6;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+  transform: translateY(-2px);
+}
+
+.match-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+  border-bottom: 2px solid #d1d5db;
+}
+
+.match-detail-type {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #1f2937;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.match-detail-opponent {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.match-detail-body {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.match-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem;
+  background: #f9fafb;
+  border-radius: 6px;
+}
+
+.match-detail-row.highlight-green {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  border: 1px solid #10b981;
+}
+
+.match-detail-row.doppel-info {
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border: 1px solid #3b82f6;
+}
+
+.detail-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+.detail-value {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.detail-value.success {
+  color: #059669;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.detail-value.bold {
+  font-weight: 700;
+  color: #1e40af;
+}
+
+/* Opponent Details - Doppel Gegner Liste */
+.opponent-details {
+  background: #f9fafb;
+  border: 2px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin: 0.5rem 0;
+}
+
+.opponent-header {
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #d1d5db;
+}
+
+.opponent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.opponent-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.75rem;
+  align-items: center;
+  background: white;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+}
+
+.opponent-number {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #6b7280;
+  width: 20px;
+  text-align: center;
+}
+
+.opponent-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1f2937;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opponent-lk {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #3b82f6;
+  background: #eff6ff;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.opponent-average {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #f59e0b;
+  margin-top: 0.25rem;
+}
+
+.average-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #92400e;
+}
+
+.average-value {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #92400e;
+}
+
+/* Mobile Optimierung für Gegner-Details */
+@media (max-width: 640px) {
+  .opponent-item {
+    grid-template-columns: auto 1fr auto;
+    gap: 0.5rem;
+    padding: 0.5rem;
+  }
+  
+  .opponent-name {
+    font-size: 0.8rem;
+  }
+  
+  .opponent-lk {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.4rem;
+  }
+  
+  .opponent-average {
+    flex-direction: column;
+    gap: 0.25rem;
+    text-align: center;
+  }
+  
+  .average-label,
+  .average-value {
+    font-size: 0.75rem;
+  }
 }
 
 .form-trend {
@@ -335,6 +827,71 @@
   
   .magic-button {
     padding: 0.4rem 0.75rem;
+    font-size: 0.75rem;
+  }
+}
+
+/* Button Inactive State */
+.btn-inactive {
+  opacity: 0.7;
+}
+
+.btn-inactive:hover {
+  opacity: 1;
+}
+
+/* Aufsteiger Badge */
+.aufsteiger-badge {
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #fff !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.improvement-value {
+  padding: 0.4rem 0.8rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 1rem;
+  font-weight: 700;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Improvement Badge - zeigt Verbesserung mit Pfeil */
+.improvement-badge {
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  animation: badge-pop 0.3s ease;
+}
+
+@keyframes badge-pop {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Mobile Optimierung für Improvement Badge */
+@media (max-width: 640px) {
+  .improvement-badge {
+    padding: 0.3rem 0.6rem;
     font-size: 0.75rem;
   }
 }

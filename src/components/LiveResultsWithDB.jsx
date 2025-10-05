@@ -448,23 +448,27 @@ const LiveResultsWithDB = () => {
           return null;
         } else {
           // Normaler Satz: Bis 6 Spiele, mindestens 2 Spiele Vorsprung
-          // Tiebreak bei 6-6: Bis 7 Punkte
-
-          // Tiebreak erkannt
+          // Tiebreak bei 6-6: Einer muss 7 erreichen
+          
+          // Tiebreak-Sieg: 7:6 oder 6:7
+          if ((home === 7 && guest === 6) || (guest === 7 && home === 6)) {
+            return home > guest ? 'home' : 'guest';
+          }
+          
+          // Normaler Satzgewinn ohne Tiebreak: 7:5 oder besser
           if ((home === 7 && guest <= 5) || (guest === 7 && home <= 5)) {
             return home > guest ? 'home' : 'guest';
           }
-
-          // Normaler Satz gewonnen
+          
+          // Normaler Satz gewonnen (6:0, 6:1, 6:2, 6:3, 6:4)
           if (home >= 6 && home >= guest + 2) return 'home';
           if (guest >= 6 && guest >= home + 2) return 'guest';
-
-          // Tiebreak bei 6-6
+          
+          // Tiebreak wird gerade gespielt (6:6)
           if (home === 6 && guest === 6) {
-            // Tiebreak wird gespielt - noch kein Gewinner
             return null;
           }
-
+          
           return null; // Satz noch nicht beendet
         }
       };

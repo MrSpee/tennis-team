@@ -26,6 +26,18 @@ export function DataProvider({ children }) {
 
     loadAllData();
     setupRealtimeSubscriptions();
+    
+    // Listen für manuelle Player-Reloads (z.B. nach LK-Berechnung)
+    const handleReloadPlayers = () => {
+      console.log('🔄 Manual player reload triggered');
+      loadPlayers();
+    };
+    
+    window.addEventListener('reloadPlayers', handleReloadPlayers);
+    
+    return () => {
+      window.removeEventListener('reloadPlayers', handleReloadPlayers);
+    };
   }, [configured]);
 
   // Lade alle Daten
