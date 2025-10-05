@@ -412,3 +412,61 @@
     font-size: 1rem;
   }
 }
+
+/* Beendete Spiele Styling */
+.match-preview-card.finished-match {
+  opacity: 0.85;
+  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+  border: 2px solid #e5e7eb;
+}
+
+.match-preview-card.finished-match:hover {
+  opacity: 1;
+  border-color: #10b981;
+}
+
+.match-date.finished {
+  background: linear-gradient(135deg, #d1d5db 0%, #9ca3af 100%);
+}
+
+.match-date.finished .date-day {
+  color: #1f2937;
+}
+
+.match-date.finished .date-month,
+.match-date.finished .date-year {
+  color: #4b5563;
+}
+
+.finished-badge {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* Mobile Anpassungen für beendete Spiele */
+@media (max-width: 640px) {
+  .finished-badge {
+    top: 0.75rem;
+    right: 0.75rem;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.7rem;
+  }
+}
+
+@media (max-width: 375px) {
+  .finished-badge {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.65rem;
+  }
+}

@@ -688,7 +688,7 @@ const MatchdayResults = () => {
       {/* Gesamtpunktzahl - Neues modernes Design */}
       <div className="mh-wrap">
         <div className="mh-headline">
-          <h1 className="mh-title">Aktueller Stand</h1>
+          <h1 className="mh-title">{isMatchCompleted ? 'Endergebnis' : 'Aktueller Stand'}</h1>
         </div>
 
         <section className="mh-card" role="region" aria-label="Scoreboard">
