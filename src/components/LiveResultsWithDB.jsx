@@ -3,11 +3,13 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, MessageCircle, Save } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { getOpponentPlayers } from '../services/liveResultsService';
+import { useAuth } from '../context/AuthContext';
 import './LiveResults.css';
 
 const LiveResultsWithDB = () => {
   const { matchId } = useParams();
   const navigate = useNavigate();
+  const { currentUser } = useAuth();
 
   // State für echte Daten
   const [match, setMatch] = useState(null);
@@ -22,8 +24,12 @@ const LiveResultsWithDB = () => {
 
   // Lade echte Daten aus der Datenbank
   useEffect(() => {
-    loadData();
-  }, [matchId]);
+    // Warte bis currentUser geladen ist, bevor wir Daten laden
+    if (matchId && currentUser) {
+      loadData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchId, currentUser]);
 
   const loadData = async () => {
     try {
