@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Calendar, Trophy, Table, Settings, User } from 'lucide-react';
+import { Home, Calendar, Trophy, Award, Settings, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import './Navigation.css';
 
@@ -18,14 +18,13 @@ function Navigation() {
         <span>Verfügbarkeit</span>
       </NavLink>
       
-      {/* Saison-Tab vorübergehend ausgeblendet */}
-      {/* <NavLink to="/league" className="nav-item">
-        <Table size={24} />
-        <span>Saison</span>
-      </NavLink> */}
+      <NavLink to="/results" className="nav-item">
+        <Trophy size={24} />
+        <span>Ergebnisse</span>
+      </NavLink>
       
       <NavLink to="/rankings" className="nav-item">
-        <Trophy size={24} />
+        <Award size={24} />
         <span>Rangliste</span>
       </NavLink>
       

@@ -14,7 +14,8 @@ import PlayerProfileSimple from './components/PlayerProfileSimple';
 import PasswordResetPage from './components/PasswordResetPage';
 import LiveResults from './components/LiveResults';
 import LiveResultsWithDB from './components/LiveResultsWithDB';
-import LiveResultsOverview from './components/LiveResultsOverview';
+import MatchdayResults from './components/MatchdayResults';
+import Results from './components/Results';
 import Navigation from './components/Navigation';
 import Header from './components/Header';
 import ScrollToTop from './components/ScrollToTop';
@@ -120,6 +121,12 @@ function AppContent() {
             </ProtectedRoute>
           } />
           
+          <Route path="/results" element={
+            <ProtectedRoute>
+              <Results />
+            </ProtectedRoute>
+          } />
+          
           <Route path="/profile" element={
             <ProtectedRoute>
               <SupabaseProfile />
@@ -136,7 +143,7 @@ function AppContent() {
           
           <Route path="/ergebnisse/:matchId" element={
             <ProtectedRoute>
-              <LiveResultsOverview />
+              <MatchdayResults />
             </ProtectedRoute>
           } />
           
@@ -149,7 +156,7 @@ function AppContent() {
           {/* Legacy routes for backward compatibility */}
           <Route path="/live-results/:matchId" element={
             <ProtectedRoute>
-              <LiveResultsOverview />
+              <MatchdayResults />
             </ProtectedRoute>
           } />
           

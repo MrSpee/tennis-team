@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabaseClient';
 import { useData } from '../context/DataContext';
 import './LiveResults.css';
 
-const LiveResultsOverview = () => {
+const MatchdayResults = () => {
   const { matchId } = useParams();
   const navigate = useNavigate();
   const { teamInfo } = useData();
@@ -28,14 +28,63 @@ const LiveResultsOverview = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchId]);
 
-  // Timer für Live-Updates (alle 30 Sekunden)
+  // Timer für Live-Updates und Countdown (jede Sekunde für präzisen Countdown)
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentTime(new Date());
-    }, 30000); // Aktualisiert alle 30 Sekunden
+    }, 1000); // Aktualisiert jede Sekunde
 
     return () => clearInterval(interval);
   }, []);
+
+  // Countdown-Funktion für Match-Start
+  const getMatchCountdown = () => {
+    if (!match || !match.match_date) {
+      return 'Kein Datum verfügbar';
+    }
+    
+    const matchStartTime = new Date(match.match_date);
+    const now = currentTime;
+    const diffTime = matchStartTime - now;
+    const diffSeconds = Math.floor(diffTime / 1000);
+    
+    // Spiel hat bereits begonnen (negative Zeit)
+    if (diffSeconds < 0) {
+      const elapsedTime = Math.abs(diffTime);
+      const elapsedHours = Math.floor(elapsedTime / (1000 * 60 * 60));
+      const elapsedMinutes = Math.floor((elapsedTime % (1000 * 60 * 60)) / (1000 * 60));
+      
+      if (elapsedHours === 0) {
+        return `🔴 Läuft seit ${elapsedMinutes} Min`;
+      }
+      return `🔴 Läuft seit ${elapsedHours}h ${elapsedMinutes}m`;
+    }
+    
+    // Mehr als 3 Tage (72 Stunden) entfernt
+    const diffHours = diffSeconds / 3600;
+    if (diffHours > 72) {
+      const diffDays = Math.ceil(diffHours / 24);
+      return `📅 In ${diffDays} Tagen`;
+    }
+    
+    // Zwischen 3 Tagen und 2 Stunden: Zeige nur Stunden
+    if (diffHours > 2) {
+      const hours = Math.floor(diffHours);
+      const minutes = Math.floor((diffHours - hours) * 60);
+      return `⏰ In ${hours}h ${minutes}m`;
+    }
+    
+    // Weniger als 2 Stunden: Zeige HH:MM:SS Countdown
+    const hours = Math.floor(diffSeconds / 3600);
+    const minutes = Math.floor((diffSeconds % 3600) / 60);
+    const seconds = diffSeconds % 60;
+    
+    const hoursStr = String(hours).padStart(2, '0');
+    const minutesStr = String(minutes).padStart(2, '0');
+    const secondsStr = String(seconds).padStart(2, '0');
+    
+    return `🔥 ${hoursStr}:${minutesStr}:${secondsStr}`;
+  };
 
   // Prüfe ob Live-Button angezeigt werden soll (ab Match-Startzeit + 6 Stunden, oder bis Match beendet)
   const shouldShowLiveButton = () => {
@@ -572,20 +621,17 @@ const LiveResultsOverview = () => {
             
             <div className="header-center">
               <div className="modern-time">
-                <div className="date-display">
-                  {currentTime.toLocaleDateString('de-DE', {
+                <div className="countdown-display">
+                  {getMatchCountdown()}
+                </div>
+                <div className="date-display-small">
+                  {match?.match_date && new Date(match.match_date).toLocaleDateString('de-DE', {
                     weekday: 'short',
                     day: '2-digit',
                     month: '2-digit',
-                    year: 'numeric'
-                  })}
-                </div>
-                <div className="time-display">
-                  {currentTime.toLocaleTimeString('de-DE', { 
-                    hour: '2-digit', 
-                    minute: '2-digit',
-                    second: '2-digit'
-                  })}
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })} Uhr
                 </div>
               </div>
             </div>
@@ -671,4 +717,4 @@ const LiveResultsOverview = () => {
   );
 };
 
-export default LiveResultsOverview;
+export default MatchdayResults;
