@@ -421,7 +421,10 @@ const LiveResultsOverview = () => {
             <div className="player-scores">
               <span className="score-number">{result.set1_home || '0'}</span>
               <span className="score-number">{result.set2_home || '0'}</span>
-              <span className="score-number">{result.set3_home || '0'}</span>
+              {/* Zeige dritten Satz nur, wenn er gespielt wurde */}
+              {(result.set3_home > 0 || result.set3_guest > 0) && (
+                <span className="score-number">{result.set3_home || '0'}</span>
+              )}
             </div>
           </div>
 
@@ -460,7 +463,10 @@ const LiveResultsOverview = () => {
             <div className="player-scores">
               <span className="score-number">{result.set1_guest || '0'}</span>
               <span className="score-number">{result.set2_guest || '0'}</span>
-              <span className="score-number">{result.set3_guest || '0'}</span>
+              {/* Zeige dritten Satz nur, wenn er gespielt wurde */}
+              {(result.set3_home > 0 || result.set3_guest > 0) && (
+                <span className="score-number">{result.set3_guest || '0'}</span>
+              )}
             </div>
           </div>
         </div>
