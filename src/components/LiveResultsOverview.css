@@ -350,6 +350,11 @@
 @media (max-width: 768px) {
   .live-overview {
     padding: 0.5rem;
+    padding-bottom: 180px;
+  }
+  
+  .matches-list {
+    padding-bottom: 3rem;
   }
   
   .live-header {

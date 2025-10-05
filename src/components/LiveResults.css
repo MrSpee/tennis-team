@@ -580,6 +580,11 @@
 @media (max-width: 768px) {
   .live-results-page {
     padding: 0.5rem;
+    padding-bottom: 180px;
+  }
+  
+  .matches-container {
+    padding-bottom: 3rem;
   }
   
   .live-indicator-full {
@@ -965,6 +970,10 @@
 }
 
 @media (max-width: 640px) {
+  .mh-wrap {
+    margin: 1rem auto 2rem;
+  }
+  
   .mh-match-title {
     font-size: clamp(14px, 3.5vw, 18px);
     margin-bottom: 16px;
@@ -976,6 +985,10 @@
   
   .mh-sep {
     font-size: clamp(24px, 6vw, 36px);
+  }
+  
+  .matches-container {
+    margin-bottom: 4rem;
   }
 }
 
