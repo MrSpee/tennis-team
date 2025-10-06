@@ -1,6 +1,9 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 
+// Lokale Test-Daten für TC Köln (nur für Theo Tester)
+import tcKoelnTestData from '../../testdata-tc-koeln/tc-koeln-team.json';
+
 const DataContext = createContext();
 
 export function useData() {
@@ -13,6 +16,11 @@ export function DataProvider({ children }) {
   const [leagueStandings, setLeagueStandings] = useState([]);
   const [teamInfo, setTeamInfo] = useState(null);
   const [loading, setLoading] = useState(true);
+  
+  // Multi-Team Support
+  const [playerTeams, setPlayerTeams] = useState([]);
+  const [selectedTeamId, setSelectedTeamId] = useState(null);
+  const [allTeams, setAllTeams] = useState([]);
   
   const configured = isSupabaseConfigured();
 
@@ -33,16 +41,41 @@ export function DataProvider({ children }) {
       loadPlayers();
     };
     
+    // Listen für manuelle Team-Reloads
+    const handleReloadTeams = (event) => {
+      const playerId = event.detail?.playerId;
+      if (playerId) {
+        console.log('🔄 Manual team reload triggered for player:', playerId);
+        loadPlayerTeams(playerId);
+      }
+    };
+    
     window.addEventListener('reloadPlayers', handleReloadPlayers);
+    window.addEventListener('reloadTeams', handleReloadTeams);
     
     return () => {
       window.removeEventListener('reloadPlayers', handleReloadPlayers);
+      window.removeEventListener('reloadTeams', handleReloadTeams);
     };
   }, [configured]);
 
+  // Reload TeamInfo wenn selectedTeamId sich ändert (Matches werden nicht gefiltert)
+  useEffect(() => {
+    if (selectedTeamId && configured) {
+      console.log('🔄 Team changed, reloading team info for:', selectedTeamId);
+      loadTeamInfo();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTeamId]);
+
   // Lade alle Daten
-  const loadAllData = async () => {
+  const loadAllData = async (playerId = null) => {
     try {
+      // Lade zuerst Player-Teams (wenn playerId vorhanden)
+      if (playerId) {
+        await loadPlayerTeams(playerId);
+      }
+      
       await Promise.all([
         loadMatches(),
         loadPlayers(),
@@ -56,52 +89,171 @@ export function DataProvider({ children }) {
     }
   };
 
-  // Lade Matches
-  const loadMatches = async () => {
-    const { data, error } = await supabase
-      .from('matches')
-      .select(`
-        *,
-        match_availability (
-          id,
-          player_id,
-          status,
-          comment,
-          players (
+  // Lade Player-Teams (für Multi-Team Support)
+  const loadPlayerTeams = async (playerId) => {
+    try {
+      console.log('🔍 Loading teams for player:', playerId);
+      
+      const { data, error } = await supabase
+        .from('player_teams')
+        .select(`
+          *,
+          team_info (
             id,
-            name,
-            ranking
+            team_name,
+            club_name,
+            category,
+            league,
+            group_name,
+            region,
+            tvm_link,
+            season,
+            season_year
           )
-        )
-      `)
-      .order('match_date', { ascending: true });
+        `)
+        .eq('player_id', playerId)
+        .order('is_primary', { ascending: false });
 
-    if (error) {
-      console.error('Error loading matches:', error);
-      return;
+      if (error) {
+        console.error('Error loading player teams:', error);
+        return;
+      }
+
+      console.log('✅ Player teams loaded from DB:', data);
+      
+      let teams = data.map(pt => ({
+        ...pt.team_info,
+        is_primary: pt.is_primary,
+        role: pt.role
+      }));
+      
+      // LOKALE TEST-DATEN: Füge TC Köln hinzu für Theo Tester
+      if (tcKoelnTestData.enabled) {
+        console.log('🧪 Adding TC Köln test team for Theo Tester');
+        teams.push({
+          id: tcKoelnTestData.team.id,
+          club_name: tcKoelnTestData.team.club_name,
+          team_name: tcKoelnTestData.team.team_name,
+          category: tcKoelnTestData.team.category,
+          league: tcKoelnTestData.team.league,
+          group_name: tcKoelnTestData.team.group_name,
+          region: tcKoelnTestData.team.region,
+          tvm_link: tcKoelnTestData.team.tvm_link,
+          season: tcKoelnTestData.team.season,
+          season_year: tcKoelnTestData.team.season_year,
+          is_primary: false,
+          role: 'player',
+          isTestData: true
+        });
+      }
+      
+      setPlayerTeams(teams);
+      
+      // Setze Primary-Team als Default (für Results.jsx Filterung)
+      const primaryTeam = teams.find(t => t.is_primary) || teams[0];
+      if (primaryTeam && !selectedTeamId) {
+        console.log('✅ Primary team set as default:', primaryTeam.club_name, primaryTeam.team_name);
+        setSelectedTeamId(primaryTeam.id);
+      }
+      
+    } catch (error) {
+      console.error('Error in loadPlayerTeams:', error);
     }
+  };
 
-    // Transformiere Daten - verwende playerId als Key (nicht Name!)
-    const transformedMatches = data.map(match => ({
-      id: match.id,
-      date: new Date(match.match_date),
-      opponent: match.opponent,
-      location: match.location,
-      venue: match.venue,
-      season: match.season,
-      playersNeeded: match.players_needed,
-      availability: match.match_availability.reduce((acc, avail) => {
-        // Verwende player_id als Key für schnellen Zugriff
-        acc[avail.player_id] = {
-          status: avail.status,
-          comment: avail.comment,
-          playerName: avail.players?.name || 'Unbekannt'
-        };
-        return acc;
-      }, {})
-    }));
+  // Lade Matches (ALLE Matches mit Team-Info)
+  const loadMatches = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('matches')
+        .select(`
+          *,
+          team_info (
+            id,
+            club_name,
+            team_name,
+            category
+          ),
+          match_availability (
+            id,
+            player_id,
+            status,
+            comment,
+            players (
+              id,
+              name,
+              ranking
+            )
+          )
+        `)
+        .order('match_date', { ascending: true });
 
-    setMatches(transformedMatches);
+      if (error) {
+        console.error('Error loading matches:', error);
+        return;
+      }
+
+      console.log('✅ Matches loaded from DB:', data?.length || 0, 'matches');
+
+      // Transformiere Daten - verwende playerId als Key (nicht Name!)
+      let transformedMatches = data.map(match => ({
+        id: match.id,
+        date: new Date(match.match_date),
+        opponent: match.opponent,
+        location: match.location,
+        venue: match.venue,
+        season: match.season,
+        playersNeeded: match.players_needed,
+        teamId: match.team_id,
+        // Team-Info für Badge UND Filter
+        teamInfo: match.team_info ? {
+          id: match.team_info.id, // WICHTIG: ID für Filterung!
+          clubName: match.team_info.club_name,
+          teamName: match.team_info.team_name,
+          category: match.team_info.category
+        } : null,
+        availability: match.match_availability.reduce((acc, avail) => {
+          // Verwende player_id als Key für schnellen Zugriff
+          acc[avail.player_id] = {
+            status: avail.status,
+            comment: avail.comment,
+            playerName: avail.players?.name || 'Unbekannt'
+          };
+          return acc;
+        }, {})
+      }));
+
+      // LOKALE TEST-DATEN: Füge TC Köln Matches hinzu
+      if (tcKoelnTestData.enabled && tcKoelnTestData.matches) {
+        console.log('🧪 Adding', tcKoelnTestData.matches.length, 'TC Köln test matches');
+        
+        const testMatches = tcKoelnTestData.matches.map(match => ({
+          id: match.id,
+          date: new Date(match.match_date),
+          opponent: match.opponent,
+          location: match.location,
+          venue: match.venue,
+          season: match.season,
+          playersNeeded: match.players_needed,
+          teamId: match.team_id,
+          teamInfo: {
+            id: tcKoelnTestData.team.id, // WICHTIG: ID für Filterung!
+            clubName: tcKoelnTestData.team.club_name,
+            teamName: tcKoelnTestData.team.team_name,
+            category: tcKoelnTestData.team.category
+          },
+          availability: match.availability || {},
+          isTestData: true
+        }));
+        
+        transformedMatches = [...transformedMatches, ...testMatches];
+        console.log('✅ Total matches (DB + Test):', transformedMatches.length);
+      }
+
+      setMatches(transformedMatches);
+    } catch (error) {
+      console.error('Error in loadMatches:', error);
+    }
   };
 
   // Lade Spieler (für Rangliste)
@@ -146,61 +298,100 @@ export function DataProvider({ children }) {
     setLeagueStandings(transformed);
   };
 
-  // Lade Team Info
+  // Lade Team Info (mit Team-Filter Support)
   const loadTeamInfo = async () => {
-    // Bestimme aktuelle Saison
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
-    
-    let season = 'winter';
-    let seasonYear = '';
-    
-    if (currentMonth >= 4 && currentMonth <= 7) {
-      season = 'summer';
-      seasonYear = String(currentYear);
-    } else {
-      season = 'winter';
-      if (currentMonth >= 8) {
-        const nextYear = currentYear + 1;
-        seasonYear = `${String(currentYear).slice(-2)}/${String(nextYear).slice(-2)}`;
-      } else {
-        const prevYear = currentYear - 1;
-        seasonYear = `${String(prevYear).slice(-2)}/${String(currentYear).slice(-2)}`;
+    try {
+      // Wenn selectedTeamId gesetzt ist, lade spezifisches Team
+      if (selectedTeamId) {
+        console.log('🔍 Loading team info for team_id:', selectedTeamId);
+        
+        const { data, error } = await supabase
+          .from('team_info')
+          .select('*')
+          .eq('id', selectedTeamId)
+          .maybeSingle();
+
+        if (error && error.code !== 'PGRST116') {
+          console.error('Error loading team info:', error);
+          return;
+        }
+
+        if (data) {
+          console.log('✅ Team info loaded:', data);
+          setTeamInfo({
+            id: data.id,
+            teamName: data.team_name,
+            clubName: data.club_name,
+            category: data.category,
+            league: data.league,
+            group: data.group_name,
+            region: data.region,
+            tvmLink: data.tvm_link,
+            season: data.season,
+            seasonYear: data.season_year
+          });
+        } else {
+          setTeamInfo(null);
+        }
+        return;
       }
-    }
-    
-    console.log('🔵 Loading team info for season:', season, seasonYear);
+      
+      // Fallback: Lade Team für aktuelle Saison (alte Logik)
+      const now = new Date();
+      const currentMonth = now.getMonth();
+      const currentYear = now.getFullYear();
+      
+      let season = 'winter';
+      let seasonYear = '';
+      
+      if (currentMonth >= 4 && currentMonth <= 7) {
+        season = 'summer';
+        seasonYear = String(currentYear);
+      } else {
+        season = 'winter';
+        if (currentMonth >= 8) {
+          const nextYear = currentYear + 1;
+          seasonYear = `${String(currentYear).slice(-2)}/${String(nextYear).slice(-2)}`;
+        } else {
+          const prevYear = currentYear - 1;
+          seasonYear = `${String(prevYear).slice(-2)}/${String(currentYear).slice(-2)}`;
+        }
+      }
+      
+      console.log('🔵 Loading team info for season:', season, seasonYear);
 
-    // Lade Team-Info für die aktuelle Saison
-    const { data, error } = await supabase
-      .from('team_info')
-      .select('*')
-      .eq('season', season)
-      .eq('season_year', seasonYear)
-      .maybeSingle();
+      const { data, error } = await supabase
+        .from('team_info')
+        .select('*')
+        .eq('season', season)
+        .eq('season_year', seasonYear)
+        .maybeSingle();
 
-    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows
-      console.error('Error loading team info:', error);
-      return;
-    }
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error loading team info:', error);
+        return;
+      }
 
-    if (data) {
-      console.log('✅ Team info loaded:', data);
-      setTeamInfo({
-        teamName: data.team_name,
-        clubName: data.club_name,
-        category: data.category,
-        league: data.league,
-        group: data.group_name,
-        region: data.region,
-        tvmLink: data.tvm_link,
-        season: data.season,
-        seasonYear: data.season_year
-      });
-    } else {
-      console.log('⚠️ No team info for current season yet');
-      setTeamInfo(null);
+      if (data) {
+        console.log('✅ Team info loaded:', data);
+        setTeamInfo({
+          id: data.id,
+          teamName: data.team_name,
+          clubName: data.club_name,
+          category: data.category,
+          league: data.league,
+          group: data.group_name,
+          region: data.region,
+          tvmLink: data.tvm_link,
+          season: data.season,
+          seasonYear: data.season_year
+        });
+      } else {
+        console.log('⚠️ No team info for current season yet');
+        setTeamInfo(null);
+      }
+    } catch (error) {
+      console.error('Error in loadTeamInfo:', error);
     }
   };
 
@@ -714,7 +905,12 @@ export function DataProvider({ children }) {
     getPlayerProfile,
     updatePlayerProfile,
     updateTeamInfo,
-    importHistoricalAvailabilityLogs
+    importHistoricalAvailabilityLogs,
+    // Multi-Team Support
+    playerTeams,
+    selectedTeamId,
+    setSelectedTeamId,
+    loadPlayerTeams
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

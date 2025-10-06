@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Edit, Clock, CheckCircle, PlayCircle } from 'lucide-react';
+import { format } from 'date-fns';
+import { de } from 'date-fns/locale';
 import { supabase } from '../lib/supabaseClient';
-import { useData } from '../context/DataContext';
 import './LiveResults.css';
+import './Dashboard.css';
 
 const MatchdayResults = () => {
   const { matchId } = useParams();
   const navigate = useNavigate();
-  const { teamInfo } = useData();
 
   // State für Daten
   const [match, setMatch] = useState(null);
@@ -22,6 +23,7 @@ const MatchdayResults = () => {
 
   useEffect(() => {
     // ProtectedRoute garantiert bereits, dass User eingeloggt ist
+    console.log('🔵 MatchdayResults mounted, loading data for matchId:', matchId);
     if (matchId) {
       loadData();
     }
@@ -51,6 +53,7 @@ const MatchdayResults = () => {
     }, 1000); // Aktualisiert jede Sekunde
 
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchResults, totalScore]);
 
   // Countdown-Funktion für Match-Start
@@ -135,11 +138,13 @@ const MatchdayResults = () => {
   };
 
   const loadData = async () => {
+    console.log('🔄 loadData() called for matchId:', matchId);
     try {
       setLoading(true);
       setError(null);
 
       // Lade Match-Daten
+      console.log('📡 Fetching match data...');
       const { data: matchData, error: matchError } = await supabase
         .from('matches')
         .select('*')
@@ -183,33 +188,43 @@ const MatchdayResults = () => {
         });
       }
 
-      // Lade alle Spieler-Daten separat (mit Profilbild!)
+      // Lade alle Spieler-Daten separat (mit Profilbild und LK!)
+      console.log('📡 Fetching home players data...');
       const { data: homePlayersData, error: homeError } = await supabase
         .from('players')
-        .select('id, name, profile_image')
+        .select('id, name, profile_image, current_lk, ranking')
         .order('name', { ascending: true });
 
+      console.log('👥 Home players loaded:', homePlayersData);
+
+      console.log('📡 Fetching opponent players data...');
       const { data: opponentPlayersData, error: opponentError } = await supabase
         .from('opponent_players')
         .select('id, name, lk');
+      
+      console.log('👥 Opponent players loaded:', opponentPlayersData);
 
       if (homeError) {
-        console.error('Error loading home players:', homeError);
+        console.error('❌ Error loading home players:', homeError);
       } else {
         const playersMap = {};
         homePlayersData?.forEach(player => {
           playersMap[player.id] = player;
+          console.log(`  ✅ Loaded player: ${player.name} | LK: ${player.current_lk || player.ranking || 'N/A'}`);
         });
+        console.log('📦 Home players map created:', playersMap);
         setHomePlayers(playersMap);
       }
 
       if (opponentError) {
-        console.error('Error loading opponent players:', opponentError);
+        console.error('❌ Error loading opponent players:', opponentError);
       } else {
         const playersMap = {};
         opponentPlayersData?.forEach(player => {
           playersMap[player.id] = player;
+          console.log(`  ✅ Loaded opponent: ${player.name} | LK: ${player.lk || 'N/A'}`);
         });
+        console.log('📦 Opponent players map created:', playersMap);
         setOpponentPlayers(playersMap);
       }
 
@@ -217,9 +232,10 @@ const MatchdayResults = () => {
       calculateTotalScore(resultsData || []);
 
     } catch (err) {
-      console.error('Error in loadData:', err);
+      console.error('❌ Error in loadData:', err);
       setError('Fehler beim Laden der Daten');
     } finally {
+      console.log('✅ loadData() completed, setting loading=false');
       setLoading(false);
     }
   };
@@ -365,7 +381,25 @@ const MatchdayResults = () => {
       ? (opponentPlayers[result.guest_player_id]?.name || 'Gegner wählen')
       : `${opponentPlayers[result.guest_player1_id]?.name || 'Gegner 1'} & ${opponentPlayers[result.guest_player2_id]?.name || 'Gegner 2'}`;
     
-    // LK für Gegner extrahieren - Frank Ritter hat LK 16.9
+    // LK für Heimspieler extrahieren
+    const getHomePlayerLK = () => {
+      if (result.match_type === 'Einzel' && result.home_player_id) {
+        const player = homePlayers[result.home_player_id];
+        return player?.current_lk || player?.ranking || '';
+      } else if (result.match_type === 'Doppel') {
+        const player1 = homePlayers[result.home_player1_id];
+        const player2 = homePlayers[result.home_player2_id];
+        const lk1 = player1?.current_lk || player1?.ranking || '';
+        const lk2 = player2?.current_lk || player2?.ranking || '';
+        if (lk1 && lk2) return `${lk1} / ${lk2}`;
+        return lk1 || lk2 || '';
+      }
+      return '';
+    };
+    
+    const homePlayerLK = getHomePlayerLK();
+    
+    // LK für Gegner extrahieren
     const guestPlayerLK = result.match_type === 'Einzel' 
       ? (opponentPlayers[result.guest_player_id]?.lk || '')
       : `${opponentPlayers[result.guest_player1_id]?.lk || ''} / ${opponentPlayers[result.guest_player2_id]?.lk || ''}`;
@@ -450,7 +484,7 @@ const MatchdayResults = () => {
           <div className={`player-row home ${
             matchStatus === 'completed' && matchWinner === 'home' ? 'winner' : 
             matchStatus === 'completed' && matchWinner === 'guest' ? 'loser' : ''
-          }`}>
+          } ${matchType === 'Doppel' ? 'doppel-row' : ''}`}>
             <div className="player-avatar">
               <img 
                 src={homeImageSrc}
@@ -465,16 +499,38 @@ const MatchdayResults = () => {
               </div>
             </div>
             <div className="player-info">
-              <div className="player-name">
-                {homePlayerName}
-                {/* LK für Frank Ritter (aus Rankings-Liste: LK 16.9) */}
-                {homePlayerName.includes('Frank Ritter') && (
-                  <span className="player-lk" style={{ marginLeft: '8px', fontSize: '12px', color: '#666', fontWeight: '500' }}>
-                    LK 16.9
-                  </span>
-                )}
-                {matchStatus === 'completed' && matchWinner === 'home' && <span style={{color: 'gold', fontSize: '1.2em'}}>🏆</span>}
-              </div>
+              {matchType === 'Doppel' ? (
+                // Doppel: Namen untereinander
+                <div className="player-name-doppel">
+                  <div className="doppel-player-line">
+                    <span>{homePlayers[result.home_player1_id]?.name || 'Spieler 1'}</span>
+                    {homePlayers[result.home_player1_id]?.current_lk && (
+                      <span className="player-lk" style={{ marginLeft: '8px', fontSize: '11px', color: '#666', fontWeight: '500' }}>
+                        {homePlayers[result.home_player1_id].current_lk}
+                      </span>
+                    )}
+                  </div>
+                  <div className="doppel-player-line">
+                    <span>{homePlayers[result.home_player2_id]?.name || 'Spieler 2'}</span>
+                    {homePlayers[result.home_player2_id]?.current_lk && (
+                      <span className="player-lk" style={{ marginLeft: '8px', fontSize: '11px', color: '#666', fontWeight: '500' }}>
+                        {homePlayers[result.home_player2_id].current_lk}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                // Einzel: Name in einer Zeile
+                <div className="player-name">
+                  {homePlayerName}
+                  {/* LK anzeigen */}
+                  {homePlayerLK && (
+                    <span className="player-lk" style={{ marginLeft: '8px', fontSize: '12px', color: '#666', fontWeight: '500' }}>
+                      {homePlayerLK}
+                    </span>
+                  )}
+                </div>
+              )}
               <div className="player-status">
                 {/* Grüner Haken entfernt */}
               </div>
@@ -493,7 +549,7 @@ const MatchdayResults = () => {
           <div className={`player-row guest ${
             matchStatus === 'completed' && matchWinner === 'guest' ? 'winner' : 
             matchStatus === 'completed' && matchWinner === 'home' ? 'loser' : ''
-          }`}>
+          } ${matchType === 'Doppel' ? 'doppel-row' : ''}`}>
             <div className="player-avatar">
               <img 
                 src={guestImageSrc}
@@ -508,15 +564,37 @@ const MatchdayResults = () => {
               </div>
             </div>
             <div className="player-info">
-              <div className="player-name">
-                {guestPlayerName}
-                {guestPlayerLK && (
-                  <span className="player-lk" style={{ marginLeft: '8px', fontSize: '12px', color: '#666', fontWeight: '500' }}>
-                    LK{guestPlayerLK}
-                  </span>
-                )}
-                {matchStatus === 'completed' && matchWinner === 'guest' && <span style={{fontSize: '1.2em'}}>🤡</span>}
-              </div>
+              {matchType === 'Doppel' ? (
+                // Doppel: Namen untereinander
+                <div className="player-name-doppel">
+                  <div className="doppel-player-line">
+                    <span>{opponentPlayers[result.guest_player1_id]?.name || 'Gegner 1'}</span>
+                    {opponentPlayers[result.guest_player1_id]?.lk && (
+                      <span className="player-lk" style={{ marginLeft: '8px', fontSize: '11px', color: '#666', fontWeight: '500' }}>
+                        LK{opponentPlayers[result.guest_player1_id].lk}
+                      </span>
+                    )}
+                  </div>
+                  <div className="doppel-player-line">
+                    <span>{opponentPlayers[result.guest_player2_id]?.name || 'Gegner 2'}</span>
+                    {opponentPlayers[result.guest_player2_id]?.lk && (
+                      <span className="player-lk" style={{ marginLeft: '8px', fontSize: '11px', color: '#666', fontWeight: '500' }}>
+                        LK{opponentPlayers[result.guest_player2_id].lk}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                // Einzel: Name in einer Zeile
+                <div className="player-name">
+                  {guestPlayerName}
+                  {guestPlayerLK && (
+                    <span className="player-lk" style={{ marginLeft: '8px', fontSize: '12px', color: '#666', fontWeight: '500' }}>
+                      LK{guestPlayerLK}
+                    </span>
+                  )}
+                </div>
+              )}
               <div className="player-status">
                 {/* Grüner Haken entfernt */}
               </div>
@@ -592,9 +670,33 @@ const MatchdayResults = () => {
   // Humorvoller Status-Text basierend auf Gesamtergebnis
   const getOverallMatchStatus = () => {
     if (!isMatchCompleted) {
-      // Spiel läuft noch
+      // Prüfe ob Spiel noch gar nicht begonnen hat (alle 0:0)
+      const hasAnyScore = matchResults.some(result => 
+        result.set1_home > 0 || result.set1_guest > 0 || 
+        result.set2_home > 0 || result.set2_guest > 0 || 
+        result.set3_home > 0 || result.set3_guest > 0
+      );
+      
+      if (!hasAnyScore) {
+        // Spiel hat noch nicht begonnen - lustige Texte
+        const funnyTexts = [
+          '🎾 Gleich geht\'s los!',
+          '🔥 Die Schläger sind schon warm!',
+          '⚡ Bereit für Action!',
+          '🎯 Spannung liegt in der Luft!',
+          '💪 Let\'s go!',
+          '🌟 Das Match kann beginnen!',
+          '🚀 Countdown läuft!',
+          '⏰ Die Uhren sind gestellt!'
+        ];
+        // Wähle einen Text basierend auf matchId für Konsistenz
+        const index = matchId ? matchId.length % funnyTexts.length : 0;
+        return funnyTexts[index];
+      }
+      
+      // Spiel läuft schon
       if (totalScore.home === totalScore.guest) {
-        return 'Unentschieden';
+        return 'Ausgeglichen';
       }
       return totalScore.home > totalScore.guest ? 'Heim führt' : 'Auswärts führt';
     }
@@ -622,136 +724,184 @@ const MatchdayResults = () => {
   };
 
   return (
-    <div className="live-results-page">
-      {/* Live Indicator oder Finales Ergebnis */}
-      {shouldShowLiveButton() && !isMatchCompleted ? (
-        <div className="live-indicator-full">
-          <div className="live-dot"></div>
-          <span>LIVE</span>
-        </div>
-      ) : isMatchCompleted ? (
-        <div className="final-result-indicator">
-          <div className="final-result-content">
-            <span className="final-result-icon">🏆</span>
-            <span className="final-result-text">
-              {matchWinner === 'home' ? 'MEDENSPIEL GEWONNEN' : 
-               matchWinner === 'guest' ? 'MEDENSPIEL VERLOREN' : 'MEDENSPIEL UNENTSCHIEDEN'}
-            </span>
-            <span className="final-result-score">
-              {totalScore.home} : {totalScore.guest}
-            </span>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Header */}
-      <div className="page-header">
-          <div className="header-top">
+    <div className="dashboard container">
+      {/* Zurück Button */}
+      <div className="fade-in" style={{ paddingTop: '0.5rem', marginBottom: '1rem' }}>
             <button 
               className="back-button"
               onClick={() => navigate('/')}
-            >
-              <ArrowLeft size={20} />
-              Zurück zur Übersicht
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '8px 12px',
+            background: 'var(--card)',
+            border: '1px solid var(--border)',
+            borderRadius: '10px',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            color: 'var(--text)',
+            fontWeight: '600',
+            fontSize: '14px'
+          }}
+        >
+          <ArrowLeft size={18} />
+          Zurück
             </button>
-            
-            <div className="header-center">
-              <div className="modern-time">
-                <div className="countdown-display">
-                  {getMatchCountdown(isMatchCompleted)}
-                </div>
-                <div className="date-display-small">
-                  {match?.match_date && new Date(match.match_date).toLocaleDateString('de-DE', {
-                    weekday: 'short',
-                    day: '2-digit',
-                    month: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })} Uhr
-                </div>
-              </div>
-            </div>
-            
-            <button
-              className="btn-update"
-              onClick={() => navigate(`/ergebnisse/${matchId}/edit`)}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-square-pen">
-                <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"></path>
-              </svg>
-              Ergebnisse eintragen
-            </button>
-          </div>
       </div>
 
-      {/* Gesamtpunktzahl - Neues modernes Design */}
-      <div className="mh-wrap">
-        <div className="mh-headline">
-          <h1 className="mh-title">{isMatchCompleted ? 'Endergebnis' : 'Aktueller Stand'}</h1>
-        </div>
-
-        <section className="mh-card" role="region" aria-label="Scoreboard">
-          <div className="mh-glow mh-glow-right" />
-          <div className="mh-glow mh-glow-left" />
-
-          <div className="mh-match-title">
-            <strong>{teamInfo?.teamName || 'Heim'}</strong> vs. <strong>{match?.opponent || 'Gegner'}</strong>
-          </div>
-
-          <div className="mh-scoregrid">
-            <div className="mh-center">
-              <div className="mh-score-pill" aria-live="polite">
-                <div className="mh-score-bg" />
-                <div className="mh-score">{totalScore.home}</div>
-              </div>
-              <div className="mh-sep" aria-hidden>:</div>
-              <div className="mh-score-pill" aria-live="polite">
-                <div className="mh-score-bg" />
-                <div className="mh-score">{totalScore.guest}</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mh-status">
-            <span className="mh-trophy" aria-hidden>
-              {isMatchCompleted 
-                ? (matchWinner === 'home' ? '🏆' : matchWinner === 'guest' ? '😢' : '🤝')
-                : '🏆'
-              }
-            </span>
-            <span className="mh-status-text">
-              {getOverallMatchStatus()}
-            </span>
-          </div>
-        </section>
-      </div>
-
-      {/* Match-Ergebnisse */}
-      <div className="matches-container">
-        <div className="matches-header">
-          <h2>Match-Übersicht</h2>
-        </div>
-
-        <div className="matches-grid">
-          {matchResults.length > 0 ? (
-            matchResults.map((result, index) => renderMatchCard(result, index))
-          ) : (
-            <div className="no-results">
-              <div className="no-results-icon">🎾</div>
-              <h3>Noch keine Ergebnisse</h3>
-              <p>Klicke auf &quot;Ergebnisse eintragen&quot; um zu beginnen!</p>
-              <button 
-                className="btn-primary"
-                onClick={() => navigate(`/live-results/${matchId}/edit`)}
-              >
-                <Edit size={16} />
-                Erste Ergebnisse eintragen
-              </button>
+      {/* CARD 1: Match Info */}
+      <div className="fade-in lk-card-full match-info-card">
+        <div className="formkurve-header">
+          <div className="formkurve-title">Match Info</div>
+          {shouldShowLiveButton() && !isMatchCompleted && (
+            <div className="improvement-badge-top negative" style={{ background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)', animation: 'pulse 2s infinite' }}>
+              <span className="badge-icon">🔴</span>
+              <span className="badge-value">LIVE</span>
             </div>
           )}
         </div>
+        
+        <div className="season-content">
+          {/* Timer / Countdown */}
+          {!isMatchCompleted && (
+            <div className="next-match-card">
+              <div className="next-match-countdown">{getMatchCountdown(isMatchCompleted)}</div>
+            </div>
+          )}
+          
+          {/* Match Details - VEREINFACHT */}
+          <div className="match-info-grid">
+            <div className="match-info-row">
+              <span className="info-label">🎾 Gegner:</span>
+              <span className="info-value-large">{match?.opponent || 'Unbekannt'}</span>
+            </div>
+            
+            <div className="match-info-row">
+              <span className="info-label">📅 Datum:</span>
+              <span className="info-value">
+                {match?.match_date && format(new Date(match.match_date), 'EEEE, dd. MMMM yyyy', { locale: de })}
+              </span>
+                </div>
+                </div>
+              </div>
+            </div>
+            
+      {/* CARD 2: Scoreboard */}
+      <div className="fade-in lk-card-full scoreboard-card">
+        <div className="formkurve-header">
+          <div className="formkurve-title">
+            {isMatchCompleted ? 'Endergebnis' : 'Aktueller Stand'}
+          </div>
+          {isMatchCompleted && (
+            <div className={`improvement-badge-top ${matchWinner === 'home' ? 'positive' : matchWinner === 'guest' ? 'negative' : 'neutral'}`}>
+              <span className="badge-icon">
+                {matchWinner === 'home' ? '🏆' : matchWinner === 'guest' ? '😢' : '🤝'}
+              </span>
+              <span className="badge-value">
+                {matchWinner === 'home' ? 'Sieg' : matchWinner === 'guest' ? 'Niederlage' : 'Draw'}
+              </span>
+            </div>
+          )}
+        </div>
+        
+        <div className="scoreboard-content-new">
+          {/* Team Namen über Score - Reihenfolge basierend auf Home/Away */}
+          <div className="score-teams">
+            {match?.location === 'Home' ? (
+              <>
+                <span className="team-name-score home">SV Rot-Gelb Sürth</span>
+                <span className="team-separator">:</span>
+                <span className="team-name-score guest">{match?.opponent || 'Gegner'}</span>
+              </>
+            ) : (
+              <>
+                <span className="team-name-score guest">{match?.opponent || 'Gegner'}</span>
+                <span className="team-separator">:</span>
+                <span className="team-name-score home">SV Rot-Gelb Sürth</span>
+              </>
+            )}
+          </div>
+          
+          {/* Großer Score - Reihenfolge basierend auf Home/Away */}
+          <div className="score-display-large">
+            {match?.location === 'Home' ? (
+              <>
+                <div className="score-number-huge">{totalScore.home}</div>
+                <div className="score-separator-huge">:</div>
+                <div className="score-number-huge">{totalScore.guest}</div>
+              </>
+            ) : (
+              <>
+                <div className="score-number-huge">{totalScore.guest}</div>
+                <div className="score-separator-huge">:</div>
+                <div className="score-number-huge">{totalScore.home}</div>
+              </>
+            )}
+          </div>
+          
+          {/* Status-Text */}
+          <div className="score-status-text">
+            {getOverallMatchStatus()}
+          </div>
+          
+          {/* Edit Button */}
+            <button
+            className="btn-participation"
+              onClick={() => navigate(`/ergebnisse/${matchId}/edit`)}
+            >
+            <Edit size={16} style={{ marginRight: '6px' }} />
+            Ergebnisse bearbeiten
+            </button>
+          </div>
       </div>
+
+      {/* CARD 3: Einzelmatches */}
+      {matchResults.filter(r => r.match_type === 'Einzel').length > 0 && (
+        <div className="fade-in lk-card-full einzel-matches-card">
+          <div className="formkurve-header">
+            <div className="formkurve-title">Einzel</div>
+            <div className="match-count-badge">
+              {matchResults.filter(r => r.match_type === 'Einzel').length} Spiele
+        </div>
+          </div>
+
+          <div className="season-matches">
+            {matchResults
+              .filter(result => result.match_type === 'Einzel')
+              .map((result, index) => renderMatchCard(result, index))}
+              </div>
+              </div>
+      )}
+      
+      {/* CARD 4: Doppelmatches */}
+      {matchResults.filter(r => r.match_type === 'Doppel').length > 0 && (
+        <div className="fade-in lk-card-full doppel-matches-card">
+          <div className="formkurve-header">
+            <div className="formkurve-title">Doppel</div>
+            <div className="match-count-badge">
+              {matchResults.filter(r => r.match_type === 'Doppel').length} Spiele
+            </div>
+          </div>
+
+          <div className="season-matches">
+            {matchResults
+              .filter(result => result.match_type === 'Doppel')
+              .map((result, index) => renderMatchCard(result, index))}
+          </div>
+        </div>
+      )}
+      
+      {/* Keine Ergebnisse */}
+      {matchResults.length === 0 && (
+        <div className="fade-in lk-card-full no-results-card">
+            <div className="no-results">
+            <div style={{ fontSize: '3rem' }}>🎾</div>
+              <h3>Noch keine Ergebnisse</h3>
+            <p>Klicke auf &quot;Ergebnisse bearbeiten&quot; um zu beginnen!</p>
+            </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,0 +1,119 @@
+{
+  "enabled": true,
+  "team": {
+    "id": "tc-koeln-team-001",
+    "club_name": "TC Köln",
+    "team_name": "Herren 1",
+    "category": "Herren",
+    "league": "Verbandsliga",
+    "group_name": "Gr. 1",
+    "region": "Mittelrhein",
+    "tvm_link": "https://tvm-tennis.de/spielbetrieb/mannschaft/example-tc-koeln",
+    "season": "winter",
+    "season_year": "24/25"
+  },
+  "players": [
+    {
+      "id": "tc-player-001",
+      "name": "Max Müller",
+      "email": "max.mueller@tc-koeln.de",
+      "current_lk": "LK 12.5",
+      "ranking": "LK 12.5",
+      "is_active": true
+    },
+    {
+      "id": "tc-player-002",
+      "name": "Stefan Weber",
+      "email": "stefan.weber@tc-koeln.de",
+      "current_lk": "LK 14.1",
+      "ranking": "LK 14.1",
+      "is_active": true
+    },
+    {
+      "id": "tc-player-003",
+      "name": "Thomas Klein",
+      "email": "thomas.klein@tc-koeln.de",
+      "current_lk": "LK 15.8",
+      "ranking": "LK 15.8",
+      "is_active": true
+    },
+    {
+      "id": "tc-player-004",
+      "name": "Andreas Schmidt",
+      "email": "andreas.schmidt@tc-koeln.de",
+      "current_lk": "LK 17.2",
+      "ranking": "LK 17.2",
+      "is_active": true
+    },
+    {
+      "id": "tc-player-005",
+      "name": "Michael Fischer",
+      "email": "michael.fischer@tc-koeln.de",
+      "current_lk": "LK 18.5",
+      "ranking": "LK 18.5",
+      "is_active": true
+    }
+  ],
+  "matches": [
+    {
+      "id": "tc-koeln-match-001",
+      "match_date": "2025-12-20T09:00:00",
+      "opponent": "TC Bayer Leverkusen 1",
+      "location": "Away",
+      "venue": "TC Bayer Leverkusen, Nobelstraße 37, 51373 Leverkusen",
+      "season": "winter",
+      "players_needed": 6,
+      "team_id": "tc-koeln-team-001",
+      "availability": {
+        "theo-tester-id": {
+          "status": "available",
+          "comment": "Bin dabei!",
+          "playerName": "Theo Tester"
+        },
+        "tc-player-001": {
+          "status": "available",
+          "comment": "",
+          "playerName": "Max Müller"
+        },
+        "tc-player-002": {
+          "status": "available",
+          "comment": "",
+          "playerName": "Stefan Weber"
+        },
+        "tc-player-003": {
+          "status": "unavailable",
+          "comment": "Bin im Urlaub",
+          "playerName": "Thomas Klein"
+        }
+      }
+    },
+    {
+      "id": "tc-koeln-match-002",
+      "match_date": "2026-01-10T10:00:00",
+      "opponent": "TG Grün-Weiß Bonn 1",
+      "location": "Home",
+      "venue": "TC Köln, Olympiaweg 3, 50933 Köln",
+      "season": "winter",
+      "players_needed": 6,
+      "team_id": "tc-koeln-team-001",
+      "availability": {}
+    },
+    {
+      "id": "tc-koeln-match-003",
+      "match_date": "2024-10-01T09:00:00",
+      "opponent": "TC Rheinland 1",
+      "location": "Home",
+      "venue": "TC Köln, Olympiaweg 3, 50933 Köln",
+      "season": "winter",
+      "players_needed": 6,
+      "team_id": "tc-koeln-team-001",
+      "availability": {},
+      "result": {
+        "home": 4,
+        "guest": 2,
+        "completed": 6
+      }
+    }
+  ]
+}
+

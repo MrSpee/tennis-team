@@ -4,18 +4,29 @@ import { ChevronRight } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useData } from '../context/DataContext';
 import './Results.css';
+import './Dashboard.css';
 
 const Results = () => {
   console.log('🟣 Results Component MOUNTED');
   
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { teamInfo, players } = useData();
-  const [matches, setMatches] = useState([]);
+  const { 
+    players, 
+    playerTeams, 
+    selectedTeamId, 
+    setSelectedTeamId,
+    matches: dataContextMatches,
+    loading: dataContextLoading
+  } = useData();
+  
   const [matchScores, setMatchScores] = useState({});
   const [loading, setLoading] = useState(true);
   const [currentTime] = useState(new Date());
   const [hasLoaded, setHasLoaded] = useState(false);
+  
+  // Nutze Matches aus DataContext
+  const matches = dataContextMatches;
   
   // Prüfe URL-Parameter für viewMode
   const initialViewMode = searchParams.get('view') === 'spieler' ? 'spieler' : 'mannschaft';
@@ -23,7 +34,13 @@ const Results = () => {
   const [playerResults, setPlayerResults] = useState({});
 
   useEffect(() => {
-    console.log('🔵 Results useEffect triggered, hasLoaded:', hasLoaded);
+    console.log('🔵 Results useEffect triggered, hasLoaded:', hasLoaded, 'dataContextMatches:', dataContextMatches.length);
+    
+    // Warte bis DataContext Matches geladen hat
+    if (dataContextLoading) {
+      console.log('⏳ DataContext still loading, waiting...');
+      return;
+    }
     
     // Verhindere doppeltes Laden (React Strict Mode)
     if (hasLoaded) {
@@ -34,7 +51,7 @@ const Results = () => {
     setHasLoaded(true);
     loadMatchesAndResults();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [dataContextLoading, dataContextMatches]);
 
   // Aktualisiere viewMode wenn URL-Parameter sich ändert
   useEffect(() => {
@@ -83,50 +100,30 @@ const Results = () => {
 
   const loadMatchesAndResults = async () => {
     console.log('🟢 loadMatchesAndResults STARTED');
+    console.log('🟢 Using matches from DataContext:', dataContextMatches.length);
     
     try {
       setLoading(true);
       console.log('⏳ Loading set to TRUE');
       
-      const { season } = getCurrentSeason();
-      console.log('📅 Current season:', season);
-
-      // Lade alle Matches der aktuellen Saison (chronologisch aufsteigend)
-      console.log('🔍 Fetching matches from Supabase...');
-      const { data: matchesData, error: matchesError } = await supabase
-        .from('matches')
-        .select('*')
-        .eq('season', season)
-        .order('match_date', { ascending: true });
-
-      console.log('📦 Matches data received:', {
-        count: matchesData?.length || 0,
-        hasError: !!matchesError,
-        error: matchesError
-      });
-
-      if (matchesError) {
-        console.error('❌ Error loading matches:', matchesError);
-        setLoading(false);
-        return;
-      }
-
-      if (!matchesData || matchesData.length === 0) {
-        console.warn('⚠️ No matches found for season:', season);
-        setMatches([]);
+      // Nutze Matches aus DataContext (schon mit team_info geladen!)
+      const processedMatches = dataContextMatches;
+      
+      if (processedMatches.length === 0) {
+        console.warn('⚠️ No matches from DataContext');
         setMatchScores({});
         setLoading(false);
         return;
       }
 
-      // Konvertiere Datum-Strings zu Date-Objekten
-      const processedMatches = matchesData.map(match => ({
-        ...match,
-        date: new Date(match.match_date)
-      }));
-
-      console.log('✅ Processed matches:', processedMatches.length);
+      console.log('✅ Using matches from DataContext:', processedMatches.length);
       console.log('📋 First match:', processedMatches[0]);
+      console.log('📋 Team IDs in matches:', processedMatches.map(m => ({ 
+        opponent: m.opponent, 
+        team_id: m.teamId,
+        has_team_info: !!m.teamInfo,
+        team_info: m.teamInfo
+      })));
 
       // Lade Ergebnisse für alle Matches parallel (viel schneller!)
       console.log('🔍 Fetching match results for', processedMatches.length, 'matches...');
@@ -166,15 +163,13 @@ const Results = () => {
       console.log('📊 Final scores object:', scores);
       console.log('🎯 Setting state with', processedMatches.length, 'matches and', Object.keys(scores).length, 'scores');
 
-      // Setze BEIDE States auf einmal → nur ein Re-Render!
-      setMatches(processedMatches);
       setMatchScores(scores);
       
       console.log('✅ State set successfully!');
       
       // Lade Spieler-Ergebnisse
       if (players && players.length > 0) {
-        await loadPlayerResults(processedMatches, season);
+        await loadPlayerResults(processedMatches);
       }
       
     } catch (error) {
@@ -185,7 +180,7 @@ const Results = () => {
     }
   };
 
-  const loadPlayerResults = async (seasonMatches, season) => {
+  const loadPlayerResults = async (seasonMatches) => {
     try {
       if (!players || players.length === 0) return;
 
@@ -436,105 +431,128 @@ const Results = () => {
     return 'completed';
   };
 
-  const getStatusBadge = (match) => {
-    const status = getMatchStatus(match);
-    
-    switch (status) {
-      case 'completed':
-        return <span className="mr-pill mr-status">✅ Abgeschlossen</span>;
-      case 'in-progress':
-        return <span className="mr-pill mr-status-progress">⏳ Läuft</span>;
-      case 'live':
-        return <span className="mr-pill mr-status-live">🔴 LIVE</span>;
-      case 'upcoming':
-        return <span className="mr-pill mr-status-upcoming">📅 Geplant</span>;
-      case 'finished-no-result':
-        return <span className="mr-pill mr-status-no-result">❓ Kein Ergebnis</span>;
-      default:
-        return null;
-    }
-  };
-
-  const getResultDisplay = (match) => {
-    const score = matchScores[match.id];
-    
-    if (!score || score.completed === 0) {
-      return <span className="result-text no-result">-:-</span>;
-    }
-
-    const homeWins = score.home > score.guest;
-    const guestWins = score.guest > score.home;
-    const isTie = score.home === score.guest;
-
-    return (
-      <div className="result-display">
-        <span className={`result-score ${homeWins ? 'winner' : ''}`}>
-          {score.home}
-        </span>
-        <span className="result-separator">:</span>
-        <span className={`result-score ${guestWins ? 'winner' : ''}`}>
-          {score.guest}
-        </span>
-        {score.completed < score.total && (
-          <span className="result-info">({score.completed}/{score.total})</span>
-        )}
-      </div>
-    );
-  };
-
-  const { season, display } = getCurrentSeason();
+  const { display } = getCurrentSeason();
 
   console.log('🎨 Rendering Results, loading:', loading, 'matches:', matches.length);
 
   if (loading) {
     return (
-      <div className="results-page">
+      <div className="dashboard container">
         <div className="loading-container">
           <div className="loading-spinner"></div>
           <p>Lade Ergebnisse...</p>
-          <p style={{fontSize: '12px', color: '#666', marginTop: '10px'}}>
-            Debug: Loading state = {loading ? 'true' : 'false'}
-          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="results-page">
-      <div className="page-header">
-        <div className="header-content">
-          <h1>🏆 Spielergebnisse</h1>
-        </div>
-        <p className="season-info">{display}</p>
+    <div className="dashboard container">
+      {/* Header - Moderner Dashboard-Stil */}
+      <div className="fade-in" style={{ marginBottom: '1rem', paddingTop: '0.5rem' }}>
+        <h1 className="hi">
+          Spielergebnisse 🏆
+        </h1>
         
-        <div className="view-mode-buttons">
+        {/* Season Info prominent */}
+        <div style={{ 
+          fontSize: '0.875rem', 
+          color: '#6b7280',
+          fontWeight: '600',
+          marginTop: '0.5rem',
+          marginBottom: '1rem'
+        }}>
+          Saison: {display}
+        </div>
+        
+        {/* View-Mode Toggle - Moderne Tab-Buttons */}
+        <div className="view-mode-toggle">
           <button
-            className={`view-btn ${viewMode === 'mannschaft' ? 'active' : ''}`}
+            className={`view-toggle-btn ${viewMode === 'mannschaft' ? 'active' : ''}`}
             onClick={() => setViewMode('mannschaft')}
           >
-            👥 Mannschaft
+            <span style={{ fontSize: '1.2rem' }}>👥</span>
+            <span>Mannschaft</span>
           </button>
           <button
-            className={`view-btn ${viewMode === 'spieler' ? 'active' : ''}`}
+            className={`view-toggle-btn ${viewMode === 'spieler' ? 'active' : ''}`}
             onClick={() => setViewMode('spieler')}
           >
-            🎾 Spieler
+            <span style={{ fontSize: '1.2rem' }}>🎾</span>
+            <span>Spieler</span>
           </button>
         </div>
       </div>
 
-      <div className="results-container">
-        {viewMode === 'mannschaft' ? (
-          matches.length === 0 ? (
-          <div className="no-matches">
-            <div className="no-matches-icon">🎾</div>
-            <h3>Keine Spiele gefunden</h3>
-            <p>Für die aktuelle Saison {display} sind noch keine Spiele geplant.</p>
-          </div>
-        ) : (
-          <div className="matches-list">
-            {matches.map((match, matchIndex) => {
+      {/* Results Container */}
+      {viewMode === 'mannschaft' ? (
+        /* Mannschafts-Ansicht Card */
+        (() => {
+          // Filter Matches basierend auf selectedTeamId
+          const filteredMatches = matches.filter(match => {
+            // Wenn kein Team ausgewählt → zeige alle Matches
+            if (!selectedTeamId) {
+              return true;
+            }
+            
+            // Wenn Team ausgewählt:
+            // - Match MIT teamInfo: Prüfe ob ID übereinstimmt
+            // - Match OHNE teamInfo: Zeige trotzdem an (alte Daten)
+            if (match.teamInfo) {
+              return match.teamInfo.id === selectedTeamId;
+            }
+            
+            // Matches ohne teamInfo immer anzeigen (Fallback)
+            return true;
+          });
+          
+          console.log('🔍 Filter Debug:', {
+            totalMatches: matches.length,
+            selectedTeamId: selectedTeamId,
+            filteredMatches: filteredMatches.length,
+            matchesWithTeamInfo: matches.filter(m => m.teamInfo).length,
+            matchTeamIds: matches.map(m => m.teamInfo?.id).filter(Boolean)
+          });
+          
+          return (
+            <div className="fade-in lk-card-full">
+              <div className="formkurve-header">
+                <div className="formkurve-title">Alle Spiele</div>
+                <div className="match-count-badge">
+                  {filteredMatches.length} {filteredMatches.length === 1 ? 'Spiel' : 'Spiele'}
+                </div>
+              </div>
+              
+              {/* Team-Selector - nur in Mannschafts-Ansicht und nur wenn > 1 Team */}
+              {playerTeams.length > 1 && (
+                <div style={{ padding: '1rem 1rem 0 1rem' }}>
+                  <div className="team-selector-modern">
+                    <label className="team-selector-label">Team filtern:</label>
+                    <select 
+                      className="team-selector-dropdown"
+                      value={selectedTeamId || ''}
+                      onChange={(e) => setSelectedTeamId(e.target.value)}
+                    >
+                      {playerTeams.map(team => (
+                        <option key={team.id} value={team.id}>
+                          {team.club_name} - {team.team_name} ({team.category})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+              
+              <div className="season-content">
+              {filteredMatches.length === 0 ? (
+                <div className="no-results">
+                  <div style={{ fontSize: '3rem' }}>🎾</div>
+                  <h3>Keine Spiele gefunden</h3>
+                  <p>Für die aktuelle Saison {display} {selectedTeamId && playerTeams.length > 1 ? 'und das gewählte Team' : ''} sind noch keine Spiele geplant.</p>
+                </div>
+              ) : (
+                <div className="season-matches">
+                  {filteredMatches.map((match) => {
               const score = matchScores[match.id];
               const status = getMatchStatus(match);
               
@@ -543,136 +561,171 @@ const Results = () => {
               const isMedenspieleCompleted = score && score.completed >= expectedTotal;
               
               // Outcome basierend auf Medenspiel-Status
-              let outcome, outcomeClass, outcomeLabel;
+              let outcome, outcomeLabel;
               
               if (!score || score.completed === 0) {
                 // Keine Ergebnisse
                 outcome = status === 'live' ? 'live' : 'upcoming';
-                outcomeClass = outcome === 'live' ? 'result-live' : 'result-upcoming';
                 outcomeLabel = '';
               } else if (isMedenspieleCompleted) {
                 // ALLE Spiele abgeschlossen → Finaler Sieger
                 if (score.home > score.guest) {
                   outcome = 'win';
-                  outcomeClass = 'result-win';
                   outcomeLabel = '🏆 Sieg';
                 } else if (score.home < score.guest) {
                   outcome = 'loss';
-                  outcomeClass = 'result-loss';
                   outcomeLabel = '🏆 Niederlage';
                 } else {
                   outcome = 'draw';
-                  outcomeClass = 'result-draw';
                   outcomeLabel = '🏆 Remis';
                 }
               } else {
                 // Spiel läuft noch (1-5 Spiele bei Winter, 1-8 bei Sommer)
                 if (score.home > score.guest) {
                   outcome = 'leading';
-                  outcomeClass = 'result-leading';
                   outcomeLabel = '🏠 Heim führt';
                 } else if (score.home < score.guest) {
                   outcome = 'trailing';
-                  outcomeClass = 'result-trailing';
                   outcomeLabel = '✈️ Gast führt';
                 } else {
                   outcome = 'tied';
-                  outcomeClass = 'result-tied';
                   outcomeLabel = '⚖️ Unentschieden';
                 }
               }
 
               return (
-                <article 
+                <div 
                   key={match.id} 
-                  className={`mr-card ${outcomeClass}`}
+                  className="match-result-card"
                   onClick={() => navigate(`/ergebnisse/${match.id}`)}
+                  style={{ cursor: 'pointer' }}
                 >
-                  <div className="mr-accent" aria-hidden="true"></div>
-
-                  <header className="mr-head">
-                    <span className="mr-pill mr-match-number">
-                      🎾 Spiel {matchIndex + 1}
-                    </span>
-                    <span className="mr-pill mr-date">
-                      📅 {match.date.toLocaleDateString('de-DE', {
-                        weekday: 'short',
-                        day: '2-digit',
-                        month: '2-digit',
-                        year: 'numeric'
-                      })}
-                    </span>
-                    <span className="mr-pill mr-time">
-                      ⏰ {match.date.toLocaleTimeString('de-DE', {
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })} Uhr
-                    </span>
-                    <span className={`mr-pill ${match.location === 'Home' ? 'mr-location-home' : 'mr-location-away'}`}>
-                      {match.location === 'Home' ? '🏠 Heimspiel' : '✈️ Auswärtsspiel'}
-                    </span>
-                    {getStatusBadge(match)}
-                  </header>
-
-                  <hr className="mr-divider" />
-
-                  <section className="mr-body">
-                    <div className="mr-team-row">
-                      <div className="mr-team">
-                        <span className="mr-emoji" aria-hidden="true">🏠</span>
-                        <span className="mr-team-name">{teamInfo?.teamName || 'Unser Team'}</span>
+                  {/* Match Header */}
+                  <div className="match-header">
+                    <div className="match-info">
+                      <span className="match-opponent-name">{match.opponent}</span>
+                    </div>
+                    <div className="match-status">
+                      {/* Status Badge */}
+                      <div className={`improvement-badge-top ${
+                        status === 'completed' ? 'positive' : 
+                        status === 'in-progress' || status === 'live' ? 'neutral' : 
+                        'negative'
+                      }`} style={{ fontSize: '0.75rem', padding: '0.35rem 0.6rem' }}>
+                        <span className="badge-value">
+                          {status === 'completed' ? '✅' : 
+                           status === 'in-progress' || status === 'live' ? '⏳' : 
+                           status === 'upcoming' ? '📅' : 
+                           '❓'}
+                        </span>
                       </div>
                     </div>
+                  </div>
 
-                    <div className="mr-score-wrap">
-                      {score && score.completed > 0 ? (
-                        <div className="mr-score-box">
-                          <span className="mr-score">{score.home}</span>
-                          <span className="mr-sep">:</span>
-                          <span className="mr-score">{score.guest}</span>
-                        </div>
-                      ) : (
-                        <div className="mr-score-box upcoming">
-                          <span className="result-text no-result">-:-</span>
-                        </div>
-                      )}
+                  {/* Match Info Compact */}
+                  <div className="results-match-compact">
+                    {/* Datum + Zeit Row */}
+                    <div className="results-match-row">
+                      <span className="results-info-label">
+                        📅 {match.date.toLocaleDateString('de-DE', {
+                          weekday: 'short',
+                          day: '2-digit',
+                          month: '2-digit'
+                        })}
+                      </span>
+                      <span className="results-info-value">
+                        {match.date.toLocaleTimeString('de-DE', {
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })} Uhr
+                      </span>
                     </div>
 
-                    {outcome !== 'upcoming' && (
-                      <div className={`mr-outcome ${outcome}`}>
-                        <span>{outcomeLabel}</span>
+                    {/* Score Compact - Reihenfolge basierend auf Home/Away */}
+                    {score && score.completed > 0 ? (
+                      <div className="results-score-compact">
+                        {match.location === 'Home' ? (
+                          <>
+                            <span className={`score-digit ${score.home > score.guest ? 'winner' : ''}`}>
+                              {score.home}
+                            </span>
+                            <span className="score-sep">:</span>
+                            <span className={`score-digit ${score.guest > score.home ? 'winner' : ''}`}>
+                              {score.guest}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className={`score-digit ${score.guest > score.home ? 'winner' : ''}`}>
+                              {score.guest}
+                            </span>
+                            <span className="score-sep">:</span>
+                            <span className={`score-digit ${score.home > score.guest ? 'winner' : ''}`}>
+                              {score.home}
+                            </span>
+                          </>
+                        )}
+                        {score.completed < score.total && (
+                          <span className="score-progress">({score.completed}/{score.total})</span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="results-score-compact">
+                        <span className="score-digit">-</span>
+                        <span className="score-sep">:</span>
+                        <span className="score-digit">-</span>
                       </div>
                     )}
 
-                    <div className="mr-team-row">
-                      <div className="mr-team">
-                        <span className="mr-team-name">{match.opponent}</span>
-                        <span className="mr-emoji" aria-hidden="true">✈️</span>
+                    {/* Outcome Badge */}
+                    {isMedenspieleCompleted && (
+                      <div className={`outcome-badge ${outcome}`}>
+                        {outcome === 'win' && '🏆 Sieg'}
+                        {outcome === 'loss' && '😢 Niederlage'}
+                        {outcome === 'draw' && '🤝 Remis'}
                       </div>
-                    </div>
-                  </section>
+                    )}
+                    {!isMedenspieleCompleted && score && score.completed > 0 && (
+                      <div className="outcome-badge in-progress">
+                        {outcomeLabel}
+                      </div>
+                    )}
+                  </div>
 
-                  <footer className="mr-foot">
+                  {/* Details Link */}
+                  <div className="results-match-footer">
                     <span className="view-details-link">
                       Details ansehen <ChevronRight size={16} />
                     </span>
-                  </footer>
-                </article>
+                  </div>
+                </div>
               );
-            })}
-          </div>
-          )
-        ) : (
-          // SPIELER-ANSICHT
-          <div className="player-results-view">
-            {Object.values(playerResults).length === 0 ? (
-              <div className="no-matches">
-                <div className="no-matches-icon">🎾</div>
-                <h3>Keine Spieler-Ergebnisse</h3>
-                <p>Es sind noch keine Ergebnisse für einzelne Spieler vorhanden.</p>
+                  })}
+                </div>
+              )}
               </div>
-            ) : (
-              <div className="players-list">
+            </div>
+          );
+        })()
+      ) : (
+        // SPIELER-ANSICHT
+        <div className="fade-in lk-card-full">
+          <div className="formkurve-header">
+            <div className="formkurve-title">Spieler-Ergebnisse</div>
+            <div className="match-count-badge">
+              {Object.values(playerResults).length} {Object.values(playerResults).length === 1 ? 'Spieler' : 'Spieler'}
+            </div>
+          </div>
+          
+          <div className="season-content">
+          {Object.values(playerResults).length === 0 ? (
+            <div className="no-results">
+              <div style={{ fontSize: '3rem' }}>🎾</div>
+              <h3>Keine Spieler-Ergebnisse</h3>
+              <p>Es sind noch keine Ergebnisse für einzelne Spieler vorhanden.</p>
+            </div>
+          ) : (
+            <div className="season-matches">
                 {Object.values(playerResults)
                   .sort((a, b) => {
                     const lkA = a.player.current_lk || a.player.season_start_lk || a.player.ranking || 'LK 99';
@@ -835,11 +888,11 @@ const Results = () => {
                       </div>
                     );
                   })}
-              </div>
-            )}
+            </div>
+          )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

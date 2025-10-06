@@ -137,6 +137,11 @@ export function AuthProvider({ children }) {
       if (data) {
         console.log('✅ Player data loaded:', data.name, data.email);
         setPlayer(data);
+        
+        // Trigger Team-Reload Event für DataContext
+        window.dispatchEvent(new CustomEvent('reloadTeams', { 
+          detail: { playerId: data.id } 
+        }));
       } else {
         console.warn('⚠️ No player data found - creating player entry');
         
@@ -186,6 +191,11 @@ export function AuthProvider({ children }) {
           } else {
             console.log('✅ Player created successfully:', newPlayer);
             setPlayer(newPlayer);
+            
+            // Trigger Team-Reload Event für DataContext
+            window.dispatchEvent(new CustomEvent('reloadTeams', { 
+              detail: { playerId: newPlayer.id } 
+            }));
           }
         }
       }

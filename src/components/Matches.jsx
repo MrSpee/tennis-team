@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
-import { Calendar, MapPin, Users, MessageCircle, Check, X, Download } from 'lucide-react';
+import { MessageCircle, Check, X, Download } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import './Matches.css';
+import './Dashboard.css';
 
 function Matches() {
   const navigate = useNavigate();
   const { player } = useAuth();
-  const { matches, updateMatchAvailability } = useData();
+  const { matches, updateMatchAvailability, playerTeams } = useData();
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [comment, setComment] = useState('');
   const [searchParams] = useSearchParams();
@@ -48,41 +49,6 @@ function Matches() {
     }
   }, [searchParams, matches]);
 
-  // Motivierende Verfügbarkeits-Texte
-  const getAvailabilityText = (status) => {
-    const availableTexts = [
-      '🎾 Ich bin dabei!',
-      '🔥 Bin am Start!',
-      '⚡ Count me in!',
-      '🚀 Ich komme!',
-      '💪 Bin bereit!',
-      '🎯 Absolut dabei!',
-      '🏆 Ich spiele mit!',
-      '✨ Bin dabei!',
-      '🎪 Ich mache mit!',
-      '🌟 Bin am Ball!'
-    ];
-    
-    
-    const unavailableTexts = [
-      '😔 Leider nicht dabei',
-      '❌ Kann nicht',
-      '🚫 Bin verhindert',
-      '😢 Muss absagen',
-      '⛔ Leider nicht möglich',
-      '😞 Bin nicht verfügbar',
-      '🙁 Kann nicht mitspielen',
-      '😓 Muss passen',
-      '😔 Leider nicht',
-      '❌ Muss absagen'
-    ];
-
-    if (status === 'available') {
-      return availableTexts[Math.floor(Math.random() * availableTexts.length)];
-    } else {
-      return unavailableTexts[Math.floor(Math.random() * unavailableTexts.length)];
-    }
-  };
 
   const upcomingMatches = matches
     .filter(m => m.date > new Date())
@@ -181,19 +147,26 @@ function Matches() {
   };
 
   return (
-    <div className="matches-page container">
-      <header className="page-header fade-in">
-        <div>
-          <h1>Meine Verfügbarkeit</h1>
-          <p>Verfügbarkeit für kommende Spiele angeben</p>
-        </div>
-      </header>
+    <div className="dashboard container">
+      {/* Header - Moderner Dashboard-Stil */}
+      <div className="fade-in" style={{ marginBottom: '1rem', paddingTop: '0.5rem' }}>
+        <h1 className="hi">
+          Meine Verfügbarkeit 📅
+        </h1>
+      </div>
 
-      <section className="matches-section fade-in">
-        <h2>Kommende Spiele ({upcomingMatches.length})</h2>
+      {/* Kommende Spiele Card */}
+      <div className="fade-in lk-card-full">
+        <div className="formkurve-header">
+          <div className="formkurve-title">Kommende Spiele</div>
+          <div className="match-count-badge">
+            {upcomingMatches.length} {upcomingMatches.length === 1 ? 'Spiel' : 'Spiele'}
+          </div>
+        </div>
         
+        <div className="season-content">
         {upcomingMatches.length > 0 ? (
-          <div className="matches-list">
+          <div className="season-matches">
             {upcomingMatches.map(match => {
               const myStatus = getAvailabilityStatus(match);
               const availableCount = Object.values(match.availability || {})
@@ -203,230 +176,247 @@ function Matches() {
                 .filter(([, data]) => data.status === 'available')
                 .map(([, data]) => data.playerName)
                 .filter(name => name && name !== 'Unbekannt');
-              
-              const missingPlayers = match.playersNeeded - availableCount;
 
               return (
                 <div 
                   key={match.id} 
                   id={`match-${match.id}`}
-                  className="match-card card" 
-                  style={{
-                    border: '2px solid #e5e7eb',
-                    borderRadius: '12px',
-                    padding: '1rem',
-                    marginBottom: '1rem'
-                  }}
+                  className="match-result-card"
                 >
-                  {/* Gegner */}
-                  <div style={{ marginBottom: '0.5rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                      <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '700' }}>
-                        {match.opponent}
-                      </h3>
-                      <span className={`season-badge ${match.season}`} style={{ fontSize: '0.7rem' }}>
-                        {match.season === 'winter' ? 'Winter' : 'Sommer'}
-                      </span>
+                  {/* Match Header mit Gegner */}
+                  <div className="match-header">
+                    <div className="match-info">
+                      <span className="match-opponent-name">{match.opponent}</span>
                     </div>
-                    
-                    {/* Es spielen: */}
-                    {availablePlayers.length > 0 && (
-                      <div style={{ marginBottom: '0.5rem' }}>
-                        <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem' }}>
-                          Es spielen:
-                        </div>
-                        <div className="player-badges">
-                          {availablePlayers.map((playerName, index) => (
-                            <span 
-                              key={index} 
-                              className="player-badge"
-                              onClick={() => navigate(`/player/${encodeURIComponent(playerName)}`)}
-                              style={{ cursor: 'pointer' }}
-                              title={`Profil von ${playerName} anzeigen`}
-                            >
-                              {playerName}
-                            </span>
-                          ))}
-                        </div>
+                    <div className="match-status">
+                      {/* Status Badge */}
+                      <div className={`improvement-badge-top ${
+                        availableCount >= match.playersNeeded ? 'positive' : 
+                        availableCount > 0 ? 'neutral' : 
+                        'negative'
+                      }`}>
+                        <span className="badge-icon">
+                          {availableCount >= match.playersNeeded ? '✅' : 
+                           availableCount > 0 ? '⚠️' : 
+                           '❌'}
+                        </span>
+                        <span className="badge-value">
+                          {availableCount}/{match.playersNeeded}
+                        </span>
                       </div>
-                    )}
-                  </div>
-
-                  {/* Status-Meldung */}
-                  <div style={{
-                    padding: '0.5rem 0.75rem',
-                    background: availableCount >= match.playersNeeded ? '#d1fae5' : availableCount > 0 ? '#fef3c7' : '#fee2e2',
-                    borderRadius: '6px',
-                    marginBottom: '0.75rem'
-                  }}>
-                    <div style={{ 
-                      fontSize: '0.85rem', 
-                      fontWeight: '600',
-                      color: availableCount >= match.playersNeeded ? '#065f46' : availableCount > 0 ? '#92400e' : '#991b1b'
-                    }}>
-                      {availableCount >= match.playersNeeded 
-                        ? '✅ Wir sind ausreichend! Der MF darf sich seine Premium-Mannschaft zusammenstellen.'
-                        : availableCount > 0
-                        ? `⚠️ Es fehlen noch ${missingPlayers} Spieler!`
-                        : '❌ Noch keine Rückmeldungen!'
-                      }
                     </div>
                   </div>
 
-                  {/* Dein Feedback */}
-                  {myStatus && (
-                    <div style={{
-                      padding: '0.5rem 0.75rem',
-                      background: myStatus.status === 'available' ? '#d1fae5' : '#fee2e2',
-                      borderRadius: '6px',
-                      marginBottom: '0.75rem',
-                      border: `2px solid ${myStatus.status === 'available' ? '#10b981' : '#ef4444'}`
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <div style={{ fontSize: '0.75rem', color: '#666', fontWeight: '600', marginBottom: '0.25rem' }}>
-                            DEIN FEEDBACK:
-                          </div>
-                          <div style={{ 
-                            fontSize: '0.9rem', 
-                            fontWeight: '600',
-                            color: myStatus.status === 'available' ? '#065f46' : '#991b1b'
-                          }}>
-                            {getAvailabilityText(myStatus.status)}
-                          </div>
-                          {myStatus.comment && (
-                            <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.25rem', fontStyle: 'italic' }}>
-                              💬 {myStatus.comment}
-                            </div>
-                          )}
-                        </div>
-                        {myStatus.status === 'available' && (
-                          <button
-                            onClick={() => downloadCalendarEvent(match)}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '0.25rem',
-                              padding: '0.4rem 0.6rem',
-                              background: '#10b981',
-                              color: 'white',
-                              border: 'none',
-                              borderRadius: '6px',
-                              fontSize: '0.75rem',
-                              fontWeight: '600',
-                              cursor: 'pointer'
-                            }}
-                            title="In Kalender speichern"
-                          >
-                            <Download size={14} />
-                            Kalender
-                          </button>
-                        )}
-                      </div>
+                  {/* Team-Badge (wenn Multi-Team) */}
+                  {match.teamInfo && playerTeams.length > 1 && (
+                    <div className="match-team-badge" style={{ marginBottom: '1rem' }}>
+                      🏢 {match.teamInfo.clubName} - {match.teamInfo.teamName}
                     </div>
                   )}
 
-                  {/* Spiel-Details */}
-                  <div className="match-details-grid" style={{ marginBottom: '0.75rem' }}>
-                    <div className="detail-item">
-                      <Calendar size={18} />
-                      <span>{format(match.date, 'EEEE, dd. MMMM yyyy', { locale: de })}</span>
+                  {/* Match Details Compact */}
+                  <div className="match-info-grid" style={{ marginBottom: '1rem' }}>
+                    <div className="match-info-row">
+                      <span className="info-label">📅 Datum:</span>
+                      <span className="info-value">{format(match.date, 'EEEE, dd. MMMM', { locale: de })}</span>
                     </div>
-                    <div className="detail-item">
-                      <Users size={18} />
-                      <span>{format(match.date, 'HH:mm', { locale: de })} Uhr</span>
+                    <div className="match-info-row">
+                      <span className="info-label">⏰ Zeit:</span>
+                      <span className="info-value">{format(match.date, 'HH:mm', { locale: de })} Uhr</span>
                     </div>
-                    <div className="detail-item">
-                      <MapPin size={18} />
-                      <span>{match.location === 'Home' ? 'Heimspiel' : 'Auswärtsspiel'}</span>
+                    <div className="match-info-row">
+                      <span className="info-label">📍 Ort:</span>
+                      <span className="info-value">
+                        {match.location === 'Home' ? '🏠 Heimspiel' : '✈️ Auswärtsspiel'}
+                      </span>
                     </div>
                     {match.venue && (
-                      <div className="detail-item" style={{ gridColumn: '1 / -1' }}>
-                        <MapPin size={18} />
+                      <div className="match-info-row" style={{ gridColumn: '1 / -1' }}>
+                        <span className="info-label">🗺️</span>
                         <a
                           href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(match.venue)}`}
                           target="_blank"
                           rel="noopener noreferrer"
+                          className="info-value"
                           style={{
-                            color: '#3b82f6',
-                            textDecoration: 'none',
+                            color: '#0ea5e9',
+                            textDecoration: 'underline',
                             fontWeight: '500'
                           }}
                         >
-                          📍 {match.venue}
+                          {match.venue}
                         </a>
                       </div>
                     )}
                   </div>
 
-                  <div className="availability-actions">
-                    {selectedMatch === match.id ? (
-                      <div className="availability-form">
+                  {/* ES SPIELEN MIT - Prominent anzeigen */}
+                  {availablePlayers.length > 0 && (
+                    <div style={{ marginBottom: '1rem' }}>
+                      <div style={{ 
+                        fontSize: '0.75rem', 
+                        color: '#6b7280', 
+                        fontWeight: '700',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        marginBottom: '0.5rem' 
+                      }}>
+                        Es spielen mit ({availablePlayers.length}):
+                      </div>
+                      <div className="player-badges">
+                        {availablePlayers.map((playerName, index) => (
+                          <span 
+                            key={index} 
+                            className="player-badge-small"
+                            onClick={() => navigate(`/player/${encodeURIComponent(playerName)}`)}
+                            title={`Profil von ${playerName}`}
+                          >
+                            {playerName}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* DEINE VERFÜGBARKEIT - HERO ELEMENT */}
+                  <div className="availability-hero">
+                    {myStatus ? (
+                      // Bereits geantwortet
+                      <div className={`availability-status-card ${myStatus.status}`}>
+                        <div className="status-card-header">
+                          <div>
+                            <div className="status-card-label">Deine Antwort:</div>
+                            <div className="status-card-value">
+                              {myStatus.status === 'available' ? '✅ Bin dabei!' : '❌ Kann nicht'}
+                            </div>
+                            {myStatus.comment && (
+                              <div className="status-card-comment">
+                                💬 {myStatus.comment}
+                              </div>
+                            )}
+                          </div>
+                          {myStatus.status === 'available' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
+                              <span style={{ fontSize: '0.7rem', color: '#6b7280', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                Zum Kalender
+                              </span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  downloadCalendarEvent(match);
+                                }}
+                                className="btn-calendar"
+                                title="In Kalender speichern"
+                              >
+                                <Download size={16} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Ändern Button */}
+                        {selectedMatch !== match.id && (
+                          <button
+                            onClick={() => setSelectedMatch(match.id)}
+                            className="btn-change-availability"
+                          >
+                            Antwort ändern
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      // Noch nicht geantwortet - Große auffällige Buttons
+                      !selectedMatch || selectedMatch !== match.id ? (
+                        <button
+                          onClick={() => setSelectedMatch(match.id)}
+                          className="btn-availability-main"
+                        >
+                          <span style={{ fontSize: '1.2rem' }}>📅</span>
+                          <span>Verfügbarkeit angeben</span>
+                        </button>
+                      ) : null
+                    )}
+
+                    {/* Formular wenn geöffnet */}
+                    {selectedMatch === match.id && (
+                      <div className="availability-form-modern">
+                        <div style={{ 
+                          fontSize: '0.875rem', 
+                          fontWeight: '600', 
+                          color: '#374151',
+                          marginBottom: '0.75rem'
+                        }}>
+                          Kannst du am {format(match.date, 'dd. MMMM', { locale: de })} spielen?
+                        </div>
+                        
                         <textarea
                           value={comment}
                           onChange={(e) => setComment(e.target.value)}
-                          placeholder="Optional: Kommentar hinzufügen (z.B. 'Bin unsicher wegen Arbeit')"
+                          placeholder="Optional: Kommentar (z.B. 'Komme eventuell 10 Min später')"
                           rows="2"
+                          style={{
+                            width: '100%',
+                            padding: '0.75rem',
+                            borderRadius: '8px',
+                            border: '1px solid #e5e7eb',
+                            fontSize: '0.875rem',
+                            marginBottom: '0.75rem',
+                            fontFamily: 'inherit',
+                            resize: 'vertical'
+                          }}
                         />
-                        <div className="form-buttons">
+                        
+                        <div className="availability-buttons">
                           <button
                             onClick={() => handleAvailability(match.id, 'available')}
-                            className="btn btn-success"
+                            className="btn-available"
                           >
-                            <Check size={18} />
-                            🎾 Bin dabei!
+                            <Check size={20} />
+                            <span>Bin dabei!</span>
                           </button>
                           <button
                             onClick={() => handleAvailability(match.id, 'unavailable')}
-                            className="btn btn-danger"
+                            className="btn-unavailable"
                           >
-                            <X size={18} />
-                            😔 Kann nicht
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSelectedMatch(null);
-                              setComment('');
-                            }}
-                            className="btn btn-secondary"
-                          >
-                            Abbrechen
+                            <X size={20} />
+                            <span>Kann nicht</span>
                           </button>
                         </div>
+                        
+                        <button
+                          onClick={() => {
+                            setSelectedMatch(null);
+                            setComment('');
+                          }}
+                          className="btn-cancel"
+                        >
+                          Abbrechen
+                        </button>
                       </div>
-                    ) : (
-                      <button
-                        onClick={() => setSelectedMatch(match.id)}
-                        className="btn btn-primary btn-full"
-                        style={{
-                          background: myStatus ? '#f8f9fa' : '#3b82f6',
-                          color: myStatus ? '#374151' : 'white',
-                          border: myStatus ? '2px solid #e5e7eb' : 'none',
-                          fontWeight: '600'
-                        }}
-                      >
-                        {myStatus ? '✅ Zusage | 🚫 Absage' : 'Verfügbarkeit angeben'}
-                      </button>
                     )}
                   </div>
 
+                  {/* Alle Rückmeldungen (aufklappbar) */}
                   {Object.keys(match.availability || {}).length > 0 && (
-                    <details className="availability-details">
-                      <summary>Feedback Spieler ({Object.keys(match.availability).length})</summary>
-                      <div className="availability-list">
+                    <details className="availability-details-modern">
+                      <summary>
+                        <MessageCircle size={16} />
+                        <span>Alle Rückmeldungen ({Object.keys(match.availability).length})</span>
+                      </summary>
+                      <div className="availability-list-modern">
                         {Object.entries(match.availability).map(([playerId, data]) => (
-                          <div key={playerId} className="availability-item">
-                            <div className="availability-name">
-                              <span className={`status-dot ${data.status}`}></span>
-                              {data.playerName || 'Unbekannter Spieler'}
-                            </div>
-                            <div className="availability-status-text">
-                              {data.status === 'available' ? 'Verfügbar' : 'Nicht verfügbar'}
+                          <div key={playerId} className="availability-item-modern">
+                            <div className="availability-player-info">
+                              <span className={`status-indicator ${data.status}`}>
+                                {data.status === 'available' ? '✅' : '❌'}
+                              </span>
+                              <span className="player-name-text">
+                                {data.playerName || 'Unbekannter Spieler'}
+                              </span>
                             </div>
                             {data.comment && (
-                              <div className="availability-comment">
-                                <MessageCircle size={14} />
-                                {data.comment}
+                              <div className="player-comment">
+                                💬 {data.comment}
                               </div>
                             )}
                           </div>
@@ -439,37 +429,44 @@ function Matches() {
             })}
           </div>
         ) : (
-          <div className="empty-state card">
-            <Calendar size={48} color="var(--gray-400)" />
-            <p>Keine kommenden Spiele geplant</p>
+          <div className="no-results">
+            <div style={{ fontSize: '3rem' }}>📅</div>
+            <h3>Keine kommenden Spiele</h3>
+            <p>Sobald neue Spiele geplant sind, kannst du hier deine Verfügbarkeit angeben.</p>
           </div>
         )}
-      </section>
+        </div>
+      </div>
 
+      {/* Vergangene Spiele Card */}
       {pastMatches.length > 0 && (
-        <section className="matches-section fade-in">
-          <h2>Vergangene Spiele ({pastMatches.length})</h2>
-          <div className="matches-list">
-            {pastMatches.map(match => (
-              <div key={match.id} className="match-card card past-match">
-                <div className="match-header">
-                  <h3>{match.opponent}</h3>
-                  <span className="past-badge">Beendet</span>
-                </div>
-                <div className="match-details-grid">
-                  <div className="detail-item">
-                    <Calendar size={18} />
-                    <span>{format(match.date, 'dd.MM.yyyy', { locale: de })}</span>
-                  </div>
-                  <div className="detail-item">
-                    <MapPin size={18} />
-                    <span>{match.location === 'Home' ? 'Heimspiel' : 'Auswärtsspiel'}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
+        <div className="fade-in lk-card-full">
+          <div className="formkurve-header">
+            <div className="formkurve-title">Vergangene Spiele</div>
+            <div className="match-count-badge">
+              {pastMatches.length} {pastMatches.length === 1 ? 'Spiel' : 'Spiele'}
+            </div>
           </div>
-        </section>
+          
+          <div className="season-content">
+            <div className="season-matches">
+              {pastMatches.map(match => (
+                <div key={match.id} className="match-preview-card finished">
+                  <div className="match-preview-header">
+                    <div className="match-preview-date">
+                      {format(match.date, 'EEE, dd. MMM', { locale: de })}
+                    </div>
+                    <div className="match-preview-badge">Beendet</div>
+                  </div>
+                  <div className="match-preview-opponent">{match.opponent}</div>
+                  <div className="match-preview-type">
+                    {match.location === 'Home' ? '🏠 Heimspiel' : '✈️ Auswärtsspiel'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

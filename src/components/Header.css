@@ -81,7 +81,15 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: all 0.3s ease;
+  transition: opacity 0.3s ease, max-height 0.3s ease, margin 0.3s ease;
+  max-height: 20px;
+}
+
+/* Header Rechts: Logo + Logout */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .brand-avatar {
@@ -96,7 +104,7 @@
   background: radial-gradient(140% 140% at 30% 20%, #e0e7ff, #c7d2fe);
   border: 1px solid rgba(255, 255, 255, 0.36);
   box-shadow: 0 4px 10px rgba(2, 6, 23, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.5);
-  transition: all 0.3s ease;
+  transition: width 0.3s ease, height 0.3s ease;
 }
 
 .brand-avatar img {
@@ -104,6 +112,29 @@
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+/* Logout Button im Header */
+.btn-logout {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 10px;
+  padding: 8px;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease, padding 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+
+.btn-logout:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.btn-logout:active {
+  transform: translateY(0);
 }
 
 /* Kompakter Zustand beim Scrollen */
@@ -126,6 +157,10 @@
 .app-header.is-compact .brand-avatar {
   width: 36px;
   height: 36px;
+}
+
+.app-header.is-compact .btn-logout {
+  padding: 6px;
 }
 
 /* Mobile Anpassungen */
