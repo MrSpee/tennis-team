@@ -579,6 +579,15 @@ function Dashboard() {
             </div>
           )}
           
+          {/* Visueller Trenner zwischen Kommenden und Beendeten Spielen */}
+          {upcomingMatches.length > 0 && recentlyFinishedMatches.length > 0 && (
+            <div className="matches-divider">
+              <div className="divider-line"></div>
+              <div className="divider-icon">⏱️</div>
+              <div className="divider-line"></div>
+            </div>
+          )}
+          
           {/* Beendete Spiele */}
           {recentlyFinishedMatches.length > 0 && (
             <div className="season-matches">

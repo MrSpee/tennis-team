@@ -21,6 +21,7 @@ export function DataProvider({ children }) {
   const [playerTeams, setPlayerTeams] = useState([]);
   const [selectedTeamId, setSelectedTeamId] = useState(null);
   const [allTeams, setAllTeams] = useState([]);
+  const [currentPlayerName, setCurrentPlayerName] = useState(null);
   
   const configured = isSupabaseConfigured();
 
@@ -71,13 +72,16 @@ export function DataProvider({ children }) {
   // Lade alle Daten
   const loadAllData = async (playerId = null) => {
     try {
-      // Lade zuerst Player-Teams (wenn playerId vorhanden)
+      // Lade zuerst Player-Teams (wenn playerId vorhanden) - für Test-Daten-Filter
       if (playerId) {
         await loadPlayerTeams(playerId);
       }
       
+      // Lade Matches NACH loadPlayerTeams (benötigt currentPlayerName)
+      await loadMatches();
+      
+      // Rest parallel laden
       await Promise.all([
-        loadMatches(),
         loadPlayers(),
         loadLeagueStandings(),
         loadTeamInfo()
@@ -93,6 +97,17 @@ export function DataProvider({ children }) {
   const loadPlayerTeams = async (playerId) => {
     try {
       console.log('🔍 Loading teams for player:', playerId);
+      
+      // Lade Spieler-Name für Test-Daten-Check
+      const { data: playerData } = await supabase
+        .from('players')
+        .select('name')
+        .eq('id', playerId)
+        .single();
+      
+      const playerName = playerData?.name || '';
+      console.log('👤 Player name:', playerName);
+      setCurrentPlayerName(playerName); // Speichere für Test-Daten-Filter
       
       const { data, error } = await supabase
         .from('player_teams')
@@ -127,8 +142,9 @@ export function DataProvider({ children }) {
         role: pt.role
       }));
       
-      // LOKALE TEST-DATEN: Füge TC Köln hinzu für Theo Tester
-      if (tcKoelnTestData.enabled) {
+      // LOKALE TEST-DATEN: Füge TC Köln hinzu NUR für Theo Tester
+      const isTheoTester = playerName === 'Theo Tester';
+      if (tcKoelnTestData.enabled && isTheoTester) {
         console.log('🧪 Adding TC Köln test team for Theo Tester');
         teams.push({
           id: tcKoelnTestData.team.id,
@@ -145,6 +161,8 @@ export function DataProvider({ children }) {
           role: 'player',
           isTestData: true
         });
+      } else if (tcKoelnTestData.enabled && !isTheoTester) {
+        console.log('⚠️ TC Köln test data SKIPPED for', playerName, '(not Theo Tester)');
       }
       
       setPlayerTeams(teams);
@@ -223,9 +241,10 @@ export function DataProvider({ children }) {
         }, {})
       }));
 
-      // LOKALE TEST-DATEN: Füge TC Köln Matches hinzu
-      if (tcKoelnTestData.enabled && tcKoelnTestData.matches) {
-        console.log('🧪 Adding', tcKoelnTestData.matches.length, 'TC Köln test matches');
+      // LOKALE TEST-DATEN: Füge TC Köln Matches hinzu NUR für Theo Tester
+      const isTheoTester = currentPlayerName === 'Theo Tester';
+      if (tcKoelnTestData.enabled && tcKoelnTestData.matches && isTheoTester) {
+        console.log('🧪 Adding', tcKoelnTestData.matches.length, 'TC Köln test matches for Theo Tester');
         
         const testMatches = tcKoelnTestData.matches.map(match => ({
           id: match.id,
@@ -248,6 +267,8 @@ export function DataProvider({ children }) {
         
         transformedMatches = [...transformedMatches, ...testMatches];
         console.log('✅ Total matches (DB + Test):', transformedMatches.length);
+      } else if (tcKoelnTestData.enabled && !isTheoTester) {
+        console.log('⚠️ TC Köln test matches SKIPPED for', currentPlayerName, '(not Theo Tester)');
       }
 
       setMatches(transformedMatches);

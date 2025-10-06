@@ -225,24 +225,21 @@ function Matches() {
                       <span className="info-value">{format(match.date, 'HH:mm', { locale: de })} Uhr</span>
                     </div>
                     <div className="match-info-row">
-                      <span className="info-label">📍 Ort:</span>
+                      <span className="info-label">
+                        {match.location === 'Home' ? '🏠' : '✈️'}
+                      </span>
                       <span className="info-value">
-                        {match.location === 'Home' ? '🏠 Heimspiel' : '✈️ Auswärtsspiel'}
+                        {match.location === 'Home' ? 'Heimspiel' : 'Auswärtsspiel'}
                       </span>
                     </div>
                     {match.venue && (
                       <div className="match-info-row" style={{ gridColumn: '1 / -1' }}>
-                        <span className="info-label">🗺️</span>
+                        <span className="info-label">📍</span>
                         <a
                           href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(match.venue)}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="info-value"
-                          style={{
-                            color: '#0ea5e9',
-                            textDecoration: 'underline',
-                            fontWeight: '500'
-                          }}
+                          className="info-value venue-link"
                         >
                           {match.venue}
                         </a>
