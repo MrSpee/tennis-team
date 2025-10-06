@@ -20,6 +20,19 @@
   transition: all 0.3s ease;
 }
 
+/* Safe Area Gradient-Füllung */
+.app-header::before {
+  content: "";
+  position: absolute;
+  top: calc(-1 * env(safe-area-inset-top));
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top);
+  background: linear-gradient(165deg, var(--brand-1), var(--brand-2));
+  z-index: -1;
+  pointer-events: none;
+}
+
 .app-header::after {
   content: "";
   position: absolute;
