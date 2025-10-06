@@ -45,3 +45,4 @@ LIMIT 5;
 -- 2. Leere Strings ("") sind nicht erlaubt für UUID-Felder
 -- 3. Verwende NULL für fehlende Werte
 
+

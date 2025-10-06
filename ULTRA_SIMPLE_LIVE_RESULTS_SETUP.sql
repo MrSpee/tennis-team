@@ -141,3 +141,4 @@ CREATE TRIGGER trigger_update_match_results_updated_at
 -- 2. Eingabe der Live-Ergebnisse
 -- 3. Manuelle Validierung in der App
 
+
