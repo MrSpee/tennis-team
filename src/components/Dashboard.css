@@ -1048,17 +1048,17 @@
     background: linear-gradient(135deg, #334155 0%, #1e293b 100%);
   }
   
-  /* Team-Texte für Dark Mode */
+  /* Team-Texte für Dark Mode - mit !important für Robustheit */
   .team-club {
-    color: #e2e8f0; /* Heller Text auf dunklem Hintergrund */
+    color: #e2e8f0 !important; /* Heller Text auf dunklem Hintergrund */
   }
   
   .team-category {
-    color: #f1f5f9; /* Sehr heller Text */
+    color: #f1f5f9 !important; /* Sehr heller Text */
   }
   
   .team-league {
-    color: #cbd5e1; /* Mittlerer heller Text */
+    color: #cbd5e1 !important; /* Mittlerer heller Text */
   }
   
   .team-badge.primary {
@@ -2396,6 +2396,363 @@
   font-weight: 700;
   color: #3730a3;
   margin-bottom: 0.5rem;
+}
+
+/* ====== PlayerProfile Modern Styles ====== */
+
+/* Hero-Section */
+.profile-hero-modern {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.profile-image-large {
+  width: 80px;
+  height: 80px;
+  border-radius: 20px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.profile-image-large .profile-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-image-placeholder-large {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  color: #1f2937;
+}
+
+.profile-info-modern {
+  flex: 1;
+  min-width: 0;
+}
+
+.player-name-large {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.player-lk-display {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.contact-chips {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.contact-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 12px;
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.contact-chip.whatsapp {
+  background: linear-gradient(135deg, #25d366 0%, #128c7e 100%);
+  color: white;
+}
+
+.contact-chip.email {
+  background: linear-gradient(135deg, #ea4335 0%, #d33b2c 100%);
+  color: white;
+}
+
+.contact-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.chip-icon {
+  font-size: 1rem;
+}
+
+.chip-text {
+  font-size: 0.875rem;
+}
+
+/* Personality Grid */
+.personality-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.personality-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.personality-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.personality-content h4 {
+  margin: 0 0 0.25rem 0;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--slate-600);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.personality-content p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+/* Moments Grid */
+.moments-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.moment-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.moment-card.positive {
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+}
+
+.moment-card.funny {
+  background: linear-gradient(135deg, #fefce8 0%, #fef3c7 100%);
+}
+
+.moment-card.neutral {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+}
+
+.moment-card.dream {
+  background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
+}
+
+.moment-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.moment-content h4 {
+  margin: 0 0 0.25rem 0;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--slate-600);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.moment-content p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+/* Personal Info Grid */
+.personal-info-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.personal-info-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.personal-info-row svg {
+  color: var(--slate-500);
+  flex-shrink: 0;
+}
+
+/* Dark Mode für PlayerProfile */
+@media (prefers-color-scheme: dark) {
+  .personality-card {
+    background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+    border-color: #475569;
+  }
+  
+  .moment-card.positive {
+    background: linear-gradient(135deg, #064e3b 0%, #065f46 100%);
+  }
+  
+  .moment-card.funny {
+    background: linear-gradient(135deg, #451a03 0%, #78350f 100%);
+  }
+  
+  .moment-card.neutral {
+    background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+  }
+  
+  .moment-card.dream {
+    background: linear-gradient(135deg, #581c87 0%, #7c3aed 100%);
+  }
+  
+  .personal-info-row {
+    background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+    border-color: #475569;
+  }
+  
+  .personality-content h4,
+  .moment-content h4 {
+    color: #cbd5e1;
+  }
+  
+  .personality-content p,
+  .moment-content p {
+    color: #e2e8f0;
+  }
+  
+  .personal-info-row {
+    color: #e2e8f0;
+  }
+  
+  .personal-info-row svg {
+    color: #94a3b8;
+  }
+}
+
+/* Mobile Responsive für PlayerProfile */
+@media (max-width: 480px) {
+  .profile-hero-modern {
+    flex-direction: column;
+    text-align: center;
+    gap: 1rem;
+  }
+  
+  .profile-image-large {
+    width: 100px;
+    height: 100px;
+  }
+  
+  .personality-grid,
+  .moments-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .contact-chips {
+    justify-content: center;
+  }
+}
+
+/* ====== Rankings Modern Styles ====== */
+
+.sort-buttons-modern {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.btn-modern {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 12px;
+  border: 2px solid transparent;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn-modern-active {
+  background: linear-gradient(135deg, #0ea5e9 0%, #10b981 100%);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+}
+
+.btn-modern-inactive {
+  background: #ffffff;
+  color: #475569;
+  border-color: #e2e8f0;
+}
+
+.btn-modern-inactive:hover {
+  background: #f8fafc;
+  border-color: #0ea5e9;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.btn-modern-active:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(14, 165, 233, 0.4);
+}
+
+.ranking-hero-modern {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.ranking-lk-display {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* Dark Mode für Rankings */
+@media (prefers-color-scheme: dark) {
+  .btn-modern-inactive {
+    background: #1e293b;
+    color: #cbd5e1;
+    border-color: #475569;
+  }
+  
+  .btn-modern-inactive:hover {
+    background: #334155;
+    border-color: #0ea5e9;
+  }
 }
 
 /* Dark Mode */

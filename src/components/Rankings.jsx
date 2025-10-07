@@ -4,6 +4,7 @@ import { Users, List } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { supabase } from '../lib/supabaseClient';
 import './Rankings.css';
+import './Dashboard.css';
 
 function Rankings() {
   const navigate = useNavigate();
@@ -658,32 +659,30 @@ function Rankings() {
   };
 
   return (
-    <div className="rankings-page container">
-      <header className="page-header fade-in">
-        <div>
-          <h1>Spieler-Rangliste</h1>
-          <p>Offizielle Tennisverband Rankings</p>
-        </div>
-      </header>
+    <div className="dashboard container">
+      {/* Kopfbereich im Dashboard-Stil */}
+      <div className="fade-in" style={{ marginBottom: '1rem', paddingTop: '0.5rem' }}>
+        <h1 className="hi">Spieler-Rangliste 🏆</h1>
+      </div>
 
       <div className="rankings-controls fade-in">
-        <div className="sort-buttons">
+        <div className="sort-buttons-modern">
           <button
-            className={`btn btn-team-intim ${sortBy === 'registered' ? 'btn-primary' : 'btn-secondary'}`}
+            className={`btn-modern ${sortBy === 'registered' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
             onClick={() => setSortBy('registered')}
           >
             <Users size={18} />
             Team intim 😉 ({registeredPlayers.length})
           </button>
           <button
-            className={`btn btn-aufsteiger ${sortBy === 'aufsteiger' ? 'btn-primary' : 'btn-secondary btn-inactive'}`}
+            className={`btn-modern ${sortBy === 'aufsteiger' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
             onClick={() => setSortBy('aufsteiger')}
             title="Aufsteiger der Saison"
           >
             🚀 Hot Player
           </button>
           <button
-            className={`btn btn-tvm ${sortBy === 'tvm' ? 'btn-primary' : 'btn-secondary'}`}
+            className={`btn-modern ${sortBy === 'tvm' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
             onClick={() => setSortBy('tvm')}
           >
             <List size={18} />
@@ -693,20 +692,30 @@ function Rankings() {
       </div>
 
       {sortBy === 'registered' && (
-        <div className="live-lk-info card fade-in" style={{ marginBottom: '1.5rem', background: 'linear-gradient(135deg, #fef3c7 0%, #fed7aa 100%)', border: 'none', padding: '1rem', textAlign: 'center' }}>
-          <h3 style={{ margin: '0 0 0.5rem 0', color: '#92400e', fontSize: '1rem' }}>⚡ Live-LK Berechnung</h3>
-          <p style={{ margin: 0, color: '#78350f', fontSize: '0.85rem', lineHeight: '1.6' }}>
-            Anhand eurer Medenspiel-Ergebnisse berechnet. Wer grad on fire ist, sieht man hier! 🔥
-          </p>
-        </div>
+        <div className="fade-in lk-card-full" style={{ marginBottom: '1.5rem' }}>
+          <div className="formkurve-header">
+            <div className="formkurve-title">⚡ Live-LK Berechnung</div>
+            <div className="match-count-badge">🔮</div>
+          </div>
+          <div className="season-content">
+            <p style={{ margin: 0, color: '#78350f', fontSize: '0.85rem', lineHeight: '1.6' }}>
+              Anhand eurer Medenspiel-Ergebnisse berechnet. Wer grad on fire ist, sieht man hier! 🔥
+            </p>
+          </div>
+      </div>
       )}
       
       {sortBy === 'aufsteiger' && (
-        <div className="live-lk-info card fade-in" style={{ marginBottom: '1.5rem', background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)', border: 'none', padding: '1rem', textAlign: 'center' }}>
-          <h3 style={{ margin: '0 0 0.5rem 0', color: '#92400e', fontSize: '1rem' }}>🚀 Aufsteiger der Saison</h3>
-          <p style={{ margin: 0, color: '#78350f', fontSize: '0.85rem', lineHeight: '1.6' }}>
-            Wer hat sich am meisten verbessert? Die größten Fortschritte der Saison! 💪
-          </p>
+        <div className="fade-in lk-card-full" style={{ marginBottom: '1.5rem' }}>
+          <div className="formkurve-header">
+            <div className="formkurve-title">🚀 Aufsteiger der Saison</div>
+            <div className="match-count-badge">💪</div>
+          </div>
+          <div className="season-content">
+            <p style={{ margin: 0, color: '#78350f', fontSize: '0.85rem', lineHeight: '1.6' }}>
+              Wer hat sich am meisten verbessert? Die größten Fortschritte der Saison! 💪
+            </p>
+          </div>
         </div>
       )}
 
@@ -717,13 +726,12 @@ function Rankings() {
             <div className="card" style={{ padding: '2rem', textAlign: 'center' }}>
               <p>🚀 Noch keine Aufsteiger-Daten verfügbar.</p>
               <p style={{ color: '#666', marginTop: '0.5rem' }}>
-                Drücke "🔮 LK" bei einem Spieler, um die Verbesserung zu berechnen!
+                Drücke ‘🔮 LK’ bei einem Spieler, um die Verbesserung zu berechnen!
               </p>
             </div>
           ) : (
             aufsteigerPlayers.map((player, index) => {
               const position = index + 1;
-              const matchStats = getPlayerMatchStats(player.id);
               const improvement = player.season_improvement || 0;
               
               // Bestimme Aufsteiger-Kategorie
@@ -737,34 +745,25 @@ function Rankings() {
               else if (improvement <= 0.2) category = { icon: '😴', text: 'Winterschlaf', color: '#9ca3af' };
               
               return (
-                <div key={player.id} className="ranking-card card">
-                  <div className="ranking-card-header">
-                    <h3 className="player-name-large">
+                <div key={player.id} className="fade-in lk-card-full">
+                  <div className="formkurve-header">
+                    <div className="formkurve-title">
                       <span className="position-number">{position}</span> - {player.name}
-                    </h3>
-                    <div className="player-stats">
-                      <span 
-                        className="ranking-badge aufsteiger-badge"
-                        style={{ backgroundColor: category.color }}
-                      >
-                        {category.icon} {category.text}
-                      </span>
-                      <span className="improvement-value" style={{ 
-                        color: improvement < 0 ? '#10b981' : '#ef4444',
-                        fontWeight: '700',
-                        fontSize: '1.1rem'
-                      }}>
-                        {improvement > 0 ? '+' : ''}{improvement.toFixed(2)} LK
-                      </span>
+                    </div>
+                    <div className="match-count-badge" style={{ backgroundColor: category.color }}>
+                      {category.icon} {category.text}
                     </div>
                   </div>
                   
-                  <div className="form-indicator">
-                    <div className="form-content">
-                      <span className="form-label">Aktuelle LK:</span>
-                      <div className="form-display">
-                        <span className="form-text">
+                  <div className="season-content">
+                    <div className="ranking-hero-modern">
+                      <div className="ranking-lk-display">
+                        <span className="lk-chip">
                           {player.season_start_lk || 'LK ?'} → {player.current_lk || 'LK ?'}
+                        </span>
+                        <span className="improvement-badge-top positive">
+                          <span className="badge-icon">▼</span>
+                          <span className="badge-value">{Math.abs(improvement).toFixed(2)}</span>
                         </span>
                       </div>
                     </div>
@@ -776,26 +775,26 @@ function Rankings() {
         ) : sortBy === 'tvm' ? (
           // TVM Meldeliste - Hardcoded
           tvmMeldeliste.map((player) => (
-            <div key={player.position} className="ranking-card card">
-              <div className="ranking-card-header">
-                <div className="position-badge">{player.position}</div>
-                <h3 className="player-name-large">
-                  {player.name}
+            <div key={player.position} className="fade-in lk-card-full">
+              <div className="formkurve-header">
+                <div className="formkurve-title">
+                  <span className="position-number">{player.position}</span> - {player.name}
                   {player.mf && <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem', color: '#f59e0b' }}>⭐ MF</span>}
-                </h3>
-                <div className="player-stats">
-                  <span 
-                    className="ranking-badge"
-                    style={{ backgroundColor: getRankingColor(`LK ${player.lk}`) }}
-                  >
-                    LK {player.lk}
-                  </span>
+                </div>
+                <div className="match-count-badge" style={{ backgroundColor: getRankingColor(`LK ${player.lk}`) }}>
+                  LK {player.lk}
                 </div>
               </div>
-
-              <div className="form-indicator">
-                <span className="form-label">Formkurve:</span>
-                <span className="form-trend neutral">-</span>
+              
+              <div className="season-content">
+                <div className="ranking-hero-modern">
+                  <div className="ranking-lk-display">
+                    <span className="lk-chip">
+                      LK {player.lk}
+                    </span>
+                    <span className="form-trend neutral">-</span>
+                  </div>
+                </div>
               </div>
             </div>
           ))
@@ -1072,9 +1071,9 @@ function Rankings() {
                                   <div className="match-detail-row">
                                     <span className="detail-label">LK nachher:</span>
                                     <span className="detail-value bold">LK {matchDetail.lkAfter.toFixed(3)}</span>
-                                  </div>
-                                </div>
-                              </div>
+                  </div>
+                </div>
+              </div>
                             ))}
                           </div>
                         )}

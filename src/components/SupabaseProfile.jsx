@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import PasswordReset from './PasswordReset';
 import './Profile.css';
+import './Dashboard.css';
 
 function SupabaseProfile() {
   const navigate = useNavigate();
@@ -397,27 +398,32 @@ function SupabaseProfile() {
   }
 
   return (
-    <div className="profile-container">
+    <div className="dashboard container">
       {isSetup && (
-        <div className="welcome-message">
-          <h2>🎉 Willkommen!</h2>
-          <p>Bitte vervollständigen Sie Ihr Profil, um fortzufahren.</p>
-          <p className="hint-text">📝 Mindestens Ihr <strong>Name</strong> ist erforderlich.</p>
+        <div className="fade-in lk-card-full" style={{ marginBottom: '1rem' }}>
+          <div className="formkurve-header">
+            <div className="formkurve-title">🎉 Willkommen!</div>
+          </div>
+          <div className="season-content">
+            <p style={{ margin: '0 0 0.5rem 0' }}>Bitte vervollständigen Sie Ihr Profil, um fortzufahren.</p>
+            <p style={{ margin: 0, fontSize: '0.9rem', color: '#666' }}>📝 Mindestens Ihr <strong>Name</strong> ist erforderlich.</p>
+          </div>
         </div>
       )}
       
-      <div className="profile-header">
-        <h1>👤 {isSetup ? 'Profil einrichten' : 'Mein Profil'}</h1>
+      {/* Kopfbereich im Dashboard-Stil */}
+      <div className="fade-in" style={{ marginBottom: '1rem', paddingTop: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+        <h1 className="hi">👤 {isSetup ? 'Profil einrichten' : 'Mein Profil'}</h1>
         {!isEditing && !isSetup && !isViewingOtherPlayer && (
-          <div className="profile-actions">
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
             <button 
-              className="btn-edit"
+              className="btn-modern btn-modern-inactive"
               onClick={() => setIsEditing(true)}
             >
               ✏️ Bearbeiten
             </button>
             <button 
-              className="btn-password"
+              className="btn-modern btn-modern-inactive"
               onClick={() => setShowPasswordReset(true)}
             >
               🔐 Passwort zurücksetzen

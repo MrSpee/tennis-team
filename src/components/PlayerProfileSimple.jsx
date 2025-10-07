@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { ArrowLeft, Trophy, Heart } from 'lucide-react';
 import './PlayerProfile.css';
+import './Dashboard.css';
 
 function PlayerProfileSimple() {
   const { playerName } = useParams();
@@ -114,8 +115,8 @@ function PlayerProfileSimple() {
 
   if (loading) {
     return (
-      <div className="player-profile-container">
-        <div className="loading-state">
+      <div className="dashboard container">
+        <div className="loading-container">
           <div className="loading-spinner"></div>
           <p>Lade Spieler-Profil...</p>
         </div>
@@ -125,7 +126,7 @@ function PlayerProfileSimple() {
 
   if (error) {
     return (
-      <div className="player-profile-container">
+      <div className="dashboard container">
         <div className="error-state">
           <div className="error-icon">😔</div>
           <h2>Spieler nicht gefunden</h2>
@@ -143,202 +144,238 @@ function PlayerProfileSimple() {
   }
 
   return (
-    <div className="player-profile-container">
-      {/* Header mit Navigation */}
-      <div className="profile-header">
-        <button 
-          onClick={() => navigate(-1)}
-          className="back-button"
-        >
-          <ArrowLeft size={20} />
-          Zurück
-        </button>
-        
-        {isOwnProfile && (
-          <button 
-            onClick={() => navigate('/profile')}
-            className="edit-button"
-          >
-            Profil bearbeiten
-          </button>
-        )}
+    <div className="dashboard container">
+      {/* Kopfbereich im Dashboard-Stil */}
+      <div className="fade-in" style={{ marginBottom: '1rem', paddingTop: '0.5rem' }}>
+        <h1 className="hi">{player?.name || 'Spieler-Profil'}</h1>
       </div>
 
-      {/* Profil-Header mit Bild und Grundinfo */}
-      <div className="profile-hero">
-        <div className="profile-image-container">
-          {player.profile_image ? (
-            <img 
-              src={player.profile_image} 
-              alt={`Profilbild von ${player.name}`}
-              className="profile-image"
-            />
-          ) : (
-            <div className="profile-image-placeholder">
-              🎾
+      {/* Hero-Card mit Profilbild und Grundinfo */}
+      <div className="fade-in lk-card-full">
+        <div className="formkurve-header">
+          <div className="formkurve-title">Spielerprofil</div>
+          <div className="match-count-badge">
+            {player.role === 'captain' ? '⭐ Captain' : '🎾 Spieler'}
+          </div>
+        </div>
+
+        <div className="season-content">
+          {/* Navigation */}
+          <div className="profile-header" style={{ marginBottom: '1rem' }}>
+            <button 
+              onClick={() => navigate(-1)}
+              className="back-button"
+            >
+              <ArrowLeft size={20} />
+              Zurück
+            </button>
+            
+            {isOwnProfile && (
+              <button 
+                onClick={() => navigate('/profile')}
+                className="edit-button"
+              >
+                Profil bearbeiten
+              </button>
+            )}
+          </div>
+
+          {/* Hero-Section */}
+          <div className="profile-hero-modern">
+            <div className="profile-image-large">
+              {player.profile_image ? (
+                <img 
+                  src={player.profile_image} 
+                  alt={`Profilbild von ${player.name}`}
+                  className="profile-image"
+                />
+              ) : (
+                <div className="profile-image-placeholder-large">
+                  🎾
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        
-        <div className="profile-basic-info">
-          <h1 className="player-name">{player.name}</h1>
-          <div className="player-rank">
-            <Trophy size={18} />
-            <span>{player.ranking || 'Noch kein Ranking'}</span>
-          </div>
-          
-          {/* Kontaktdaten */}
-          <div className="contact-info">
-            {player.phone && (
-              <a 
-                href={`https://wa.me/${formatPhoneForWhatsApp(player.phone)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="contact-item whatsapp"
-              >
-                <span className="contact-icon">📱</span>
-                <span className="contact-text">WhatsApp</span>
-              </a>
-            )}
             
-            {player.email && (
-              <a 
-                href={`mailto:${player.email}`}
-                className="contact-item email"
-              >
-                <span className="contact-icon">📧</span>
-                <span className="contact-text">E-Mail</span>
-              </a>
-            )}
+            <div className="profile-info-modern">
+              <h2 className="player-name-large">{player.name}</h2>
+              
+              {/* LK-Badge */}
+              <div className="player-lk-display">
+                <span className="lk-chip">
+                  {player.current_lk || player.season_start_lk || player.ranking || 'LK ?'}
+                </span>
+                {player.season_improvement !== null && player.season_improvement !== undefined && (
+                  <span className={`improvement-badge-top ${player.season_improvement < -0.1 ? 'positive' : player.season_improvement > 0.1 ? 'negative' : 'neutral'}`}>
+                    <span className="badge-icon">
+                      {player.season_improvement < -0.1 ? '▼' : player.season_improvement > 0.1 ? '▲' : '■'}
+                    </span>
+                    <span className="badge-value">
+                      {player.season_improvement > 0 ? '+' : ''}{player.season_improvement.toFixed(2)}
+                    </span>
+                  </span>
+                )}
+              </div>
+              
+              {/* Kontakt-Chips */}
+              <div className="contact-chips">
+                {player.phone && (
+                  <a 
+                    href={`https://wa.me/${formatPhoneForWhatsApp(player.phone)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="contact-chip whatsapp"
+                  >
+                    <span className="chip-icon">📱</span>
+                    <span className="chip-text">WhatsApp</span>
+                  </a>
+                )}
+                
+                {player.email && (
+                  <a 
+                    href={`mailto:${player.email}`}
+                    className="contact-chip email"
+                  >
+                    <span className="chip-icon">📧</span>
+                    <span className="chip-text">E-Mail</span>
+                  </a>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Tennis-Persönlichkeit - nur wenn Daten vorhanden */}
+      {/* Tennis-Persönlichkeit Card */}
       {(player.favorite_shot || player.tennis_motto || player.fun_fact || player.superstition || player.pre_match_routine) && (
-        <section className="profile-section">
-          <h2 className="section-title">
-            <Heart size={20} />
-            Tennis-Persönlichkeit
-          </h2>
-          
-          <div className="info-grid">
-            {player.favorite_shot && (
-              <div className="info-card">
-                <div className="info-icon">🎯</div>
-                <div className="info-content">
-                  <h3>Lieblingsschlag</h3>
-                  <p>{player.favorite_shot}</p>
-                </div>
-              </div>
-            )}
-            
-            {player.tennis_motto && (
-              <div className="info-card">
-                <div className="info-icon">💭</div>
-                <div className="info-content">
-                  <h3>Tennis-Motto</h3>
-                  <p>"{player.tennis_motto}"</p>
-                </div>
-              </div>
-            )}
-            
-            {player.fun_fact && (
-              <div className="info-card">
-                <div className="info-icon">😄</div>
-                <div className="info-content">
-                  <h3>Lustiger Fakt</h3>
-                  <p>{player.fun_fact}</p>
-                </div>
-              </div>
-            )}
-            
-            {player.superstition && (
-              <div className="info-card">
-                <div className="info-icon">🔮</div>
-                <div className="info-content">
-                  <h3>Tennis-Aberglaube</h3>
-                  <p>{player.superstition}</p>
-                </div>
-              </div>
-            )}
-            
-            {player.pre_match_routine && (
-              <div className="info-card">
-                <div className="info-icon">⚡</div>
-                <div className="info-content">
-                  <h3>Pre-Match Routine</h3>
-                  <p>{player.pre_match_routine}</p>
-                </div>
-              </div>
-            )}
+        <div className="fade-in lk-card-full">
+          <div className="formkurve-header">
+            <div className="formkurve-title">Tennis-Persönlichkeit</div>
+            <div className="match-count-badge">💭</div>
           </div>
-        </section>
+          
+          <div className="season-content">
+            <div className="personality-grid">
+              {player.favorite_shot && (
+                <div className="personality-card">
+                  <div className="personality-icon">🎯</div>
+                  <div className="personality-content">
+                    <h4>Lieblingsschlag</h4>
+                    <p>{player.favorite_shot}</p>
+                  </div>
+                </div>
+              )}
+              
+              {player.tennis_motto && (
+                <div className="personality-card">
+                  <div className="personality-icon">💭</div>
+                  <div className="personality-content">
+                    <h4>Tennis-Motto</h4>
+                    <p>"{player.tennis_motto}"</p>
+                  </div>
+                </div>
+              )}
+              
+              {player.fun_fact && (
+                <div className="personality-card">
+                  <div className="personality-icon">😄</div>
+                  <div className="personality-content">
+                    <h4>Lustiger Fakt</h4>
+                    <p>{player.fun_fact}</p>
+                  </div>
+                </div>
+              )}
+              
+              {player.superstition && (
+                <div className="personality-card">
+                  <div className="personality-icon">🔮</div>
+                  <div className="personality-content">
+                    <h4>Tennis-Aberglaube</h4>
+                    <p>{player.superstition}</p>
+                  </div>
+                </div>
+              )}
+              
+              {player.pre_match_routine && (
+                <div className="personality-card">
+                  <div className="personality-icon">⚡</div>
+                  <div className="personality-content">
+                    <h4>Pre-Match Routine</h4>
+                    <p>{player.pre_match_routine}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
-      {/* Tennis-Momente - nur wenn Daten vorhanden */}
+      {/* Tennis-Momente Card */}
       {(player.best_tennis_memory || player.worst_tennis_memory || player.favorite_opponent || player.dream_match) && (
-        <section className="profile-section">
-          <h2 className="section-title">
-            <Trophy size={20} />
-            Tennis-Momente
-          </h2>
-          
-          <div className="moments-grid">
-            {player.best_tennis_memory && (
-              <div className="moment-card positive">
-                <div className="moment-icon">🏆</div>
-                <div className="moment-content">
-                  <h3>Bester Moment</h3>
-                  <p>{player.best_tennis_memory}</p>
-                </div>
-              </div>
-            )}
-            
-            {player.worst_tennis_memory && (
-              <div className="moment-card funny">
-                <div className="moment-icon">😅</div>
-                <div className="moment-content">
-                  <h3>Peinlichster Moment</h3>
-                  <p>{player.worst_tennis_memory}</p>
-                </div>
-              </div>
-            )}
-            
-            {player.favorite_opponent && (
-              <div className="moment-card neutral">
-                <div className="moment-icon">🤝</div>
-                <div className="moment-content">
-                  <h3>Lieblingsgegner</h3>
-                  <p>{player.favorite_opponent}</p>
-                </div>
-              </div>
-            )}
-            
-            {player.dream_match && (
-              <div className="moment-card dream">
-                <div className="moment-icon">🌟</div>
-                <div className="moment-content">
-                  <h3>Traum-Match</h3>
-                  <p>{player.dream_match}</p>
-                </div>
-              </div>
-            )}
+        <div className="fade-in lk-card-full">
+          <div className="formkurve-header">
+            <div className="formkurve-title">Tennis-Momente</div>
+            <div className="match-count-badge">🏆</div>
           </div>
-        </section>
+          
+          <div className="season-content">
+            <div className="moments-grid">
+              {player.best_tennis_memory && (
+                <div className="moment-card positive">
+                  <div className="moment-icon">🏆</div>
+                  <div className="moment-content">
+                    <h4>Bester Moment</h4>
+                    <p>{player.best_tennis_memory}</p>
+                  </div>
+                </div>
+              )}
+              
+              {player.worst_tennis_memory && (
+                <div className="moment-card funny">
+                  <div className="moment-icon">😅</div>
+                  <div className="moment-content">
+                    <h4>Peinlichster Moment</h4>
+                    <p>{player.worst_tennis_memory}</p>
+                  </div>
+                </div>
+              )}
+              
+              {player.favorite_opponent && (
+                <div className="moment-card neutral">
+                  <div className="moment-icon">🤝</div>
+                  <div className="moment-content">
+                    <h4>Lieblingsgegner</h4>
+                    <p>{player.favorite_opponent}</p>
+                  </div>
+                </div>
+              )}
+              
+              {player.dream_match && (
+                <div className="moment-card dream">
+                  <div className="moment-icon">🌟</div>
+                  <div className="moment-content">
+                    <h4>Traum-Match</h4>
+                    <p>{player.dream_match}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Fallback für Spieler ohne erweiterte Daten */}
       {!player.favorite_shot && !player.tennis_motto && !player.fun_fact && (
-        <section className="profile-section">
-          <div className="info-card">
-            <div className="info-icon">ℹ️</div>
-            <div className="info-content">
-              <h3>🎭 Geheimnisvoller Tennis-Spieler</h3>
-              <p>Dieser Spieler hüllt sich noch in Schweigen! 🕵️‍♂️ Frag ihn doch mal nach seinem Lieblingsschlag oder seinem Tennis-Motto - er wird sich freuen! 😄</p>
-            </div>
+        <div className="fade-in lk-card-full">
+          <div className="formkurve-header">
+            <div className="formkurve-title">🎭 Geheimnisvoller Tennis-Spieler</div>
+            <div className="match-count-badge">ℹ️</div>
           </div>
-        </section>
+          <div className="season-content">
+            <p style={{ margin: 0, lineHeight: '1.6' }}>
+              Dieser Spieler hüllt sich noch in Schweigen! 🕵️‍♂️ Frag ihn doch mal nach seinem Lieblingsschlag oder seinem Tennis-Motto - er wird sich freuen! 😄
+            </p>
+          </div>
+        </div>
       )}
     </div>
   );
