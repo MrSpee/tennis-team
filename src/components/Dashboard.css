@@ -5,8 +5,8 @@
   --border:#e6ecf3;
   --shadow:0 18px 40px rgba(2,6,23,.08);
 
-  --slate-500:#6b7280;
-  --slate-600:#475569;
+  --slate-500:#374151; /* Dunkler für besseren Kontrast */
+  --slate-600:#1f2937; /* Viel dunkler für Titel */
 
   --accent:#2563eb; /* Sparkline-Farbe */
   --trend-up:#059669;
@@ -85,7 +85,7 @@
 
 .formkurve-title {
   font-size: 14px;
-  color: var(--slate-600);
+  color: #1f2937; /* Dunkelgrau statt hellgrau */
   font-weight: 700;
   letter-spacing: .04em;
   text-transform: uppercase;
@@ -449,7 +449,7 @@
 
 .season-matches-label {
   font-size: 11px;
-  color: var(--slate-600);
+  color: #1f2937; /* Dunkelgrau statt hellgrau */
   font-weight: 700;
   letter-spacing: .04em;
   text-transform: uppercase;

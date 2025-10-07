@@ -45,9 +45,12 @@ export function DataProvider({ children }) {
     // Listen für manuelle Team-Reloads
     const handleReloadTeams = (event) => {
       const playerId = event.detail?.playerId;
+      console.log('🔄 Team reload event received:', { event, playerId });
       if (playerId) {
         console.log('🔄 Manual team reload triggered for player:', playerId);
         loadPlayerTeams(playerId);
+      } else {
+        console.warn('⚠️ No playerId in reloadTeams event');
       }
     };
     

@@ -16,6 +16,14 @@ function Dashboard() {
     playerTeams
   } = useData();
   
+  // Debug: Prüfe was geladen wurde
+  console.log('🔍 Dashboard Debug:', {
+    playerTeams: playerTeams,
+    playerTeamsLength: playerTeams?.length,
+    teamInfo: teamInfo,
+    player: player
+  });
+  
   // State für Live-Timer
   const [currentTime, setCurrentTime] = useState(new Date());
 
