@@ -1048,6 +1048,19 @@
     background: linear-gradient(135deg, #334155 0%, #1e293b 100%);
   }
   
+  /* Team-Texte für Dark Mode */
+  .team-club {
+    color: #e2e8f0; /* Heller Text auf dunklem Hintergrund */
+  }
+  
+  .team-category {
+    color: #f1f5f9; /* Sehr heller Text */
+  }
+  
+  .team-league {
+    color: #cbd5e1; /* Mittlerer heller Text */
+  }
+  
   .team-badge.primary {
     background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
     color: #bfdbfe;
