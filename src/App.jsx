@@ -1,4 +1,5 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { DataProvider } from './context/DataContext';
 // Analytics minimal - nur wenn Vercel korrekt konfiguriert ist
@@ -19,10 +20,55 @@ import Results from './components/Results';
 import Training from './components/Training';
 import OnboardingFlow from './components/OnboardingFlow';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
+import EmailVerificationError from './components/EmailVerificationError';
+import NotFound from './components/NotFound';
 import Navigation from './components/Navigation';
 import Header from './components/Header';
 import ScrollToTop from './components/ScrollToTop';
 import './index.css';
+
+// Hash Error Handler - Fängt Supabase Email-Fehler ab
+function HashErrorHandler() {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    // Prüfe Hash-Parameter bei jedem Laden
+    const checkHashError = () => {
+      const hash = window.location.hash;
+      
+      if (hash.includes('error=')) {
+        // Extrahiere Error-Parameter aus dem Hash
+        const params = new URLSearchParams(hash.substring(1));
+        const error = params.get('error');
+        const errorCode = params.get('error_code');
+        const errorDescription = params.get('error_description');
+        
+        console.log('🔴 Hash Error detected:', { error, errorCode, errorDescription });
+        
+        // Navigiere zur Error-Seite mit Parametern
+        const queryParams = new URLSearchParams({
+          error: error || 'unknown',
+          error_code: errorCode || 'unknown',
+          error_description: errorDescription || 'Unknown error'
+        });
+        
+        // Entferne Hash
+        window.location.hash = '';
+        
+        // Navigiere zur Error-Seite
+        navigate(`/email-error?${queryParams.toString()}`);
+      }
+    };
+
+    checkHashError();
+    
+    // Listen für Hash-Änderungen
+    window.addEventListener('hashchange', checkHashError);
+    return () => window.removeEventListener('hashchange', checkHashError);
+  }, [navigate]);
+
+  return null;
+}
 
 // Protected Route Component
 function ProtectedRoute({ children }) {
@@ -101,6 +147,7 @@ function AppContent() {
 
   return (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <HashErrorHandler />
       <div className="app">
         <ScrollToTop />
         {showHeader && <Header />}
@@ -123,6 +170,8 @@ function AppContent() {
               <AppLogin />
             )
           } />
+          
+          <Route path="/email-error" element={<EmailVerificationError />} />
           
           <Route path="/" element={
             <ProtectedRoute>
@@ -218,7 +267,8 @@ function AppContent() {
             </CaptainRoute>
           } />
 
-          <Route path="*" element={<Navigate to="/" />} />
+          {/* 404 - Catch all undefined routes */}
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </div>
     </Router>

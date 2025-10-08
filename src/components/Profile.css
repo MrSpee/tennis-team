@@ -462,21 +462,158 @@
   .form-actions {
     flex-direction: column;
     align-items: stretch;
-    gap: 15px;
+    gap: 12px;
+    padding: 20px 15px;
+    margin-top: 20px;
   }
   
   .form-actions-left {
     order: 2;
+    margin-bottom: 0;
   }
   
   .form-actions-right {
     order: 1;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+  }
+  
+  .btn-cancel,
+  .btn-save {
+    width: 100%;
+    padding: 14px 20px;
+    font-size: 16px;
+    font-weight: 600;
+    border-radius: 10px;
+    min-height: 48px; /* Mindesthöhe für Touch-Targets */
+    display: flex;
+    align-items: center;
     justify-content: center;
+    gap: 8px;
+  }
+  
+  .btn-save {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: white;
+    border: none;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+  }
+  
+  .btn-cancel {
+    background: #f3f4f6;
+    color: #6b7280;
+    border: 2px solid #e5e7eb;
+  }
+  
+  .btn-save:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+  }
+  
+  .btn-cancel:hover:not(:disabled) {
+    background: #e5e7eb;
+    border-color: #d1d5db;
+    transform: translateY(-1px);
   }
   
   .success-message-inline {
     text-align: center;
     width: 100%;
+    margin-bottom: 10px;
+    padding: 12px 16px;
+    font-size: 14px;
+  }
+}
+
+/* Extra kleine Bildschirme (iPhone SE, etc.) */
+@media (max-width: 480px) {
+  .form-actions {
+    padding: 15px 10px;
+    gap: 10px;
+  }
+  
+  .btn-cancel,
+  .btn-save {
+    padding: 16px 20px;
+    font-size: 15px;
+    min-height: 52px;
+  }
+  
+  .success-message-inline {
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+}
+
+/* Modal Actions - Mobile Optimiert */
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.btn-modal-cancel,
+.btn-modal-save {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.btn-modal-cancel {
+  background: #6b7280;
+  color: white;
+}
+
+.btn-modal-cancel:hover {
+  background: #5a6268;
+  transform: translateY(-1px);
+}
+
+.btn-modal-save {
+  background: #3b82f6;
+  color: white;
+}
+
+.btn-modal-save:hover {
+  background: #2563eb;
+  transform: translateY(-1px);
+}
+
+/* Mobile Optimierung für Modal Actions */
+@media (max-width: 768px) {
+  .modal-actions {
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+  }
+  
+  .btn-modal-cancel,
+  .btn-modal-save {
+    width: 100%;
+    padding: 14px 20px;
+    font-size: 16px;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .btn-modal-cancel,
+  .btn-modal-save {
+    padding: 16px 20px;
+    font-size: 15px;
+    min-height: 52px;
   }
 }
 
