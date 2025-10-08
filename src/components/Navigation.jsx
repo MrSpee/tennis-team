@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Calendar, Trophy, Award, Settings, User } from 'lucide-react';
+import { Home, Calendar, Trophy, Award, Settings, User, Dumbbell } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import './Navigation.css';
 
@@ -16,6 +16,11 @@ function Navigation() {
       <NavLink to="/matches" className="nav-item">
         <Calendar size={24} />
         <span>Verfügbarkeit</span>
+      </NavLink>
+      
+      <NavLink to="/training" className="nav-item">
+        <Dumbbell size={24} />
+        <span>Training</span>
       </NavLink>
       
       <NavLink to="/results" className="nav-item">

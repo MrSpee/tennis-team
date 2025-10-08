@@ -13,12 +13,40 @@ export function AuthProvider({ children }) {
   const [player, setPlayer] = useState(null);
   const [loading, setLoading] = useState(true); // TRUE während Session geladen wird!
   const [initialCheckDone, setInitialCheckDone] = useState(false);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false); // Spieler hat kein Team
 
   // Prüfe Supabase-Konfiguration
   const configured = isSupabaseConfigured();
 
   useEffect(() => {
+    // Verhindere mehrfache Ausführung
+    if (initialCheckDone) {
+      return; // Weniger Logs
+    }
+
     console.log('🔵 AuthContext - Supabase configured:', configured);
+    
+    // Prüfe zuerst lokale Daten (TEMPORÄR DEAKTIVIERT FÜR TESTING)
+    const localPlayerData = localStorage.getItem('localPlayerData');
+    const localOnboardingComplete = localStorage.getItem('localOnboardingComplete');
+    
+    // TEMPORÄR: Lokale Daten ignorieren für sauberes Testing
+    if (false && localPlayerData && localOnboardingComplete === 'true') {
+      console.log('🏠 LOCAL Player data found:', localPlayerData);
+      try {
+        const playerData = JSON.parse(localPlayerData);
+        setPlayer(playerData);
+        setIsAuthenticated(true);
+        setCurrentUser({ id: playerData.id, email: playerData.email });
+        setNeedsOnboarding(false);
+        setLoading(false);
+        setInitialCheckDone(true);
+        return;
+      } catch (error) {
+        console.error('❌ Error parsing local player data:', error);
+        // Fallback zu Supabase
+      }
+    }
     
     if (!configured) {
       console.error('❌ Supabase nicht konfiguriert! Prüfe Umgebungsvariablen');
@@ -138,6 +166,20 @@ export function AuthProvider({ children }) {
         console.log('✅ Player data loaded:', data.name, data.email);
         setPlayer(data);
         
+        // Prüfe ob Spieler einem Team zugeordnet ist
+        const { data: playerTeams, error: teamError } = await supabase
+          .from('player_teams')
+          .select('team_id')
+          .eq('player_id', data.id)
+          .limit(1);
+
+        if (!teamError && (!playerTeams || playerTeams.length === 0)) {
+          console.log('⚠️ Player hat kein Team → Onboarding nötig');
+          setNeedsOnboarding(true);
+        } else {
+          setNeedsOnboarding(false);
+        }
+        
         // Trigger Team-Reload Event für DataContext
         window.dispatchEvent(new CustomEvent('reloadTeams', { 
           detail: { playerId: data.id } 
@@ -191,6 +233,10 @@ export function AuthProvider({ children }) {
           } else {
             console.log('✅ Player created successfully:', newPlayer);
             setPlayer(newPlayer);
+            
+            // Neuer Spieler hat kein Team → Onboarding nötig
+            setNeedsOnboarding(true);
+            console.log('⚠️ Neuer Spieler → Onboarding nötig');
             
             // Trigger Team-Reload Event für DataContext
             window.dispatchEvent(new CustomEvent('reloadTeams', { 
@@ -394,6 +440,7 @@ export function AuthProvider({ children }) {
     player,
     loading,
     configured,
+    needsOnboarding,
     login,
     register,
     logout,

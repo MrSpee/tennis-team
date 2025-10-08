@@ -439,7 +439,32 @@ function Dashboard() {
         )}
       </div>
 
-      {/* 2. Aktuelle Saison Card */}
+      {/* 2. Training-Teaser Card */}
+      <div 
+        className="fade-in lk-card-full"
+        onClick={() => navigate('/training')}
+        style={{ cursor: 'pointer' }}
+      >
+        <div className="formkurve-header">
+          <div className="formkurve-title">🎾 Nächstes Training</div>
+          <div className="match-count-badge" style={{ background: '#10b981' }}>
+            Neu
+          </div>
+        </div>
+
+        <div className="season-content">
+          <div className="next-match-card">
+            <div className="next-match-label">MITTWOCH, 17:00 UHR</div>
+            <div className="next-match-countdown">📅 Zur Trainingsseite</div>
+            <div className="next-match-opponent">
+              <div className="opponent-label">Tennisplatz Sürth</div>
+              <div className="opponent-name">Jetzt Zu-/Absagen</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Aktuelle Saison Card */}
       <div className="fade-in lk-card-full">
         <div className="formkurve-header">
           <div className="formkurve-title">Aktuelle Saison</div>
@@ -681,7 +706,7 @@ function Dashboard() {
             playerTeams.map((team) => (
               <div key={team.id} className="team-item">
                 <img 
-                  src="/logo.png" 
+                  src="/app-icon.jpg" 
                   alt="Vereinslogo" 
                   className="team-logo"
                   onError={(e) => {
@@ -702,7 +727,7 @@ function Dashboard() {
             teamInfo && (
               <div className="team-item">
                 <img 
-                  src="/logo.png" 
+                  src="/app-icon.jpg" 
                   alt="Vereinslogo" 
                   className="team-logo"
                   onError={(e) => {

@@ -3,8 +3,23 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  background: linear-gradient(165deg, #0ea5e9, #10b981);
   padding: 1rem;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Gradient-Effekt wie im Header */
+.login-container::after {
+  content: "";
+  position: absolute;
+  right: -60px;
+  top: -60px;
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0.35), transparent);
+  filter: blur(6px);
+  pointer-events: none;
 }
 
 .login-card {
@@ -21,30 +36,32 @@
   margin-bottom: 2rem;
 }
 
-.tennis-icon {
-  font-size: 4rem;
-  margin-bottom: 1rem;
-  animation: bounce 2s infinite;
+.app-logo {
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 1rem;
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
 }
 
-@keyframes bounce {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-10px);
-  }
+.app-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .login-header h1 {
   font-size: 1.75rem;
   color: var(--gray-900);
   margin-bottom: 0.5rem;
+  font-weight: 800;
 }
 
 .login-header p {
   color: var(--gray-600);
   font-size: 0.9375rem;
+  font-style: italic;
 }
 
 .login-tabs {
@@ -101,12 +118,19 @@
   font-weight: 600;
 }
 
-.code-input {
-  text-align: center;
-  font-size: 1.5rem;
-  letter-spacing: 0.5rem;
-  font-weight: 600;
-  font-family: 'Courier New', monospace;
+.form-group input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  transition: border-color 0.2s ease;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .error-message {
@@ -119,8 +143,58 @@
   text-align: center;
 }
 
-.btn-full {
+.success-message {
+  background-color: #dcfce7;
+  color: #166534;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+  font-size: 0.9375rem;
+  text-align: center;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
   width: 100%;
+  margin-bottom: 0.75rem;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-secondary {
+  background: white;
+  color: #2563eb;
+  border: 2px solid #2563eb;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.btn-secondary:hover {
+  background: #2563eb;
+  color: white;
+  transform: translateY(-1px);
 }
 
 .login-footer {
@@ -143,28 +217,6 @@
   margin: 0.5rem 0;
 }
 
-.hint-text strong {
-  font-family: 'Courier New', monospace;
-  background-color: var(--gray-100);
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-  color: var(--primary-color);
-  font-weight: 700;
-}
-
-.hint-code {
-  color: var(--gray-700);
-  font-size: 0.875rem;
-  margin: 0.25rem 0;
-}
-
-.hint-code strong {
-  font-family: 'Courier New', monospace;
-  background-color: var(--gray-100);
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-}
-
 @media (max-width: 480px) {
   .login-card {
     padding: 2rem 1.5rem;
@@ -174,7 +226,18 @@
     font-size: 1.5rem;
   }
   
-  .tennis-icon {
-    font-size: 3rem;
+  .app-logo {
+    width: 60px;
+    height: 60px;
   }
+}
+
+/* CSS Variables */
+:root {
+  --gray-100: #f3f4f6;
+  --gray-200: #e5e7eb;
+  --gray-600: #4b5563;
+  --gray-700: #374151;
+  --gray-900: #111827;
+  --primary-color: #2563eb;
 }

@@ -2755,6 +2755,290 @@
   }
 }
 
+/* =====================================================
+   CLUB AUTOCOMPLETE STYLES
+   ===================================================== */
+
+.club-autocomplete {
+  position: relative;
+  width: 100%;
+}
+
+.search-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-icon {
+  position: absolute;
+  left: 1rem;
+  color: #6b7280;
+  pointer-events: none;
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.875rem 3rem 0.875rem 3rem;
+  border: 2px solid #e5e7eb;
+  border-radius: 12px;
+  font-size: 1rem;
+  transition: all 0.2s ease;
+  background: #ffffff;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #0ea5e9;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+}
+
+.search-loading {
+  position: absolute;
+  right: 1rem;
+  font-size: 1rem;
+}
+
+/* Selected Clubs */
+.selected-clubs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.selected-club-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: linear-gradient(135deg, #0ea5e9 0%, #10b981 100%);
+  color: #ffffff;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(14, 165, 233, 0.25);
+}
+
+.remove-club-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: #ffffff;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 1.25rem;
+  line-height: 1;
+  transition: all 0.2s ease;
+}
+
+.remove-club-btn:hover {
+  background: rgba(255, 255, 255, 0.4);
+  transform: scale(1.1);
+}
+
+/* Dropdown */
+.club-dropdown {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 2px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+  max-height: 400px;
+  overflow-y: auto;
+  z-index: 1000;
+  animation: dropdownFadeIn 0.2s ease;
+}
+
+@keyframes dropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.club-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.875rem 1rem;
+  border: none;
+  background: #ffffff;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.club-dropdown-item:last-child {
+  border-bottom: none;
+}
+
+.club-dropdown-item:hover,
+.club-dropdown-item.highlighted {
+  background: #f8fafc;
+}
+
+.club-dropdown-item.selected {
+  background: #eff6ff;
+  border-left: 4px solid #0ea5e9;
+}
+
+.club-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.club-item-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 0.25rem;
+}
+
+.verified-badge {
+  color: #10b981;
+  flex-shrink: 0;
+}
+
+.club-item-location {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.selected-icon {
+  color: #0ea5e9;
+  flex-shrink: 0;
+}
+
+/* Add New Club Button in Dropdown */
+.add-new-club {
+  background: #f8fafc !important;
+  border-top: 2px solid #e5e7eb !important;
+  color: #0ea5e9 !important;
+  font-weight: 600 !important;
+  gap: 0.5rem;
+}
+
+.add-new-club:hover {
+  background: #eff6ff !important;
+}
+
+/* Empty State */
+.club-dropdown-empty {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: #6b7280;
+}
+
+.club-dropdown-empty p {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.875rem;
+}
+
+/* Help Text */
+.search-help-text {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: #6b7280;
+  font-style: italic;
+}
+
+/* Dark Mode */
+@media (prefers-color-scheme: dark) {
+  .search-input {
+    background: #1e293b;
+    border-color: #475569;
+    color: #e2e8f0;
+  }
+
+  .search-input:focus {
+    border-color: #0ea5e9;
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+  }
+
+  .search-icon {
+    color: #94a3b8;
+  }
+
+  .club-dropdown {
+    background: #1e293b;
+    border-color: #475569;
+  }
+
+  .club-dropdown-item {
+    background: #1e293b;
+    border-bottom-color: #334155;
+  }
+
+  .club-dropdown-item:hover,
+  .club-dropdown-item.highlighted {
+    background: #334155;
+  }
+
+  .club-dropdown-item.selected {
+    background: #1e3a5f;
+  }
+
+  .club-item-name {
+    color: #e2e8f0;
+  }
+
+  .club-item-location {
+    color: #94a3b8;
+  }
+
+  .add-new-club {
+    background: #334155 !important;
+    border-top-color: #475569 !important;
+  }
+
+  .add-new-club:hover {
+    background: #3f4f66 !important;
+  }
+
+  .club-dropdown-empty {
+    color: #94a3b8;
+  }
+
+  .search-help-text {
+    color: #94a3b8;
+  }
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+  .club-dropdown {
+    max-height: 300px;
+  }
+
+  .club-dropdown-item {
+    padding: 0.75rem 0.875rem;
+  }
+
+  .selected-club-chip {
+    font-size: 0.8125rem;
+    padding: 0.4rem 0.625rem;
+  }
+}
+
 /* Dark Mode */
 @media (prefers-color-scheme: dark) {
   .match-team-badge {

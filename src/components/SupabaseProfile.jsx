@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
+import { LoggingService } from '../services/activityLogger';
 import PasswordReset from './PasswordReset';
 import './Profile.css';
 import './Dashboard.css';
@@ -17,23 +18,8 @@ function SupabaseProfile() {
     name: '',
     email: '',
     phone: '',
-    mobile: '',
-    address: '',
-    birthDate: '',
-    ranking: '',
-    emergencyContact: '',
-    emergencyPhone: '',
-    notes: '',
-    profileImage: '',
-    favoriteShot: '',
-    tennisMotto: '',
-    funFact: '',
-    worstTennisMemory: '',
-    bestTennisMemory: '',
-    superstition: '',
-    preMatchRoutine: '',
-    favoriteOpponent: '',
-    dreamMatch: ''
+    whatsappEnabled: false,
+    profileImage: ''
   });
 
   const [isEditing, setIsEditing] = useState(isSetup);
@@ -73,23 +59,8 @@ function SupabaseProfile() {
           name: data.name || '',
           email: data.email || '',
           phone: data.phone || '',
-          mobile: data.phone || '',
-          address: '',
-          birthDate: '',
-          ranking: data.ranking || '',
-          emergencyContact: '',
-          emergencyPhone: '',
-          notes: '',
-          profileImage: data.profile_image || '',
-          favoriteShot: data.favorite_shot || '',
-          tennisMotto: data.tennis_motto || '',
-          funFact: data.fun_fact || '',
-          worstTennisMemory: data.worst_tennis_memory || '',
-          bestTennisMemory: data.best_tennis_memory || '',
-          superstition: data.superstition || '',
-          preMatchRoutine: data.pre_match_routine || '',
-          favoriteOpponent: data.favorite_opponent || '',
-          dreamMatch: data.dream_match || ''
+          whatsappEnabled: data.whatsapp_enabled || false,
+          profileImage: data.profile_image || ''
         });
         setViewingPlayer(data);
       }
@@ -116,23 +87,8 @@ function SupabaseProfile() {
         name: player.name || '',
         email: player.email || currentUser?.email || '',
         phone: player.phone || '',
-        mobile: player.phone || '', // Alias
-        address: '',
-        birthDate: '',
-        ranking: player.ranking || '',
-        emergencyContact: '',
-        emergencyPhone: '',
-        notes: '',
-        profileImage: player.profile_image || '',
-        favoriteShot: player.favorite_shot || '',
-        tennisMotto: player.tennis_motto || '',
-        funFact: player.fun_fact || '',
-        worstTennisMemory: player.worst_tennis_memory || '',
-        bestTennisMemory: player.best_tennis_memory || '',
-        superstition: player.superstition || '',
-        preMatchRoutine: player.pre_match_routine || '',
-        favoriteOpponent: player.favorite_opponent || '',
-        dreamMatch: player.dream_match || ''
+        whatsappEnabled: player.whatsapp_enabled || false,
+        profileImage: player.profile_image || ''
       });
     } else if (currentUser && !authLoading) {
       // Neuer User - initialisiere mit Auth-Daten
@@ -324,22 +280,13 @@ function SupabaseProfile() {
     try {
       console.log('💾 Saving profile to Supabase:', profile);
       
-      // Profil in Supabase speichern mit allen neuen Feldern
+      // Profil in Supabase speichern - nur die wichtigsten Felder
       const result = await updateProfile({
         name: profile.name,
-        phone: profile.phone || profile.mobile,
-        ranking: profile.ranking,
+        phone: profile.phone,
+        whatsapp_enabled: profile.whatsappEnabled,
         email: profile.email,
-        profileImage: profile.profileImage,
-        favoriteShot: profile.favoriteShot,
-        tennisMotto: profile.tennisMotto,
-        funFact: profile.funFact,
-        worstTennisMemory: profile.worstTennisMemory,
-        bestTennisMemory: profile.bestTennisMemory,
-        superstition: profile.superstition,
-        preMatchRoutine: profile.preMatchRoutine,
-        favoriteOpponent: profile.favoriteOpponent,
-        dreamMatch: profile.dreamMatch
+        profileImage: profile.profileImage
       });
       
       if (!result.success) {
@@ -347,6 +294,15 @@ function SupabaseProfile() {
       }
       
       console.log('✅ Profile saved successfully');
+      
+      // Log Profil-Bearbeitung
+      await LoggingService.logProfileEdit({
+        name: profile.name,
+        phone: profile.phone,
+        whatsapp_enabled: profile.whatsappEnabled,
+        email: profile.email,
+        profileImage: profile.profileImage
+      }, player?.id);
       
       setSuccessMessage('✅ Profil erfolgreich gespeichert!');
       setIsEditing(false);
@@ -376,13 +332,8 @@ function SupabaseProfile() {
         name: player.name || '',
         email: player.email || currentUser?.email || '',
         phone: player.phone || '',
-        mobile: player.phone || '',
-        address: '',
-        birthDate: '',
-        ranking: player.ranking || '',
-        emergencyContact: '',
-        emergencyPhone: '',
-        notes: ''
+        whatsappEnabled: player.whatsapp_enabled || false,
+        profileImage: player.profile_image || ''
       });
     }
     setIsEditing(false);
@@ -490,7 +441,7 @@ function SupabaseProfile() {
           <h2>📋 Persönliche Informationen</h2>
           
           <div className="form-group">
-            <label htmlFor="name">Name *</label>
+            <label htmlFor="name">👤 Name *</label>
             <input
               type="text"
               id="name"
@@ -499,12 +450,12 @@ function SupabaseProfile() {
               onChange={handleInputChange}
               disabled={!isEditing}
               required
-              placeholder="Vor- und Nachname"
+              placeholder="Max Mustermann"
             />
           </div>
 
           <div className="form-group">
-            <label htmlFor="email">E-Mail</label>
+            <label htmlFor="email">✉️ E-Mail *</label>
             <input
               type="email"
               id="email"
@@ -518,178 +469,106 @@ function SupabaseProfile() {
               📧 E-Mail-Adresse ist mit Ihrem Account verknüpft und kann nicht geändert werden
             </small>
           </div>
-
-          <div className="form-group">
-            <label htmlFor="ranking">LK-Ranking</label>
-            <input
-              type="text"
-              id="ranking"
-              name="ranking"
-              value={profile.ranking}
-              onChange={handleInputChange}
-              disabled={!isEditing}
-              placeholder="z.B. LK 10"
-            />
-          </div>
         </section>
 
-        {/* Kontaktdaten */}
+        {/* WhatsApp Teaser */}
         <section className="profile-section">
-          <h2>📞 Kontaktdaten</h2>
+          <h2>📱 WhatsApp Push-Benachrichtigungen</h2>
           
-          <div className="form-group">
-            <label htmlFor="mobile">Mobiltelefon</label>
-            <input
-              type="tel"
-              id="mobile"
-              name="mobile"
-              value={profile.mobile}
-              onChange={handleInputChange}
-              disabled={!isEditing}
-              placeholder="+49 123 456789"
-            />
-          </div>
+          <div style={{ 
+            padding: '1.5rem',
+            background: 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)',
+            border: '2px solid #22c55e',
+            borderRadius: '12px',
+            marginBottom: '1rem'
+          }}>
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '0.75rem',
+              marginBottom: '1rem'
+            }}>
+              <div style={{ 
+                fontSize: '1.5rem',
+                background: '#22c55e',
+                borderRadius: '50%',
+                width: '40px',
+                height: '40px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'white'
+              }}>
+                📱
+              </div>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: '700', color: '#14532d' }}>
+                  Verpasse nie wieder wichtige Updates!
+                </h4>
+                <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: '#166534' }}>
+                  Erhalte Push-Benachrichtigungen für dein Team
+                </p>
+              </div>
+            </div>
 
-          <div className="form-group">
-            <label htmlFor="phone">Festnetz</label>
-            <input
-              type="tel"
-              id="phone"
-              name="phone"
-              value={profile.phone}
-              onChange={handleInputChange}
-              disabled={!isEditing}
-              placeholder="+49 123 456789"
-            />
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '0.5rem',
+                cursor: 'pointer',
+                fontSize: '0.9rem',
+                fontWeight: '600',
+                color: '#14532d'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={profile.whatsappEnabled}
+                  onChange={(e) => setProfile(prev => ({ ...prev, whatsappEnabled: e.target.checked }))}
+                  disabled={!isEditing}
+                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                />
+                <span>🔔 Ja, ich möchte Push-Benachrichtigungen erhalten</span>
+              </label>
+            </div>
+
+            <div style={{ fontSize: '0.8rem', color: '#166534', lineHeight: '1.5' }}>
+              <strong>Du erhältst Updates zu:</strong>
+              <ul style={{ margin: '0.5rem 0 0 1.5rem', padding: 0 }}>
+                <li>🏆 Neue Matchdays & Termine</li>
+                <li>📈 LK-Updates & Rankings</li>
+                <li>🎾 Trainingseinladungen</li>
+                <li>📢 Team-News & Ankündigungen</li>
+              </ul>
+            </div>
+
+            {profile.whatsappEnabled && (
+              <div style={{ marginTop: '1rem' }}>
+                <label htmlFor="phone" style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', fontSize: '0.9rem', color: '#14532d' }}>
+                  📱 WhatsApp-Nummer
+                </label>
+                <input
+                  id="phone"
+                  name="phone"
+                  type="tel"
+                  value={profile.phone}
+                  onChange={handleInputChange}
+                  disabled={!isEditing}
+                  placeholder="+49 123 456789"
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '2px solid #22c55e',
+                    borderRadius: '8px',
+                    fontSize: '0.95rem',
+                    background: 'white'
+                  }}
+                />
+              </div>
+            )}
           </div>
         </section>
 
-        {/* Tennis-Persönlichkeit */}
-        <section className="profile-section">
-          <h2>🎾 Tennis-Persönlichkeit</h2>
-          
-          <div className="form-group">
-            <label htmlFor="favoriteShot">Lieblingsschlag</label>
-            <input
-              type="text"
-              id="favoriteShot"
-              name="favoriteShot"
-              value={profile.favoriteShot}
-              onChange={handleInputChange}
-              disabled={!isEditing}
-              placeholder="z.B. Vorhand Topspin, Rückhand Slice..."
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="tennisMotto">Tennis-Motto</label>
-            <input
-              type="text"
-              id="tennisMotto"
-              name="tennisMotto"
-              value={profile.tennisMotto}
-              onChange={handleInputChange}
-              disabled={!isEditing}
-              placeholder="z.B. 'Ball ins Feld, Punkt gewonnen!'"
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="funFact">Lustiger Fakt über dich</label>
-            <textarea
-              id="funFact"
-              name="funFact"
-              value={profile.funFact}
-              onChange={handleInputChange}
-              disabled={!isEditing}
-              placeholder="Erzähl uns etwas Lustiges über dich..."
-              rows="3"
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="superstition">Tennis-Aberglaube</label>
-            <input
-              type="text"
-              id="superstition"
-              name="superstition"
-              value={profile.superstition}
-              onChange={handleInputChange}
-              disabled={!isEditing}
-              placeholder="z.B. Immer mit dem linken Schuh beginnen..."
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="preMatchRoutine">Pre-Match Routine</label>
-            <textarea
-              id="preMatchRoutine"
-              name="preMatchRoutine"
-              value={profile.preMatchRoutine}
-              onChange={handleInputChange}
-              disabled={!isEditing}
-              placeholder="Was machst du vor dem Spiel?"
-              rows="2"
-            />
-          </div>
-        </section>
-
-        {/* Tennis-Momente */}
-        <section className="profile-section">
-          <h2>🏆 Tennis-Momente</h2>
-          
-          <div className="form-group">
-            <label htmlFor="bestTennisMemory">Bester Tennis-Moment</label>
-            <textarea
-              id="bestTennisMemory"
-              name="bestTennisMemory"
-              value={profile.bestTennisMemory}
-              onChange={handleInputChange}
-              disabled={!isEditing}
-              placeholder="Dein schönster Moment auf dem Platz..."
-              rows="3"
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="worstTennisMemory">Peinlichster Tennis-Moment</label>
-            <textarea
-              id="worstTennisMemory"
-              name="worstTennisMemory"
-              value={profile.worstTennisMemory}
-              onChange={handleInputChange}
-              disabled={!isEditing}
-              placeholder="Der Moment, über den wir alle lachen können..."
-              rows="3"
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="favoriteOpponent">Lieblingsgegner</label>
-            <input
-              type="text"
-              id="favoriteOpponent"
-              name="favoriteOpponent"
-              value={profile.favoriteOpponent}
-              onChange={handleInputChange}
-              disabled={!isEditing}
-              placeholder="Mit wem spielst du am liebsten?"
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="dreamMatch">Traum-Match</label>
-            <input
-              type="text"
-              id="dreamMatch"
-              name="dreamMatch"
-              value={profile.dreamMatch}
-              onChange={handleInputChange}
-              disabled={!isEditing}
-              placeholder="Gegen wen würdest du gerne spielen?"
-            />
-          </div>
-        </section>
 
         {isEditing && (
           <div className="form-actions">
@@ -722,22 +601,6 @@ function SupabaseProfile() {
           </div>
         )}
       </form>
-
-      {/* Debug Info (nur in Development) */}
-      {import.meta.env.DEV && (
-        <details style={{ marginTop: '2rem', padding: '1rem', background: '#f0f0f0', borderRadius: '8px' }}>
-          <summary style={{ cursor: 'pointer', fontWeight: 'bold' }}>🔍 Debug Info</summary>
-          <pre style={{ fontSize: '0.75rem', overflow: 'auto' }}>
-            {JSON.stringify({ 
-              currentUser: currentUser?.email,
-              player: player,
-              profile: profile,
-              isEditing,
-              isSetup
-            }, null, 2)}
-          </pre>
-        </details>
-      )}
 
       {/* Passwort-Reset-Modal */}
       {showPasswordReset && (

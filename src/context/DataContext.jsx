@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
+import { useAuth } from './AuthContext';
 
 // Lokale Test-Daten für TC Köln (nur für Theo Tester)
 import tcKoelnTestData from '../../testdata-tc-koeln/tc-koeln-team.json';
@@ -11,6 +12,8 @@ export function useData() {
 }
 
 export function DataProvider({ children }) {
+  const { isAuthenticated, loading: authLoading, player } = useAuth();
+  
   const [matches, setMatches] = useState([]);
   const [players, setPlayers] = useState([]);
   const [leagueStandings, setLeagueStandings] = useState([]);
@@ -25,8 +28,70 @@ export function DataProvider({ children }) {
   
   const configured = isSupabaseConfigured();
 
-  // Initial data load
+  // Initial data load - NUR wenn User authentifiziert ist
   useEffect(() => {
+    // Warte bis Auth-Check abgeschlossen ist
+    if (authLoading) {
+      return;
+    }
+
+    // Nur laden wenn User authentifiziert ist
+    if (!isAuthenticated) {
+      setLoading(false);
+      return;
+    }
+
+    console.log('🔵 DataContext - User authenticated, loading data...');
+    // Prüfe zuerst lokale Daten
+    const localPlayerData = localStorage.getItem('localPlayerData');
+    const localOnboardingComplete = localStorage.getItem('localOnboardingComplete');
+    
+    if (localPlayerData && localOnboardingComplete === 'true') {
+      console.log('🏠 LOCAL DataContext - Using local player data');
+      try {
+        const playerData = JSON.parse(localPlayerData);
+        
+        // Simuliere lokale Daten für das Dashboard
+        const localMatches = [
+          {
+            id: 'local_match_1',
+            match_date: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(), // 5 Tage in der Zukunft
+            opponent: 'TC Test Gegner',
+            location: 'Home',
+            venue: 'Tennisplatz Test',
+            season: 'Winter 2025',
+            team_id: playerData.team.id,
+            teamInfo: playerData.team
+          },
+          {
+            id: 'local_match_2',
+            match_date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 Tage in der Vergangenheit
+            opponent: 'TC Vergangenheit',
+            location: 'Away',
+            venue: 'Auswärtsplatz',
+            season: 'Winter 2025',
+            team_id: playerData.team.id,
+            teamInfo: playerData.team
+          }
+        ];
+        
+        const localPlayerTeams = [playerData.team];
+        
+        setMatches(localMatches);
+        setPlayerTeams(localPlayerTeams);
+        setTeamInfo(playerData.team);
+        setSelectedTeamId(playerData.team.id);
+        setCurrentPlayerName(playerData.name);
+        setLoading(false);
+        
+        console.log('✅ LOCAL Data loaded successfully');
+        return;
+      } catch (error) {
+        console.error('❌ Error parsing local data:', error);
+        // Fallback zu Supabase
+      }
+    }
+    
     if (!configured) {
       console.warn('⚠️ Supabase nicht konfiguriert - Verwende lokale Daten');
       setLoading(false);
@@ -61,7 +126,7 @@ export function DataProvider({ children }) {
       window.removeEventListener('reloadPlayers', handleReloadPlayers);
       window.removeEventListener('reloadTeams', handleReloadTeams);
     };
-  }, [configured]);
+  }, [configured, isAuthenticated, authLoading]);
 
   // Reload TeamInfo wenn selectedTeamId sich ändert (Matches werden nicht gefiltert)
   useEffect(() => {
@@ -73,11 +138,17 @@ export function DataProvider({ children }) {
   }, [selectedTeamId]);
 
   // Lade alle Daten
-  const loadAllData = async (playerId = null) => {
+  const loadAllData = async () => {
     try {
-      // Lade zuerst Player-Teams (wenn playerId vorhanden) - für Test-Daten-Filter
-      if (playerId) {
-        await loadPlayerTeams(playerId);
+      // Verwende aktuellen Player aus AuthContext
+      const currentPlayerId = player?.id;
+      
+      if (currentPlayerId) {
+        console.log('🔵 Loading data for player:', currentPlayerId);
+        // Lade zuerst Player-Teams - für Test-Daten-Filter
+        await loadPlayerTeams(currentPlayerId);
+      } else {
+        console.log('⚠️ No player ID available, loading data without player context');
       }
       
       // Lade Matches NACH loadPlayerTeams (benötigt currentPlayerName)
@@ -121,12 +192,8 @@ export function DataProvider({ children }) {
             team_name,
             club_name,
             category,
-            league,
-            group_name,
             region,
-            tvm_link,
-            season,
-            season_year
+            tvm_link
           )
         `)
         .eq('player_id', playerId)
@@ -346,13 +413,17 @@ export function DataProvider({ children }) {
             id: data.id,
             teamName: data.team_name,
             clubName: data.club_name,
-            category: data.category,
-            league: data.league,
-            group: data.group_name,
-            region: data.region,
-            tvmLink: data.tvm_link,
-            season: data.season,
-            seasonYear: data.season_year
+            category: data.category || 'Herren',
+            league: data.league || 'Kreisliga',
+            group: data.group_name || '',
+            region: data.region || 'Köln',
+            tvmLink: data.tvm_link || '',
+            address: data.address || '',
+            contact: data.contact || '',
+            phone: data.phone || '',
+            email: data.email || '',
+            website: data.website || '',
+            logoUrl: data.logo_url || '/app-icon.jpg'
           });
         } else {
           setTeamInfo(null);
@@ -360,35 +431,13 @@ export function DataProvider({ children }) {
         return;
       }
       
-      // Fallback: Lade Team für aktuelle Saison (alte Logik)
-      const now = new Date();
-      const currentMonth = now.getMonth();
-      const currentYear = now.getFullYear();
-      
-      let season = 'winter';
-      let seasonYear = '';
-      
-      if (currentMonth >= 4 && currentMonth <= 7) {
-        season = 'summer';
-        seasonYear = String(currentYear);
-      } else {
-        season = 'winter';
-        if (currentMonth >= 8) {
-          const nextYear = currentYear + 1;
-          seasonYear = `${String(currentYear).slice(-2)}/${String(nextYear).slice(-2)}`;
-        } else {
-          const prevYear = currentYear - 1;
-          seasonYear = `${String(prevYear).slice(-2)}/${String(currentYear).slice(-2)}`;
-        }
-      }
-      
-      console.log('🔵 Loading team info for season:', season, seasonYear);
+      // Fallback: Vereinfachte Team-Info-Ladung ohne Season-Filter
+      console.log('🔵 Loading team info (fallback - no season filter)');
 
       const { data, error } = await supabase
         .from('team_info')
         .select('*')
-        .eq('season', season)
-        .eq('season_year', seasonYear)
+        .limit(1)
         .maybeSingle();
 
       if (error && error.code !== 'PGRST116') {
@@ -402,17 +451,37 @@ export function DataProvider({ children }) {
           id: data.id,
           teamName: data.team_name,
           clubName: data.club_name,
-          category: data.category,
-          league: data.league,
-          group: data.group_name,
-          region: data.region,
-          tvmLink: data.tvm_link,
-          season: data.season,
-          seasonYear: data.season_year
+          category: data.category || 'Herren',
+          league: 'Kreisliga', // Default - wird später aus team_seasons geladen
+          group: '', // Default - wird später aus team_seasons geladen
+          region: data.region || 'Köln',
+          tvmLink: data.tvm_link || '',
+          address: data.address || '',
+          contact: data.contact || '',
+          phone: data.phone || '',
+          email: data.email || '',
+          website: data.website || '',
+          logoUrl: data.logo_url || '/app-icon.jpg'
         });
       } else {
-        console.log('⚠️ No team info for current season yet');
-        setTeamInfo(null);
+        console.log('⚠️ No team info found - using defaults');
+        // Fallback zu Standard-Werten
+        setTeamInfo({
+          id: 'default',
+          teamName: 'SV Rot-Gelb Sürth',
+          clubName: 'SV Rot-Gelb Sürth',
+          category: 'Herren',
+          league: '1. Kreisliga',
+          group: 'Gruppe 1',
+          region: 'Köln',
+          tvmLink: '',
+          address: 'Sürther Hauptstraße 123, 50999 Köln',
+          contact: 'Teamleitung',
+          phone: '',
+          email: '',
+          website: '',
+          logoUrl: '/app-icon.jpg'
+        });
       }
     } catch (error) {
       console.error('Error in loadTeamInfo:', error);

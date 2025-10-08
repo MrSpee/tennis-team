@@ -1,15 +1,16 @@
 import { useState } from 'react';
-import { Plus, Trash2, Calendar, MapPin, Users, Shield, Settings, Trophy, MessageCircle, Edit2, ExternalLink } from 'lucide-react';
+import { Plus, Trash2, Calendar, MapPin, Users, Shield, Settings, Trophy, MessageCircle, Edit2, ExternalLink, Target } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { useNavigate } from 'react-router-dom';
+import MatchdayPlanner from './MatchdayPlanner';
 import './AdminPanel.css';
 
 function AdminPanel() {
   const { isCaptain } = useAuth();
   const { matches, teamInfo, players, addMatch, updateMatch, deleteMatch, updateTeamInfo, importHistoricalAvailabilityLogs } = useData();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('matches'); // 'matches', 'season', 'players', 'team'
+  const [activeTab, setActiveTab] = useState('planner'); // 'planner', 'matches', 'season', 'players', 'team'
   const [editingMatchId, setEditingMatchId] = useState(null);
   const [editFormData, setEditFormData] = useState({});
   const [logFilter, setLogFilter] = useState('all'); // Filter für Verfügbarkeits-Log
@@ -168,6 +169,29 @@ function AdminPanel() {
         gap: '1rem',
         marginBottom: '2rem'
       }}>
+        <div 
+          className={`admin-tab-card ${activeTab === 'planner' ? 'active' : ''}`}
+          onClick={() => setActiveTab('planner')}
+          style={{
+            background: activeTab === 'planner' ? 'linear-gradient(135deg, #0ea5e9 0%, #10b981 100%)' : '#f8fafc',
+            color: activeTab === 'planner' ? 'white' : '#374151',
+            padding: '1.5rem',
+            borderRadius: '12px',
+            cursor: 'pointer',
+            border: activeTab === 'planner' ? 'none' : '2px solid #e2e8f0',
+            transition: 'all 0.3s ease',
+            textAlign: 'center'
+          }}
+        >
+          <Target size={24} style={{ marginBottom: '0.5rem' }} />
+          <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem', fontWeight: '600' }}>
+            Aufstellungs-Assistent
+          </h3>
+          <p style={{ margin: 0, fontSize: '0.875rem', opacity: 0.9 }}>
+            {upcomingMatches.length} kommende Spiele
+          </p>
+        </div>
+
         <div 
           className={`admin-tab-card ${activeTab === 'matches' ? 'active' : ''}`}
           onClick={() => setActiveTab('matches')}
@@ -426,6 +450,11 @@ function AdminPanel() {
       )}
 
       {/* Spiele-Verwaltung */}
+      {/* Aufstellungs-Assistent Tab */}
+      {activeTab === 'planner' && (
+        <MatchdayPlanner />
+      )}
+
       {activeTab === 'matches' && (
         <div className="matches-management-card fade-in card">
           <div style={{ 

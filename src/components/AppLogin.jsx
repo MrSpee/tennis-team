@@ -3,13 +3,11 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import './Login.css';
 
-function SupabaseLogin() {
+function AppLogin() {
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [ranking, setRanking] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
@@ -25,17 +23,9 @@ function SupabaseLogin() {
 
     try {
       if (isRegister) {
-        // Registrierung
-        if (!name.trim()) {
-          setError('Bitte geben Sie Ihren Namen ein');
-          setLoading(false);
-          return;
-        }
-
+        // Registrierung - nur E-Mail und Passwort
         const result = await auth.register(email, password, {
-          name,
-          phone,
-          ranking,
+          name: email.split('@')[0], // Verwende E-Mail-Prefix als temporären Namen
           points: 0
         });
 
@@ -45,9 +35,6 @@ function SupabaseLogin() {
           // Formular zurücksetzen
           setEmail('');
           setPassword('');
-          setName('');
-          setPhone('');
-          setRanking('');
         } else {
           setError(result.error || 'Registrierung fehlgeschlagen');
         }
@@ -84,8 +71,8 @@ function SupabaseLogin() {
             marginBottom: '1rem' 
           }}>
             <img 
-              src="/logo.png" 
-              alt="Rot-Gelb Sürth Herren 40" 
+              src="/app-icon.jpg" 
+              alt="Platzhirsch Logo" 
               style={{ 
                 width: '120px', 
                 height: '120px', 
@@ -108,48 +95,47 @@ function SupabaseLogin() {
             fontSize: '1.2rem', 
             color: '#666', 
             fontStyle: 'italic',
-            marginBottom: '1.5rem'
+            marginBottom: '0.5rem',
+            textAlign: 'center',
+            lineHeight: '1.6'
           }}>
-            Spiel, Satz und Übersicht
+            Deine Matches,<br />
+            Dein Team,<br />
+            Dein Tennis.
           </p>
+          {isRegister && (
+            <div style={{
+              background: 'linear-gradient(135deg, #e0f2fe 0%, #f0fdf4 100%)',
+              border: '2px solid #0ea5e9',
+              borderRadius: '12px',
+              padding: '1rem',
+              marginBottom: '1.5rem',
+              textAlign: 'center'
+            }}>
+              <h2 style={{ 
+                fontSize: '1.1rem', 
+                fontWeight: '700', 
+                color: '#0c4a6e',
+                margin: '0 0 0.5rem 0'
+              }}>
+                🎾 Willkommen bei Platzhirsch!
+              </h2>
+              <p style={{ 
+                fontSize: '0.95rem', 
+                color: '#1e40af',
+                margin: '0',
+                lineHeight: '1.4',
+                fontStyle: 'italic'
+              }}>
+                Vom ersten Aufschlag bis zum großen Triumph – 
+                <br />
+                <strong>Platzhirsch begleitet dich auf deiner Tennisreise.</strong>
+              </p>
+            </div>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="login-form">
-          {isRegister && (
-            <>
-              <div className="form-group">
-                <label>👤 Name *</label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Max Mustermann"
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label>📱 Telefon</label>
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+49 123 456789"
-                />
-              </div>
-
-              <div className="form-group">
-                <label>🏆 Leistungsklasse</label>
-                <input
-                  type="text"
-                  value={ranking}
-                  onChange={(e) => setRanking(e.target.value)}
-                  placeholder="z.B. LK 10"
-                />
-              </div>
-            </>
-          )}
-
           <div className="form-group">
             <label>✉️ E-Mail *</label>
             <input
@@ -215,9 +201,6 @@ function SupabaseLogin() {
               setSuccess('');
               setEmail('');
               setPassword('');
-              setName('');
-              setPhone('');
-              setRanking('');
             }}
             style={{
               width: '100%',
@@ -251,5 +234,5 @@ function SupabaseLogin() {
   );
 }
 
-export default SupabaseLogin;
+export default AppLogin;
 

@@ -5,6 +5,7 @@ import { MessageCircle, Check, X, Download } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
+import { LoggingService } from '../services/activityLogger';
 import './Matches.css';
 import './Dashboard.css';
 
@@ -71,6 +72,9 @@ function Matches() {
       
       if (result.success) {
         console.log('✅ Availability set successfully');
+        
+        // Log Matchday-Zusage/Absage
+        await LoggingService.logMatchdayResponse(matchId, status, player.id);
         
         // UI State zurücksetzen
         setComment('');

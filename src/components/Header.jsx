@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { LogOut } from 'lucide-react';
+import { LogOut, Settings } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import "./Header.css";
 
 function useHeaderCompact(offset = 50) {
@@ -40,11 +41,19 @@ function useHeaderCompact(offset = 50) {
 
 export default function Header() {
   const compact = useHeaderCompact(50);
-  const { logout } = useAuth();
+  const { logout, player } = useAuth();
+  const navigate = useNavigate();
   
   const handleLogout = async () => {
     await logout();
   };
+
+  const handleSuperAdmin = () => {
+    navigate('/super-admin');
+  };
+  
+  // Prüfe ob User Super-Admin ist
+  const isSuperAdmin = player?.is_super_admin === true;
   
   return (
     <header className={`app-header${compact ? " is-compact" : ""}`} role="banner">
@@ -57,6 +66,16 @@ export default function Header() {
           <div className="brand-avatar" title="Logo">
             <img src="/app-icon.jpg" alt="Logo" />
           </div>
+          {isSuperAdmin && (
+            <button 
+              onClick={handleSuperAdmin} 
+              className="btn-logout" 
+              title="Super-Admin Dashboard"
+              style={{ marginRight: '0.5rem' }}
+            >
+              <Settings size={18} />
+            </button>
+          )}
           <button onClick={handleLogout} className="btn-logout" title="Abmelden">
             <LogOut size={18} />
           </button>
