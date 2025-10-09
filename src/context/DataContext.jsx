@@ -107,14 +107,14 @@ export function DataProvider({ children }) {
       
       if (currentPlayerId) {
         console.log('🔵 Loading data for player:', currentPlayerId);
-        // Lade zuerst Player-Teams - für Test-Daten-Filter
+        // Lade zuerst Player-Teams - loadMatches wird intern aufgerufen!
         await loadPlayerTeams(currentPlayerId);
       } else {
         console.log('⚠️ No player ID available, loading data without player context');
       }
       
-      // Lade Matches NACH loadPlayerTeams (benötigt currentPlayerName)
-      await loadMatches();
+      // 🔧 FIX: loadMatches wird NICHT mehr hier aufgerufen!
+      // Es wird jetzt IN loadPlayerTeams aufgerufen (nach dem playerTeams gesetzt wurde)
       
       // Rest parallel laden
       await Promise.all([
@@ -221,6 +221,11 @@ export function DataProvider({ children }) {
       }
       
       setPlayerTeams(teams);
+      console.log('✅ playerTeams state updated with', teams.length, 'teams');
+      
+      // 🔧 FIX: Lade Matches NACHDEM playerTeams gesetzt wurde!
+      console.log('🔄 Now loading matches with team filter...');
+      await loadMatches(teams); // Übergebe teams direkt!
       
       // Setze Primary-Team als Default (für Results.jsx Filterung)
       const primaryTeam = teams.find(t => t.is_primary) || teams[0];
@@ -234,9 +239,21 @@ export function DataProvider({ children }) {
     }
   };
 
-  // Lade Matches (ALLE Matches mit Team-Info)
-  const loadMatches = async () => {
+  // Lade Matches (NUR für die Teams des Spielers!)
+  const loadMatches = async (teamsToFilter = null) => {
     try {
+      // 🔒 FILTERUNG: Verwende übergebene teams ODER state playerTeams
+      const teamsForFilter = teamsToFilter || playerTeams;
+      const playerTeamIds = teamsForFilter.map(t => t.id);
+      
+      if (playerTeamIds.length === 0) {
+        console.log('⚠️ No teams found for player, no matches to load');
+        setMatches([]);
+        return;
+      }
+
+      console.log('🔒 Loading matches for player teams:', playerTeamIds);
+
       const { data, error } = await supabase
         .from('matches')
         .select(`
@@ -259,6 +276,7 @@ export function DataProvider({ children }) {
             )
           )
         `)
+        .in('team_id', playerTeamIds)  // 🔒 FILTERUNG: Nur Matches der eigenen Teams!
         .order('match_date', { ascending: true });
 
       if (error) {
@@ -266,7 +284,7 @@ export function DataProvider({ children }) {
         return;
       }
 
-      console.log('✅ Matches loaded from DB:', data?.length || 0, 'matches');
+      console.log('✅ Matches loaded from DB (filtered by player teams):', data?.length || 0, 'matches');
 
       // Transformiere Daten - verwende playerId als Key (nicht Name!)
       let transformedMatches = data.map(match => ({
@@ -450,17 +468,17 @@ export function DataProvider({ children }) {
         });
       } else {
         console.log('⚠️ No team info found - using defaults');
-        // Fallback zu Standard-Werten
+        // Fallback zu Standard-Werten (generisch, NICHT clubspezifisch!)
         setTeamInfo({
           id: 'default',
-          teamName: 'SV Rot-Gelb Sürth',
-          clubName: 'SV Rot-Gelb Sürth',
+          teamName: 'Mein Team',
+          clubName: 'Mein Verein',
           category: 'Herren',
-          league: '1. Kreisliga',
+          league: 'Kreisliga',
           group: 'Gruppe 1',
-          region: 'Köln',
+          region: 'Mittelrhein',
           tvmLink: '',
-          address: 'Sürther Hauptstraße 123, 50999 Köln',
+          address: '',
           contact: 'Teamleitung',
           phone: '',
           email: '',

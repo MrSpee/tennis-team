@@ -13,10 +13,14 @@ function Training() {
   const { players } = useData();
   const [trainings, setTrainings] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedFilter, setSelectedFilter] = useState('all'); // 'all', 'public', 'mine'
+  const [selectedFilter, setSelectedFilter] = useState('all'); // 'all', 'team', 'mine'
   const [respondingTo, setRespondingTo] = useState(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  
+  // Neu: User Teams
+  const [userTeams, setUserTeams] = useState([]);
+  const [teamMembers, setTeamMembers] = useState([]);
   
   // Form State
   const [formData, setFormData] = useState({
@@ -25,8 +29,10 @@ function Training() {
     startTime: '17:00',
     endTime: '19:00',
     location: 'Draußen',
-    venue: 'Tennisplatz SV Rot-Gelb Sürth',
-    type: 'public',
+    venue: '',  // 🔧 KEIN Hardcoded Venue mehr!
+    type: 'team',
+    teamId: null, // Neu: Team-Zuordnung
+    invitationMode: 'all_team_members', // Neu: 'all_team_members', 'selected_players'
     maxPlayers: 8,
     targetPlayers: 8,
     weatherDependent: true,
@@ -38,16 +44,107 @@ function Training() {
     externalPlayers: [] // { name, lk, club }
   });
 
-  // Lade Trainings
+  // Lade Trainings und User Teams
   useEffect(() => {
     loadTrainings();
-  }, []);
+    loadUserTeams();
+  }, [player]);
+
+  // Lade Teams des Users
+  const loadUserTeams = async () => {
+    if (!player) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('player_teams')
+        .select(`
+          *,
+          team:team_id (
+            id,
+            teamName,
+            clubName,
+            category,
+            league
+          )
+        `)
+        .eq('player_id', player.id);
+
+      if (error) throw error;
+
+      const teams = data.map(pt => ({
+        id: pt.team.id,
+        name: pt.team.team_name || pt.team.teamName, // snake_case oder camelCase
+        club: pt.team.club_name || pt.team.clubName,
+        category: pt.team.category,
+        league: pt.team.league,
+        isPrimary: pt.is_primary
+      }));
+
+      setUserTeams(teams);
+
+      // Setze primäres Team als Default
+      const primaryTeam = teams.find(t => t.isPrimary);
+      if (primaryTeam && !formData.teamId) {
+        setFormData(prev => ({ ...prev, teamId: primaryTeam.id }));
+        loadTeamMembers(primaryTeam.id);
+      }
+    } catch (error) {
+      console.error('Error loading user teams:', error);
+    }
+  };
+
+  // Lade Team-Mitglieder
+  const loadTeamMembers = async (teamId) => {
+    if (!teamId) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('player_teams')
+        .select(`
+          *,
+          player:player_id (
+            id,
+            name,
+            email,
+            current_lk
+          )
+        `)
+        .eq('team_id', teamId);
+
+      if (error) throw error;
+
+      const members = data.map(pt => ({
+        id: pt.player.id,
+        name: pt.player.name,
+        email: pt.player.email,
+        currentLk: pt.player.current_lk,
+        isPrimary: pt.is_primary,
+        role: pt.role
+      }));
+
+      setTeamMembers(members);
+    } catch (error) {
+      console.error('Error loading team members:', error);
+    }
+  };
 
   const loadTrainings = async () => {
     try {
       setLoading(true);
       
-      // Lade Trainings mit Teilnahme-Info
+      // 🔒 FILTERUNG: Hole nur Team-IDs des Spielers
+      const playerTeamIds = userTeams.map(t => t.id);
+      
+      if (playerTeamIds.length === 0) {
+        console.log('⚠️ No teams found for player, no trainings to load');
+        setTrainings([]);
+        setLoading(false);
+        return;
+      }
+
+      console.log('🔒 Loading trainings for player teams:', playerTeamIds);
+
+      // Lade Trainings mit Teilnahme-Info (NUR für eigene Teams!)
       const { data: sessionsData, error: sessionsError } = await supabase
         .from('training_sessions')
         .select(`
@@ -58,10 +155,13 @@ function Training() {
             profile_image
           )
         `)
+        .in('team_id', playerTeamIds)  // 🔒 FILTERUNG: Nur Trainings der eigenen Teams!
         .gte('date', new Date().toISOString())
         .order('date', { ascending: true });
 
       if (sessionsError) throw sessionsError;
+      
+      console.log('✅ Trainings loaded (filtered by player teams):', sessionsData?.length || 0);
 
       // Lade alle Teilnahmen
       const { data: attendanceData, error: attendanceError } = await supabase
@@ -104,8 +204,8 @@ function Training() {
     if (!player) return [];
     
     return trainings.filter(training => {
-      // Öffentliche Trainings: Alle sehen
-      if (training.type === 'public') return true;
+      // Team-Trainings: Alle Team-Mitglieder sehen
+      if (training.type === 'team') return true;
       
       // Private Trainings mit "Spieler gesucht": Alle sehen
       if (training.type === 'private' && training.is_public && training.needs_substitute) {
@@ -133,7 +233,11 @@ function Training() {
         (t.organizer_id === player?.id || t.invited_players?.includes(player?.id))
       );
     }
-    return visibleTrainings.filter(t => t.type === selectedFilter);
+    if (selectedFilter === 'team') {
+      // Nur Team-Trainings
+      return visibleTrainings.filter(t => t.type === 'team');
+    }
+    return visibleTrainings;
   }, [visibleTrainings, selectedFilter, player]);
 
   // Gruppiere nach Zeitraum
@@ -201,13 +305,15 @@ function Training() {
             location: formData.location,
             venue: formData.venue || null,
             type: formData.type,
-            is_public: formData.type === 'public' ? true : formData.needsSubstitute,
+            team_id: formData.type === 'team' ? formData.teamId : null, // Neu: Team-Zuordnung
+            invitation_mode: formData.type === 'team' ? formData.invitationMode : null, // Neu: Einladungs-Modus
+            is_public: formData.type === 'team' ? true : formData.needsSubstitute,
             organizer_id: player.id,
             max_players: parseInt(formData.maxPlayers),
             target_players: parseInt(formData.targetPlayers),
             needs_substitute: formData.needsSubstitute || false,
             weather_dependent: formData.weatherDependent || false,
-            title: formData.title || (formData.type === 'public' ? 'Team-Training' : 'Privates Training'),
+            title: formData.title || (formData.type === 'team' ? 'Team-Training' : 'Privates Training'),
             notes: formData.notes || null,
             invited_players: formData.invitedPlayers.length > 0 ? formData.invitedPlayers : null,
             external_players: formData.externalPlayers.length > 0 ? formData.externalPlayers : null,
@@ -241,13 +347,15 @@ function Training() {
           location: formData.location,
           venue: formData.venue || null,
           type: formData.type,
-          is_public: formData.type === 'public' ? true : formData.needsSubstitute,
+          team_id: formData.type === 'team' ? formData.teamId : null, // Neu: Team-Zuordnung
+          invitation_mode: formData.type === 'team' ? formData.invitationMode : null, // Neu: Einladungs-Modus
+          is_public: formData.type === 'team' ? true : formData.needsSubstitute,
           organizer_id: player.id,
           max_players: parseInt(formData.maxPlayers),
           target_players: parseInt(formData.targetPlayers),
           needs_substitute: formData.needsSubstitute || false,
           weather_dependent: formData.weatherDependent || false,
-          title: formData.title || (formData.type === 'public' ? 'Team-Training' : 'Privates Training'),
+          title: formData.title || (formData.type === 'team' ? 'Team-Training' : 'Privates Training'),
           notes: formData.notes || null,
           invited_players: formData.invitedPlayers.length > 0 ? formData.invitedPlayers : null,
           external_players: formData.externalPlayers.length > 0 ? formData.externalPlayers : null,
@@ -283,8 +391,8 @@ function Training() {
         startTime: '17:00',
         endTime: '19:00',
         location: 'Draußen',
-        venue: 'Tennisplatz SV Rot-Gelb Sürth',
-        type: 'public',
+        venue: '',  // 🔧 Kein Hardcoded Venue
+        type: 'team',
         maxPlayers: 8,
         targetPlayers: 8,
         weatherDependent: true,
@@ -689,11 +797,11 @@ function Training() {
             Alle ({visibleTrainings.length})
           </button>
           <button
-            className={`btn-modern ${selectedFilter === 'public' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
-            onClick={() => setSelectedFilter('public')}
+            className={`btn-modern ${selectedFilter === 'team' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
+            onClick={() => setSelectedFilter('team')}
           >
-            <Sun size={18} />
-            Öffentlich ({visibleTrainings.filter(t => t.type === 'public').length})
+            <Users size={18} />
+            Team-Training ({visibleTrainings.filter(t => t.type === 'team').length})
           </button>
           <button
             className={`btn-modern ${selectedFilter === 'mine' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
@@ -724,7 +832,7 @@ function Training() {
               Keine Trainings geplant
             </h3>
             <p style={{ margin: 0, color: '#9ca3af', fontSize: '0.9rem' }}>
-              Aktuell sind keine Trainings für {selectedFilter === 'public' ? 'öffentliche' : selectedFilter === 'private' ? 'private' : ''} Trainings geplant.
+              Aktuell sind keine Trainings für {selectedFilter === 'team' ? 'Team-' : selectedFilter === 'mine' ? 'private ' : ''}Trainings geplant.
             </p>
           </div>
         </div>
@@ -828,12 +936,12 @@ function Training() {
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                   <button
                     type="button"
-                    className={`btn-modern ${formData.type === 'public' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
-                    onClick={() => setFormData(prev => ({ ...prev, type: 'public', weatherDependent: true }))}
+                    className={`btn-modern ${formData.type === 'team' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
+                    onClick={() => setFormData(prev => ({ ...prev, type: 'team', weatherDependent: true }))}
                     style={{ flex: 1 }}
                   >
-                    <Sun size={16} />
-                    Öffentlich
+                    <Users size={16} />
+                    Team-Training
                   </button>
                   <button
                     type="button"
@@ -847,6 +955,63 @@ function Training() {
                 </div>
               </div>
 
+              {/* Team-Auswahl (nur bei Team-Training) */}
+              {formData.type === 'team' && (
+                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', fontSize: '0.9rem' }}>
+                    🏆 Team (für das trainiert wird)
+                  </label>
+                  {userTeams.length > 0 ? (
+                    <>
+                      <select
+                        value={formData.teamId || ''}
+                        onChange={(e) => {
+                          const teamId = e.target.value;
+                          setFormData(prev => ({ ...prev, teamId }));
+                          loadTeamMembers(teamId);
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '0.75rem',
+                          border: '2px solid #e2e8f0',
+                          borderRadius: '8px',
+                          fontSize: '0.9rem',
+                          backgroundColor: 'white'
+                        }}
+                        required
+                      >
+                        <option value="">Bitte wählen...</option>
+                        {userTeams.map(team => (
+                          <option key={team.id} value={team.id}>
+                            {team.club} - {team.name} ({team.category}, {team.league})
+                          </option>
+                        ))}
+                      </select>
+                      {formData.teamId && teamMembers.length > 0 && (
+                        <p style={{ 
+                          marginTop: '0.5rem', 
+                          fontSize: '0.85rem', 
+                          color: '#6b7280' 
+                        }}>
+                          👥 {teamMembers.length} Team-Mitglieder werden automatisch eingeladen
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{
+                      padding: '1rem',
+                      background: '#fef3c7',
+                      borderRadius: '8px',
+                      border: '1px solid #fbbf24'
+                    }}>
+                      <p style={{ margin: 0, color: '#92400e', fontSize: '0.9rem' }}>
+                        ⚠️ Du bist aktuell keinem Team zugeordnet. Bitte wende dich an deinen Team Captain.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Titel */}
               <div className="form-group" style={{ marginBottom: '1.5rem' }}>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', fontSize: '0.9rem' }}>
@@ -856,7 +1021,7 @@ function Training() {
                   type="text"
                   value={formData.title}
                   onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                  placeholder={formData.type === 'public' ? 'Mannschaftstraining' : 'Privates Training'}
+                  placeholder={formData.type === 'team' ? 'Mannschaftstraining' : 'Privates Training'}
                   style={{
                     width: '100%',
                     padding: '0.75rem',
@@ -985,7 +1150,7 @@ function Training() {
                   <button
                     type="button"
                     className={`btn-modern ${formData.location === 'Draußen' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
-                    onClick={() => setFormData(prev => ({ ...prev, location: 'Draußen', venue: 'Tennisplatz SV Rot-Gelb Sürth', weatherDependent: true }))}
+                    onClick={() => setFormData(prev => ({ ...prev, location: 'Draußen', venue: '', weatherDependent: true }))}
                     style={{ flex: 1 }}
                   >
                     <Sun size={16} />
@@ -994,7 +1159,7 @@ function Training() {
                   <button
                     type="button"
                     className={`btn-modern ${formData.location === 'Halle' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
-                    onClick={() => setFormData(prev => ({ ...prev, location: 'Halle', venue: 'Tennishalle Köln-Sürth', weatherDependent: false }))}
+                    onClick={() => setFormData(prev => ({ ...prev, location: 'Halle', venue: '', weatherDependent: false }))}
                     style={{ flex: 1 }}
                   >
                     <Home size={16} />

@@ -6,6 +6,7 @@ import { LoggingService } from '../services/activityLogger';
 import PasswordReset from './PasswordReset';
 import { Building2, Users, MapPin, Phone, Mail, Globe, Edit3 } from 'lucide-react';
 import { normalizeLK } from '../lib/lkUtils';
+import TeamSelector from './TeamSelector';
 import './Profile.css';
 import './Dashboard.css';
 
@@ -641,6 +642,17 @@ function SupabaseProfile() {
         </div>
       )}
 
+      {/* Team-Auswahl / Team-Verwaltung */}
+      {!isViewingOtherPlayer && !isEditing && (
+        <div className="fade-in lk-card-full" style={{ marginBottom: '1.5rem' }}>
+          <TeamSelector onTeamsUpdated={() => {
+            // Reload wenn sich Teams ändern
+            if (player) {
+              loadPlayerProfile();
+            }
+          }} />
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="profile-form">
         {/* Profilbild */}
