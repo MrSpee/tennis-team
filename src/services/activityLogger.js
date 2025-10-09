@@ -250,10 +250,24 @@ class LoggingService {
 
   /**
    * Loggt Profil-Bearbeitung
+   * @param {object} updatedFields - Object mit {fieldName: {old: oldValue, new: newValue}}
+   * @param {string} playerId - ID des Spielers
    */
   static async logProfileEdit(updatedFields, playerId) {
+    // Extrahiere Änderungen für bessere Lesbarkeit
+    const changes = {};
+    Object.keys(updatedFields).forEach(field => {
+      const change = updatedFields[field];
+      changes[field] = {
+        old: change.old,
+        new: change.new
+      };
+    });
+
     return this.logActivity('profile_edited', 'player', playerId, {
-      updated_fields: Object.keys(updatedFields),
+      field_count: Object.keys(updatedFields).length,
+      changes: changes,
+      field_names: Object.keys(updatedFields),
       source: 'profile_page'
     });
   }

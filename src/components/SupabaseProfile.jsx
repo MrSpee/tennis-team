@@ -45,6 +45,7 @@ function SupabaseProfile() {
 
   const [isEditing, setIsEditing] = useState(isSetup);
   const [isSaving, setIsSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -53,12 +54,105 @@ function SupabaseProfile() {
   const [isLoadingOtherPlayer, setIsLoadingOtherPlayer] = useState(false);
   const [currentBucket, setCurrentBucket] = useState('profile-images');
   const [showPasswordReset, setShowPasswordReset] = useState(false);
+  const [autoSaveTimer, setAutoSaveTimer] = useState(null);
+  const [lastEditedField, setLastEditedField] = useState(null); // Welches Feld wurde zuletzt bearbeitet
   
   // Vereins-/Mannschafts-Daten
   const [playerTeams, setPlayerTeams] = useState([]);
   const [clubs, setClubs] = useState([]);
   const [isEditingTeams, setIsEditingTeams] = useState(false);
   const [editingTeam, setEditingTeam] = useState(null);
+
+  // Cleanup Timer beim Unmount
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+      }
+    };
+  }, [autoSaveTimer]);
+
+  // Helper: Inline Save Indicator - Mobile optimiert
+  const renderSaveIndicator = (fieldName) => {
+    if (isViewingOtherPlayer) return null;
+    
+    const isThisField = lastEditedField === fieldName;
+    
+    if (!isThisField) return null;
+    
+    // Mobile: Badge über dem Feld, Desktop: Icon links im Feld
+    const isMobile = window.innerWidth <= 768;
+    
+    if (isMobile) {
+      // Mobile: Badge über dem Eingabefeld
+      return (
+        <div style={{
+          position: 'absolute',
+          top: '-0.5rem',
+          left: '0.5rem',
+          background: isSaving 
+            ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'
+            : hasUnsavedChanges 
+            ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+            : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+          color: 'white',
+          padding: '0.25rem 0.75rem',
+          borderRadius: '12px',
+          fontSize: '0.75rem',
+          fontWeight: '700',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.375rem',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+          zIndex: 100,
+          animation: 'slideInDown 0.3s ease-out'
+        }}>
+          {isSaving ? (
+            <>
+              <span className="pulse" style={{ fontSize: '1rem' }}>💾</span>
+              <span>Speichert...</span>
+            </>
+          ) : hasUnsavedChanges ? (
+            <>
+              <span style={{ fontSize: '1rem' }}>⏳</span>
+              <span>Wartet...</span>
+            </>
+          ) : (
+            <>
+              <span style={{ fontSize: '1rem' }}>✅</span>
+              <span>Gespeichert</span>
+            </>
+          )}
+        </div>
+      );
+    } else {
+      // Desktop: Icon links im Feld
+      return (
+        <div style={{
+          position: 'absolute',
+          left: '0.75rem',
+          top: '50%',
+          transform: 'translateY(-50%)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          pointerEvents: 'none',
+          zIndex: 10
+        }}>
+          {isSaving ? (
+            <span className="pulse" style={{ fontSize: '1.5rem' }}>💾</span>
+          ) : hasUnsavedChanges ? (
+            <span style={{ fontSize: '1.5rem', opacity: 0.7 }}>⏳</span>
+          ) : (
+            <span style={{ 
+              fontSize: '1.5rem',
+              animation: 'fadeIn 0.3s ease-in-out'
+            }}>✅</span>
+          )}
+        </div>
+      );
+    }
+  };
 
   // Funktion zum Laden anderer Spieler-Profile
   const loadOtherPlayerProfile = async (playerName) => {
@@ -329,10 +423,126 @@ function SupabaseProfile() {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    console.log('📝 Input changed:', name, '=', value);
+    
     setProfile(prev => ({
       ...prev,
       [name]: value
     }));
+    
+    // Markiere welches Feld bearbeitet wird
+    setLastEditedField(name);
+    setHasUnsavedChanges(true);
+    console.log('⚠️ Marked as unsaved, field:', name);
+    
+    // Auto-Save nach 2 Sekunden Inaktivität
+    if (autoSaveTimer) {
+      clearTimeout(autoSaveTimer);
+      console.log('⏱️ Cleared previous timer');
+    }
+    
+    console.log('⏱️ Setting new auto-save timer (2 seconds)');
+    const timer = setTimeout(() => {
+      console.log('⏰ Timer fired! isViewingOtherPlayer:', isViewingOtherPlayer, 'isSetup:', isSetup);
+      if (!isViewingOtherPlayer && !isSetup) {
+        console.log('✅ Conditions met, calling handleAutoSave...');
+        handleAutoSave();
+      } else {
+        console.log('❌ Conditions NOT met, skipping auto-save');
+      }
+    }, 2000);
+    
+    setAutoSaveTimer(timer);
+  };
+  
+  // Auto-Save Funktion
+  const handleAutoSave = async () => {
+    console.log('🔍 handleAutoSave called. hasUnsavedChanges:', hasUnsavedChanges);
+    
+    if (!hasUnsavedChanges) {
+      console.log('⏭️ No unsaved changes, skipping save');
+      return;
+    }
+    
+    try {
+      console.log('💾 Auto-saving profile...', profile);
+      setIsSaving(true);
+      
+      // Normalisiere LK
+      const normalizedLK = profile.current_lk ? normalizeLK(profile.current_lk) : null;
+      console.log('🔢 Normalized LK:', normalizedLK);
+      
+      console.log('📤 Calling updateProfile...');
+      const result = await updateProfile({
+        name: profile.name,
+        phone: profile.phone,
+        email: profile.email,
+        profileImage: profile.profileImage,
+        birth_date: profile.birth_date,
+        current_lk: normalizedLK,
+        tennis_motto: profile.tennis_motto,
+        favorite_shot: profile.favorite_shot,
+        best_tennis_memory: profile.best_tennis_memory,
+        worst_tennis_memory: profile.worst_tennis_memory,
+        favorite_opponent: profile.favorite_opponent,
+        dream_match: profile.dream_match,
+        fun_fact: profile.fun_fact,
+        superstition: profile.superstition,
+        pre_match_routine: profile.pre_match_routine,
+        address: profile.address,
+        emergency_contact: profile.emergency_contact,
+        emergency_phone: profile.emergency_phone,
+        notes: profile.notes
+      });
+      
+      console.log('📥 updateProfile result:', result);
+      
+      if (result.success) {
+        console.log('✅ Save successful!');
+        setHasUnsavedChanges(false);
+        setSuccessMessage('✅ Gespeichert!');
+        
+        // Feld-Indikator nach 2 Sekunden ausblenden
+        setTimeout(() => {
+          setLastEditedField(null);
+          setSuccessMessage('');
+        }, 2000);
+        
+        // Logge nur wenn tatsächlich Änderungen vorhanden
+        const changes = {};
+        const fieldsToTrack = {
+          name: { old: player.name, new: profile.name },
+          phone: { old: player.phone, new: profile.phone },
+          email: { old: player.email, new: profile.email },
+          current_lk: { old: player.current_lk, new: normalizedLK },
+          tennis_motto: { old: player.tennis_motto, new: profile.tennis_motto },
+          favorite_shot: { old: player.favorite_shot, new: profile.favorite_shot },
+          birth_date: { old: player.birth_date, new: profile.birth_date },
+          address: { old: player.address, new: profile.address },
+          emergency_contact: { old: player.emergency_contact, new: profile.emergency_contact },
+          emergency_phone: { old: player.emergency_phone, new: profile.emergency_phone }
+        };
+        
+        Object.keys(fieldsToTrack).forEach(field => {
+          const oldVal = fieldsToTrack[field].old || '';
+          const newVal = fieldsToTrack[field].new || '';
+          if (oldVal !== newVal) {
+            changes[field] = { old: oldVal, new: newVal };
+          }
+        });
+        
+        if (Object.keys(changes).length > 0) {
+          await LoggingService.logProfileEdit(changes, player?.id);
+        }
+      } else {
+        throw new Error(result.error || 'Fehler beim Speichern');
+      }
+    } catch (error) {
+      console.error('❌ Auto-save error:', error);
+      setErrorMessage(`Fehler: ${error.message}`);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleImageUpload = async (e) => {
@@ -488,101 +698,26 @@ function SupabaseProfile() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    // Nur für eigenes Profil erlauben
-    if (isViewingOtherPlayer) {
-      setErrorMessage('Sie können nur Ihr eigenes Profil bearbeiten.');
-      return;
-    }
-    
-    // Validierung
-    if (!profile.name || profile.name.trim() === '') {
-      setErrorMessage('❌ Bitte geben Sie Ihren Namen ein');
-      return;
-    }
-    
-    setIsSaving(true);
-    setErrorMessage('');
-    
-    try {
-      console.log('💾 Saving profile to Supabase:', profile);
-      
-      // Normalisiere LK vor dem Speichern (13,6 → LK 13.6)
-      const normalizedLK = profile.current_lk ? normalizeLK(profile.current_lk) : null;
-      
-      // Profil in Supabase speichern - alle relevanten Felder
-      const result = await updateProfile({
-        name: profile.name,
-        phone: profile.phone,
-        email: profile.email,
-        profileImage: profile.profileImage,
-        birth_date: profile.birth_date,
-        // Tennis-Identity
-        current_lk: normalizedLK,
-        tennis_motto: profile.tennis_motto,
-        favorite_shot: profile.favorite_shot,
-        best_tennis_memory: profile.best_tennis_memory,
-        worst_tennis_memory: profile.worst_tennis_memory,
-        favorite_opponent: profile.favorite_opponent,
-        dream_match: profile.dream_match,
-        // Fun & Aberglaube
-        fun_fact: profile.fun_fact,
-        superstition: profile.superstition,
-        pre_match_routine: profile.pre_match_routine,
-        // Kontakt & Notfall
-        address: profile.address,
-        emergency_contact: profile.emergency_contact,
-        emergency_phone: profile.emergency_phone,
-        // Notizen
-        notes: profile.notes
-      });
-      
-      if (!result.success) {
-        throw new Error(result.error || 'Fehler beim Speichern');
+    // Bei Setup: normaler Submit
+    if (isSetup) {
+      if (isViewingOtherPlayer) {
+        setErrorMessage('Sie können nur Ihr eigenes Profil bearbeiten.');
+        return;
       }
       
-      console.log('✅ Profile saved successfully');
-      
-      // Log Profil-Bearbeitung (nur wichtigste Felder)
-      await LoggingService.logProfileEdit({
-        name: profile.name,
-        phone: profile.phone,
-        email: profile.email,
-        current_lk: profile.current_lk
-      }, player?.id);
-      
-      setSuccessMessage('✅ Profil erfolgreich gespeichert!');
-      setIsEditing(false);
-      
-      // Bei Setup zum Dashboard weiterleiten
-      if (isSetup) {
-        setTimeout(() => {
-          navigate('/');
-        }, 1500);
-      } else {
-        setTimeout(() => {
-          setSuccessMessage('');
-        }, 3000);
+      if (!profile.name || profile.name.trim() === '') {
+        setErrorMessage('❌ Bitte geben Sie Ihren Namen ein');
+        return;
       }
-    } catch (error) {
-      console.error('❌ Error saving profile:', error);
-      setErrorMessage(`❌ Fehler beim Speichern: ${error.message}`);
-    } finally {
-      setIsSaving(false);
+      
+      // Trigger Auto-Save
+      await handleAutoSave();
+      
+      // Weiterleitung nach Setup
+      setTimeout(() => {
+        navigate('/');
+      }, 1500);
     }
-  };
-
-  const handleCancel = () => {
-    // Daten zurücksetzen
-    if (player) {
-      setProfile({
-        name: player.name || '',
-        email: player.email || currentUser?.email || '',
-        phone: player.phone || '',
-        profileImage: player.profile_image || ''
-      });
-    }
-    setIsEditing(false);
-    setErrorMessage('');
   };
 
   if (authLoading) {
@@ -609,24 +744,52 @@ function SupabaseProfile() {
       
       {/* Kopfbereich im Dashboard-Stil */}
       <div className="fade-in" style={{ marginBottom: '1rem', paddingTop: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-        <h1 className="hi">👤 {isSetup ? 'Profil einrichten' : 'Mein Profil'}</h1>
-        {!isEditing && !isSetup && !isViewingOtherPlayer && (
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <button 
-              className="btn-modern btn-modern-inactive"
-              onClick={() => setIsEditing(true)}
-            >
-              ✏️ Bearbeiten
-            </button>
-            <button 
-              className="btn-modern btn-modern-inactive"
-              onClick={() => setShowPasswordReset(true)}
-            >
-              🔐 Passwort zurücksetzen
-            </button>
-          </div>
+        <div>
+          <h1 className="hi">👤 {isSetup ? 'Profil einrichten' : 'Mein Profil'}</h1>
+          {!isViewingOtherPlayer && (
+            <p style={{ 
+              margin: '0.5rem 0 0 0', 
+              fontSize: '0.875rem', 
+              color: '#6b7280',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}>
+              {isSaving ? (
+                <>
+                  <span style={{ 
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                    color: '#3b82f6'
+                  }}>
+                    <span className="pulse">💾</span> Speichert...
+                  </span>
+                </>
+              ) : hasUnsavedChanges ? (
+                <>
+                  <span style={{ color: '#f59e0b' }}>⚠️</span>
+                  Ungespeicherte Änderungen
+                </>
+              ) : (
+                <>
+                  <span style={{ color: '#10b981' }}>✓</span>
+                  Alle Änderungen gespeichert
+                </>
+              )}
+            </p>
+          )}
+        </div>
+        {!isViewingOtherPlayer && (
+          <button 
+            className="btn-modern btn-modern-inactive"
+            onClick={() => setShowPasswordReset(true)}
+          >
+            🔐 Passwort zurücksetzen
+          </button>
         )}
       </div>
+      
 
 
       {errorMessage && (
@@ -673,7 +836,7 @@ function SupabaseProfile() {
                 </div>
               )}
               
-              {isEditing && (
+              {!isViewingOtherPlayer && (
                 <label htmlFor="profileImage" className="upload-button">
                   {isUploading ? '⏳ Lädt hoch...' : '📷 Bild hochladen'}
                 </label>
@@ -685,7 +848,7 @@ function SupabaseProfile() {
                 accept="image/*,image/heic,image/heif"
                 capture="environment"
                 onChange={handleImageUpload}
-                disabled={!isEditing || isUploading}
+                disabled={isViewingOtherPlayer || isUploading}
                 style={{ display: 'none' }}
               />
             </div>
@@ -696,18 +859,24 @@ function SupabaseProfile() {
         <section className="profile-section">
           <h2>📋 Persönliche Informationen</h2>
           
-          <div className="form-group">
+          <div className="form-group" style={{ position: 'relative' }}>
             <label htmlFor="name">👤 Name *</label>
-            <input
-              type="text"
-              id="name"
-              name="name"
-              value={profile.name}
-              onChange={handleInputChange}
-              disabled={!isEditing}
-              required
-              placeholder="Max Mustermann"
-            />
+            <div style={{ position: 'relative' }}>
+              {renderSaveIndicator('name')}
+              <input
+                type="text"
+                id="name"
+                name="name"
+                value={profile.name}
+                onChange={handleInputChange}
+                disabled={isViewingOtherPlayer}
+                required
+                placeholder="Max Mustermann"
+                style={{ 
+                  paddingLeft: (lastEditedField === 'name' && window.innerWidth > 768) ? '3rem' : '16px'
+                }}
+              />
+            </div>
           </div>
 
           <div className="form-group">
@@ -726,16 +895,20 @@ function SupabaseProfile() {
             </small>
           </div>
 
-          <div className="form-group">
+          <div className="form-group" style={{ position: 'relative' }}>
             <label htmlFor="birth_date">🎂 Geburtsdatum</label>
-            <input
-              type="date"
-              id="birth_date"
-              name="birth_date"
-              value={profile.birth_date}
-              onChange={handleInputChange}
-              disabled={!isEditing}
-            />
+            <div style={{ position: 'relative' }}>
+              {renderSaveIndicator('birth_date')}
+              <input
+                type="date"
+                id="birth_date"
+                name="birth_date"
+                value={profile.birth_date}
+                onChange={handleInputChange}
+                disabled={isViewingOtherPlayer}
+                style={{ paddingLeft: (lastEditedField === 'birth_date' && window.innerWidth > 768) ? '3rem' : '16px' }}
+              />
+            </div>
             <small style={{ color: '#666', fontSize: '0.85rem' }}>
               🎉 Optional - hilft uns dein Profil zu personalisieren
             </small>
@@ -750,25 +923,29 @@ function SupabaseProfile() {
           </p>
           
           {/* Aktuelle LK - prominent */}
-          <div className="form-group">
+          <div className="form-group" style={{ position: 'relative' }}>
             <label htmlFor="current_lk">🏆 Aktuelle Leistungsklasse</label>
-            <input
-              id="current_lk"
-              name="current_lk"
-              type="text"
-              value={profile.current_lk}
-              onChange={handleInputChange}
-              disabled={!isEditing}
-              placeholder="z.B. LK 12.3"
-              style={{ 
-                textAlign: 'center', 
-                fontWeight: '700',
-                fontSize: '1.2rem',
-                color: '#3b82f6',
-                background: '#f0f9ff',
-                border: '2px solid #93c5fd'
-              }}
-            />
+            <div style={{ position: 'relative' }}>
+              {renderSaveIndicator('current_lk')}
+              <input
+                id="current_lk"
+                name="current_lk"
+                type="text"
+                value={profile.current_lk}
+                onChange={handleInputChange}
+                disabled={isViewingOtherPlayer}
+                placeholder="z.B. LK 12.3"
+                style={{ 
+                  textAlign: 'center', 
+                  fontWeight: '700',
+                  fontSize: '1.2rem',
+                  color: '#3b82f6',
+                  background: '#f0f9ff',
+                  border: '2px solid #93c5fd',
+                  paddingLeft: (lastEditedField === 'current_lk' && window.innerWidth > 768) ? '3rem' : '16px'
+                }}
+              />
+            </div>
             <small style={{ color: '#666', fontSize: '0.85rem', display: 'block', marginTop: '0.5rem', textAlign: 'center' }}>
               💡 Deine LK findest du auf deiner{' '}
               <a 
@@ -783,121 +960,115 @@ function SupabaseProfile() {
           </div>
 
           {/* Tennis-Motto */}
-          {(isEditing || profile.tennis_motto) && (
-            <div className="form-group">
-              <label htmlFor="tennis_motto">💭 Dein Tennis-Motto</label>
+          <div className="form-group" style={{ position: 'relative' }}>
+            <label htmlFor="tennis_motto">💭 Dein Tennis-Motto</label>
+            <div style={{ position: 'relative' }}>
+              {renderSaveIndicator('tennis_motto')}
               <input
                 id="tennis_motto"
                 name="tennis_motto"
                 type="text"
                 value={profile.tennis_motto}
                 onChange={handleInputChange}
-                disabled={!isEditing}
+                disabled={isViewingOtherPlayer}
                 placeholder='z.B. "Nie aufgeben!", "One point at a time"'
-                style={{ fontStyle: 'italic' }}
+                style={{ 
+                  fontStyle: 'italic',
+                  paddingLeft: (lastEditedField === 'tennis_motto' && window.innerWidth > 768) ? '3rem' : '16px'
+                }}
               />
-              <small style={{ color: '#666', fontSize: '0.85rem' }}>
-                💪 Dein persönlicher Schlachtruf auf dem Court
-              </small>
             </div>
-          )}
+            <small style={{ color: '#666', fontSize: '0.85rem' }}>
+              💪 Dein persönlicher Schlachtruf auf dem Court
+            </small>
+          </div>
 
           {/* Lieblingsschlag */}
-          {(isEditing || profile.favorite_shot) && (
-            <div className="form-group">
-              <label htmlFor="favorite_shot">🎯 Dein Lieblingsschlag</label>
-              <input
-                id="favorite_shot"
-                name="favorite_shot"
-                type="text"
-                value={profile.favorite_shot}
-                onChange={handleInputChange}
-                disabled={!isEditing}
-                placeholder="z.B. Vorhand Longline, Inside-Out, Slice..."
-              />
-              <small style={{ color: '#666', fontSize: '0.85rem' }}>
-                🎾 Der Schlag, der dir am meisten Spaß macht
-              </small>
-            </div>
-          )}
+          <div className="form-group">
+            <label htmlFor="favorite_shot">🎯 Dein Lieblingsschlag</label>
+            <input
+              id="favorite_shot"
+              name="favorite_shot"
+              type="text"
+              value={profile.favorite_shot}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+              placeholder="z.B. Vorhand Longline, Inside-Out, Slice..."
+            />
+            <small style={{ color: '#666', fontSize: '0.85rem' }}>
+              🎾 Der Schlag, der dir am meisten Spaß macht
+            </small>
+          </div>
 
           {/* Bester Moment */}
-          {(isEditing || profile.best_tennis_memory) && (
-            <div className="form-group">
-              <label htmlFor="best_tennis_memory">🌟 Dein bester Tennis-Moment</label>
-              <textarea
-                id="best_tennis_memory"
-                name="best_tennis_memory"
-                value={profile.best_tennis_memory}
-                onChange={handleInputChange}
-                disabled={!isEditing}
-                placeholder="z.B. Mein erster Turniersieg 2023 gegen..."
-                rows="3"
-                style={{ resize: 'vertical' }}
-              />
-              <small style={{ color: '#666', fontSize: '0.85rem' }}>
-                🏆 Die Erinnerung, die dich motiviert
-              </small>
-            </div>
-          )}
+          <div className="form-group">
+            <label htmlFor="best_tennis_memory">🌟 Dein bester Tennis-Moment</label>
+            <textarea
+              id="best_tennis_memory"
+              name="best_tennis_memory"
+              value={profile.best_tennis_memory}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+              placeholder="z.B. Mein erster Turniersieg 2023 gegen..."
+              rows="3"
+              style={{ resize: 'vertical' }}
+            />
+            <small style={{ color: '#666', fontSize: '0.85rem' }}>
+              🏆 Die Erinnerung, die dich motiviert
+            </small>
+          </div>
 
           {/* Schlimmster Moment */}
-          {(isEditing || profile.worst_tennis_memory) && (
-            <div className="form-group">
-              <label htmlFor="worst_tennis_memory">😅 Dein schlimmster Tennis-Moment</label>
-              <textarea
-                id="worst_tennis_memory"
-                name="worst_tennis_memory"
-                value={profile.worst_tennis_memory}
-                onChange={handleInputChange}
-                disabled={!isEditing}
-                placeholder="z.B. Als ich 6:0, 5:0 führte und dann verlor..."
-                rows="3"
-                style={{ resize: 'vertical' }}
-              />
-              <small style={{ color: '#666', fontSize: '0.85rem' }}>
-                😬 Auch das gehört dazu - daraus lernen wir
-              </small>
-            </div>
-          )}
+          <div className="form-group">
+            <label htmlFor="worst_tennis_memory">😅 Dein schlimmster Tennis-Moment</label>
+            <textarea
+              id="worst_tennis_memory"
+              name="worst_tennis_memory"
+              value={profile.worst_tennis_memory}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+              placeholder="z.B. Als ich 6:0, 5:0 führte und dann verlor..."
+              rows="3"
+              style={{ resize: 'vertical' }}
+            />
+            <small style={{ color: '#666', fontSize: '0.85rem' }}>
+              😬 Auch das gehört dazu - daraus lernen wir
+            </small>
+          </div>
 
           {/* Lieblingsgegner */}
-          {(isEditing || profile.favorite_opponent) && (
-            <div className="form-group">
-              <label htmlFor="favorite_opponent">🤝 Dein Lieblingsgegner</label>
-              <input
-                id="favorite_opponent"
-                name="favorite_opponent"
-                type="text"
-                value={profile.favorite_opponent}
-                onChange={handleInputChange}
-                disabled={!isEditing}
-                placeholder="z.B. Mein bester Freund Max, immer spannend!"
-              />
-              <small style={{ color: '#666', fontSize: '0.85rem' }}>
-                🎾 Gegen wen spielst du am liebsten?
-              </small>
-            </div>
-          )}
+          <div className="form-group">
+            <label htmlFor="favorite_opponent">🤝 Dein Lieblingsgegner</label>
+            <input
+              id="favorite_opponent"
+              name="favorite_opponent"
+              type="text"
+              value={profile.favorite_opponent}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+              placeholder="z.B. Mein bester Freund Max, immer spannend!"
+            />
+            <small style={{ color: '#666', fontSize: '0.85rem' }}>
+              🎾 Gegen wen spielst du am liebsten?
+            </small>
+          </div>
 
           {/* Traum-Match */}
-          {(isEditing || profile.dream_match) && (
-            <div className="form-group">
-              <label htmlFor="dream_match">💫 Dein Traum-Match</label>
-              <input
-                id="dream_match"
-                name="dream_match"
-                type="text"
-                value={profile.dream_match}
-                onChange={handleInputChange}
-                disabled={!isEditing}
-                placeholder="z.B. Gegen Roger Federer auf Wimbledon"
-              />
-              <small style={{ color: '#666', fontSize: '0.85rem' }}>
-                ✨ Gegen wen würdest du gerne mal spielen?
-              </small>
-            </div>
-          )}
+          <div className="form-group">
+            <label htmlFor="dream_match">💫 Dein Traum-Match</label>
+            <input
+              id="dream_match"
+              name="dream_match"
+              type="text"
+              value={profile.dream_match}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+              placeholder="z.B. Gegen Roger Federer auf Wimbledon"
+            />
+            <small style={{ color: '#666', fontSize: '0.85rem' }}>
+              ✨ Gegen wen würdest du gerne mal spielen?
+            </small>
+          </div>
         </section>
 
         {/* Fun & Aberglaube */}
@@ -908,63 +1079,57 @@ function SupabaseProfile() {
           </p>
 
           {/* Fun Fact */}
-          {(isEditing || profile.fun_fact) && (
-            <div className="form-group">
-              <label htmlFor="fun_fact">🎲 Fun Fact über dich</label>
-              <textarea
-                id="fun_fact"
-                name="fun_fact"
-                value={profile.fun_fact}
-                onChange={handleInputChange}
-                disabled={!isEditing}
-                placeholder="z.B. Ich spiele seit meinem 5. Lebensjahr Tennis..."
-                rows="3"
-                style={{ resize: 'vertical' }}
-              />
-              <small style={{ color: '#666', fontSize: '0.85rem' }}>
-                🎉 Was die wenigsten über dich wissen
-              </small>
-            </div>
-          )}
+          <div className="form-group">
+            <label htmlFor="fun_fact">🎲 Fun Fact über dich</label>
+            <textarea
+              id="fun_fact"
+              name="fun_fact"
+              value={profile.fun_fact}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+              placeholder="z.B. Ich spiele seit meinem 5. Lebensjahr Tennis..."
+              rows="3"
+              style={{ resize: 'vertical' }}
+            />
+            <small style={{ color: '#666', fontSize: '0.85rem' }}>
+              🎉 Was die wenigsten über dich wissen
+            </small>
+          </div>
 
           {/* Aberglaube */}
-          {(isEditing || profile.superstition) && (
-            <div className="form-group">
-              <label htmlFor="superstition">🍀 Dein Aberglaube</label>
-              <input
-                id="superstition"
-                name="superstition"
-                type="text"
-                value={profile.superstition}
-                onChange={handleInputChange}
-                disabled={!isEditing}
-                placeholder='z.B. "Immer mit dem rechten Fuß zuerst auf den Court"'
-              />
-              <small style={{ color: '#666', fontSize: '0.85rem' }}>
-                🔮 Hast du ein Glücksritual?
-              </small>
-            </div>
-          )}
+          <div className="form-group">
+            <label htmlFor="superstition">🍀 Dein Aberglaube</label>
+            <input
+              id="superstition"
+              name="superstition"
+              type="text"
+              value={profile.superstition}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+              placeholder='z.B. "Immer mit dem rechten Fuß zuerst auf den Court"'
+            />
+            <small style={{ color: '#666', fontSize: '0.85rem' }}>
+              🔮 Hast du ein Glücksritual?
+            </small>
+          </div>
 
           {/* Pre-Match Routine */}
-          {(isEditing || profile.pre_match_routine) && (
-            <div className="form-group">
-              <label htmlFor="pre_match_routine">🔄 Deine Pre-Match Routine</label>
-              <textarea
-                id="pre_match_routine"
-                name="pre_match_routine"
-                value={profile.pre_match_routine}
-                onChange={handleInputChange}
-                disabled={!isEditing}
-                placeholder="z.B. 30 Min Aufwärmen, Musik hören, Banane essen..."
-                rows="3"
-                style={{ resize: 'vertical' }}
-              />
-              <small style={{ color: '#666', fontSize: '0.85rem' }}>
-                🎯 Wie bereitest du dich vor einem Match vor?
-              </small>
-            </div>
-          )}
+          <div className="form-group">
+            <label htmlFor="pre_match_routine">🔄 Deine Pre-Match Routine</label>
+            <textarea
+              id="pre_match_routine"
+              name="pre_match_routine"
+              value={profile.pre_match_routine}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+              placeholder="z.B. 30 Min Aufwärmen, Musik hören, Banane essen..."
+              rows="3"
+              style={{ resize: 'vertical' }}
+            />
+            <small style={{ color: '#666', fontSize: '0.85rem' }}>
+              🎯 Wie bereitest du dich vor einem Match vor?
+            </small>
+          </div>
         </section>
 
         {/* Kontakt & Notfall */}
@@ -974,100 +1139,102 @@ function SupabaseProfile() {
             🔒 Diese Daten sind nur für dein Team sichtbar
           </p>
           
-          <div className="form-group">
+          <div className="form-group" style={{ position: 'relative' }}>
             <label htmlFor="phone">📱 Telefonnummer</label>
-            <input
-              id="phone"
-              name="phone"
-              type="tel"
-              value={profile.phone}
-              onChange={handleInputChange}
-              disabled={!isEditing}
-              placeholder="+49 123 456789"
-            />
+            <div style={{ position: 'relative' }}>
+              {renderSaveIndicator('phone')}
+              <input
+                id="phone"
+                name="phone"
+                type="tel"
+                value={profile.phone}
+                onChange={handleInputChange}
+                disabled={isViewingOtherPlayer}
+                placeholder="+49 123 456789"
+                style={{ paddingLeft: (lastEditedField === 'phone' && window.innerWidth > 768) ? '3rem' : '16px' }}
+              />
+            </div>
             <small style={{ color: '#666', fontSize: '0.85rem' }}>
               Für Team-Kommunikation und wichtige Updates
             </small>
           </div>
 
-          {(isEditing || profile.address) && (
-            <div className="form-group">
-              <label htmlFor="address">🏠 Adresse</label>
-              <textarea
-                id="address"
-                name="address"
-                value={profile.address}
-                onChange={handleInputChange}
-                disabled={!isEditing}
-                placeholder="Musterstraße 123, 12345 Musterstadt"
-                rows="2"
-                style={{ resize: 'vertical' }}
-              />
-              <small style={{ color: '#666', fontSize: '0.85rem' }}>
-                Optional - für Fahrgemeinschaften
-              </small>
-            </div>
-          )}
+          <div className="form-group">
+            <label htmlFor="address">🏠 Adresse</label>
+            <textarea
+              id="address"
+              name="address"
+              value={profile.address}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+              placeholder="Musterstraße 123, 12345 Musterstadt"
+              rows="2"
+              style={{ resize: 'vertical' }}
+            />
+            <small style={{ color: '#666', fontSize: '0.85rem' }}>
+              Optional - für Fahrgemeinschaften
+            </small>
+          </div>
 
-          {(isEditing || profile.emergency_contact) && (
-            <div className="form-group">
-              <label htmlFor="emergency_contact">🚨 Notfallkontakt</label>
-              <input
-                id="emergency_contact"
-                name="emergency_contact"
-                type="text"
-                value={profile.emergency_contact}
-                onChange={handleInputChange}
-                disabled={!isEditing}
-                placeholder="Name des Notfallkontakts"
-              />
-              <small style={{ color: '#666', fontSize: '0.85rem' }}>
-                Name der Person, die im Notfall kontaktiert werden soll
-              </small>
-            </div>
-          )}
+          <div className="form-group">
+            <label htmlFor="emergency_contact">🚨 Notfallkontakt</label>
+            <input
+              id="emergency_contact"
+              name="emergency_contact"
+              type="text"
+              value={profile.emergency_contact}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+              placeholder="Name des Notfallkontakts"
+            />
+            <small style={{ color: '#666', fontSize: '0.85rem' }}>
+              Name der Person, die im Notfall kontaktiert werden soll
+            </small>
+          </div>
 
-          {(isEditing || profile.emergency_phone) && (
-            <div className="form-group">
-              <label htmlFor="emergency_phone">☎️ Notfall-Telefon</label>
-              <input
-                id="emergency_phone"
-                name="emergency_phone"
-                type="tel"
-                value={profile.emergency_phone}
-                onChange={handleInputChange}
-                disabled={!isEditing}
-                placeholder="+49 123 456789"
-              />
-              <small style={{ color: '#666', fontSize: '0.85rem' }}>
-                Telefonnummer des Notfallkontakts
-              </small>
-            </div>
-          )}
+          <div className="form-group">
+            <label htmlFor="emergency_phone">☎️ Notfall-Telefon</label>
+            <input
+              id="emergency_phone"
+              name="emergency_phone"
+              type="tel"
+              value={profile.emergency_phone}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+              placeholder="+49 123 456789"
+            />
+            <small style={{ color: '#666', fontSize: '0.85rem' }}>
+              Telefonnummer des Notfallkontakts
+            </small>
+          </div>
         </section>
 
         {/* Notizen */}
-        {(isEditing || profile.notes) && (
-          <section className="profile-section">
-            <h2>📝 Persönliche Notizen</h2>
-            <p style={{ color: '#666', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
-              Platz für deine eigenen Gedanken und Erinnerungen
-            </p>
-            
-            <div className="form-group">
+        <section className="profile-section">
+          <h2>📝 Persönliche Notizen</h2>
+          <p style={{ color: '#666', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
+            Platz für deine eigenen Gedanken und Erinnerungen
+          </p>
+          
+          <div className="form-group" style={{ position: 'relative' }}>
+            <div style={{ position: 'relative' }}>
+              {renderSaveIndicator('notes')}
               <textarea
                 id="notes"
                 name="notes"
                 value={profile.notes}
                 onChange={handleInputChange}
-                disabled={!isEditing}
+                disabled={isViewingOtherPlayer}
                 placeholder="Hier ist Platz für deine persönlichen Notizen..."
                 rows="5"
-                style={{ resize: 'vertical' }}
+                style={{ 
+                  resize: 'vertical',
+                  paddingLeft: (lastEditedField === 'notes' && window.innerWidth > 768) ? '3rem' : '16px'
+                }}
               />
             </div>
-          </section>
-        )}
+          </div>
+        </section>
         
         {clubs.length > 0 && (
         <section className="profile-section">
@@ -1359,8 +1526,8 @@ function SupabaseProfile() {
                             </div>
                           )}
 
-                          {/* Edit Buttons (nur wenn bearbeitbar) */}
-                          {isEditing && (
+                          {/* Edit Buttons (nur bei eigenem Profil) */}
+                          {!isViewingOtherPlayer && (
                             <div style={{ 
                               marginTop: '0.75rem', 
                               display: 'flex', 
@@ -1414,7 +1581,8 @@ function SupabaseProfile() {
         </section>
         )}
 
-        {isEditing && (
+        {/* Setup-Button (nur bei Ersteinrichtung) */}
+        {isSetup && (
           <div className="form-actions">
             <div className="form-actions-left">
               {successMessage && (
@@ -1424,22 +1592,12 @@ function SupabaseProfile() {
               )}
             </div>
             <div className="form-actions-right">
-              {!isSetup && (
-                <button 
-                  type="button" 
-                  className="btn-cancel"
-                  onClick={handleCancel}
-                  disabled={isSaving}
-                >
-                  Abbrechen
-                </button>
-              )}
               <button 
                 type="submit" 
                 className="btn-save"
-                disabled={isSaving}
+                disabled={isSaving || !profile.name}
               >
-                {isSaving ? '⏳ Speichert...' : '💾 Speichern'}
+                {isSaving ? '⏳ Speichert...' : '✅ Profil abschließen'}
               </button>
             </div>
           </div>
