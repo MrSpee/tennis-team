@@ -246,6 +246,13 @@ export function DataProvider({ children }) {
       const teamsForFilter = teamsToFilter || playerTeams;
       const playerTeamIds = teamsForFilter.map(t => t.id);
       
+      console.log('🔍 loadMatches called with:', {
+        teamsToFilterParam: teamsToFilter?.length || 0,
+        playerTeamsState: playerTeams.length,
+        finalTeamsToUse: teamsForFilter.length,
+        playerTeamIds
+      });
+      
       if (playerTeamIds.length === 0) {
         console.log('⚠️ No teams found for player, no matches to load');
         setMatches([]);
