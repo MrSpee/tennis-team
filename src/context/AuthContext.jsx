@@ -370,7 +370,7 @@ export function AuthProvider({ children }) {
     }
 
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('players')
         .update({
           name: profileData.name,
@@ -390,15 +390,16 @@ export function AuthProvider({ children }) {
           address: profileData.address || null,
           emergency_contact: profileData.emergencyContact || profileData.emergency_contact || null,
           emergency_phone: profileData.emergencyPhone || profileData.emergency_phone || null,
-          notes: profileData.notes || null
+          notes: profileData.notes || null,
+          current_lk: profileData.current_lk || null
         })
-        .eq('id', player.id)
-        .select()
-        .single();
+        .eq('id', player.id);
 
       if (error) throw error;
 
-      setPlayer(data);
+      // Reload player data nach Update
+      await loadPlayerData(player.user_id);
+      
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };

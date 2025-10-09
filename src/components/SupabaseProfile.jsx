@@ -72,87 +72,78 @@ function SupabaseProfile() {
     };
   }, [autoSaveTimer]);
 
-  // Helper: Inline Save Indicator - Mobile optimiert
-  const renderSaveIndicator = (fieldName) => {
+  // Helper: Inline Save Button direkt unter Feld
+  const renderInlineSaveButton = (fieldName) => {
     if (isViewingOtherPlayer) return null;
+    if (lastEditedField !== fieldName) return null;
     
-    const isThisField = lastEditedField === fieldName;
-    
-    if (!isThisField) return null;
-    
-    // Mobile: Badge über dem Feld, Desktop: Icon links im Feld
-    const isMobile = window.innerWidth <= 768;
-    
-    if (isMobile) {
-      // Mobile: Badge über dem Eingabefeld
-      return (
-        <div style={{
-          position: 'absolute',
-          top: '-0.5rem',
-          left: '0.5rem',
-          background: isSaving 
-            ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'
-            : hasUnsavedChanges 
-            ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
-            : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-          color: 'white',
-          padding: '0.25rem 0.75rem',
-          borderRadius: '12px',
-          fontSize: '0.75rem',
-          fontWeight: '700',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.375rem',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
-          zIndex: 100,
-          animation: 'slideInDown 0.3s ease-out'
-        }}>
+    return (
+      <div style={{
+        marginTop: '0.5rem',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.75rem',
+        padding: '0.75rem',
+        background: isSaving 
+          ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'
+          : hasUnsavedChanges 
+          ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+          : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+        borderRadius: '8px',
+        animation: 'slideInDown 0.3s ease-out',
+        color: 'white',
+        fontSize: '0.875rem',
+        flexWrap: 'wrap'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: '150px' }}>
           {isSaving ? (
             <>
-              <span className="pulse" style={{ fontSize: '1rem' }}>💾</span>
-              <span>Speichert...</span>
+              <span className="pulse" style={{ fontSize: '1.25rem' }}>💾</span>
+              <span style={{ fontWeight: '600' }}>Speichert...</span>
             </>
           ) : hasUnsavedChanges ? (
             <>
-              <span style={{ fontSize: '1rem' }}>⏳</span>
-              <span>Wartet...</span>
+              <span style={{ fontSize: '1.25rem' }}>⏳</span>
+              <span style={{ fontWeight: '600' }}>Automatisches Speichern in 2 Sek...</span>
             </>
           ) : (
             <>
-              <span style={{ fontSize: '1rem' }}>✅</span>
-              <span>Gespeichert</span>
+              <span style={{ fontSize: '1.25rem' }}>✅</span>
+              <span style={{ fontWeight: '600' }}>Gespeichert!</span>
             </>
           )}
         </div>
-      );
-    } else {
-      // Desktop: Icon links im Feld
-      return (
-        <div style={{
-          position: 'absolute',
-          left: '0.75rem',
-          top: '50%',
-          transform: 'translateY(-50%)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.5rem',
-          pointerEvents: 'none',
-          zIndex: 10
-        }}>
-          {isSaving ? (
-            <span className="pulse" style={{ fontSize: '1.5rem' }}>💾</span>
-          ) : hasUnsavedChanges ? (
-            <span style={{ fontSize: '1.5rem', opacity: 0.7 }}>⏳</span>
-          ) : (
-            <span style={{ 
-              fontSize: '1.5rem',
-              animation: 'fadeIn 0.3s ease-in-out'
-            }}>✅</span>
-          )}
-        </div>
-      );
-    }
+        
+        {hasUnsavedChanges && !isSaving && (
+          <button
+            onClick={handleAutoSave}
+            style={{
+              background: 'rgba(255, 255, 255, 0.25)',
+              border: '2px solid rgba(255, 255, 255, 0.4)',
+              color: 'white',
+              padding: '0.5rem 1rem',
+              borderRadius: '6px',
+              fontWeight: '700',
+              fontSize: '0.875rem',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              minHeight: '40px',
+              whiteSpace: 'nowrap'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.background = 'rgba(255, 255, 255, 0.35)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.background = 'rgba(255, 255, 255, 0.25)';
+            }}
+          >
+            💾 Jetzt speichern
+          </button>
+        )}
+      </div>
+    );
   };
+
 
   // Funktion zum Laden anderer Spieler-Profile
   const loadOtherPlayerProfile = async (playerName) => {
@@ -744,42 +735,7 @@ function SupabaseProfile() {
       
       {/* Kopfbereich im Dashboard-Stil */}
       <div className="fade-in" style={{ marginBottom: '1rem', paddingTop: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <h1 className="hi">👤 {isSetup ? 'Profil einrichten' : 'Mein Profil'}</h1>
-          {!isViewingOtherPlayer && (
-            <p style={{ 
-              margin: '0.5rem 0 0 0', 
-              fontSize: '0.875rem', 
-              color: '#6b7280',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}>
-              {isSaving ? (
-                <>
-                  <span style={{ 
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.25rem',
-                    color: '#3b82f6'
-                  }}>
-                    <span className="pulse">💾</span> Speichert...
-                  </span>
-                </>
-              ) : hasUnsavedChanges ? (
-                <>
-                  <span style={{ color: '#f59e0b' }}>⚠️</span>
-                  Ungespeicherte Änderungen
-                </>
-              ) : (
-                <>
-                  <span style={{ color: '#10b981' }}>✓</span>
-                  Alle Änderungen gespeichert
-                </>
-              )}
-            </p>
-          )}
-        </div>
+        <h1 className="hi">👤 {isSetup ? 'Profil einrichten' : 'Mein Profil'}</h1>
         {!isViewingOtherPlayer && (
           <button 
             className="btn-modern btn-modern-inactive"
@@ -789,6 +745,7 @@ function SupabaseProfile() {
           </button>
         )}
       </div>
+      
       
 
 
@@ -859,24 +816,19 @@ function SupabaseProfile() {
         <section className="profile-section">
           <h2>📋 Persönliche Informationen</h2>
           
-          <div className="form-group" style={{ position: 'relative' }}>
+          <div className="form-group">
             <label htmlFor="name">👤 Name *</label>
-            <div style={{ position: 'relative' }}>
-              {renderSaveIndicator('name')}
-              <input
-                type="text"
-                id="name"
-                name="name"
-                value={profile.name}
-                onChange={handleInputChange}
-                disabled={isViewingOtherPlayer}
-                required
-                placeholder="Max Mustermann"
-                style={{ 
-                  paddingLeft: (lastEditedField === 'name' && window.innerWidth > 768) ? '3rem' : '16px'
-                }}
-              />
-            </div>
+            <input
+              type="text"
+              id="name"
+              name="name"
+              value={profile.name}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+              required
+              placeholder="Max Mustermann"
+            />
+            {renderInlineSaveButton('name')}
           </div>
 
           <div className="form-group">
@@ -895,20 +847,17 @@ function SupabaseProfile() {
             </small>
           </div>
 
-          <div className="form-group" style={{ position: 'relative' }}>
+          <div className="form-group">
             <label htmlFor="birth_date">🎂 Geburtsdatum</label>
-            <div style={{ position: 'relative' }}>
-              {renderSaveIndicator('birth_date')}
-              <input
-                type="date"
-                id="birth_date"
-                name="birth_date"
-                value={profile.birth_date}
-                onChange={handleInputChange}
-                disabled={isViewingOtherPlayer}
-                style={{ paddingLeft: (lastEditedField === 'birth_date' && window.innerWidth > 768) ? '3rem' : '16px' }}
-              />
-            </div>
+            <input
+              type="date"
+              id="birth_date"
+              name="birth_date"
+              value={profile.birth_date}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+            />
+            {renderInlineSaveButton('birth_date')}
             <small style={{ color: '#666', fontSize: '0.85rem' }}>
               🎉 Optional - hilft uns dein Profil zu personalisieren
             </small>
@@ -923,29 +872,26 @@ function SupabaseProfile() {
           </p>
           
           {/* Aktuelle LK - prominent */}
-          <div className="form-group" style={{ position: 'relative' }}>
+          <div className="form-group">
             <label htmlFor="current_lk">🏆 Aktuelle Leistungsklasse</label>
-            <div style={{ position: 'relative' }}>
-              {renderSaveIndicator('current_lk')}
-              <input
-                id="current_lk"
-                name="current_lk"
-                type="text"
-                value={profile.current_lk}
-                onChange={handleInputChange}
-                disabled={isViewingOtherPlayer}
-                placeholder="z.B. LK 12.3"
-                style={{ 
-                  textAlign: 'center', 
-                  fontWeight: '700',
-                  fontSize: '1.2rem',
-                  color: '#3b82f6',
-                  background: '#f0f9ff',
-                  border: '2px solid #93c5fd',
-                  paddingLeft: (lastEditedField === 'current_lk' && window.innerWidth > 768) ? '3rem' : '16px'
-                }}
-              />
-            </div>
+            <input
+              id="current_lk"
+              name="current_lk"
+              type="text"
+              value={profile.current_lk}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+              placeholder="z.B. LK 12.3"
+              style={{ 
+                textAlign: 'center', 
+                fontWeight: '700',
+                fontSize: '1.2rem',
+                color: '#3b82f6',
+                background: '#f0f9ff',
+                border: '2px solid #93c5fd'
+              }}
+            />
+            {renderInlineSaveButton('current_lk')}
             <small style={{ color: '#666', fontSize: '0.85rem', display: 'block', marginTop: '0.5rem', textAlign: 'center' }}>
               💡 Deine LK findest du auf deiner{' '}
               <a 
@@ -960,24 +906,19 @@ function SupabaseProfile() {
           </div>
 
           {/* Tennis-Motto */}
-          <div className="form-group" style={{ position: 'relative' }}>
+          <div className="form-group">
             <label htmlFor="tennis_motto">💭 Dein Tennis-Motto</label>
-            <div style={{ position: 'relative' }}>
-              {renderSaveIndicator('tennis_motto')}
-              <input
-                id="tennis_motto"
-                name="tennis_motto"
-                type="text"
-                value={profile.tennis_motto}
-                onChange={handleInputChange}
-                disabled={isViewingOtherPlayer}
-                placeholder='z.B. "Nie aufgeben!", "One point at a time"'
-                style={{ 
-                  fontStyle: 'italic',
-                  paddingLeft: (lastEditedField === 'tennis_motto' && window.innerWidth > 768) ? '3rem' : '16px'
-                }}
-              />
-            </div>
+            <input
+              id="tennis_motto"
+              name="tennis_motto"
+              type="text"
+              value={profile.tennis_motto}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+              placeholder='z.B. "Nie aufgeben!", "One point at a time"'
+              style={{ fontStyle: 'italic' }}
+            />
+            {renderInlineSaveButton('tennis_motto')}
             <small style={{ color: '#666', fontSize: '0.85rem' }}>
               💪 Dein persönlicher Schlachtruf auf dem Court
             </small>
@@ -995,6 +936,7 @@ function SupabaseProfile() {
               disabled={isViewingOtherPlayer}
               placeholder="z.B. Vorhand Longline, Inside-Out, Slice..."
             />
+            {renderInlineSaveButton('favorite_shot')}
             <small style={{ color: '#666', fontSize: '0.85rem' }}>
               🎾 Der Schlag, der dir am meisten Spaß macht
             </small>
@@ -1013,6 +955,7 @@ function SupabaseProfile() {
               rows="3"
               style={{ resize: 'vertical' }}
             />
+            {renderInlineSaveButton('best_tennis_memory')}
             <small style={{ color: '#666', fontSize: '0.85rem' }}>
               🏆 Die Erinnerung, die dich motiviert
             </small>
@@ -1031,6 +974,7 @@ function SupabaseProfile() {
               rows="3"
               style={{ resize: 'vertical' }}
             />
+            {renderInlineSaveButton('worst_tennis_memory')}
             <small style={{ color: '#666', fontSize: '0.85rem' }}>
               😬 Auch das gehört dazu - daraus lernen wir
             </small>
@@ -1048,6 +992,7 @@ function SupabaseProfile() {
               disabled={isViewingOtherPlayer}
               placeholder="z.B. Mein bester Freund Max, immer spannend!"
             />
+            {renderInlineSaveButton('favorite_opponent')}
             <small style={{ color: '#666', fontSize: '0.85rem' }}>
               🎾 Gegen wen spielst du am liebsten?
             </small>
@@ -1065,6 +1010,7 @@ function SupabaseProfile() {
               disabled={isViewingOtherPlayer}
               placeholder="z.B. Gegen Roger Federer auf Wimbledon"
             />
+            {renderInlineSaveButton('dream_match')}
             <small style={{ color: '#666', fontSize: '0.85rem' }}>
               ✨ Gegen wen würdest du gerne mal spielen?
             </small>
@@ -1091,6 +1037,7 @@ function SupabaseProfile() {
               rows="3"
               style={{ resize: 'vertical' }}
             />
+            {renderInlineSaveButton('fun_fact')}
             <small style={{ color: '#666', fontSize: '0.85rem' }}>
               🎉 Was die wenigsten über dich wissen
             </small>
@@ -1108,6 +1055,7 @@ function SupabaseProfile() {
               disabled={isViewingOtherPlayer}
               placeholder='z.B. "Immer mit dem rechten Fuß zuerst auf den Court"'
             />
+            {renderInlineSaveButton('superstition')}
             <small style={{ color: '#666', fontSize: '0.85rem' }}>
               🔮 Hast du ein Glücksritual?
             </small>
@@ -1126,6 +1074,7 @@ function SupabaseProfile() {
               rows="3"
               style={{ resize: 'vertical' }}
             />
+            {renderInlineSaveButton('pre_match_routine')}
             <small style={{ color: '#666', fontSize: '0.85rem' }}>
               🎯 Wie bereitest du dich vor einem Match vor?
             </small>
@@ -1139,21 +1088,18 @@ function SupabaseProfile() {
             🔒 Diese Daten sind nur für dein Team sichtbar
           </p>
           
-          <div className="form-group" style={{ position: 'relative' }}>
+          <div className="form-group">
             <label htmlFor="phone">📱 Telefonnummer</label>
-            <div style={{ position: 'relative' }}>
-              {renderSaveIndicator('phone')}
-              <input
-                id="phone"
-                name="phone"
-                type="tel"
-                value={profile.phone}
-                onChange={handleInputChange}
-                disabled={isViewingOtherPlayer}
-                placeholder="+49 123 456789"
-                style={{ paddingLeft: (lastEditedField === 'phone' && window.innerWidth > 768) ? '3rem' : '16px' }}
-              />
-            </div>
+            <input
+              id="phone"
+              name="phone"
+              type="tel"
+              value={profile.phone}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+              placeholder="+49 123 456789"
+            />
+            {renderInlineSaveButton('phone')}
             <small style={{ color: '#666', fontSize: '0.85rem' }}>
               Für Team-Kommunikation und wichtige Updates
             </small>
@@ -1171,6 +1117,7 @@ function SupabaseProfile() {
               rows="2"
               style={{ resize: 'vertical' }}
             />
+            {renderInlineSaveButton('address')}
             <small style={{ color: '#666', fontSize: '0.85rem' }}>
               Optional - für Fahrgemeinschaften
             </small>
@@ -1187,6 +1134,7 @@ function SupabaseProfile() {
               disabled={isViewingOtherPlayer}
               placeholder="Name des Notfallkontakts"
             />
+            {renderInlineSaveButton('emergency_contact')}
             <small style={{ color: '#666', fontSize: '0.85rem' }}>
               Name der Person, die im Notfall kontaktiert werden soll
             </small>
@@ -1203,6 +1151,7 @@ function SupabaseProfile() {
               disabled={isViewingOtherPlayer}
               placeholder="+49 123 456789"
             />
+            {renderInlineSaveButton('emergency_phone')}
             <small style={{ color: '#666', fontSize: '0.85rem' }}>
               Telefonnummer des Notfallkontakts
             </small>
@@ -1216,23 +1165,18 @@ function SupabaseProfile() {
             Platz für deine eigenen Gedanken und Erinnerungen
           </p>
           
-          <div className="form-group" style={{ position: 'relative' }}>
-            <div style={{ position: 'relative' }}>
-              {renderSaveIndicator('notes')}
-              <textarea
-                id="notes"
-                name="notes"
-                value={profile.notes}
-                onChange={handleInputChange}
-                disabled={isViewingOtherPlayer}
-                placeholder="Hier ist Platz für deine persönlichen Notizen..."
-                rows="5"
-                style={{ 
-                  resize: 'vertical',
-                  paddingLeft: (lastEditedField === 'notes' && window.innerWidth > 768) ? '3rem' : '16px'
-                }}
-              />
-            </div>
+          <div className="form-group">
+            <textarea
+              id="notes"
+              name="notes"
+              value={profile.notes}
+              onChange={handleInputChange}
+              disabled={isViewingOtherPlayer}
+              placeholder="Hier ist Platz für deine persönlichen Notizen..."
+              rows="5"
+              style={{ resize: 'vertical' }}
+            />
+            {renderInlineSaveButton('notes')}
           </div>
         </section>
         
