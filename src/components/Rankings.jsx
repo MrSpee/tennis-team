@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, List } from 'lucide-react';
+import { Users } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { supabase } from '../lib/supabaseClient';
 import './Rankings.css';
@@ -227,23 +227,6 @@ function Rankings() {
     };
   };
 
-  // TVM Meldeliste - Offizielle Namhafte Meldung (Herren 40, 1. Kreisliga Gr. 046)
-  // Quelle: https://tvm-tennis.de/spielbetrieb/mannschaft/3472127-sv-rg-suerth-1
-  const tvmMeldeliste = [
-    { position: 1, name: 'Marco Coltro', lk: '8.4', nation: 'GER' },
-    { position: 2, name: 'Thomas Mengelkamp', lk: '11.5', nation: 'GER' },
-    { position: 3, name: 'Christian Spee', lk: '12.3', nation: 'GER' },
-    { position: 4, name: 'Olivier Pol Michel', lk: '12.9', nation: 'FRA' },
-    { position: 5, name: 'Robert Ellrich', lk: '14.3', nation: 'GER' },
-    { position: 6, name: 'Daniel Becher', lk: '14.8', nation: 'GER', mf: true },
-    { position: 7, name: 'Alexander Grebe', lk: '16.3', nation: 'GER' },
-    { position: 8, name: 'Frank Ritter', lk: '16.9', nation: 'GER' },
-    { position: 9, name: 'Adrian Tugui', lk: '17.1', nation: 'ROU' },
-    { position: 10, name: 'Daniel Peters', lk: '19.9', nation: 'GER' },
-    { position: 11, name: 'Michael Borgers', lk: '23.3', nation: 'GER' },
-    { position: 12, name: 'Manuel Straub', lk: '25', nation: 'GER' }
-  ];
-
   // Registrierte Spieler aus Datenbank (aktive Spieler sortiert nach current_lk)
   const registeredPlayers = players
     .filter(p => {
@@ -260,8 +243,9 @@ function Rankings() {
       if (!lkA) return 1; // a nach unten
       if (!lkB) return -1; // b nach unten
       
-      const rankA = parseFloat(lkA.replace('LK ', '').trim()) || 99;
-      const rankB = parseFloat(lkB.replace('LK ', '').trim()) || 99;
+      // Unterstütze sowohl Punkt (13.6) als auch Komma (13,6)
+      const rankA = parseFloat(lkA.replace('LK ', '').replace(',', '.').trim()) || 99;
+      const rankB = parseFloat(lkB.replace('LK ', '').replace(',', '.').trim()) || 99;
       return rankA - rankB; // Kleinere LK = besser = weiter oben
     });
   
@@ -344,11 +328,13 @@ function Rankings() {
     try {
       console.log('🔮 Berechne LK für:', player.name);
       
-      // Start-LK
-      const startLK = parseFloat(player.season_start_lk?.replace('LK ', '') || '25');
+      // Start-LK (mit Komma-Support)
+      // Fallback: season_start_lk → current_lk → ranking → 25
+      const lkSource = player.season_start_lk || player.current_lk || player.ranking || '25';
+      const startLK = parseFloat(lkSource.replace('LK ', '').replace(',', '.'));
       let begleitLK = startLK;
       
-      console.log('📊 Start-LK:', startLK);
+      console.log('📊 Start-LK:', startLK, '(Quelle:', player.season_start_lk ? 'season_start_lk' : player.current_lk ? 'current_lk' : player.ranking ? 'ranking' : 'default', ')');
       
       // Lade alle Matches der aktuellen Saison
       const now = new Date();
@@ -427,7 +413,8 @@ function Rankings() {
                 .single();
               
               if (oppData) {
-                oppLK = parseFloat(oppData.lk || '25');
+                // Unterstütze sowohl Punkt als auch Komma
+                oppLK = parseFloat((oppData.lk || '25').replace(',', '.'));
                 oppName = oppData.name || 'Unbekannt';
                 console.log(`  🎾 Einzel-Gegner: ${oppName} (LK ${oppLK})`);
               }
@@ -469,8 +456,9 @@ function Rankings() {
                 .eq('id', result.guest_player2_id)
                 .single();
               
-              const oppLK1 = parseFloat(opp1Data?.lk || '25');
-              const oppLK2 = parseFloat(opp2Data?.lk || '25');
+              // Unterstütze sowohl Punkt als auch Komma
+              const oppLK1 = parseFloat((opp1Data?.lk || '25').replace(',', '.'));
+              const oppLK2 = parseFloat((opp2Data?.lk || '25').replace(',', '.'));
               oppLK = (oppLK1 + oppLK2) / 2;
               const opp1Name = opp1Data?.name || '?';
               const opp2Name = opp2Data?.name || '?';
@@ -529,9 +517,9 @@ function Rankings() {
                 .single();
               
               matchDetail.opponent1Name = opp1Data.data?.name || '?';
-              matchDetail.opponent1LK = parseFloat(opp1Data.data?.lk || '25');
+              matchDetail.opponent1LK = parseFloat((opp1Data.data?.lk || '25').replace(',', '.'));
               matchDetail.opponent2Name = opp2Data.data?.name || '?';
-              matchDetail.opponent2LK = parseFloat(opp2Data.data?.lk || '25');
+              matchDetail.opponent2LK = parseFloat((opp2Data.data?.lk || '25').replace(',', '.'));
             }
             
             matchDetails.push(matchDetail);
@@ -681,13 +669,6 @@ function Rankings() {
           >
             🚀 Hot Player
           </button>
-          <button
-            className={`btn-modern ${sortBy === 'tvm' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
-            onClick={() => setSortBy('tvm')}
-          >
-            <List size={18} />
-            TVM Meldeliste
-          </button>
         </div>
       </div>
 
@@ -772,32 +753,6 @@ function Rankings() {
               );
             })
           )
-        ) : sortBy === 'tvm' ? (
-          // TVM Meldeliste - Hardcoded
-          tvmMeldeliste.map((player) => (
-            <div key={player.position} className="fade-in lk-card-full">
-              <div className="formkurve-header">
-                <div className="formkurve-title">
-                  <span className="position-number">{player.position}</span> - {player.name}
-                  {player.mf && <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem', color: '#f59e0b' }}>⭐ MF</span>}
-                </div>
-                <div className="match-count-badge" style={{ backgroundColor: getRankingColor(`LK ${player.lk}`) }}>
-                  LK {player.lk}
-                </div>
-              </div>
-              
-              <div className="season-content">
-                <div className="ranking-hero-modern">
-                  <div className="ranking-lk-display">
-                    <span className="lk-chip">
-                      LK {player.lk}
-                    </span>
-                    <span className="form-trend neutral">-</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))
         ) : (
           // Angemeldete Spieler aus Datenbank
           registeredPlayers.length === 0 ? (

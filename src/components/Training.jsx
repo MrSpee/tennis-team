@@ -1,6 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, MapPin, Users, Clock, Sun, Home, Share2, AlertCircle, CheckCircle, XCircle, Plus } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { useData } from '../context/DataContext';
+import { supabase } from '../lib/supabaseClient';
 import { LoggingService } from '../services/activityLogger';
 import './Dashboard.css';
 
@@ -1350,4 +1353,3 @@ function ExternalPlayerInput({ externalPlayers, onChange }) {
 }
 
 export default Training;
-

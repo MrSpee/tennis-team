@@ -146,8 +146,41 @@ export function AuthProvider({ children }) {
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+    };
   }, [configured, initialCheckDone]);
+  
+  // Separater useEffect für Auth-Reload Listener
+  useEffect(() => {
+    const handleReloadAuth = async () => {
+      console.log('🔄 Manual Auth reload triggered');
+      if (currentUser?.id) {
+        const { data, error } = await supabase
+          .from('players')
+          .select('*')
+          .eq('user_id', currentUser.id)
+          .maybeSingle();
+        
+        if (data) {
+          setPlayer(data);
+          
+          // Prüfe Teams
+          const { data: playerTeams } = await supabase
+            .from('player_teams')
+            .select('team_id')
+            .eq('player_id', data.id)
+            .limit(1);
+          
+          setNeedsOnboarding(!playerTeams || playerTeams.length === 0);
+          console.log('✅ Auth reloaded, needsOnboarding:', !playerTeams || playerTeams.length === 0);
+        }
+      }
+    };
+    
+    window.addEventListener('reloadAuth', handleReloadAuth);
+    return () => window.removeEventListener('reloadAuth', handleReloadAuth);
+  }, [currentUser]);
 
   // Lade Player-Daten aus Datenbank
   const loadPlayerData = async (userId) => {

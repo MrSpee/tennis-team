@@ -25,8 +25,10 @@ function NotFound() {
   const [randomMessage] = useState(() => 
     funnyMessages[Math.floor(Math.random() * funnyMessages.length)]
   );
-  const targetPage = isAuthenticated ? 'Dashboard' : 'Login';
-  const targetPath = isAuthenticated ? '/' : '/login';
+  
+  // Target-Pfad nur einmal beim Mount berechnen (nicht bei jedem Render)
+  const [targetPage] = useState(() => isAuthenticated ? 'Dashboard' : 'Login');
+  const [targetPath] = useState(() => isAuthenticated ? '/' : '/login');
 
   useEffect(() => {
     // Countdown

@@ -730,8 +730,9 @@ const Results = () => {
                   .sort((a, b) => {
                     const lkA = a.player.current_lk || a.player.season_start_lk || a.player.ranking || 'LK 99';
                     const lkB = b.player.current_lk || b.player.season_start_lk || b.player.ranking || 'LK 99';
-                    const numA = parseFloat(lkA.replace('LK ', '').trim()) || 99;
-                    const numB = parseFloat(lkB.replace('LK ', '').trim()) || 99;
+                    // Unterstütze sowohl Punkt (13.6) als auch Komma (13,6)
+                    const numA = parseFloat(lkA.replace('LK ', '').replace(',', '.').trim()) || 99;
+                    const numB = parseFloat(lkB.replace('LK ', '').replace(',', '.').trim()) || 99;
                     return numA - numB;
                   })
                   .map(({ player, matches: playerMatches }) => {

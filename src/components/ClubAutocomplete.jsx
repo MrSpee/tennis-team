@@ -16,8 +16,8 @@ function ClubAutocomplete({
   value = [], 
   onChange, 
   placeholder = "Verein suchen...",
-  minChars = 2,
-  maxResults = 10,
+  minChars = 0,  // Sofort suchen, keine Mindestlänge
+  maxResults = 20,  // Mehr Ergebnisse anzeigen
   allowMultiple = true
 }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -29,9 +29,21 @@ function ClubAutocomplete({
   const inputRef = useRef(null);
   const searchTimeoutRef = useRef(null);
 
+  // Initial load: Zeige alle Vereine
+  useEffect(() => {
+    loadAllClubs();
+  }, []);
+
   // Debounced Search
   useEffect(() => {
+    if (searchTerm.length === 0) {
+      // Bei leerem Suchfeld: Zeige alle Vereine
+      loadAllClubs();
+      return;
+    }
+    
     if (searchTerm.length < minChars) {
+      // Zu kurz für Suche
       setResults([]);
       setShowDropdown(false);
       return;
@@ -65,6 +77,33 @@ function ClubAutocomplete({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Load all clubs (for initial display)
+  const loadAllClubs = async () => {
+    try {
+      setLoading(true);
+      console.log('🔍 Loading all clubs...');
+
+      const { data, error } = await supabase
+        .from('club_info')
+        .select('id, name, city, postal_code, region, federation, is_verified')
+        .order('is_verified', { ascending: false })
+        .order('name', { ascending: true })
+        .limit(maxResults);
+
+      if (error) throw error;
+
+      console.log('✅ All clubs loaded:', data?.length || 0);
+      setResults(data || []);
+      setShowDropdown(false); // Nicht automatisch öffnen
+
+    } catch (error) {
+      console.error('❌ Error loading all clubs:', error);
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Search clubs with fuzzy matching
   const searchClubs = async (term) => {
@@ -180,7 +219,13 @@ function ClubAutocomplete({
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           onFocus={() => {
-            if (results.length > 0) setShowDropdown(true);
+            // Beim Focus: Zeige Dropdown sofort (wenn Ergebnisse vorhanden)
+            if (results.length > 0) {
+              setShowDropdown(true);
+            } else if (searchTerm.length === 0) {
+              // Lade alle Clubs wenn noch keine Ergebnisse
+              loadAllClubs().then(() => setShowDropdown(true));
+            }
           }}
           onKeyDown={handleKeyDown}
         />
@@ -266,4 +311,3 @@ function ClubAutocomplete({
 }
 
 export default ClubAutocomplete;
-

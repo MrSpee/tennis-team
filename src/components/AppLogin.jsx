@@ -124,12 +124,14 @@ function AppLogin() {
                 fontSize: '0.95rem', 
                 color: '#1e40af',
                 margin: '0',
-                lineHeight: '1.4',
-                fontStyle: 'italic'
+                lineHeight: '1.6',
+                fontStyle: 'italic',
+                maxWidth: '100%',
+                wordWrap: 'break-word',
+                padding: '0 0.5rem'
               }}>
-                Vom ersten Aufschlag bis zum großen Triumph – 
-                <br />
-                <strong>Platzhirsch begleitet dich auf deiner Tennisreise.</strong>
+                Vom ersten Aufschlag bis zum großen Triumph –<br />
+                Platzhirsch begleitet dich auf deiner Tennisreise.
               </p>
             </div>
           )}

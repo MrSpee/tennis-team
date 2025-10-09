@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabaseClient';
 import { LoggingService } from '../services/activityLogger';
 import PasswordReset from './PasswordReset';
 import { Building2, Users, MapPin, Phone, Mail, Globe, Edit3 } from 'lucide-react';
+import { normalizeLK } from '../lib/lkUtils';
 import './Profile.css';
 import './Dashboard.css';
 
@@ -504,6 +505,9 @@ function SupabaseProfile() {
     try {
       console.log('💾 Saving profile to Supabase:', profile);
       
+      // Normalisiere LK vor dem Speichern (13,6 → LK 13.6)
+      const normalizedLK = profile.current_lk ? normalizeLK(profile.current_lk) : null;
+      
       // Profil in Supabase speichern - alle relevanten Felder
       const result = await updateProfile({
         name: profile.name,
@@ -512,7 +516,7 @@ function SupabaseProfile() {
         profileImage: profile.profileImage,
         birth_date: profile.birth_date,
         // Tennis-Identity
-        current_lk: profile.current_lk,
+        current_lk: normalizedLK,
         tennis_motto: profile.tennis_motto,
         favorite_shot: profile.favorite_shot,
         best_tennis_memory: profile.best_tennis_memory,
@@ -753,6 +757,17 @@ function SupabaseProfile() {
                 border: '2px solid #93c5fd'
               }}
             />
+            <small style={{ color: '#666', fontSize: '0.85rem', display: 'block', marginTop: '0.5rem', textAlign: 'center' }}>
+              💡 Deine LK findest du auf deiner{' '}
+              <a 
+                href="https://tvm-tennis.de/spielbetrieb/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                style={{ color: '#3b82f6', textDecoration: 'underline' }}
+              >
+                TVM-Profilseite
+              </a>
+            </small>
           </div>
 
           {/* Tennis-Motto */}
@@ -1053,6 +1068,54 @@ function SupabaseProfile() {
                   {clubs.length} {clubs.length === 1 ? 'Verein' : 'Vereine'}
           </div>
           </div>
+          
+              {/* Button: Mannschaft hinzufügen */}
+              <div style={{ 
+                padding: '1rem', 
+                borderBottom: '1px solid rgba(0, 0, 0, 0.1)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '0.5rem'
+              }}>
+                <p style={{ 
+                  margin: 0, 
+                  fontSize: '0.9rem', 
+                  color: '#6b7280' 
+                }}>
+                  Du kannst in mehreren Vereinen und bis zu 3 Mannschaften pro Verein spielen.
+                </p>
+                <button
+                  onClick={() => alert('Team hinzufügen - Feature kommt bald! 🚀\n\nKontaktiere deinen Team-Captain, damit er dich hinzufügt.')}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: '600',
+                    fontSize: '0.875rem',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)',
+                    transition: 'all 0.2s',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.5rem'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.transform = 'translateY(-1px)';
+                    e.target.style.boxShadow = '0 4px 6px rgba(59, 130, 246, 0.4)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.transform = 'translateY(0)';
+                    e.target.style.boxShadow = '0 2px 4px rgba(59, 130, 246, 0.3)';
+                  }}
+                >
+                  <span style={{ fontSize: '1.2rem' }}>➕</span>
+                  Mannschaft hinzufügen
+                </button>
+              </div>
 
               <div className="season-content">
                 {clubs.map((club, clubIndex) => (
@@ -1465,4 +1528,3 @@ function SupabaseProfile() {
 }
 
 export default SupabaseProfile;
-

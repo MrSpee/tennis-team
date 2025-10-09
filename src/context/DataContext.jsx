@@ -42,54 +42,16 @@ export function DataProvider({ children }) {
     }
 
     console.log('🔵 DataContext - User authenticated, loading data...');
-    // Prüfe zuerst lokale Daten
+    
+    // LOCAL Storage wurde für Onboarding-Testing verwendet, ist jetzt aber deprecated
+    // Lösche alte LOCAL Daten falls vorhanden
     const localPlayerData = localStorage.getItem('localPlayerData');
     const localOnboardingComplete = localStorage.getItem('localOnboardingComplete');
     
-    if (localPlayerData && localOnboardingComplete === 'true') {
-      console.log('🏠 LOCAL DataContext - Using local player data');
-      try {
-        const playerData = JSON.parse(localPlayerData);
-        
-        // Simuliere lokale Daten für das Dashboard
-        const localMatches = [
-          {
-            id: 'local_match_1',
-            match_date: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(), // 5 Tage in der Zukunft
-            opponent: 'TC Test Gegner',
-            location: 'Home',
-            venue: 'Tennisplatz Test',
-            season: 'Winter 2025',
-            team_id: playerData.team.id,
-            teamInfo: playerData.team
-          },
-          {
-            id: 'local_match_2',
-            match_date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 Tage in der Vergangenheit
-            opponent: 'TC Vergangenheit',
-            location: 'Away',
-            venue: 'Auswärtsplatz',
-            season: 'Winter 2025',
-            team_id: playerData.team.id,
-            teamInfo: playerData.team
-          }
-        ];
-        
-        const localPlayerTeams = [playerData.team];
-        
-        setMatches(localMatches);
-        setPlayerTeams(localPlayerTeams);
-        setTeamInfo(playerData.team);
-        setSelectedTeamId(playerData.team.id);
-        setCurrentPlayerName(playerData.name);
-        setLoading(false);
-        
-        console.log('✅ LOCAL Data loaded successfully');
-        return;
-      } catch (error) {
-        console.error('❌ Error parsing local data:', error);
-        // Fallback zu Supabase
-      }
+    if (localPlayerData || localOnboardingComplete) {
+      console.log('🗑️ Removing deprecated local storage data...');
+      localStorage.removeItem('localPlayerData');
+      localStorage.removeItem('localOnboardingComplete');
     }
     
     if (!configured) {
@@ -193,7 +155,8 @@ export function DataProvider({ children }) {
             club_name,
             category,
             region,
-            tvm_link
+            tvm_link,
+            club_id
           )
         `)
         .eq('player_id', playerId)
@@ -206,11 +169,33 @@ export function DataProvider({ children }) {
 
       console.log('✅ Player teams loaded from DB:', data);
       
-      let teams = data.map(pt => ({
-        ...pt.team_info,
-        is_primary: pt.is_primary,
-        role: pt.role
-      }));
+      // Lade team_seasons für jedes Team
+      const teamsWithSeasons = await Promise.all(
+        data.map(async (pt) => {
+          const { data: seasonData } = await supabase
+            .from('team_seasons')
+            .select('*')
+            .eq('team_id', pt.team_info.id)
+            .eq('is_active', true)
+            .single();
+          
+          return {
+            ...pt.team_info,
+            is_primary: pt.is_primary,
+            role: pt.role,
+            // Füge team_seasons Daten hinzu
+            league: seasonData?.league || null,
+            group_name: seasonData?.group_name || null,
+            team_size: seasonData?.team_size || null,
+            season: seasonData?.season || null,
+            player_count: seasonData?.team_size || null
+          };
+        })
+      );
+      
+      let teams = teamsWithSeasons;
+      
+      console.log('🔍 Teams with seasons data:', teams);
       
       // LOKALE TEST-DATEN: Füge TC Köln hinzu NUR für Theo Tester
       const isTheoTester = playerName === 'Theo Tester';

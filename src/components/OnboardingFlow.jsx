@@ -4,11 +4,11 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import { ChevronRight, ChevronLeft } from 'lucide-react';
 import ClubAutocomplete from './ClubAutocomplete';
+import { normalizeLK } from '../lib/lkUtils';
 import './Dashboard.css';
 
 function OnboardingFlow() {
   const navigate = useNavigate();
-  const { } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [availableTeams, setAvailableTeams] = useState([]);
@@ -27,21 +27,11 @@ function OnboardingFlow() {
     newTeamSize: '', // Teamgröße
     name: '',
     phone: '',
+    current_lk: '', // Aktuelle Leistungsklasse
     whatsappEnabled: false
   });
 
   // Lade verfügbare Teams
-  useEffect(() => {
-    loadAvailableTeams();
-  }, []);
-
-  // Lade Teams für gewählte Vereine
-  useEffect(() => {
-    if (formData.selectedClubs.length > 0) {
-      loadTeamsForSelectedClubs();
-    }
-  }, [formData.selectedClubs, loadTeamsForSelectedClubs]);
-
   const loadAvailableTeams = async () => {
     try {
       const { data, error } = await supabase
@@ -106,6 +96,19 @@ function OnboardingFlow() {
     }
   };
 
+  // useEffects NACH den Funktions-Definitionen
+  useEffect(() => {
+    loadAvailableTeams();
+  }, []);
+
+  // Lade Teams für gewählte Vereine
+  useEffect(() => {
+    if (formData.selectedClubs.length > 0) {
+      loadTeamsForSelectedClubs();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.selectedClubs]);
+
   // Gruppiere Teams nach Verein
   const teamsByClub = availableTeams.reduce((acc, team) => {
     const club = team.club_name || 'Unbekannt';
@@ -114,11 +117,7 @@ function OnboardingFlow() {
     return acc;
   }, {});
 
-  console.log('🏢 teamsByClub structure:', teamsByClub);
-  console.log('🎯 Selected club:', formData.selectedClub);
-  console.log('🏆 Available teams for club:', formData.selectedClub ? teamsByClub[formData.selectedClub] : 'No club selected');
-
-  // Schritt abschließen - LOKALE SPEICHERUNG FÜR TESTS
+  // Schritt abschließen - ECHTE SUPABASE-SPEICHERUNG
   const handleComplete = async () => {
     console.log('🔍 Debug formData:', formData);
     
@@ -129,48 +128,108 @@ function OnboardingFlow() {
 
     try {
       setLoading(true);
-      console.log('🚀 Starting LOCAL onboarding completion...');
+      console.log('🚀 Starting SUPABASE onboarding completion...');
       console.log('📊 Custom teams:', formData.customTeams);
 
-      // LOKALE SPEICHERUNG - Simuliere erfolgreiche Registrierung
-      const playerData = {
-        id: `local_player_${Date.now()}`, // Temporäre lokale ID
-        name: formData.name,
-        phone: formData.phone,
-        whatsapp_enabled: formData.whatsappEnabled,
-        email: 'test@example.com', // Placeholder
-        current_lk: 'LK 15.0', // Placeholder
-        created_at: new Date().toISOString(),
-        // Multi-Team-Zuordnung
-        clubs: formData.selectedClubs,
-        teams: formData.customTeams.map((team) => ({
-          id: team.id,
-          club_name: team.club_name,
-          category: team.category,
-          league: team.league,
-          team_size: team.team_size,
-          group_name: team.group_name,
-          role: 'home' // Vereinfacht: alle Teams als Heimverein
-        }))
-      };
-
-      // Speichere in localStorage
-      localStorage.setItem('localPlayerData', JSON.stringify(playerData));
-      localStorage.setItem('localOnboardingComplete', 'true');
+      // 1️⃣ Hole aktuelle User-ID aus Supabase Auth
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
       
-      console.log('✅ LOCAL Profile saved:', playerData);
-      console.log('✅ LOCAL Teams assigned:', playerData.teams);
+      if (userError || !user) {
+        throw new Error('Kein User gefunden. Bitte melde dich an.');
+      }
 
-      // Simuliere kurze Verzögerung
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log('👤 Current user:', user.email, user.id);
 
-      console.log('✅ LOCAL Onboarding abgeschlossen');
+      // 2️⃣ Update Player-Profil in Supabase
+      // Normalisiere LK vor dem Speichern (13,6 → LK 13.6)
+      const normalizedLK = formData.current_lk ? normalizeLK(formData.current_lk) : null;
+      
+      const { data: playerData, error: playerError } = await supabase
+        .from('players')
+        .update({
+          name: formData.name,
+          phone: formData.phone || null,
+          current_lk: normalizedLK,
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', user.id)
+        .select()
+        .single();
 
-      // Weiterleitung zum Dashboard
-      navigate('/dashboard');
+      if (playerError) {
+        console.error('❌ Error updating player:', playerError);
+        throw new Error('Fehler beim Speichern der Profildaten');
+      }
+
+      console.log('✅ Player profile updated:', playerData);
+
+      // 3️⃣ Erstelle player_teams Einträge für alle gewählten Teams
+      for (let i = 0; i < formData.customTeams.length; i++) {
+        const team = formData.customTeams[i];
+        
+        console.log(`🔗 Creating player_team entry ${i + 1}/${formData.customTeams.length}:`, team);
+
+        const { error: teamError } = await supabase
+          .from('player_teams')
+          .insert({
+            player_id: playerData.id,
+            team_id: team.id,
+            role: 'player',
+            is_primary: i === 0  // Erstes Team ist primär
+          });
+
+        if (teamError) {
+          console.error('❌ Error creating player_team:', teamError);
+          throw new Error(`Fehler beim Zuordnen zu Team ${team.category}`);
+        }
+
+        console.log(`✅ Player assigned to team: ${team.category}`);
+      }
+
+      console.log('✅ All teams assigned successfully');
+
+      // 4️⃣ Lösche LOCAL Storage (nicht mehr nötig)
+      localStorage.removeItem('localPlayerData');
+      localStorage.removeItem('localOnboardingComplete');
+      console.log('🗑️ Local storage cleared');
+
+      // 5️⃣ Warte bis Teams geladen sind (wichtig für Auth-Check!)
+      console.log('⏳ Waiting for teams to load...');
+      
+      // Lade Teams direkt um sicherzustellen, dass sie verfügbar sind
+      const { data: verifyTeams, error: verifyError } = await supabase
+        .from('player_teams')
+        .select('*')
+        .eq('player_id', playerData.id);
+      
+      if (verifyError) {
+        console.error('❌ Error verifying teams:', verifyError);
+      } else {
+        console.log('✅ Teams verified:', verifyTeams?.length || 0);
+      }
+
+      // 6️⃣ Trigger Team-Reload Event UND warte
+      window.dispatchEvent(new CustomEvent('reloadTeams', {
+        detail: { playerId: playerData.id }
+      }));
+      
+      // Warte länger, damit Auth-Reload auch Zeit hat
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      console.log('✅ SUPABASE Onboarding abgeschlossen');
+
+      // 7️⃣ Force Auth-Reload
+      window.dispatchEvent(new Event('reloadAuth'));
+
+      // Kurze Verzögerung und dann Navigation
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Weiterleitung zum Dashboard (Root-Route)
+      console.log('🔄 Navigating to dashboard...');
+      navigate('/', { replace: true });
 
     } catch (error) {
-      console.error('❌ Error in LOCAL onboarding:', error);
+      console.error('❌ Error in SUPABASE onboarding:', error);
       alert(`Fehler: ${error.message}`);
     } finally {
       setLoading(false);
@@ -273,7 +332,7 @@ function OnboardingFlow() {
                   🏠 Vereinsstatus
                 </h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  {formData.selectedClubs.map((clubName) => (
+                  {formData.selectedClubs.map((clubName, index) => (
                     <div key={clubName} style={{ 
                       padding: '1rem',
                       background: 'white',
@@ -468,7 +527,7 @@ function OnboardingFlow() {
                   {formData.selectedClubs.length === 1 ? 'Dein Verein:' : 'Deine Vereine:'}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  {formData.selectedClubs.map((clubName) => (
+                  {formData.selectedClubs.map((clubName, index) => (
                     <div key={clubName} style={{
                       padding: '0.25rem 0.75rem',
                       background: '#4338ca',
@@ -974,6 +1033,47 @@ function OnboardingFlow() {
               />
             </div>
 
+            {/* Aktuelle LK - prominent */}
+            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', fontSize: '0.9rem' }}>
+                🏆 Deine aktuelle Leistungsklasse
+              </label>
+              <input
+                type="text"
+                placeholder="z.B. LK 12.3"
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  border: '2px solid #3b82f6',
+                  borderRadius: '8px',
+                  fontSize: '1rem',
+                  fontWeight: '600',
+                  textAlign: 'center',
+                  color: '#3b82f6',
+                  background: '#f0f9ff'
+                }}
+                value={formData.current_lk}
+                onChange={(e) => setFormData(prev => ({ ...prev, current_lk: e.target.value }))}
+              />
+              <small style={{ 
+                color: '#666', 
+                fontSize: '0.85rem', 
+                display: 'block', 
+                marginTop: '0.5rem', 
+                textAlign: 'center' 
+              }}>
+                💡 Deine LK findest du auf deiner{' '}
+                <a 
+                  href="https://tvm-tennis.de/spielbetrieb/" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  style={{ color: '#3b82f6', textDecoration: 'underline' }}
+                >
+                  TVM-Profilseite
+                </a>
+              </small>
+            </div>
+
             {/* WhatsApp Teaser */}
             <div style={{ 
               marginBottom: '1.5rem',
@@ -1113,6 +1213,11 @@ function OnboardingFlow() {
                     <h4>Deine Daten</h4>
                     <p style={{ margin: 0 }}>
                       <strong>{formData.name}</strong><br />
+                      {formData.current_lk && (
+                        <span style={{ fontSize: '0.9rem', color: '#3b82f6', fontWeight: '600', display: 'block', marginTop: '0.25rem' }}>
+                          🏆 {formData.current_lk}
+                        </span>
+                      )}
                       {formData.whatsappEnabled && formData.phone && (
                         <span style={{ fontSize: '0.85rem', color: '#6b7280', display: 'block', marginTop: '0.25rem' }}>
                           📱 {formData.phone}

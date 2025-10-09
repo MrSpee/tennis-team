@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
+import { parseLK } from '../lib/lkUtils';
 import './Dashboard.css';
 
 function Dashboard() {
@@ -238,13 +239,7 @@ function Dashboard() {
             
             {/* Große Sparkline mit Monatslabels */}
                 {player.current_lk && (() => {
-                  // Parse LK-Werte für Sparkline
-                  const parseLK = (lk) => {
-                    if (!lk) return 25;
-                    if (typeof lk === 'number') return lk;
-                    return parseFloat(lk.replace('LK ', '').trim()) || 25;
-                  };
-                  
+                  // Nutze gemeinsame parseLK Funktion aus lkUtils
                   const startLK = parseLK(player.start_lk || player.season_start_lk || player.current_lk);
                   const currentLKValue = parseLK(player.current_lk);
                   const improvement = player.season_improvement || 0;
@@ -439,30 +434,8 @@ function Dashboard() {
         )}
       </div>
 
-      {/* 2. Training-Teaser Card */}
-      <div 
-        className="fade-in lk-card-full"
-        onClick={() => navigate('/training')}
-        style={{ cursor: 'pointer' }}
-      >
-        <div className="formkurve-header">
-          <div className="formkurve-title">🎾 Nächstes Training</div>
-          <div className="match-count-badge" style={{ background: '#10b981' }}>
-            Neu
-          </div>
-        </div>
-
-        <div className="season-content">
-          <div className="next-match-card">
-            <div className="next-match-label">MITTWOCH, 17:00 UHR</div>
-            <div className="next-match-countdown">📅 Zur Trainingsseite</div>
-            <div className="next-match-opponent">
-              <div className="opponent-label">Tennisplatz Sürth</div>
-              <div className="opponent-name">Jetzt Zu-/Absagen</div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* 2. Training-Teaser Card - ENTFERNT (war hardcoded) */}
+      {/* TODO: Dynamische Training-Anzeige implementieren */}
 
       {/* 3. Aktuelle Saison Card */}
       <div className="fade-in lk-card-full">
@@ -695,56 +668,269 @@ function Dashboard() {
         </div>
       </div>
 
-      {/* 3. Deine Mannschaften Card */}
-      <div className="fade-in lk-card-full">
+      {/* 3. Meine Vereine & Mannschaften - Detaillierte Ansicht */}
+      <div className="fade-in lk-card-full" style={{ marginTop: '1rem' }}>
         <div className="formkurve-header">
-          <div className="formkurve-title">Deine Mannschaften</div>
+          <div className="formkurve-title">Meine Vereine &amp; Mannschaften</div>
+          <div className="match-count-badge">
+            {playerTeams.length > 0 
+              ? `${new Set(playerTeams.map(t => t.club_name)).size} Verein${new Set(playerTeams.map(t => t.club_name)).size !== 1 ? 'e' : ''}`
+              : '1 Verein'
+            }
+          </div>
         </div>
         
-        <div className="teams-list">
+        <div className="season-content">
           {playerTeams.length > 0 ? (
-            playerTeams.map((team) => (
-              <div key={team.id} className="team-item">
-                <img 
-                  src="/app-icon.jpg" 
-                  alt="Vereinslogo" 
-                  className="team-logo"
-                  onError={(e) => {
-                    e.target.style.display = 'none';
-                  }}
-                />
-                <div className="team-info">
-                  <div className="team-club">{team.club_name}</div>
-                  <div className="team-category">{team.team_name}</div>
-                  <div className="team-league">{team.league} {team.group_name}</div>
+            (() => {
+              // Gruppiere Teams nach Verein
+              const teamsByClub = playerTeams.reduce((acc, team) => {
+                const clubName = team.club_name || 'Unbekannter Verein';
+                if (!acc[clubName]) acc[clubName] = [];
+                acc[clubName].push(team);
+                return acc;
+              }, {});
+
+              return Object.entries(teamsByClub).map(([clubName, clubTeams]) => (
+                <div key={clubName} className="club-section" style={{ marginBottom: '1.5rem' }}>
+                  {/* Club Header */}
+                  <div 
+                    className="club-header" 
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      marginBottom: '1rem',
+                      padding: '0.75rem',
+                      background: 'linear-gradient(135deg, rgb(240, 249, 255) 0%, rgb(224, 242, 254) 100%)',
+                      borderRadius: '8px',
+                      border: '1px solid rgb(186, 230, 253)'
+                    }}
+                  >
+                    <svg 
+                      xmlns="http://www.w3.org/2000/svg" 
+                      width="20" 
+                      height="20" 
+                      viewBox="0 0 24 24" 
+                      fill="none" 
+                      stroke="#0369a1" 
+                      strokeWidth="2" 
+                      strokeLinecap="round" 
+                      strokeLinejoin="round" 
+                      style={{ marginRight: '0.5rem' }}
+                    >
+                      <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"></path>
+                      <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"></path>
+                      <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"></path>
+                      <path d="M10 6h4"></path>
+                      <path d="M10 10h4"></path>
+                      <path d="M10 14h4"></path>
+                      <path d="M10 18h4"></path>
+                    </svg>
+                    <h3 style={{ margin: 0, color: 'rgb(3, 105, 161)', fontSize: '1.1rem', fontWeight: '600' }}>
+                      {clubName}
+                    </h3>
+                  </div>
+
+                  {/* Teams Grid */}
+                  <div 
+                    className="teams-grid" 
+                    style={{
+                      display: 'grid',
+                      gap: '0.75rem',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))'
+                    }}
+                  >
+                    {clubTeams.map((team) => (
+                      <div 
+                        key={team.id} 
+                        className="team-card" 
+                        style={{
+                          padding: '1.5rem',
+                          border: team.is_primary ? '2px solid rgb(245, 158, 11)' : '2px solid rgb(209, 213, 219)',
+                          borderRadius: '12px',
+                          background: team.is_primary 
+                            ? 'linear-gradient(135deg, rgb(254, 243, 199) 0%, rgb(253, 230, 138) 100%)'
+                            : 'linear-gradient(135deg, rgb(249, 250, 251) 0%, rgb(243, 244, 246) 100%)',
+                          boxShadow: 'rgba(0, 0, 0, 0.05) 0px 2px 4px',
+                          transition: '0.2s'
+                        }}
+                      >
+                        {/* Team Header */}
+                        <div style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: '1rem',
+                          flexWrap: 'wrap',
+                          gap: '0.5rem'
+                        }}>
+                          <div style={{ flex: '1 1 0%', minWidth: '200px' }}>
+                            <h4 style={{ margin: '0 0 0.25rem', fontSize: '1.25rem', fontWeight: '700', color: 'rgb(31, 41, 55)' }}>
+                              {team.team_name || team.category}
+                            </h4>
+                          </div>
+                          
+                          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                            {team.is_primary && (
+                              <span style={{
+                                background: 'linear-gradient(135deg, rgb(245, 158, 11) 0%, rgb(217, 119, 6) 100%)',
+                                color: 'white',
+                                padding: '0.375rem 0.75rem',
+                                borderRadius: '6px',
+                                fontSize: '0.8rem',
+                                fontWeight: '700',
+                                boxShadow: 'rgba(245, 158, 11, 0.3) 0px 2px 4px'
+                              }}>
+                                ⭐ Hauptmannschaft
+                              </span>
+                            )}
+                            <span style={{
+                              background: team.role === 'captain' 
+                                ? 'linear-gradient(135deg, rgb(239, 68, 68) 0%, rgb(220, 38, 38) 100%)'
+                                : 'linear-gradient(135deg, rgb(107, 114, 128) 0%, rgb(75, 85, 99) 100%)',
+                              color: 'white',
+                              padding: '0.375rem 0.75rem',
+                              borderRadius: '6px',
+                              fontSize: '0.8rem',
+                              fontWeight: '700',
+                              boxShadow: team.role === 'captain'
+                                ? 'rgba(239, 68, 68, 0.3) 0px 2px 4px'
+                                : 'rgba(107, 114, 128, 0.3) 0px 2px 4px'
+                            }}>
+                              {team.role === 'captain' ? '👑 Kapitän' : '🎾 Spieler'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Team Info Grid */}
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                          gap: '0.75rem',
+                          marginBottom: '1rem',
+                          padding: '1rem',
+                          background: 'rgba(255, 255, 255, 0.6)',
+                          borderRadius: '8px',
+                          border: '1px solid rgba(0, 0, 0, 0.05)'
+                        }}>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{
+                              fontSize: '0.7rem',
+                              color: 'rgb(107, 114, 128)',
+                              fontWeight: '600',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.5px',
+                              marginBottom: '0.25rem'
+                            }}>Liga</div>
+                            <div style={{ fontSize: '0.95rem', fontWeight: '700', color: 'rgb(31, 41, 55)' }}>
+                              🏆 {team.league || '2. Bezirksliga'}
+                            </div>
+                          </div>
+                          
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{
+                              fontSize: '0.7rem',
+                              color: 'rgb(107, 114, 128)',
+                              fontWeight: '600',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.5px',
+                              marginBottom: '0.25rem'
+                            }}>Gruppe</div>
+                            <div style={{ fontSize: '0.95rem', fontWeight: '700', color: 'rgb(31, 41, 55)' }}>
+                              📋 {team.group_name || 'N/A'}
+                            </div>
+                          </div>
+                          
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{
+                              fontSize: '0.7rem',
+                              color: 'rgb(107, 114, 128)',
+                              fontWeight: '600',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.5px',
+                              marginBottom: '0.25rem'
+                            }}>Saison</div>
+                            <div style={{ fontSize: '0.95rem', fontWeight: '700', color: 'rgb(31, 41, 55)' }}>
+                              📅 {seasonDisplay}
+                            </div>
+                          </div>
+                          
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{
+                              fontSize: '0.7rem',
+                              color: 'rgb(107, 114, 128)',
+                              fontWeight: '600',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.5px',
+                              marginBottom: '0.25rem'
+                            }}>Team</div>
+                            <div style={{ fontSize: '0.95rem', fontWeight: '700', color: 'rgb(31, 41, 55)' }}>
+                              👥 {team.player_count || 'N/A'} Spieler
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div className={`team-badge ${team.is_primary ? 'primary' : 'secondary'}`}>
-                  {team.is_primary ? 'Haupt-Team' : 'Neben-Team'}
-                </div>
+              ));
+            })()
+          ) : teamInfo ? (
+            // Fallback für alte teamInfo Struktur
+            <div className="club-section" style={{ marginBottom: '1.5rem' }}>
+              <div 
+                className="club-header" 
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  marginBottom: '1rem',
+                  padding: '0.75rem',
+                  background: 'linear-gradient(135deg, rgb(240, 249, 255) 0%, rgb(224, 242, 254) 100%)',
+                  borderRadius: '8px',
+                  border: '1px solid rgb(186, 230, 253)'
+                }}
+              >
+                <svg 
+                  xmlns="http://www.w3.org/2000/svg" 
+                  width="20" 
+                  height="20" 
+                  viewBox="0 0 24 24" 
+                  fill="none" 
+                  stroke="#0369a1" 
+                  strokeWidth="2" 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round" 
+                  style={{ marginRight: '0.5rem' }}
+                >
+                  <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"></path>
+                  <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"></path>
+                  <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"></path>
+                  <path d="M10 6h4"></path>
+                  <path d="M10 10h4"></path>
+                  <path d="M10 14h4"></path>
+                  <path d="M10 18h4"></path>
+                </svg>
+                <h3 style={{ margin: 0, color: 'rgb(3, 105, 161)', fontSize: '1.1rem', fontWeight: '600' }}>
+                  {teamInfo.clubName}
+                </h3>
               </div>
-            ))
-          ) : (
-            teamInfo && (
-              <div className="team-item">
-                <img 
-                  src="/app-icon.jpg" 
-                  alt="Vereinslogo" 
-                  className="team-logo"
-                  onError={(e) => {
-                    e.target.style.display = 'none';
-                  }}
-                />
-                <div className="team-info">
-                  <div className="team-club">{teamInfo.clubName}</div>
-                  <div className="team-category">{teamInfo.category}</div>
-                  <div className="team-league">{teamInfo.league} {teamInfo.group}</div>
-                </div>
-                <div className="team-badge primary">
-                  Haupt-Team
-                </div>
+              
+              <div style={{
+                padding: '1.5rem',
+                border: '2px solid rgb(245, 158, 11)',
+                borderRadius: '12px',
+                background: 'linear-gradient(135deg, rgb(254, 243, 199) 0%, rgb(253, 230, 138) 100%)',
+                boxShadow: 'rgba(0, 0, 0, 0.05) 0px 2px 4px'
+              }}>
+                <h4 style={{ margin: '0 0 0.25rem', fontSize: '1.25rem', fontWeight: '700', color: 'rgb(31, 41, 55)' }}>
+                  {teamInfo.category}
+                </h4>
+                <p style={{ margin: 0, fontSize: '0.9rem', color: 'rgb(107, 114, 128)' }}>
+                  {teamInfo.league} {teamInfo.group}
+                </p>
               </div>
-            )
-          )}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
