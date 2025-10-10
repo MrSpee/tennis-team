@@ -397,8 +397,31 @@ export function AuthProvider({ children }) {
 
       if (error) throw error;
 
-      // Reload player data nach Update
-      await loadPlayerData(player.user_id);
+      // Update nur den lokalen Player-State (OHNE Reload von DB!)
+      // Das verhindert, dass der letzte Character beim Tippen verloren geht
+      setPlayer(prev => ({
+        ...prev,
+        name: profileData.name,
+        phone: profileData.phone || null,
+        ranking: profileData.ranking || null,
+        profile_image: profileData.profileImage || null,
+        favorite_shot: profileData.favoriteShot || profileData.favorite_shot || null,
+        tennis_motto: profileData.tennisMotto || profileData.tennis_motto || null,
+        fun_fact: profileData.funFact || profileData.fun_fact || null,
+        worst_tennis_memory: profileData.worstTennisMemory || profileData.worst_tennis_memory || null,
+        best_tennis_memory: profileData.bestTennisMemory || profileData.best_tennis_memory || null,
+        superstition: profileData.superstition || null,
+        pre_match_routine: profileData.preMatchRoutine || profileData.pre_match_routine || null,
+        favorite_opponent: profileData.favoriteOpponent || profileData.favorite_opponent || null,
+        dream_match: profileData.dreamMatch || profileData.dream_match || null,
+        birth_date: profileData.birthDate || profileData.birth_date || null,
+        address: profileData.address || null,
+        emergency_contact: profileData.emergencyContact || profileData.emergency_contact || null,
+        emergency_phone: profileData.emergencyPhone || profileData.emergency_phone || null,
+        notes: profileData.notes || null,
+        current_lk: profileData.current_lk || null,
+        updated_at: new Date().toISOString()
+      }));
       
       return { success: true };
     } catch (error) {

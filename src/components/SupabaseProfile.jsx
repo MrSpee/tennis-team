@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
@@ -62,6 +62,9 @@ function SupabaseProfile() {
   const [clubs, setClubs] = useState([]);
   const [isEditingTeams, setIsEditingTeams] = useState(false);
   const [editingTeam, setEditingTeam] = useState(null);
+
+  // REF: Verhindert Race Condition beim Tippen
+  const isEditingRef = useRef(false);
 
   // Cleanup Timer beim Unmount
   useEffect(() => {
@@ -206,6 +209,13 @@ function SupabaseProfile() {
     // Prüfe ob ein anderer Spieler angezeigt werden soll
     if (playerName && playerName !== player?.name) {
       loadOtherPlayerProfile(playerName);
+      return;
+    }
+    
+    // WICHTIG: Nicht überschreiben wenn User gerade tippt!
+    // isEditingRef.current ist SOFORT gesetzt (synchron!)
+    if (isEditingRef.current || hasUnsavedChanges || isSaving) {
+      console.log('⏸️ Skipping profile reload - user is editing (ref:', isEditingRef.current, 'state:', hasUnsavedChanges, isSaving, ')');
       return;
     }
     
@@ -416,6 +426,9 @@ function SupabaseProfile() {
     const { name, value } = e.target;
     console.log('📝 Input changed:', name, '=', value);
     
+    // SOFORT als "editing" markieren (synchron!)
+    isEditingRef.current = true;
+    
     setProfile(prev => ({
       ...prev,
       [name]: value
@@ -424,7 +437,7 @@ function SupabaseProfile() {
     // Markiere welches Feld bearbeitet wird
     setLastEditedField(name);
     setHasUnsavedChanges(true);
-    console.log('⚠️ Marked as unsaved, field:', name);
+    console.log('⚠️ Marked as unsaved, field:', name, '(ref set to true)');
     
     // Auto-Save nach 2 Sekunden Inaktivität
     if (autoSaveTimer) {
@@ -454,6 +467,30 @@ function SupabaseProfile() {
       console.log('⏭️ No unsaved changes, skipping save');
       return;
     }
+    
+    // WICHTIG: Alte Werte JETZT speichern (VOR dem Update!)
+    // Sonst sind sie nach updateProfile schon aktualisiert
+    const oldValues = {
+      name: player?.name,
+      phone: player?.phone,
+      email: player?.email,
+      birth_date: player?.birth_date,
+      current_lk: player?.current_lk,
+      tennis_motto: player?.tennis_motto,
+      favorite_shot: player?.favorite_shot,
+      best_tennis_memory: player?.best_tennis_memory,
+      worst_tennis_memory: player?.worst_tennis_memory,
+      favorite_opponent: player?.favorite_opponent,
+      dream_match: player?.dream_match,
+      fun_fact: player?.fun_fact,
+      superstition: player?.superstition,
+      pre_match_routine: player?.pre_match_routine,
+      address: player?.address,
+      emergency_contact: player?.emergency_contact,
+      emergency_phone: player?.emergency_phone,
+      notes: player?.notes
+    };
+    console.log('📸 Snapshot of old values taken');
     
     try {
       console.log('💾 Auto-saving profile...', profile);
@@ -490,8 +527,16 @@ function SupabaseProfile() {
       
       if (result.success) {
         console.log('✅ Save successful!');
+        
         setHasUnsavedChanges(false);
         setSuccessMessage('✅ Gespeichert!');
+        
+        // WICHTIG: Editing-Flag erst NACH einem Tick zurücksetzen
+        // So kann der Player-State Update durchlaufen ohne dass useEffect triggert
+        setTimeout(() => {
+          console.log('🔓 Releasing editing lock');
+          isEditingRef.current = false;
+        }, 100);
         
         // Feld-Indikator nach 2 Sekunden ausblenden
         setTimeout(() => {
@@ -499,19 +544,32 @@ function SupabaseProfile() {
           setSuccessMessage('');
         }, 2000);
         
-        // Logge nur wenn tatsächlich Änderungen vorhanden
+        // Logge ALLE Profil-Änderungen (verwende oldValues Snapshot!)
         const changes = {};
         const fieldsToTrack = {
-          name: { old: player.name, new: profile.name },
-          phone: { old: player.phone, new: profile.phone },
-          email: { old: player.email, new: profile.email },
-          current_lk: { old: player.current_lk, new: normalizedLK },
-          tennis_motto: { old: player.tennis_motto, new: profile.tennis_motto },
-          favorite_shot: { old: player.favorite_shot, new: profile.favorite_shot },
-          birth_date: { old: player.birth_date, new: profile.birth_date },
-          address: { old: player.address, new: profile.address },
-          emergency_contact: { old: player.emergency_contact, new: profile.emergency_contact },
-          emergency_phone: { old: player.emergency_phone, new: profile.emergency_phone }
+          // Basis-Informationen
+          name: { old: oldValues.name, new: profile.name },
+          phone: { old: oldValues.phone, new: profile.phone },
+          email: { old: oldValues.email, new: profile.email },
+          birth_date: { old: oldValues.birth_date, new: profile.birth_date },
+          // Tennis-Identity
+          current_lk: { old: oldValues.current_lk, new: normalizedLK },
+          tennis_motto: { old: oldValues.tennis_motto, new: profile.tennis_motto },
+          favorite_shot: { old: oldValues.favorite_shot, new: profile.favorite_shot },
+          best_tennis_memory: { old: oldValues.best_tennis_memory, new: profile.best_tennis_memory },
+          worst_tennis_memory: { old: oldValues.worst_tennis_memory, new: profile.worst_tennis_memory },
+          favorite_opponent: { old: oldValues.favorite_opponent, new: profile.favorite_opponent },
+          dream_match: { old: oldValues.dream_match, new: profile.dream_match },
+          // Fun & Aberglaube
+          fun_fact: { old: oldValues.fun_fact, new: profile.fun_fact },
+          superstition: { old: oldValues.superstition, new: profile.superstition },
+          pre_match_routine: { old: oldValues.pre_match_routine, new: profile.pre_match_routine },
+          // Kontakt & Notfall
+          address: { old: oldValues.address, new: profile.address },
+          emergency_contact: { old: oldValues.emergency_contact, new: profile.emergency_contact },
+          emergency_phone: { old: oldValues.emergency_phone, new: profile.emergency_phone },
+          // Notizen
+          notes: { old: oldValues.notes, new: profile.notes }
         };
         
         Object.keys(fieldsToTrack).forEach(field => {
@@ -523,7 +581,10 @@ function SupabaseProfile() {
         });
         
         if (Object.keys(changes).length > 0) {
+          console.log('📝 Logging profile changes:', changes);
           await LoggingService.logProfileEdit(changes, player?.id);
+        } else {
+          console.log('ℹ️ No changes detected, skipping activity log');
         }
       } else {
         throw new Error(result.error || 'Fehler beim Speichern');
@@ -531,6 +592,12 @@ function SupabaseProfile() {
     } catch (error) {
       console.error('❌ Auto-save error:', error);
       setErrorMessage(`Fehler: ${error.message}`);
+      
+      // Auch im Fehlerfall: Lock freigeben
+      setTimeout(() => {
+        console.log('🔓 Releasing editing lock (error case)');
+        isEditingRef.current = false;
+      }, 100);
     } finally {
       setIsSaving(false);
     }
