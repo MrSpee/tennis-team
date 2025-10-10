@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import './ImportTab.css';
@@ -20,7 +20,7 @@ const ImportTab = () => {
   const [teams, setTeams] = useState([]);
 
   // Lade Teams beim Mount
-  useState(() => {
+  useEffect(() => {
     loadUserTeams();
   }, [player]);
 
