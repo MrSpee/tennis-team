@@ -13,6 +13,7 @@ import {
   Download,
   RefreshCw
 } from 'lucide-react';
+import ImportTab from './ImportTab';
 import './Dashboard.css';
 
 function SuperAdminDashboard() {
@@ -2846,155 +2847,9 @@ function SuperAdminDashboard() {
         </div>
       )}
 
-      {/* Import Tab - Placeholder */}
+      {/* Import Tab */}
       {selectedTab === 'import' && (
-        <div className="lk-card-full">
-          <div className="formkurve-header">
-            <div className="formkurve-title">📥 Daten-Import mit KI-Unterstützung</div>
-            <div className="formkurve-subtitle">
-              Automatischer Import von Matches und Spielern aus TVM-Daten
-            </div>
-          </div>
-          <div className="season-content">
-            <div style={{ padding: '2rem' }}>
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', 
-                gap: '1.5rem',
-                marginBottom: '2rem'
-              }}>
-                {/* Match Import */}
-                <div style={{ 
-                  padding: '1.5rem',
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  color: 'white',
-                  borderRadius: '12px',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                }}>
-                  <h3 style={{ fontSize: '1.2rem', fontWeight: '700', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    🎾 Match-Import
-                  </h3>
-                  <p style={{ fontSize: '0.875rem', marginBottom: '1rem', opacity: 0.9 }}>
-                    Importiere Matches aus TVM-Meldelisten mit GPT-4o Unterstützung
-                  </p>
-                  <ul style={{ fontSize: '0.8rem', paddingLeft: '1.2rem', margin: '1rem 0' }}>
-                    <li>Text/URL eingeben oder CSV hochladen</li>
-                    <li>KI extrahiert Match-Daten automatisch</li>
-                    <li>Review & Korrektur vor Import</li>
-                    <li>Duplikat-Prüfung</li>
-                  </ul>
-                  <div style={{ 
-                    marginTop: '1.5rem',
-                    padding: '0.75rem',
-                    background: 'rgba(255,255,255,0.2)',
-                    borderRadius: '6px',
-                    fontSize: '0.75rem'
-                  }}>
-                    💰 Kosten: ~$0.01 pro Import (10 Matches)
-                  </div>
-                </div>
-
-                {/* Spieler Import */}
-                <div style={{ 
-                  padding: '1.5rem',
-                  background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-                  color: 'white',
-                  borderRadius: '12px',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                }}>
-                  <h3 style={{ fontSize: '1.2rem', fontWeight: '700', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    👥 Spieler-Import
-                  </h3>
-                  <p style={{ fontSize: '0.875rem', marginBottom: '1rem', opacity: 0.9 }}>
-                    Importiere Spieler aus TVM-Meldelisten mit Fuzzy-Matching
-                  </p>
-                  <ul style={{ fontSize: '0.8rem', paddingLeft: '1.2rem', margin: '1rem 0' }}>
-                    <li>TVM-Meldeliste URL oder Copy/Paste</li>
-                    <li>KI extrahiert Namen, LK, Teams</li>
-                    <li>Matching mit existierenden Spielern</li>
-                    <li>Automatische Einladungs-Emails</li>
-                  </ul>
-                  <div style={{ 
-                    marginTop: '1.5rem',
-                    padding: '0.75rem',
-                    background: 'rgba(255,255,255,0.2)',
-                    borderRadius: '6px',
-                    fontSize: '0.75rem'
-                  }}>
-                    ✅ 3 Status: Existing / Unsicher / Neu
-                  </div>
-                </div>
-              </div>
-
-              {/* Workflow Overview */}
-              <div style={{ 
-                padding: '1.5rem',
-                background: '#f8fafc',
-                borderRadius: '12px',
-                border: '2px dashed #cbd5e1'
-              }}>
-                <h4 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '1rem', color: '#1e293b' }}>
-                  🔄 Import-Workflow
-                </h4>
-                <div style={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', 
-                  gap: '1rem'
-                }}>
-                  {[
-                    { step: '1', icon: '📤', label: 'Daten hochladen' },
-                    { step: '2', icon: '🤖', label: 'KI-Verarbeitung' },
-                    { step: '3', icon: '👁️', label: 'Review & Edit' },
-                    { step: '4', icon: '💾', label: 'Datenbank-Import' },
-                    { step: '5', icon: '✅', label: 'Fertig!' }
-                  ].map((item) => (
-                    <div key={item.step} style={{ textAlign: 'center', padding: '1rem' }}>
-                      <div style={{ 
-                        fontSize: '2rem',
-                        marginBottom: '0.5rem'
-                      }}>
-                        {item.icon}
-                      </div>
-                      <div style={{ 
-                        fontSize: '0.7rem',
-                        color: '#64748b',
-                        fontWeight: '600'
-                      }}>
-                        Schritt {item.step}
-                      </div>
-                      <div style={{ 
-                        fontSize: '0.75rem',
-                        color: '#475569',
-                        marginTop: '0.25rem'
-                      }}>
-                        {item.label}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Call to Action */}
-              <div style={{ 
-                marginTop: '2rem',
-                textAlign: 'center',
-                padding: '2rem',
-                background: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)',
-                borderRadius: '12px'
-              }}>
-                <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.5rem' }}>
-                  🚀 Bereit für die Implementierung
-                </h4>
-                <p style={{ fontSize: '0.875rem', color: '#78350f', marginBottom: '1rem' }}>
-                  Backend-API & Frontend-UI werden in Phase 4-6 entwickelt
-                </p>
-                <p style={{ fontSize: '0.75rem', color: '#92400e' }}>
-                  📄 Vollständiger Plan: <code style={{ background: 'rgba(255,255,255,0.5)', padding: '0.25rem 0.5rem', borderRadius: '4px' }}>SUPER_ADMIN_ROADMAP.md</code>
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ImportTab />
       )}
 
       {/* Match-Detail-Modal */}

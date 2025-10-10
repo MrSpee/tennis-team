@@ -170,11 +170,11 @@ function SupabaseProfile() {
       
       if (data) {
         console.log('🟢 Loading other player data:', data);
-      setProfile({
-        name: data.name || '',
-        email: data.email || '',
-        phone: data.phone || '',
-        profileImage: data.profile_image || '',
+        setProfile({
+          name: data.name || '',
+          email: data.email || '',
+          phone: data.phone || '',
+          profileImage: data.profile_image || '',
         birth_date: data.birth_date || '',
         // Tennis-Identity
         current_lk: data.current_lk || '',
@@ -186,7 +186,7 @@ function SupabaseProfile() {
         dream_match: data.dream_match || '',
         // Fun & Aberglaube
         fun_fact: data.fun_fact || '',
-        superstition: data.superstition || '',
+          superstition: data.superstition || '',
         pre_match_routine: data.pre_match_routine || '',
         // Kontakt & Notfall
         address: data.address || '',
@@ -194,7 +194,7 @@ function SupabaseProfile() {
         emergency_phone: data.emergency_phone || '',
         // Notizen
         notes: data.notes || ''
-      });
+        });
         setViewingPlayer(data);
       }
     } catch (error) {
@@ -758,23 +758,23 @@ function SupabaseProfile() {
     
     // Bei Setup: normaler Submit
     if (isSetup) {
-      if (isViewingOtherPlayer) {
-        setErrorMessage('Sie können nur Ihr eigenes Profil bearbeiten.');
-        return;
-      }
-      
-      if (!profile.name || profile.name.trim() === '') {
-        setErrorMessage('❌ Bitte geben Sie Ihren Namen ein');
-        return;
-      }
-      
+    if (isViewingOtherPlayer) {
+      setErrorMessage('Sie können nur Ihr eigenes Profil bearbeiten.');
+      return;
+    }
+    
+    if (!profile.name || profile.name.trim() === '') {
+      setErrorMessage('❌ Bitte geben Sie Ihren Namen ein');
+      return;
+    }
+    
       // Trigger Auto-Save
       await handleAutoSave();
       
       // Weiterleitung nach Setup
-      setTimeout(() => {
-        navigate('/');
-      }, 1500);
+        setTimeout(() => {
+          navigate('/');
+        }, 1500);
     }
   };
 
@@ -804,12 +804,12 @@ function SupabaseProfile() {
       <div className="fade-in" style={{ marginBottom: '1rem', paddingTop: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
         <h1 className="hi">👤 {isSetup ? 'Profil einrichten' : 'Mein Profil'}</h1>
         {!isViewingOtherPlayer && (
-          <button 
+            <button 
             className="btn-modern btn-modern-inactive"
-            onClick={() => setShowPasswordReset(true)}
-          >
-            🔐 Passwort zurücksetzen
-          </button>
+              onClick={() => setShowPasswordReset(true)}
+            >
+              🔐 Passwort zurücksetzen
+            </button>
         )}
       </div>
       
