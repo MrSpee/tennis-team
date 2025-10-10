@@ -7,8 +7,6 @@
  * Output: { matches: Array<Match>, errors: Array<string> }
  */
 
-const OpenAI = require('openai').default;
-
 // CORS Headers für Frontend-Zugriff
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -16,18 +14,15 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
-// OpenAI Client initialisieren
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 // JSON Schema für Match-Daten (GPT soll sich daran halten)
 const MATCH_SCHEMA = {
   type: "object",
+  additionalProperties: false,
   properties: {
     // Team-Informationen (automatisch erkannt)
     team_info: {
       type: "object",
+      additionalProperties: false,
       properties: {
         club_name: { type: "string", description: "Name des Vereins (z.B. 'VKC Köln')" },
         team_name: { type: "string", description: "Mannschaftsname (z.B. 'Herren 50 1')" },
@@ -37,7 +32,7 @@ const MATCH_SCHEMA = {
         website: { type: "string", description: "Website URL (falls im Text)" },
         captain: { type: "string", description: "Mannschaftsführer Name (falls im Text)" }
       },
-      required: ["club_name"]
+      required: ["club_name", "team_name", "category", "league", "address", "website", "captain"]
     },
     
     // Match-Daten
@@ -45,6 +40,7 @@ const MATCH_SCHEMA = {
       type: "array",
       items: {
         type: "object",
+        additionalProperties: false,
         properties: {
           match_date: { type: "string", description: "Datum im Format YYYY-MM-DD" },
           start_time: { type: "string", description: "Uhrzeit im Format HH:MM" },
@@ -55,7 +51,7 @@ const MATCH_SCHEMA = {
           matchday: { type: "integer", description: "Spieltag-Nummer (falls angegeben)" },
           notes: { type: "string", description: "Zusätzliche Notizen (falls vorhanden)" }
         },
-        required: ["match_date", "opponent", "is_home_match"]
+        required: ["match_date", "start_time", "opponent", "is_home_match", "venue", "address", "matchday", "notes"]
       }
     },
     
@@ -64,6 +60,7 @@ const MATCH_SCHEMA = {
       type: "array",
       items: {
         type: "object",
+        additionalProperties: false,
         properties: {
           name: { type: "string", description: "Spieler Name" },
           lk: { type: "string", description: "Leistungsklasse (z.B. '6.8', '13.7')" },
@@ -71,7 +68,7 @@ const MATCH_SCHEMA = {
           position: { type: "integer", description: "Position in der Meldeliste" },
           is_captain: { type: "boolean", description: "true wenn Mannschaftsführer (MF)" }
         },
-        required: ["name"]
+        required: ["name", "lk", "id_number", "position", "is_captain"]
       }
     },
     
@@ -187,6 +184,12 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    // Initialisiere OpenAI HIER (nicht global!)
+    const { OpenAI } = require('openai');
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+
     const { text, url, teamId, userEmail } = req.body;
 
     // Validierung
@@ -212,22 +215,15 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // OpenAI GPT-4o aufrufen mit Structured Outputs
+    // OpenAI GPT-4o aufrufen OHNE Structured Outputs (einfacher!)
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-2024-08-06",
+      model: "gpt-4o-mini",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: `Bitte parse folgende Tennis-Meldeliste:\n\n${inputText}` }
+        { role: "user", content: `Bitte parse folgende Tennis-Meldeliste und gib NUR valides JSON zurück:\n\n${inputText}` }
       ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "match_list_parser",
-          schema: MATCH_SCHEMA,
-          strict: true
-        }
-      },
-      temperature: 0.1, // Niedrig für konsistente Ergebnisse
+      response_format: { type: "json_object" },
+      temperature: 0.1,
       max_tokens: 2000
     });
 

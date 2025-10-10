@@ -6,7 +6,7 @@
  * Testet ob der OpenAI API Key korrekt konfiguriert ist
  */
 
-const OpenAI = require('openai').default;
+const { OpenAI } = require('openai');
 
 module.exports = async function handler(req, res) {
   // Nur GET erlaubt

@@ -140,8 +140,8 @@ const ImportTab = () => {
       
       console.log('💾 Importing matches to Supabase:', matchesToImport);
       
-      // SCHRITT 1: Finde oder erstelle das Team
-      let teamId = await findOrCreateTeam(parsedData.team_info);
+      // SCHRITT 1: Finde oder erstelle das Team (inkl. Season)
+      let teamId = await findOrCreateTeam(parsedData.team_info, parsedData.season);
       console.log('🎯 Using team_id:', teamId);
 
       // SCHRITT 2: Prüfe auf Duplikate
@@ -231,7 +231,7 @@ const ImportTab = () => {
   /**
    * Finde oder erstelle Team in Supabase
    */
-  const findOrCreateTeam = async (teamInfo) => {
+  const findOrCreateTeam = async (teamInfo, season) => {
     if (!teamInfo) {
       throw new Error('Team-Informationen fehlen. KI konnte kein Team erkennen.');
     }
@@ -239,44 +239,90 @@ const ImportTab = () => {
     try {
       console.log('🔍 Searching for team:', teamInfo.club_name, teamInfo.team_name);
       
-      // Suche nach existierendem Team
+      // SCHRITT 1: Suche existierendes Team in team_info
       const { data: existingTeam, error: searchError } = await supabase
         .from('team_info')
         .select('id')
         .eq('club_name', teamInfo.club_name)
-        .eq('team_name', teamInfo.team_name || 'Herren 1')
+        .eq('team_name', teamInfo.team_name || null)
+        .eq('category', teamInfo.category || 'Herren')
         .maybeSingle();
 
       if (searchError && searchError.code !== 'PGRST116') {
         throw searchError;
       }
 
+      let teamId;
+
       if (existingTeam) {
-        console.log('✅ Team found:', existingTeam.id);
-        return existingTeam.id;
+        console.log('✅ Team found in team_info:', existingTeam.id);
+        teamId = existingTeam.id;
+      } else {
+        // SCHRITT 2: Team existiert nicht → ERSTELLE es
+        console.log('⚠️ Team not found, creating new team in team_info...');
+        
+        const { data: newTeam, error: insertError } = await supabase
+          .from('team_info')
+          .insert({
+            club_name: teamInfo.club_name,
+            team_name: teamInfo.team_name || null,
+            category: teamInfo.category || 'Herren',
+            region: 'Mittelrhein',
+            tvm_link: teamInfo.website || null
+          })
+          .select('id')
+          .single();
+
+        if (insertError) throw insertError;
+
+        console.log('✅ Team created in team_info:', newTeam.id);
+        teamId = newTeam.id;
       }
 
-      // Team existiert nicht → ERSTELLE es
-      console.log('⚠️ Team not found, creating new team...');
+      // SCHRITT 3: Prüfe/Erstelle team_seasons Eintrag
+      const currentSeason = season || 'Winter 2025/26';
       
-      const { data: newTeam, error: insertError } = await supabase
-        .from('team_info')
-        .insert({
-          club_name: teamInfo.club_name,
-          team_name: teamInfo.team_name || null,
-          category: teamInfo.category || 'Herren',
-          league: teamInfo.league || null,
-          address: teamInfo.address || null,
-          website: teamInfo.website || null,
-          region: 'Mittelrhein' // Default
-        })
+      const { data: existingSeason, error: seasonSearchError } = await supabase
+        .from('team_seasons')
         .select('id')
-        .single();
+        .eq('team_id', teamId)
+        .eq('season', currentSeason)
+        .maybeSingle();
 
-      if (insertError) throw insertError;
+      if (seasonSearchError && seasonSearchError.code !== 'PGRST116') {
+        console.warn('⚠️ Error checking season:', seasonSearchError);
+      }
 
-      console.log('✅ Team created:', newTeam.id);
-      return newTeam.id;
+      if (!existingSeason) {
+        console.log('📅 Creating team_seasons entry...');
+        
+        // Extrahiere Liga aus teamInfo.league (z.B. "Herren 50 2. Bezirksliga Gr. 054")
+        const leagueMatch = teamInfo.league?.match(/(\d+\.\s*\w+)/);
+        const league = leagueMatch ? leagueMatch[1] : null;
+        
+        // Extrahiere Gruppe (z.B. "Gr. 054")
+        const groupMatch = teamInfo.league?.match(/Gr\.\s*(\d+)/);
+        const groupName = groupMatch ? `Gr. ${groupMatch[1]}` : null;
+
+        const { error: seasonInsertError } = await supabase
+          .from('team_seasons')
+          .insert({
+            team_id: teamId,
+            season: currentSeason,
+            league: league || '2. Bezirksliga',
+            group_name: groupName,
+            team_size: 4, // Default für 4er-Teams
+            is_active: true
+          });
+
+        if (seasonInsertError) {
+          console.warn('⚠️ Could not create season:', seasonInsertError);
+        } else {
+          console.log('✅ team_seasons created');
+        }
+      }
+
+      return teamId;
 
     } catch (err) {
       console.error('❌ Error finding/creating team:', err);
