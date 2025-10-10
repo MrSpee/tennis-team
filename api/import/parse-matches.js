@@ -7,7 +7,7 @@
  * Output: { matches: Array<Match>, errors: Array<string> }
  */
 
-import OpenAI from 'openai';
+const OpenAI = require('openai').default;
 
 // CORS Headers für Frontend-Zugriff
 const corsHeaders = {
@@ -172,7 +172,7 @@ Wenn du dir bei etwas unsicher bist, lass das Feld weg (außer required fields).
 /**
  * Hauptfunktion: Vercel Serverless Handler
  */
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   // CORS Preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).json({ ok: true });
@@ -308,4 +308,5 @@ function calculateCost(usage) {
   const total = inputCost + outputCost;
   return `$${total.toFixed(4)}`;
 }
+
 
