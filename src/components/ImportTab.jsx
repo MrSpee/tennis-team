@@ -72,11 +72,6 @@ const ImportTab = () => {
       return;
     }
 
-    if (!selectedTeamId) {
-      setError('Bitte wähle ein Team aus.');
-      return;
-    }
-
     setIsProcessing(true);
     setError(null);
     setParsedData(null);
@@ -85,7 +80,7 @@ const ImportTab = () => {
     try {
       console.log('🔄 Calling parse API...');
       
-      // API-Aufruf an Vercel Function
+      // API-Aufruf an Vercel Function (kein teamId nötig - KI erkennt es!)
       const response = await fetch('/api/import/parse-matches', {
         method: 'POST',
         headers: {
@@ -93,7 +88,6 @@ const ImportTab = () => {
         },
         body: JSON.stringify({
           text: inputText,
-          teamId: selectedTeamId,
           userEmail: player?.email
         })
       });
@@ -112,7 +106,14 @@ const ImportTab = () => {
       // Alle Matches standardmäßig auswählen
       setSelectedMatches(result.data.matches.map((_, idx) => idx));
       
-      setSuccessMessage(`${result.data.matches.length} Match(es) erfolgreich erkannt! Überprüfe die Daten und klicke auf "Importieren".`);
+      let successMsg = `${result.data.matches.length} Match(es) erfolgreich erkannt!`;
+      if (result.data.team_info) {
+        successMsg += `\n🎾 Team: ${result.data.team_info.club_name}`;
+      }
+      if (result.data.players && result.data.players.length > 0) {
+        successMsg += `\n👥 ${result.data.players.length} Spieler erkannt`;
+      }
+      setSuccessMessage(successMsg);
 
     } catch (err) {
       console.error('❌ Parse error:', err);
@@ -138,9 +139,13 @@ const ImportTab = () => {
       const matchesToImport = selectedMatches.map(idx => parsedData.matches[idx]);
       
       console.log('💾 Importing matches to Supabase:', matchesToImport);
+      
+      // SCHRITT 1: Finde oder erstelle das Team
+      let teamId = await findOrCreateTeam(parsedData.team_info);
+      console.log('🎯 Using team_id:', teamId);
 
-      // Prüfe auf Duplikate
-      const duplicateCheck = await checkForDuplicates(matchesToImport);
+      // SCHRITT 2: Prüfe auf Duplikate
+      const duplicateCheck = await checkForDuplicates(matchesToImport, teamId);
       
       if (duplicateCheck.duplicates.length > 0) {
         const confirmImport = window.confirm(
@@ -169,17 +174,17 @@ const ImportTab = () => {
         return;
       }
 
-      // Formatiere für Supabase
+      // SCHRITT 3: Formatiere für Supabase
       const formattedMatches = uniqueMatches.map(match => ({
-        team_id: selectedTeamId,
+        team_id: teamId,
         match_date: match.match_date,
         start_time: match.start_time || null,
         opponent: match.opponent,
         is_home_match: match.is_home_match,
         venue: match.venue || null,
         address: match.address || null,
-        league: match.league || parsedData.category || null,
-        group_name: match.group_name || null,
+        league: parsedData.team_info?.league || null,
+        group_name: null,
         season: parsedData.season || '2025/26',
         status: 'scheduled',
         notes: match.notes || null
@@ -224,9 +229,65 @@ const ImportTab = () => {
   };
 
   /**
+   * Finde oder erstelle Team in Supabase
+   */
+  const findOrCreateTeam = async (teamInfo) => {
+    if (!teamInfo) {
+      throw new Error('Team-Informationen fehlen. KI konnte kein Team erkennen.');
+    }
+
+    try {
+      console.log('🔍 Searching for team:', teamInfo.club_name, teamInfo.team_name);
+      
+      // Suche nach existierendem Team
+      const { data: existingTeam, error: searchError } = await supabase
+        .from('team_info')
+        .select('id')
+        .eq('club_name', teamInfo.club_name)
+        .eq('team_name', teamInfo.team_name || 'Herren 1')
+        .maybeSingle();
+
+      if (searchError && searchError.code !== 'PGRST116') {
+        throw searchError;
+      }
+
+      if (existingTeam) {
+        console.log('✅ Team found:', existingTeam.id);
+        return existingTeam.id;
+      }
+
+      // Team existiert nicht → ERSTELLE es
+      console.log('⚠️ Team not found, creating new team...');
+      
+      const { data: newTeam, error: insertError } = await supabase
+        .from('team_info')
+        .insert({
+          club_name: teamInfo.club_name,
+          team_name: teamInfo.team_name || null,
+          category: teamInfo.category || 'Herren',
+          league: teamInfo.league || null,
+          address: teamInfo.address || null,
+          website: teamInfo.website || null,
+          region: 'Mittelrhein' // Default
+        })
+        .select('id')
+        .single();
+
+      if (insertError) throw insertError;
+
+      console.log('✅ Team created:', newTeam.id);
+      return newTeam.id;
+
+    } catch (err) {
+      console.error('❌ Error finding/creating team:', err);
+      throw new Error('Fehler beim Finden/Erstellen des Teams: ' + err.message);
+    }
+  };
+
+  /**
    * Prüfe auf Duplikate in der Datenbank
    */
-  const checkForDuplicates = async (matches) => {
+  const checkForDuplicates = async (matches, teamId) => {
     try {
       const dates = matches.map(m => m.match_date);
       
@@ -265,23 +326,22 @@ const ImportTab = () => {
    * Beispiel-Text einfügen (für Testing)
    */
   const insertExampleText = () => {
-    setInputText(`Medenspiele Winter 2025/26
-Herren 40 - Kreisliga A
+    setInputText(`VKC Köln
+Stadt Köln
+Alfred Schütte Allee 51
+51105 Köln
+http://www.vkc-koeln.de
 
-Spieltag 1
-Sa, 15.11.2025, 14:00 Uhr
-SV Rot-Gelb Sürth vs. TC Köln-Süd
-Ort: Marienburger SC, Köln
+Mannschaftsführer
+Kliemt Mathias (-)
 
-Spieltag 2
-Sa, 22.11.2025, 14:00 Uhr
-Rodenkirchener TC vs. SV Rot-Gelb Sürth
-Ort: Rodenkirchener TC, Köln-Rodenkirchen
+Herren 50 2. Bezirksliga Gr. 054
+Herren 50 1 (4er)
 
-Spieltag 3
-Sa, 29.11.2025, 14:00 Uhr
-SV Rot-Gelb Sürth vs. TC Grün-Weiß Rheidt
-Ort: Marienburger SC, Köln`);
+Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele	
+11.10.2025, 18:00	Cologne Sportspark	VKC Köln 1	TG Leverkusen 2	0:0	0:0	0:0	offen
+29.11.2025, 18:00	KölnerTHC Stadion RW	KölnerTHC Stadion RW 2	VKC Köln 1	0:0	0:0	0:0	offen
+17.01.2026, 18:00	Cologne Sportspark	VKC Köln 1	TPSK 1925 Köln 1	0:0	0:0	0:0	offen`);
   };
 
   return (
@@ -291,23 +351,21 @@ Ort: Marienburger SC, Köln`);
         <p>Kopiere TVM-Meldelisten hier rein und lass die KI die Matches automatisch extrahieren.</p>
       </div>
 
-      {/* Team Auswahl */}
-      <div className="import-section">
-        <label htmlFor="team-select">🎾 Team auswählen:</label>
-        <select 
-          id="team-select"
-          value={selectedTeamId || ''}
-          onChange={(e) => setSelectedTeamId(e.target.value)}
-          className="team-select"
-        >
-          <option value="">-- Team wählen --</option>
-          {teams.map(team => (
-            <option key={team.id} value={team.id}>
-              {team.name} {team.isPrimary && '⭐'}
-            </option>
-          ))}
-        </select>
-      </div>
+      {/* Team-Info wird automatisch erkannt */}
+      {parsedData?.team_info && (
+        <div className="import-section">
+          <div className="team-info-banner">
+            <h3>🎾 Erkanntes Team:</h3>
+            <div className="team-details">
+              <strong>{parsedData.team_info.club_name}</strong>
+              {parsedData.team_info.team_name && ` - ${parsedData.team_info.team_name}`}
+              {parsedData.team_info.category && ` (${parsedData.team_info.category})`}
+              <br />
+              {parsedData.team_info.league && <span className="meta-badge">{parsedData.team_info.league}</span>}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Text-Eingabe */}
       <div className="import-section">
@@ -326,13 +384,12 @@ Ort: Marienburger SC, Köln`);
           id="match-text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
-          placeholder="Kopiere hier die Meldeliste aus TVM (Text oder URL)...
+          placeholder="Kopiere hier die komplette TVM-Seite (inkl. Team-Info und Spielplan)...
 
-Beispiel:
-Spieltag 1
-Sa, 15.11.2025, 14:00 Uhr
-SV Sürth vs. TC Köln
-Ort: Marienburger SC, Köln"
+Die KI erkennt automatisch:
+✅ Verein & Mannschaft
+✅ Alle Spieltage
+✅ Spieler (falls Meldeliste dabei)"
           rows={12}
           className="match-input"
         />
@@ -340,10 +397,10 @@ Ort: Marienburger SC, Köln"
         <div className="input-actions">
           <button
             onClick={handleParseMatches}
-            disabled={!inputText.trim() || !selectedTeamId || isProcessing}
+            disabled={!inputText.trim() || isProcessing}
             className="btn-parse"
           >
-            {isProcessing ? '⏳ Verarbeite...' : '🔍 Matches erkennen'}
+            {isProcessing ? '⏳ Verarbeite...' : '🤖 KI analysieren'}
           </button>
           
           <button

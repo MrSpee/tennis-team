@@ -25,6 +25,22 @@ const openai = new OpenAI({
 const MATCH_SCHEMA = {
   type: "object",
   properties: {
+    // Team-Informationen (automatisch erkannt)
+    team_info: {
+      type: "object",
+      properties: {
+        club_name: { type: "string", description: "Name des Vereins (z.B. 'VKC Köln')" },
+        team_name: { type: "string", description: "Mannschaftsname (z.B. 'Herren 50 1')" },
+        category: { type: "string", description: "Kategorie (z.B. 'Herren 50')" },
+        league: { type: "string", description: "Liga-Name (z.B. 'Herren 50 2. Bezirksliga Gr. 054')" },
+        address: { type: "string", description: "Vereinsadresse (falls im Text)" },
+        website: { type: "string", description: "Website URL (falls im Text)" },
+        captain: { type: "string", description: "Mannschaftsführer Name (falls im Text)" }
+      },
+      required: ["club_name"]
+    },
+    
+    // Match-Daten
     matches: {
       type: "array",
       items: {
@@ -32,92 +48,123 @@ const MATCH_SCHEMA = {
         properties: {
           match_date: { type: "string", description: "Datum im Format YYYY-MM-DD" },
           start_time: { type: "string", description: "Uhrzeit im Format HH:MM" },
-          opponent: { type: "string", description: "Name des Gegner-Vereins" },
+          opponent: { type: "string", description: "Name des Gegner-Vereins (inkl. Mannschaft, z.B. 'TG Leverkusen 2')" },
           is_home_match: { type: "boolean", description: "true = Heimspiel, false = Auswärtsspiel" },
-          venue: { type: "string", description: "Spielort/Anlage (falls angegeben)" },
+          venue: { type: "string", description: "Spielort/Anlage (z.B. 'Cologne Sportspark')" },
           address: { type: "string", description: "Adresse des Spielorts (falls angegeben)" },
-          league: { type: "string", description: "Liga-Name (z.B. 'Kreisliga A', falls angegeben)" },
-          group_name: { type: "string", description: "Gruppenname (falls angegeben)" },
           matchday: { type: "integer", description: "Spieltag-Nummer (falls angegeben)" },
           notes: { type: "string", description: "Zusätzliche Notizen (falls vorhanden)" }
         },
         required: ["match_date", "opponent", "is_home_match"]
       }
     },
+    
+    // Spieler-Daten (optional, falls Meldeliste vorhanden)
+    players: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Spieler Name" },
+          lk: { type: "string", description: "Leistungsklasse (z.B. '6.8', '13.7')" },
+          id_number: { type: "string", description: "TVM ID-Nummer" },
+          position: { type: "integer", description: "Position in der Meldeliste" },
+          is_captain: { type: "boolean", description: "true wenn Mannschaftsführer (MF)" }
+        },
+        required: ["name"]
+      }
+    },
+    
     season: {
       type: "string",
-      description: "Saison (z.B. '2025/26', falls im Text erwähnt)"
-    },
-    category: {
-      type: "string",
-      description: "Kategorie/Altersklasse (z.B. 'Herren 40', falls im Text erwähnt)"
+      description: "Saison (z.B. '2025/26' oder 'Winter 25/26')"
     }
   },
-  required: ["matches"]
+  required: ["team_info", "matches"]
 };
 
 // System-Prompt für GPT-4o
-const SYSTEM_PROMPT = `Du bist ein Experte für das Parsen von Tennis-Meldelisten im TVM-Format (Tennisverband Mittelrhein).
+const SYSTEM_PROMPT = `Du bist ein Experte für das Parsen von Tennis-Meldelisten und Spielplänen im TVM-Format (Tennisverband Mittelrhein).
 
-Deine Aufgabe: Extrahiere ALLE Match-Informationen aus dem bereitgestellten Text und gib sie im JSON-Format zurück.
+Deine Aufgabe: Extrahiere ALLE Informationen (Team, Matches, Spieler) aus dem bereitgestellten Text und gib sie strukturiert im JSON-Format zurück.
 
 WICHTIGE REGELN:
-1. Extrahiere ALLE Matches aus dem Text, nicht nur das erste
-2. Datumsformat: YYYY-MM-DD (z.B. "Sa, 15.11.2025" → "2025-11-15")
-3. Zeitformat: HH:MM (24-Stunden-Format, z.B. "14:00")
-4. Heimspiel-Erkennung:
-   - Wenn "vs." oder "gegen" verwendet wird: Das Team VOR "vs." ist HEIM (is_home_match = true)
-   - Wenn "bei" oder "@" verwendet wird: Das Team ist AUSWÄRTS (is_home_match = false)
-   - Beispiel: "SV Sürth vs. TC Köln" → SV Sürth ist Heim
-   - Beispiel: "SV Sürth bei TC Köln" → SV Sürth ist Auswärts
-5. Wenn Spieltag-Nummer angegeben ist, extrahiere sie
-6. Wenn Liga/Gruppe angegeben ist, extrahiere sie
-7. Wenn Venue/Ort angegeben ist, extrahiere es
-8. Saison: Suche nach "Winter 2025/26" oder ähnlichem
-9. Kategorie: Suche nach "Herren 40", "Damen", etc.
 
-BEISPIEL INPUT:
+**1. TEAM-INFORMATIONEN:**
+   - Erkenne automatisch den Vereinsnamen (z.B. "VKC Köln")
+   - Erkenne die Mannschaft (z.B. "Herren 50 1")
+   - Erkenne die Kategorie (z.B. "Herren 50")
+   - Erkenne die Liga (z.B. "Herren 50 2. Bezirksliga Gr. 054")
+   - Adresse und Website extrahieren (falls vorhanden)
+   - Mannschaftsführer erkennen (oft mit "MF" markiert)
+
+**2. MATCH-DATEN:**
+   - Extrahiere ALLE Matches aus dem Text
+   - Datumsformat: YYYY-MM-DD (z.B. "11.10.2025" → "2025-10-11")
+   - Zeitformat: HH:MM (24-Stunden-Format, z.B. "18:00")
+   - Heimspiel-Erkennung:
+     * In TVM-Spielplänen: Das ERSTE Team in der Zeile ist IMMER Heim
+     * Beispiel: "VKC Köln 1	TG Leverkusen 2" → VKC Köln 1 ist Heim (is_home_match = true)
+     * Beispiel: "KölnerTHC 2	VKC Köln 1" → VKC Köln 1 ist Auswärts (is_home_match = false)
+   - Venue/Spielort extrahieren (erste Spalte im Spielplan)
+   - Gegner ist immer der ANDERE Verein (nicht der eigene!)
+
+**3. SPIELER-DATEN (falls Meldeliste vorhanden):**
+   - Extrahiere ALLE Spieler mit Name, LK, ID-Nummer
+   - Position in der Meldeliste beachten
+   - Mannschaftsführer markieren (Spalte "MF")
+
+**4. SAISON:**
+   - Erkenne Saison-Format: "Winter 25/26" oder "2025/26"
+
+BEISPIEL INPUT (TVM-Format):
 """
-Medenspiele Winter 2025/26
-Herren 40 - Kreisliga A
+VKC Köln
+Stadt Köln
+Alfred Schütte Allee 51
+51105 Köln
+http://www.vkc-koeln.de
 
-Spieltag 1
-Sa, 15.11.2025, 14:00 Uhr
-SV Rot-Gelb Sürth vs. TC Köln-Süd
-Ort: Marienburger SC, Köln
+Mannschaftsführer
+Kliemt Mathias (-)
 
-Spieltag 2
-Sa, 22.11.2025, 14:00 Uhr
-Rodenkirchener TC vs. SV Rot-Gelb Sürth
-Ort: Rodenkirchener TC, Köln-Rodenkirchen
+Herren 50 2. Bezirksliga Gr. 054
+Herren 50 1 (4er)
+
+Spieltage:
+Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele	
+11.10.2025, 18:00	Cologne Sportspark	VKC Köln 1	TG Leverkusen 2	0:0	0:0	0:0	offen
+29.11.2025, 18:00	KölnerTHC Stadion RW	KölnerTHC Stadion RW 2	VKC Köln 1	0:0	0:0	0:0	offen
 """
 
 BEISPIEL OUTPUT:
 {
+  "team_info": {
+    "club_name": "VKC Köln",
+    "team_name": "Herren 50 1",
+    "category": "Herren 50",
+    "league": "Herren 50 2. Bezirksliga Gr. 054",
+    "address": "Alfred Schütte Allee 51, 51105 Köln",
+    "website": "http://www.vkc-koeln.de",
+    "captain": "Kliemt Mathias"
+  },
   "matches": [
     {
-      "match_date": "2025-11-15",
-      "start_time": "14:00",
-      "opponent": "TC Köln-Süd",
+      "match_date": "2025-10-11",
+      "start_time": "18:00",
+      "opponent": "TG Leverkusen 2",
       "is_home_match": true,
-      "venue": "Marienburger SC",
-      "address": "Köln",
-      "matchday": 1,
-      "league": "Kreisliga A"
+      "venue": "Cologne Sportspark"
     },
     {
-      "match_date": "2025-11-22",
-      "start_time": "14:00",
-      "opponent": "Rodenkirchener TC",
+      "match_date": "2025-11-29",
+      "start_time": "18:00",
+      "opponent": "KölnerTHC Stadion RW 2",
       "is_home_match": false,
-      "venue": "Rodenkirchener TC",
-      "address": "Köln-Rodenkirchen",
-      "matchday": 2,
-      "league": "Kreisliga A"
+      "venue": "KölnerTHC Stadion RW"
     }
   ],
-  "season": "2025/26",
-  "category": "Herren 40"
+  "season": "2025/26"
 }
 
 Wenn du dir bei etwas unsicher bist, lass das Feld weg (außer required fields).`;
@@ -150,12 +197,7 @@ export default async function handler(req, res) {
       });
     }
 
-    if (!teamId) {
-      return res.status(400).json({ 
-        error: 'teamId ist erforderlich.',
-        ...corsHeaders 
-      });
-    }
+    // teamId ist OPTIONAL - KI erkennt Team automatisch!
 
     console.log('🔄 Starting match parsing for team:', teamId);
     console.log('📝 Input length:', text?.length || 0, 'chars');
@@ -212,12 +254,13 @@ export default async function handler(req, res) {
     return res.status(200).json({
       success: true,
       data: {
+        team_info: result.team_info || null,
         matches: result.matches,
+        players: result.players || [],
         season: result.season,
-        category: result.category,
         metadata: {
           parsed_at: new Date().toISOString(),
-          team_id: teamId,
+          team_id: teamId || null,
           user_email: userEmail,
           tokens_used: completion.usage.total_tokens,
           cost_estimate: calculateCost(completion.usage)

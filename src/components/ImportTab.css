@@ -39,20 +39,29 @@
   font-size: 1rem;
 }
 
-/* Team Select */
-.team-select {
-  width: 100%;
-  padding: 0.75rem;
-  border: 2px solid #e5e7eb;
-  border-radius: 8px;
-  font-size: 1rem;
-  transition: all 0.2s;
+/* Team Info Banner */
+.team-info-banner {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  padding: 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
 }
 
-.team-select:focus {
-  outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+.team-info-banner h3 {
+  margin: 0 0 0.75rem 0;
+  font-size: 1.1rem;
+}
+
+.team-details {
+  font-size: 1rem;
+  line-height: 1.8;
+}
+
+.team-details strong {
+  font-size: 1.25rem;
+  display: inline-block;
+  margin-bottom: 0.5rem;
 }
 
 /* Input Area */
