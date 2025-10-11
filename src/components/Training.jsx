@@ -17,6 +17,8 @@ function Training() {
   const [respondingTo, setRespondingTo] = useState(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [editingTraining, setEditingTraining] = useState(null); // Training zum Bearbeiten
+  const [isDeleting, setIsDeleting] = useState(null); // Training-ID beim Löschen
   
   // Neu: User Teams
   const [userTeams, setUserTeams] = useState([]);
@@ -392,6 +394,42 @@ function Training() {
         return;
       }
 
+      // 🔧 FIX: Validiere Email für ausgewählte importierte Spieler
+      const selectedImportedPlayerIds = formData.invitedPlayers.filter(id => 
+        importedPlayers.some(ip => ip.id === id)
+      );
+      
+      for (const importedId of selectedImportedPlayerIds) {
+        if (!importedPlayerEmails[importedId]) {
+          alert(`❌ Bitte Email für ${importedPlayers.find(ip => ip.id === importedId)?.name} eingeben!`);
+          setIsCreating(false);
+          return;
+        }
+      }
+
+      // 🔧 FIX: Konvertiere importierte Spieler zu external_players (mit Email)
+      const importedAsExternal = selectedImportedPlayerIds.map(id => {
+        const importedPlayer = importedPlayers.find(ip => ip.id === id);
+        return {
+          name: importedPlayer.name,
+          lk: importedPlayer.currentLk || '',
+          club: 'Wartet auf Registrierung',
+          email: importedPlayerEmails[id],
+          imported_player_id: id // Referenz behalten
+        };
+      });
+
+      // 🔧 FIX: Nur registrierte Spieler in invited_players
+      const registeredPlayerIds = formData.invitedPlayers.filter(id => 
+        !importedPlayers.some(ip => ip.id === id)
+      );
+
+      console.log('📊 Invited players breakdown:', {
+        registered: registeredPlayerIds.length,
+        imported: importedAsExternal.length,
+        external: formData.externalPlayers.length
+      });
+
       // Wenn wöchentlich wiederkehrend: Erstelle mehrere Trainings
       if (formData.isRecurring) {
         const trainingsToCreate = [];
@@ -412,8 +450,8 @@ function Training() {
             location: formData.location,
             venue: formData.venue || null,
             type: formData.type,
-            team_id: formData.type === 'team' ? formData.teamId : null, // Neu: Team-Zuordnung
-            invitation_mode: formData.type === 'team' ? formData.invitationMode : null, // Neu: Einladungs-Modus
+            team_id: formData.type === 'team' ? formData.teamId : null,
+            invitation_mode: formData.type === 'team' ? formData.invitationMode : null,
             is_public: formData.type === 'team' ? true : formData.needsSubstitute,
             organizer_id: player.id,
             max_players: parseInt(formData.maxPlayers),
@@ -422,8 +460,10 @@ function Training() {
             weather_dependent: formData.weatherDependent || false,
             title: formData.title || (formData.type === 'team' ? 'Team-Training' : 'Privates Training'),
             notes: formData.notes || null,
-            invited_players: formData.invitedPlayers.length > 0 ? formData.invitedPlayers : null,
-            external_players: formData.externalPlayers.length > 0 ? formData.externalPlayers : null,
+            invited_players: registeredPlayerIds.length > 0 ? registeredPlayerIds : null, // 🔧 FIX: Nur registrierte
+            external_players: [...formData.externalPlayers, ...importedAsExternal].length > 0 
+              ? [...formData.externalPlayers, ...importedAsExternal] 
+              : null, // 🔧 FIX: Inkl. importierte mit Email
             status: 'scheduled'
           };
           
@@ -454,8 +494,8 @@ function Training() {
           location: formData.location,
           venue: formData.venue || null,
           type: formData.type,
-          team_id: formData.type === 'team' ? formData.teamId : null, // Neu: Team-Zuordnung
-          invitation_mode: formData.type === 'team' ? formData.invitationMode : null, // Neu: Einladungs-Modus
+          team_id: formData.type === 'team' ? formData.teamId : null,
+          invitation_mode: formData.type === 'team' ? formData.invitationMode : null,
           is_public: formData.type === 'team' ? true : formData.needsSubstitute,
           organizer_id: player.id,
           max_players: parseInt(formData.maxPlayers),
@@ -464,8 +504,10 @@ function Training() {
           weather_dependent: formData.weatherDependent || false,
           title: formData.title || (formData.type === 'team' ? 'Team-Training' : 'Privates Training'),
           notes: formData.notes || null,
-          invited_players: formData.invitedPlayers.length > 0 ? formData.invitedPlayers : null,
-          external_players: formData.externalPlayers.length > 0 ? formData.externalPlayers : null,
+          invited_players: registeredPlayerIds.length > 0 ? registeredPlayerIds : null, // 🔧 FIX: Nur registrierte
+          external_players: [...formData.externalPlayers, ...importedAsExternal].length > 0 
+            ? [...formData.externalPlayers, ...importedAsExternal] 
+            : null, // 🔧 FIX: Inkl. importierte mit Email
           status: 'scheduled'
         };
 
@@ -486,6 +528,28 @@ function Training() {
         
         // Log Training-Erstellung
         await LoggingService.logTrainingCreation(data);
+
+        // 🔧 FIX: Bei Team-Training → Auto-Create Attendance für Team-Mitglieder
+        if (formData.type === 'team' && formData.teamId && teamMembers.length > 0) {
+          console.log('📧 Creating auto-attendance for team members...');
+          
+          const attendanceEntries = teamMembers.map(member => ({
+            session_id: data.id,
+            player_id: member.id,
+            status: 'pending', // Alle starten als "pending"
+            response_date: null
+          }));
+
+          const { error: attendanceError } = await supabase
+            .from('training_attendance')
+            .insert(attendanceEntries);
+
+          if (attendanceError) {
+            console.warn('⚠️ Could not create auto-attendance:', attendanceError);
+          } else {
+            console.log(`✅ Auto-attendance created for ${teamMembers.length} team members`);
+          }
+        }
       }
 
       // Reload trainings
@@ -500,6 +564,7 @@ function Training() {
         location: 'Draußen',
         venue: '',  // 🔧 Kein Hardcoded Venue
         type: 'team',
+        teamId: userTeams.find(t => t.isPrimary)?.id || null,
         maxPlayers: 8,
         targetPlayers: 8,
         weatherDependent: true,
@@ -510,6 +575,8 @@ function Training() {
         invitedPlayers: [],
         externalPlayers: []
       });
+      setImportedPlayerSearch(''); // 🔧 FIX: Reset Suche
+      setImportedPlayerEmails({}); // 🔧 FIX: Reset Emails
       setShowCreateForm(false);
 
       alert(formData.isRecurring 
@@ -593,7 +660,7 @@ function Training() {
     }
   };
 
-  // WhatsApp Share
+  // WhatsApp Share - Training teilen
   const shareViaWhatsApp = (training) => {
     const date = new Date(training.date).toLocaleDateString('de-DE', {
       weekday: 'long',
@@ -611,6 +678,132 @@ function Training() {
     
     const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
     window.open(whatsappUrl, '_blank');
+  };
+
+  // WhatsApp-Einladung für importierte Spieler (zur App-Registrierung)
+  const inviteImportedPlayerViaWhatsApp = (importedPlayer) => {
+    const appUrl = window.location.origin;
+    
+    const message = `🎾 *Hey ${importedPlayer.name}!*\n\n` +
+      `Du bist in unserer Team-App als Spieler hinterlegt! 🏆\n\n` +
+      `*Deine Vorteile:*\n` +
+      `✅ Immer über Matchdays & Trainings informiert\n` +
+      `✅ Direktes Zu-/Absagen per Klick\n` +
+      `✅ LK-Tracking & Team-Statistiken\n` +
+      `✅ Push-Benachrichtigungen für wichtige Updates\n\n` +
+      `*Jetzt registrieren (1 Minute):*\n` +
+      `${appUrl}/login\n\n` +
+      `Deine Daten sind bereits hinterlegt – du musst nur noch dein Konto aktivieren! 🚀\n\n` +
+      `Bis bald auf dem Platz! 🎾`;
+    
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
+    window.open(whatsappUrl, '_blank');
+  };
+
+  // Training bearbeiten (nur Organisator)
+  const handleEditTraining = (training) => {
+    console.log('✏️ Editing training:', training);
+    
+    setEditingTraining(training);
+    setFormData({
+      title: training.title || '',
+      date: training.date.split('T')[0],
+      startTime: training.start_time || '17:00',
+      endTime: training.end_time || '19:00',
+      location: training.location,
+      venue: training.venue || '',
+      type: training.type,
+      teamId: training.team_id,
+      maxPlayers: training.max_players,
+      targetPlayers: training.target_players,
+      weatherDependent: training.weather_dependent,
+      needsSubstitute: training.needs_substitute,
+      isRecurring: false,
+      notes: training.notes || '',
+      invitedPlayers: training.invited_players || [],
+      externalPlayers: training.external_players || []
+    });
+    setShowCreateForm(true);
+  };
+
+  // Training aktualisieren
+  const handleUpdateTraining = async (e) => {
+    e.preventDefault();
+    
+    if (!editingTraining) return;
+
+    try {
+      setIsCreating(true);
+
+      const dateTime = new Date(`${formData.date}T${formData.startTime}`);
+
+      const { error } = await supabase
+        .from('training_sessions')
+        .update({
+          date: dateTime.toISOString(),
+          start_time: formData.startTime,
+          end_time: formData.endTime,
+          duration: calculateDuration(formData.startTime, formData.endTime),
+          location: formData.location,
+          venue: formData.venue || null,
+          max_players: parseInt(formData.maxPlayers),
+          target_players: parseInt(formData.targetPlayers),
+          weather_dependent: formData.weatherDependent,
+          needs_substitute: formData.needsSubstitute,
+          title: formData.title || null,
+          notes: formData.notes || null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', editingTraining.id);
+
+      if (error) throw error;
+
+      console.log('✅ Training updated');
+      
+      // Reload
+      await loadTrainings();
+      
+      // Reset
+      setEditingTraining(null);
+      setShowCreateForm(false);
+      
+      alert('✅ Training erfolgreich aktualisiert!');
+    } catch (error) {
+      console.error('❌ Error updating training:', error);
+      alert(`❌ Fehler beim Aktualisieren: ${error.message}`);
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  // Training löschen (nur Organisator)
+  const handleDeleteTraining = async (trainingId) => {
+    if (!confirm('❌ Training wirklich löschen? Dies kann nicht rückgängig gemacht werden!')) {
+      return;
+    }
+
+    try {
+      setIsDeleting(trainingId);
+
+      const { error } = await supabase
+        .from('training_sessions')
+        .delete()
+        .eq('id', trainingId);
+
+      if (error) throw error;
+
+      console.log('✅ Training deleted:', trainingId);
+      
+      // Reload
+      await loadTrainings();
+      
+      alert('✅ Training gelöscht!');
+    } catch (error) {
+      console.error('❌ Error deleting training:', error);
+      alert(`❌ Fehler beim Löschen: ${error.message}`);
+    } finally {
+      setIsDeleting(null);
+    }
   };
 
   // Formatiere Datum
@@ -760,38 +953,73 @@ function Training() {
 
           {/* Actions */}
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            {/* Bearbeiten & Löschen (nur Organisator) */}
+            {isOrganizer && (
+              <>
+                <button
+                  className="btn-modern btn-modern-inactive"
+                  onClick={() => handleEditTraining(training)}
+                  style={{ 
+                    flex: '0 0 auto',
+                    background: '#f59e0b',
+                    color: 'white'
+                  }}
+                  title="Training bearbeiten"
+                >
+                  ✏️ Bearbeiten
+                </button>
+                <button
+                  className="btn-modern btn-modern-inactive"
+                  onClick={() => handleDeleteTraining(training.id)}
+                  disabled={isDeleting === training.id}
+                  style={{ 
+                    flex: '0 0 auto',
+                    background: '#ef4444',
+                    color: 'white'
+                  }}
+                  title="Training löschen"
+                >
+                  🗑️ Löschen
+                </button>
+              </>
+            )}
+
             {/* Zusagen */}
-            <button
-              className={`btn-modern ${myResponse === 'confirmed' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
-              onClick={() => handleResponse(training.id, 'confirmed')}
-              disabled={respondingTo === training.id}
-              style={{
-                flex: 1,
-                background: myResponse === 'confirmed' ? 
-                  'linear-gradient(135deg, #10b981 0%, #059669 100%)' : undefined
-              }}
-            >
-              <CheckCircle size={16} />
-              Bin dabei!
-            </button>
+            {!isOrganizer && (
+              <button
+                className={`btn-modern ${myResponse === 'confirmed' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
+                onClick={() => handleResponse(training.id, 'confirmed')}
+                disabled={respondingTo === training.id}
+                style={{
+                  flex: 1,
+                  background: myResponse === 'confirmed' ? 
+                    'linear-gradient(135deg, #10b981 0%, #059669 100%)' : undefined
+                }}
+              >
+                <CheckCircle size={16} />
+                Bin dabei!
+              </button>
+            )}
 
             {/* Absagen */}
-            <button
-              className={`btn-modern ${myResponse === 'declined' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
-              onClick={() => handleResponse(training.id, 'declined')}
-              disabled={respondingTo === training.id}
-              style={{
-                flex: 1,
-                background: myResponse === 'declined' ? 
-                  'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)' : undefined
-              }}
-            >
-              <XCircle size={16} />
-              Kann nicht
-            </button>
+            {!isOrganizer && (
+              <button
+                className={`btn-modern ${myResponse === 'declined' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
+                onClick={() => handleResponse(training.id, 'declined')}
+                disabled={respondingTo === training.id}
+                style={{
+                  flex: 1,
+                  background: myResponse === 'declined' ? 
+                    'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)' : undefined
+                }}
+              >
+                <XCircle size={16} />
+                Kann nicht
+              </button>
+            )}
 
             {/* WhatsApp Share */}
-            {(training.needs_substitute || training.type === 'private') && (
+            {(training.needs_substitute || training.type === 'private' || isOrganizer) && (
               <button
                 className="btn-modern btn-modern-inactive"
                 onClick={() => shareViaWhatsApp(training)}
@@ -922,7 +1150,10 @@ function Training() {
         {/* Create Training Button */}
         <button
           className="btn-modern btn-modern-active"
-          onClick={() => setShowCreateForm(true)}
+          onClick={() => {
+            setEditingTraining(null); // Reset edit mode
+            setShowCreateForm(true);
+          }}
           style={{ flex: '0 0 auto' }}
         >
           <Plus size={18} />
@@ -1031,10 +1262,10 @@ function Training() {
             }}
           >
             <h2 style={{ margin: '0 0 1.5rem 0', fontSize: '1.5rem', fontWeight: '700' }}>
-              ➕ Training erstellen
+              {editingTraining ? '✏️ Training bearbeiten' : '➕ Training erstellen'}
             </h2>
 
-            <form onSubmit={handleCreateTraining}>
+            <form onSubmit={editingTraining ? handleUpdateTraining : handleCreateTraining}>
               {/* Typ */}
               <div className="form-group" style={{ marginBottom: '1.5rem' }}>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', fontSize: '0.9rem' }}>
@@ -1139,20 +1370,22 @@ function Training() {
                 />
               </div>
 
-              {/* Wöchentlich wiederholen */}
-              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={formData.isRecurring}
-                    onChange={(e) => setFormData(prev => ({ ...prev, isRecurring: e.target.checked }))}
-                    style={{ width: '20px', height: '20px', cursor: 'pointer' }}
-                  />
-                  <span style={{ fontSize: '0.9rem', fontWeight: '600' }}>
-                    🔁 Wöchentlich wiederholen (6 Monate)
-                  </span>
-                </label>
-              </div>
+              {/* Wöchentlich wiederholen (nur beim Erstellen, nicht beim Bearbeiten) */}
+              {!editingTraining && (
+                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={formData.isRecurring}
+                      onChange={(e) => setFormData(prev => ({ ...prev, isRecurring: e.target.checked }))}
+                      style={{ width: '20px', height: '20px', cursor: 'pointer' }}
+                    />
+                    <span style={{ fontSize: '0.9rem', fontWeight: '600' }}>
+                      🔁 Wöchentlich wiederholen (6 Monate)
+                    </span>
+                  </label>
+                </div>
+              )}
 
               {/* Wochentag (wenn wiederkehrend) */}
               {formData.isRecurring && (
@@ -1412,23 +1645,53 @@ function Training() {
                           const hasEmail = importedPlayerEmails[ip.id];
 
                           return (
-                            <div key={ip.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem', background: isSelected ? '#10b981' : 'white', borderRadius: '6px', border: isSelected ? 'none' : '1px solid #e2e8f0' }}>
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => {
-                                  setFormData(prev => ({
-                                    ...prev,
-                                    invitedPlayers: prev.invitedPlayers.includes(ip.id)
-                                      ? prev.invitedPlayers.filter(id => id !== ip.id)
-                                      : [...prev.invitedPlayers, ip.id]
-                                  }));
-                                }}
-                                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                              />
-                              <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: '600', color: isSelected ? 'white' : '#374151' }}>
-                                {ip.name} {ip.currentLk && `(LK ${ip.currentLk})`}
-                              </span>
+                            <div key={ip.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '0.75rem', background: isSelected ? '#10b981' : 'white', borderRadius: '6px', border: isSelected ? 'none' : '1px solid #e2e8f0' }}>
+                              {/* Erste Reihe: Checkbox + Name + WhatsApp-Button */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => {
+                                    setFormData(prev => ({
+                                      ...prev,
+                                      invitedPlayers: prev.invitedPlayers.includes(ip.id)
+                                        ? prev.invitedPlayers.filter(id => id !== ip.id)
+                                        : [...prev.invitedPlayers, ip.id]
+                                    }));
+                                  }}
+                                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                                />
+                                <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: '600', color: isSelected ? 'white' : '#374151' }}>
+                                  {ip.name} {ip.currentLk && `(LK ${ip.currentLk})`}
+                                </span>
+                                {/* WhatsApp-Einladung Button */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    inviteImportedPlayerViaWhatsApp(ip);
+                                  }}
+                                  style={{
+                                    padding: '0.25rem 0.5rem',
+                                    background: '#25D366',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                  title="Per WhatsApp zur App einladen"
+                                >
+                                  📱 Einladen
+                                </button>
+                              </div>
+                              
+                              {/* Zweite Reihe: Email-Eingabe (wenn ausgewählt) */}
                               {isSelected && (
                                 <input
                                   type="email"
@@ -1437,11 +1700,11 @@ function Training() {
                                   onChange={(e) => setImportedPlayerEmails(prev => ({ ...prev, [ip.id]: e.target.value }))}
                                   onClick={(e) => e.stopPropagation()}
                                   style={{
-                                    padding: '0.25rem 0.5rem',
-                                    border: '1px solid white',
-                                    borderRadius: '4px',
-                                    fontSize: '0.75rem',
-                                    width: '180px'
+                                    padding: '0.5rem',
+                                    border: '2px solid white',
+                                    borderRadius: '6px',
+                                    fontSize: '0.85rem',
+                                    width: '100%'
                                   }}
                                   required={isSelected}
                                 />
@@ -1538,7 +1801,10 @@ function Training() {
                 <button
                   type="button"
                   className="btn-modern btn-modern-inactive"
-                  onClick={() => setShowCreateForm(false)}
+                  onClick={() => {
+                    setShowCreateForm(false);
+                    setEditingTraining(null);
+                  }}
                   disabled={isCreating}
                 >
                   Abbrechen
@@ -1548,7 +1814,12 @@ function Training() {
                   className="btn-modern btn-modern-active"
                   disabled={isCreating || !formData.date}
                 >
-                  {isCreating ? '⏳ Erstellt...' : '✅ Training erstellen'}
+                  {isCreating 
+                    ? '⏳ Speichert...' 
+                    : editingTraining 
+                      ? '✅ Änderungen speichern' 
+                      : '✅ Training erstellen'
+                  }
                 </button>
               </div>
             </form>
