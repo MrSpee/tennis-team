@@ -12,6 +12,9 @@ function OnboardingFlow() {
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [availableTeams, setAvailableTeams] = useState([]);
+  const [importedPlayerSearch, setImportedPlayerSearch] = useState('');
+  const [importedPlayerResults, setImportedPlayerResults] = useState([]);
+  const [selectedImportedPlayer, setSelectedImportedPlayer] = useState(null);
 
   // Form Data
   const [formData, setFormData] = useState({
@@ -44,6 +47,47 @@ function OnboardingFlow() {
       setAvailableTeams(data || []);
     } catch (error) {
       console.error('Error loading teams:', error);
+    }
+  };
+
+  // Suche nach importierten Spielern
+  const searchImportedPlayers = async (searchTerm) => {
+    if (!searchTerm || searchTerm.length < 2) {
+      setImportedPlayerResults([]);
+      return;
+    }
+
+    try {
+      console.log('🔍 Searching imported players for:', searchTerm);
+      
+      const { data, error } = await supabase
+        .from('imported_players')
+        .select(`
+          id,
+          name,
+          import_lk,
+          tvm_id_number,
+          team_id,
+          position,
+          is_captain,
+          team_info!inner (
+            club_name,
+            team_name,
+            category
+          )
+        `)
+        .eq('status', 'pending')
+        .ilike('name', `%${searchTerm}%`)
+        .order('name', { ascending: true })
+        .limit(10);
+
+      if (error) throw error;
+
+      console.log('✅ Found imported players:', data?.length || 0);
+      setImportedPlayerResults(data || []);
+    } catch (error) {
+      console.error('Error searching imported players:', error);
+      setImportedPlayerResults([]);
     }
   };
 
@@ -163,6 +207,27 @@ function OnboardingFlow() {
 
       console.log('✅ Player profile updated:', playerData);
 
+      // 2.5️⃣ Wenn importierter Spieler: Merge durchführen
+      if (selectedImportedPlayer) {
+        console.log('🔗 Merging imported player:', selectedImportedPlayer.id);
+        
+        const { error: mergeError } = await supabase
+          .from('imported_players')
+          .update({
+            status: 'merged',
+            merged_to_player_id: playerData.id,
+            merged_at: new Date().toISOString()
+          })
+          .eq('id', selectedImportedPlayer.id);
+
+        if (mergeError) {
+          console.error('⚠️ Error merging imported player:', mergeError);
+          // Nicht kritisch, weiter machen
+        } else {
+          console.log('✅ Imported player merged successfully');
+        }
+      }
+
       // 3️⃣ Erstelle player_teams Einträge für alle gewählten Teams
       for (let i = 0; i < formData.customTeams.length; i++) {
         const team = formData.customTeams[i];
@@ -208,25 +273,27 @@ function OnboardingFlow() {
         console.log('✅ Teams verified:', verifyTeams?.length || 0);
       }
 
-      // 6️⃣ Trigger Team-Reload Event UND warte
+      // 6️⃣ Force Auth-Reload ZUERST (wichtig für needsOnboarding-Update)
+      console.log('🔄 Triggering auth reload...');
+      window.dispatchEvent(new Event('reloadAuth'));
+      
+      // Warte auf Auth-Reload
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // 7️⃣ Trigger Team-Reload Event
+      console.log('🔄 Triggering teams reload...');
       window.dispatchEvent(new CustomEvent('reloadTeams', {
         detail: { playerId: playerData.id }
       }));
       
-      // Warte länger, damit Auth-Reload auch Zeit hat
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Warte auf Teams-Reload
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       console.log('✅ SUPABASE Onboarding abgeschlossen');
 
-      // 7️⃣ Force Auth-Reload
-      window.dispatchEvent(new Event('reloadAuth'));
-
-      // Kurze Verzögerung und dann Navigation
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Weiterleitung zum Dashboard (Root-Route)
-      console.log('🔄 Navigating to dashboard...');
-      navigate('/', { replace: true });
+      // 8️⃣ Weiterleitung zum Dashboard mit window.location (erzwingt Full-Reload)
+      console.log('🔄 Navigating to dashboard with full reload...');
+      window.location.href = '/';
 
     } catch (error) {
       console.error('❌ Error in SUPABASE onboarding:', error);
@@ -988,6 +1055,173 @@ function OnboardingFlow() {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Importierte Spieler Suche */}
+            {!selectedImportedPlayer && (
+              <div style={{ 
+                marginBottom: '2rem',
+                padding: '1.5rem',
+                background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+                border: '2px solid #f59e0b',
+                borderRadius: '12px'
+              }}>
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.75rem',
+                  marginBottom: '1rem'
+                }}>
+                  <div style={{ fontSize: '1.5rem' }}>🎾</div>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: '700', color: '#92400e' }}>
+                      Profil-Turbo aktivieren!
+                    </h4>
+                    <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: '#78350f' }}>
+                      Einige Spieler wurden bereits über TVM-Meldelisten angelegt – vielleicht bist du dabei? 
+                      Ein schneller Check kann dir Zeit sparen! 😉
+                    </p>
+                  </div>
+                </div>
+
+                <input
+                  type="text"
+                  placeholder="🔍 Deinen Namen eingeben..."
+                  value={importedPlayerSearch}
+                  onChange={(e) => {
+                    setImportedPlayerSearch(e.target.value);
+                    searchImportedPlayers(e.target.value);
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '2px solid #f59e0b',
+                    borderRadius: '8px',
+                    fontSize: '0.95rem',
+                    background: 'white'
+                  }}
+                />
+
+                {/* Suchergebnisse */}
+                {importedPlayerResults.length > 0 && (
+                  <div style={{ marginTop: '1rem' }}>
+                    <div style={{ fontSize: '0.85rem', color: '#92400e', marginBottom: '0.5rem', fontWeight: '600' }}>
+                      🎯 Treffer gefunden:
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      {importedPlayerResults.map((player) => (
+                        <div
+                          key={player.id}
+                          onClick={() => {
+                            setSelectedImportedPlayer(player);
+                            setFormData(prev => ({
+                              ...prev,
+                              name: player.name,
+                              current_lk: player.import_lk || '',
+                              customTeams: player.team_id ? [{
+                                id: player.team_id,
+                                club_name: player.team_info.club_name,
+                                category: player.team_info.team_name || player.team_info.category,
+                                season: formData.currentSeason,
+                                league: 'Automatisch übernommen',
+                                team_size: 6
+                              }] : prev.customTeams
+                            }));
+                            setImportedPlayerSearch('');
+                            setImportedPlayerResults([]);
+                          }}
+                          style={{
+                            padding: '1rem',
+                            background: 'white',
+                            border: '2px solid #f59e0b',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = '#fffbeb';
+                            e.currentTarget.style.transform = 'translateX(4px)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'white';
+                            e.currentTarget.style.transform = 'translateX(0)';
+                          }}
+                        >
+                          <div style={{ fontWeight: '700', color: '#92400e', marginBottom: '0.25rem' }}>
+                            {player.name}
+                            {player.is_captain && <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem' }}>👑 MF</span>}
+                          </div>
+                          <div style={{ fontSize: '0.85rem', color: '#78350f' }}>
+                            {player.team_info.club_name} • {player.team_info.team_name || player.team_info.category}
+                            {player.import_lk && ` • LK ${player.import_lk}`}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {importedPlayerSearch && importedPlayerResults.length === 0 && importedPlayerSearch.length >= 2 && (
+                  <div style={{ 
+                    marginTop: '1rem',
+                    padding: '1rem',
+                    background: 'white',
+                    border: '2px solid #f59e0b',
+                    borderRadius: '8px',
+                    textAlign: 'center',
+                    color: '#92400e',
+                    fontSize: '0.85rem'
+                  }}>
+                    😔 Kein Match gefunden. Kein Problem – einfach manuell weiter!
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Bestätigung bei ausgewähltem Spieler */}
+            {selectedImportedPlayer && (
+              <div style={{ 
+                marginBottom: '2rem',
+                padding: '1.5rem',
+                background: 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)',
+                border: '2px solid #22c55e',
+                borderRadius: '12px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+                  <div style={{ fontSize: '1.5rem' }}>✅</div>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: '700', color: '#14532d' }}>
+                      Profil gefunden!
+                    </h4>
+                    <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: '#166534' }}>
+                      Deine Daten wurden automatisch übernommen. Du kannst sie unten noch anpassen.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedImportedPlayer(null);
+                    setFormData(prev => ({
+                      ...prev,
+                      name: '',
+                      current_lk: ''
+                    }));
+                  }}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    background: 'white',
+                    color: '#166534',
+                    border: '2px solid #22c55e',
+                    borderRadius: '8px',
+                    fontSize: '0.85rem',
+                    fontWeight: '600',
+                    cursor: 'pointer'
+                  }}
+                >
+                  🔄 Andere Auswahl
+                </button>
               </div>
             )}
 

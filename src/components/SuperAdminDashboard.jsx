@@ -194,11 +194,12 @@ function SuperAdminDashboard() {
       // Lade echte Statistiken aus der Datenbank
       console.log('🔵 Loading admin statistics...');
 
-      // 1. Zähle aktive Benutzer (mit mindestens einem Team)
+      // 1. Zähle aktive Benutzer (NUR registrierte mit user_id!)
       const { count: activeUsersCount } = await supabase
         .from('players')
         .select('id', { count: 'exact', head: true })
-        .eq('is_active', true);
+        .eq('is_active', true)
+        .not('user_id', 'is', null); // Nur registrierte!
 
       // 2. Zähle alle Vereine
       const { count: totalClubsCount } = await supabase
@@ -240,6 +241,12 @@ function SuperAdminDashboard() {
         .select('id', { count: 'exact', head: true })
         .gte('created_at', today.toISOString());
 
+      // 9. Zähle importierte Spieler (warten auf Registrierung)
+      const { count: importedPlayersCount } = await supabase
+        .from('imported_players')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending');
+
       console.log('✅ Statistics loaded:', {
         users: activeUsersCount,
         clubs: totalClubsCount,
@@ -248,7 +255,8 @@ function SuperAdminDashboard() {
         teams: totalTeamsCount,
         matches: totalMatchesCount,
         trainings: totalTrainingsCount,
-        dailyActivity: dailyActivityCount
+        dailyActivity: dailyActivityCount,
+        importedPlayers: importedPlayersCount
       });
 
       // Setze Stats
@@ -260,7 +268,8 @@ function SuperAdminDashboard() {
         totalTeams: totalTeamsCount || 0,
         totalMatches: totalMatchesCount || 0,
         totalTrainings: totalTrainingsCount || 0,
-        dailyActivity: dailyActivityCount || 0
+        dailyActivity: dailyActivityCount || 0,
+        importedPlayers: importedPlayersCount || 0
       });
 
       // Lade Activity Logs mit Filter
@@ -410,18 +419,22 @@ function SuperAdminDashboard() {
     try {
       console.log('🔵 Loading full player data for Users tab...');
       
-      // Schritt 1: Lade alle Spieler
-      const { data: playersData, error: playersError } = await supabase
-        .from('players')
-        .select('*')
-        .order('created_at', { ascending: false });
+      // Schritt 1: Lade BEIDE - registrierte UND importierte Spieler
+      const [
+        { data: playersData, error: playersError },
+        { data: importedPlayersData, error: importedError }
+      ] = await Promise.all([
+        supabase.from('players').select('*').order('created_at', { ascending: false }),
+        supabase.from('imported_players').select('*').eq('status', 'pending').order('imported_at', { ascending: false })
+      ]);
 
       if (playersError) {
         console.error('❌ Error loading players:', playersError);
         return;
       }
 
-      console.log('✅ Players loaded:', playersData?.length || 0, 'players');
+      console.log('✅ Players loaded:', playersData?.length || 0, 'registered');
+      console.log('✅ Imported players loaded:', importedPlayersData?.length || 0, 'pending');
 
       // Schritt 2: Lade player_teams mit team_info für alle Spieler
       const { data: playerTeamsData, error: teamsError } = await supabase
@@ -443,7 +456,7 @@ function SuperAdminDashboard() {
         console.log('✅ Player teams loaded:', playerTeamsData?.length || 0, 'team assignments');
       }
 
-      // Schritt 3: Merge die Daten
+      // Schritt 3: Merge registrierte Spieler mit Teams
       const playersWithTeams = playersData.map(player => {
         const teams = (playerTeamsData || [])
           .filter(pt => pt.player_id === player.id)
@@ -455,13 +468,46 @@ function SuperAdminDashboard() {
         
         return {
           ...player,
-          player_teams: teams
+          player_teams: teams,
+          source: 'registered', // Markierung
+          status_badge: '✅ Registriert'
         };
       });
 
-      console.log('✅ Players with teams merged:', playersWithTeams.length);
-      console.log('🔍 First player sample:', playersWithTeams[0]);
-      setPlayers(playersWithTeams);
+      // Schritt 4: Füge importierte Spieler hinzu (noch nicht registriert)
+      const importedPlayersWithTeams = (importedPlayersData || []).map(imported => {
+        // Finde Team-Info
+        const teamInfo = imported.team_id ? {
+          club_name: 'Wird geladen...', // Würde durch JOIN kommen
+          team_name: '',
+          category: ''
+        } : null;
+        
+        return {
+          id: imported.id,
+          name: imported.name,
+          email: null, // Kein Email (nicht registriert)
+          user_id: null, // Kein user_id
+          current_lk: imported.import_lk,
+          import_lk: imported.import_lk,
+          role: imported.is_captain ? 'captain' : 'player',
+          is_active: false, // Noch nicht aktiv (nicht registriert)
+          created_at: imported.imported_at,
+          player_teams: teamInfo ? [{ team_info: teamInfo }] : [],
+          source: 'imported', // Markierung
+          status_badge: '⏳ Wartet auf Registrierung',
+          tvm_id: imported.tvm_id_number
+        };
+      });
+
+      // Kombiniere BEIDE Listen
+      const allPlayers = [
+        ...playersWithTeams,
+        ...importedPlayersWithTeams
+      ];
+
+      console.log('✅ All players merged:', allPlayers.length, '(registered:', playersWithTeams.length, ', imported:', importedPlayersWithTeams.length, ')');
+      setPlayers(allPlayers);
 
     } catch (error) {
       console.error('Error loading players:', error);
@@ -1015,6 +1061,11 @@ function SuperAdminDashboard() {
                   <p style={{ fontSize: '1.5rem', fontWeight: '700', margin: 0 }}>
                     {stats.totalUsers || 0}
                   </p>
+                  {stats.importedPlayers > 0 && (
+                    <p style={{ fontSize: '0.75rem', color: '#f59e0b', marginTop: '0.25rem' }}>
+                      ⏳ {stats.importedPlayers} warten auf Registrierung
+                    </p>
+                  )}
                   <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
                     Klicken für Details →
                   </p>
@@ -1736,7 +1787,9 @@ function SuperAdminDashboard() {
           <div className="formkurve-header">
             <div className="formkurve-title">👥 Benutzer-Verwaltung</div>
             <div className="formkurve-subtitle">
-              {players.length} Spieler registriert
+              {players.filter(p => p.source === 'registered' && p.is_active).length} Aktiv · 
+              {players.filter(p => p.source === 'imported').length} Wartet auf Registrierung · 
+              {players.length} Gesamt
             </div>
           </div>
           <div className="season-content">
@@ -2027,8 +2080,23 @@ function SuperAdminDashboard() {
                           }}>
                             {/* Spieler Name */}
                             <td style={{ padding: '0.75rem' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                                 <strong>{player.name || 'Unbekannt'}</strong>
+                                
+                                {/* Status-Badge: Registriert vs. Importiert */}
+                                {player.source === 'imported' && (
+                                  <span style={{ 
+                                    fontSize: '0.7rem',
+                                    padding: '0.125rem 0.375rem',
+                                    background: '#fef3c7',
+                                    color: '#92400e',
+                                    borderRadius: '4px',
+                                    fontWeight: '600'
+                                  }}>
+                                    ⏳ Import
+                                  </span>
+                                )}
+                                
                                 {player.is_super_admin && (
                                   <span style={{ 
                                     fontSize: '0.7rem',
@@ -2046,7 +2114,7 @@ function SuperAdminDashboard() {
                             
                             {/* Email */}
                             <td style={{ padding: '0.75rem', color: '#6b7280', fontSize: '0.8rem' }}>
-                              {player.email || '-'}
+                              {player.email || (player.source === 'imported' ? <span style={{ fontStyle: 'italic', color: '#9ca3af' }}>Wartet auf Registrierung</span> : '-')}
                             </td>
                             
                             {/* Telefon */}
@@ -2141,13 +2209,26 @@ function SuperAdminDashboard() {
                               <div style={{ 
                                 padding: '0.25rem 0.5rem',
                                 borderRadius: '6px',
-                                background: teams.length > 0 ? '#dcfce7' : '#fee2e2',
-                                color: teams.length > 0 ? '#15803d' : '#991b1b',
+                                background: player.source === 'imported' 
+                                  ? '#fef3c7'  // Orange für Importiert
+                                  : (player.is_active && teams.length > 0) 
+                                    ? '#dcfce7'  // Grün für Aktiv
+                                    : '#fee2e2', // Rot für Inaktiv
+                                color: player.source === 'imported'
+                                  ? '#92400e'
+                                  : (player.is_active && teams.length > 0)
+                                    ? '#15803d'
+                                    : '#991b1b',
                                 fontWeight: '600',
                                 fontSize: '0.7rem',
                                 display: 'inline-block'
                               }}>
-                                {teams.length > 0 ? '✅ Aktiv' : '⚠️ Kein Team'}
+                                {player.source === 'imported' 
+                                  ? '⏳ Wartet auf Registrierung'
+                                  : (player.is_active && teams.length > 0)
+                                    ? '✅ Aktiv'
+                                    : '⚠️ Inaktiv / Kein Team'
+                                }
                               </div>
                             </td>
                           </tr>

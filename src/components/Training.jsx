@@ -21,6 +21,10 @@ function Training() {
   // Neu: User Teams
   const [userTeams, setUserTeams] = useState([]);
   const [teamMembers, setTeamMembers] = useState([]);
+  const [importedPlayers, setImportedPlayers] = useState([]); // Importierte Spieler (ohne Email)
+  const [importedPlayerEmails, setImportedPlayerEmails] = useState({}); // { playerId: email }
+  const [importedPlayerSearch, setImportedPlayerSearch] = useState(''); // Suchfeld für importierte Spieler
+  const [allImportedPlayers, setAllImportedPlayers] = useState([]); // Alle importierten Spieler (ungefiltered)
   
   // Form State
   const [formData, setFormData] = useState({
@@ -50,55 +54,133 @@ function Training() {
     loadUserTeams();
   }, [player]);
 
+  // Lade importierte Spieler beim Öffnen des Formulars (für Privat-Training)
+  useEffect(() => {
+    if (showCreateForm && formData.type === 'private') {
+      // Lade ALLE importierten Spieler (clubübergreifend)
+      console.log('🔍 Loading ALL imported players (club-wide)');
+      loadImportedPlayersForPrivateTraining();
+    }
+  }, [showCreateForm, formData.type]);
+
+  // Filter importierte Spieler basierend auf Suche
+  useEffect(() => {
+    if (!importedPlayerSearch.trim()) {
+      setImportedPlayers([]);
+      return;
+    }
+
+    const searchLower = importedPlayerSearch.toLowerCase();
+    const filtered = allImportedPlayers.filter(ip => 
+      ip.name.toLowerCase().includes(searchLower)
+    );
+
+    console.log(`🔍 Filtered ${filtered.length} imported players for search: "${importedPlayerSearch}"`);
+    setImportedPlayers(filtered);
+  }, [importedPlayerSearch, allImportedPlayers]);
+
   // Lade Teams des Users
   const loadUserTeams = async () => {
     if (!player) return;
     
     try {
+      console.log('🔍 Loading teams for player:', player.id);
+      
       const { data, error } = await supabase
         .from('player_teams')
         .select(`
           *,
-          team:team_id (
+          team_info!inner (
             id,
-            teamName,
-            clubName,
-            category,
-            league
+            team_name,
+            club_name,
+            category
           )
         `)
         .eq('player_id', player.id);
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Error loading user teams:', error);
+        throw error;
+      }
+
+      console.log('📊 Raw player_teams data:', data);
+
+      if (!data || data.length === 0) {
+        console.warn('⚠️ No teams found for player');
+        setUserTeams([]);
+        return;
+      }
 
       const teams = data.map(pt => ({
-        id: pt.team.id,
-        name: pt.team.team_name || pt.team.teamName, // snake_case oder camelCase
-        club: pt.team.club_name || pt.team.clubName,
-        category: pt.team.category,
-        league: pt.team.league,
+        id: pt.team_info.id,
+        name: pt.team_info.team_name,
+        club: pt.team_info.club_name,
+        category: pt.team_info.category,
         isPrimary: pt.is_primary
       }));
 
+      console.log('✅ User teams loaded:', teams);
       setUserTeams(teams);
 
       // Setze primäres Team als Default
       const primaryTeam = teams.find(t => t.isPrimary);
       if (primaryTeam && !formData.teamId) {
+        console.log('🎯 Setting primary team as default:', primaryTeam.id);
         setFormData(prev => ({ ...prev, teamId: primaryTeam.id }));
         loadTeamMembers(primaryTeam.id);
       }
     } catch (error) {
-      console.error('Error loading user teams:', error);
+      console.error('❌ Fatal error loading user teams:', error);
     }
   };
 
-  // Lade Team-Mitglieder
+  // Lade ALLE importierten Spieler (clubübergreifend für Privat-Training)
+  const loadImportedPlayersForPrivateTraining = async () => {
+    try {
+      console.log('🔍 Querying ALL imported_players (no team filter)');
+      
+      const { data, error } = await supabase
+        .from('imported_players')
+        .select('id, name, import_lk, team_id')
+        .eq('status', 'pending')
+        .order('name', { ascending: true });
+
+      if (error) {
+        console.warn('⚠️ Could not load imported players:', error);
+        setImportedPlayers([]);
+        return;
+      }
+
+      console.log('📊 Raw imported_players data:', data);
+
+      const importedMembers = (data || []).map(ip => ({
+        id: ip.id,
+        name: ip.name,
+        email: null,
+        currentLk: ip.import_lk,
+        teamId: ip.team_id, // Behalte team_id für Info
+        source: 'imported'
+      }));
+
+      console.log('✅ Imported players loaded for private training:', importedMembers.length, importedMembers);
+      setAllImportedPlayers(importedMembers); // Speichere ALLE für Suche
+      setImportedPlayers([]); // Zeige zunächst keine an (erst bei Suche)
+
+    } catch (error) {
+      console.error('❌ Error loading imported players:', error);
+      setAllImportedPlayers([]);
+      setImportedPlayers([]);
+    }
+  };
+
+  // Lade Team-Mitglieder (registriert UND importiert)
   const loadTeamMembers = async (teamId) => {
     if (!teamId) return;
     
     try {
-      const { data, error } = await supabase
+      // 1. Registrierte Spieler (mit Email)
+      const { data: registeredData, error: registeredError } = await supabase
         .from('player_teams')
         .select(`
           *,
@@ -111,18 +193,43 @@ function Training() {
         `)
         .eq('team_id', teamId);
 
-      if (error) throw error;
+      if (registeredError) throw registeredError;
 
-      const members = data.map(pt => ({
+      const registeredMembers = registeredData.map(pt => ({
         id: pt.player.id,
         name: pt.player.name,
         email: pt.player.email,
         currentLk: pt.player.current_lk,
         isPrimary: pt.is_primary,
-        role: pt.role
+        role: pt.role,
+        source: 'registered'
       }));
 
-      setTeamMembers(members);
+      setTeamMembers(registeredMembers);
+
+      // 2. Importierte Spieler (OHNE Email, warten auf Registrierung)
+      const { data: importedData, error: importedError } = await supabase
+        .from('imported_players')
+        .select('id, name, import_lk, team_id')
+        .eq('team_id', teamId)
+        .eq('status', 'pending');
+
+      if (importedError) {
+        console.warn('⚠️ Could not load imported players:', importedError);
+        setImportedPlayers([]);
+        return;
+      }
+
+      const importedMembers = (importedData || []).map(ip => ({
+        id: ip.id,
+        name: ip.name,
+        email: null, // Noch keine Email
+        currentLk: ip.import_lk,
+        source: 'imported'
+      }));
+
+      setImportedPlayers(importedMembers);
+
     } catch (error) {
       console.error('Error loading team members:', error);
     }
@@ -1236,10 +1343,10 @@ function Training() {
                     Mitspieler einladen
                   </label>
                   
-                  {/* Interne Spieler (aus DB) */}
+                  {/* Interne Spieler (aus DB) - REGISTRIERT */}
                   <div style={{ marginBottom: '1rem' }}>
                     <div style={{ fontSize: '0.85rem', color: '#6b7280', marginBottom: '0.5rem' }}>
-                      Aus deinem Team:
+                      Aus deinem Team (registriert):
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', maxHeight: '200px', overflow: 'auto', padding: '0.5rem', background: '#f8fafc', borderRadius: '8px' }}>
                       {players.filter(p => p.is_active && p.id !== player?.id).map(p => (
@@ -1271,6 +1378,107 @@ function Training() {
                         </button>
                       ))}
                     </div>
+                  </div>
+
+                  {/* Importierte Spieler (OHNE Email) mit Suche */}
+                  <div style={{ marginBottom: '1rem' }}>
+                    <div style={{ fontSize: '0.85rem', color: '#f59e0b', marginBottom: '0.5rem', fontWeight: '600' }}>
+                      ⏳ Weitere Spieler suchen (warten auf Registrierung):
+                    </div>
+                    
+                    {/* Suchfeld */}
+                    <input
+                      type="text"
+                      placeholder="Name eingeben zum Suchen..."
+                      value={importedPlayerSearch}
+                      onChange={(e) => setImportedPlayerSearch(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '0.5rem',
+                        border: '2px solid #f59e0b',
+                        borderRadius: '6px',
+                        fontSize: '0.85rem',
+                        marginBottom: '0.5rem'
+                      }}
+                    />
+
+                    {/* Gefundene Spieler */}
+                    {importedPlayerSearch && (
+                      <>
+                        {importedPlayers.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '200px', overflow: 'auto', padding: '0.5rem', background: '#fef3c7', borderRadius: '8px', border: '1px solid #f59e0b' }}>
+                        {importedPlayers.map(ip => {
+                          const isSelected = formData.invitedPlayers.includes(ip.id);
+                          const hasEmail = importedPlayerEmails[ip.id];
+
+                          return (
+                            <div key={ip.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem', background: isSelected ? '#10b981' : 'white', borderRadius: '6px', border: isSelected ? 'none' : '1px solid #e2e8f0' }}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    invitedPlayers: prev.invitedPlayers.includes(ip.id)
+                                      ? prev.invitedPlayers.filter(id => id !== ip.id)
+                                      : [...prev.invitedPlayers, ip.id]
+                                  }));
+                                }}
+                                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                              />
+                              <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: '600', color: isSelected ? 'white' : '#374151' }}>
+                                {ip.name} {ip.currentLk && `(LK ${ip.currentLk})`}
+                              </span>
+                              {isSelected && (
+                                <input
+                                  type="email"
+                                  placeholder="Email eingeben..."
+                                  value={importedPlayerEmails[ip.id] || ''}
+                                  onChange={(e) => setImportedPlayerEmails(prev => ({ ...prev, [ip.id]: e.target.value }))}
+                                  onClick={(e) => e.stopPropagation()}
+                                  style={{
+                                    padding: '0.25rem 0.5rem',
+                                    border: '1px solid white',
+                                    borderRadius: '4px',
+                                    fontSize: '0.75rem',
+                                    width: '180px'
+                                  }}
+                                  required={isSelected}
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                        ) : (
+                          <div style={{ 
+                            padding: '1rem', 
+                            background: '#fef3c7', 
+                            borderRadius: '8px', 
+                            border: '1px solid #f59e0b',
+                            textAlign: 'center',
+                            color: '#92400e',
+                            fontSize: '0.85rem'
+                          }}>
+                            🔍 Keine Spieler gefunden für "{importedPlayerSearch}"
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* Info-Text */}
+                    {importedPlayers.length > 0 && (
+                      <div style={{ fontSize: '0.75rem', color: '#92400e', marginTop: '0.5rem', fontStyle: 'italic' }}>
+                        💡 Diese Spieler haben noch kein Konto. Du kannst ihnen manuell eine Einladung per Email schicken.
+                      </div>
+                    )}
+
+                    {/* Hinweis wenn keine Suche */}
+                    {!importedPlayerSearch && allImportedPlayers.length > 0 && (
+                      <div style={{ fontSize: '0.75rem', color: '#92400e', fontStyle: 'italic' }}>
+                        💡 {allImportedPlayers.length} Spieler verfügbar. Gib einen Namen ein, um zu suchen.
+                      </div>
+                    )}
                   </div>
 
                   {/* Externe Spieler */}

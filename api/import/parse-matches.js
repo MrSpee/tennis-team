@@ -237,11 +237,12 @@ module.exports = async function handler(req, res) {
       total: completion.usage.total_tokens
     });
 
-    // Validierung: Mindestens 1 Match gefunden?
-    if (!result.matches || result.matches.length === 0) {
+    // Validierung: Mindestens Matches ODER Spieler gefunden?
+    if ((!result.matches || result.matches.length === 0) && 
+        (!result.players || result.players.length === 0)) {
       return res.status(400).json({
-        error: 'Keine Matches im Text gefunden. Bitte überprüfe das Format.',
-        details: 'Der Text scheint keine erkennbaren Match-Informationen zu enthalten.',
+        error: 'Keine Matches oder Spieler im Text gefunden. Bitte überprüfe das Format.',
+        details: 'Der Text scheint keine erkennbaren Match- oder Spieler-Informationen zu enthalten.',
         ...corsHeaders
       });
     }
@@ -251,7 +252,7 @@ module.exports = async function handler(req, res) {
       success: true,
       data: {
         team_info: result.team_info || null,
-        matches: result.matches,
+        matches: result.matches || [],
         players: result.players || [],
         season: result.season,
         metadata: {

@@ -11,6 +11,10 @@ const ImportTab = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [parsedData, setParsedData] = useState(null);
   const [selectedMatches, setSelectedMatches] = useState([]);
+  const [selectedPlayers, setSelectedPlayers] = useState([]);
+  const [playerMatchResults, setPlayerMatchResults] = useState([]); // Fuzzy matching results
+  const [clubSuggestions, setClubSuggestions] = useState(null); // Für Club-Matching Modal
+  const [pendingTeamInfo, setPendingTeamInfo] = useState(null); // Wartet auf Club-Bestätigung
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
   const [importStats, setImportStats] = useState(null);
@@ -18,6 +22,8 @@ const ImportTab = () => {
   // Team auswählen (später aus Context/Props)
   const [selectedTeamId, setSelectedTeamId] = useState(null);
   const [teams, setTeams] = useState([]);
+  const [allTeams, setAllTeams] = useState([]); // Alle Teams für manuelle Auswahl
+  const [manualTeamId, setManualTeamId] = useState(null); // Manuell ausgewähltes Team für Spieler-Import
 
   // Lade Teams beim Mount
   useEffect(() => {
@@ -28,6 +34,7 @@ const ImportTab = () => {
     if (!player?.id) return;
 
     try {
+      // Lade User-Teams
       const { data, error } = await supabase
         .from('player_teams')
         .select(`
@@ -58,6 +65,25 @@ const ImportTab = () => {
       if (primaryTeam) {
         setSelectedTeamId(primaryTeam.id);
       }
+
+      // Lade ALLE Teams (für manuelle Auswahl beim Spieler-Import)
+      const { data: allTeamsData, error: allTeamsError } = await supabase
+        .from('team_info')
+        .select('id, team_name, club_name, category')
+        .order('club_name', { ascending: true });
+
+      if (allTeamsError) throw allTeamsError;
+
+      const formattedAllTeams = allTeamsData.map(t => ({
+        id: t.id,
+        name: `${t.club_name} ${t.team_name || ''} (${t.category})`,
+        club_name: t.club_name,
+        team_name: t.team_name,
+        category: t.category
+      }));
+
+      setAllTeams(formattedAllTeams);
+
     } catch (err) {
       console.error('Error loading teams:', err);
     }
@@ -103,15 +129,36 @@ const ImportTab = () => {
       // Setze geparste Daten
       setParsedData(result.data);
       
-      // Alle Matches standardmäßig auswählen
-      setSelectedMatches(result.data.matches.map((_, idx) => idx));
-      
-      let successMsg = `${result.data.matches.length} Match(es) erfolgreich erkannt!`;
-      if (result.data.team_info) {
-        successMsg += `\n🎾 Team: ${result.data.team_info.club_name}`;
+      // Auto-Select: Alle Matches
+      if (result.data.matches?.length > 0) {
+        setSelectedMatches(result.data.matches.map((_, idx) => idx));
       }
-      if (result.data.players && result.data.players.length > 0) {
-        successMsg += `\n👥 ${result.data.players.length} Spieler erkannt`;
+      
+      // Spieler: Fuzzy-Matching durchführen
+      if (result.data.players?.length > 0) {
+        console.log('🔍 Performing player fuzzy-matching...');
+        const matchResults = await performPlayerMatching(result.data.players);
+        setPlayerMatchResults(matchResults);
+        
+        // Nur NEUE Spieler standardmäßig auswählen
+        const newPlayerIndices = matchResults
+          .map((r, idx) => r.status === 'new' ? idx : null)
+          .filter(idx => idx !== null);
+        setSelectedPlayers(newPlayerIndices);
+      }
+      
+      // Erfolgs-Nachricht (zeigt alles was erkannt wurde)
+      let successMsg = '🎉 KI-Analyse erfolgreich!\n\n';
+      if (result.data.team_info) {
+        successMsg += `🎾 Team: ${result.data.team_info.club_name}`;
+        if (result.data.team_info.team_name) successMsg += ` - ${result.data.team_info.team_name}`;
+        successMsg += '\n';
+      }
+      if (result.data.matches?.length > 0) {
+        successMsg += `📅 ${result.data.matches.length} Match(es) erkannt\n`;
+      }
+      if (result.data.players?.length > 0) {
+        successMsg += `👥 ${result.data.players.length} Spieler erkannt\n`;
       }
       setSuccessMessage(successMsg);
 
@@ -174,20 +221,16 @@ const ImportTab = () => {
         return;
       }
 
-      // SCHRITT 3: Formatiere für Supabase
+      // SCHRITT 3: Formatiere für Supabase (NUR existierende Spalten!)
       const formattedMatches = uniqueMatches.map(match => ({
         team_id: teamId,
-        match_date: match.match_date,
-        start_time: match.start_time || null,
+        match_date: match.match_date + ' ' + (match.start_time || '00:00:00'),
         opponent: match.opponent,
-        is_home_match: match.is_home_match,
+        location: match.is_home_match ? 'heim' : 'auswärts',
         venue: match.venue || null,
-        address: match.address || null,
-        league: parsedData.team_info?.league || null,
-        group_name: null,
-        season: parsedData.season || '2025/26',
-        status: 'scheduled',
-        notes: match.notes || null
+        season: parsedData.season?.toLowerCase().includes('winter') ? 'winter' : 'summer',
+        players_needed: 4,
+        created_by: player?.id || null
       }));
 
       // Insert in Supabase
@@ -258,12 +301,23 @@ const ImportTab = () => {
         console.log('✅ Team found in team_info:', existingTeam.id);
         teamId = existingTeam.id;
       } else {
-        // SCHRITT 2: Team existiert nicht → ERSTELLE es
-        console.log('⚠️ Team not found, creating new team in team_info...');
+        // SCHRITT 2: Team existiert nicht → Finde/Erstelle Verein zuerst!
+        console.log('⚠️ Team not found, finding/creating club first...');
+        
+        // 2a. SMART CLUB MATCHING mit Fuzzy-Search
+        let clubId = await findOrSuggestClub(teamInfo.club_name, season);
+        
+        if (!clubId) {
+          throw new Error('Club-Matching abgebrochen oder fehlgeschlagen.');
+        }
+
+        // 2c. Jetzt Team erstellen mit club_id
+        console.log('📝 Creating team with club_id:', clubId);
         
         const { data: newTeam, error: insertError } = await supabase
           .from('team_info')
           .insert({
+            club_id: clubId,
             club_name: teamInfo.club_name,
             team_name: teamInfo.team_name || null,
             category: teamInfo.category || 'Herren',
@@ -369,6 +423,394 @@ const ImportTab = () => {
   };
 
   /**
+   * Spieler-Import mit Fuzzy-Matching
+   */
+  const handleImportPlayers = async () => {
+    if (!parsedData?.players || selectedPlayers.length === 0) {
+      setError('Keine Spieler zum Importieren ausgewählt.');
+      return;
+    }
+
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      // SCHRITT 1: Team ermitteln (automatisch oder manuell)
+      let teamId = null;
+
+      if (parsedData?.team_info) {
+        // Automatisch aus geparsten Daten
+        teamId = await findOrCreateTeam(parsedData.team_info, parsedData.season);
+        console.log('🎯 Team ID (automatisch ermittelt):', teamId);
+      } else if (manualTeamId) {
+        // Manuell ausgewählt
+        teamId = manualTeamId;
+        console.log('🎯 Team ID (manuell ausgewählt):', teamId);
+      } else {
+        // Kein Team → Import OHNE Team-Zuordnung (erlaubt!)
+        console.log('ℹ️ Spieler werden ohne Team-Zuordnung importiert');
+      }
+
+      // SCHRITT 2: Für jeden ausgewählten Spieler
+      const playersToImport = selectedPlayers.map(idx => ({
+        ...parsedData.players[idx],
+        matchResult: playerMatchResults[idx]
+      }));
+
+      let created = 0;
+      let updated = 0;
+      let skipped = 0;
+
+      for (const playerData of playersToImport) {
+        const matchResult = playerData.matchResult;
+
+        // FALL 1: Existierender Spieler (exakte Übereinstimmung)
+        if (matchResult?.status === 'exact' && matchResult.playerId) {
+          console.log('✅ Updating existing player:', playerData.name);
+          
+          // Update LK wenn sich geändert hat
+          const { error: updateError } = await supabase
+            .from('players')
+            .update({
+              current_lk: playerData.lk || null,
+              last_lk_update: new Date().toISOString()
+            })
+            .eq('id', matchResult.playerId);
+
+          if (updateError) {
+            console.error('❌ Error updating player:', updateError);
+            skipped++;
+          } else {
+            updated++;
+            
+            // Verknüpfe mit Team (falls noch nicht)
+            await linkPlayerToTeam(matchResult.playerId, teamId, playerData.is_captain);
+          }
+          continue;
+        }
+
+        // FALL 2: Neuer Spieler → imported_players (OHNE user_id!)
+        console.log('🆕 Creating imported player:', playerData.name);
+        
+        const { data: newImportedPlayer, error: insertError } = await supabase
+          .from('imported_players')
+          .insert({
+            name: playerData.name,
+            import_lk: playerData.lk || null, // Import-LK (Saison-Start)
+            tvm_id_number: playerData.id_number || null,
+            team_id: teamId || null, // NULL erlaubt (kein Team)
+            position: playerData.position || null,
+            is_captain: playerData.is_captain || false,
+            status: 'pending',
+            imported_by: player?.user_id || null
+          })
+          .select('id')
+          .single();
+
+        if (insertError) {
+          console.error('❌ Error creating imported player:', insertError);
+          skipped++;
+        } else {
+          created++;
+          console.log('✅ Imported player created (will be linked during onboarding)');
+        }
+      }
+
+      setImportStats({
+        total: playersToImport.length,
+        created,
+        updated,
+        skipped
+      });
+
+      setSuccessMessage(
+        `🎉 Spieler-Import erfolgreich!\n\n` +
+        `🆕 ${created} neue Spieler erstellt\n` +
+        `🔄 ${updated} Spieler aktualisiert\n` +
+        `⏭️ ${skipped} übersprungen`
+      );
+
+      // Reset
+      setInputText('');
+      setParsedData(null);
+      setSelectedPlayers([]);
+      setPlayerMatchResults([]);
+
+    } catch (err) {
+      console.error('❌ Spieler-Import error:', err);
+      setError(err.message || 'Fehler beim Importieren der Spieler');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  /**
+   * SMART CLUB MATCHING: Finde Verein mit Fuzzy-Matching
+   * Berücksichtigt Schreibfehler, Abkürzungen, etc.
+   */
+  const findOrSuggestClub = async (clubName) => {
+    try {
+      console.log('🔍 Smart Club Matching for:', clubName);
+      
+      // 1. Exakte Übereinstimmung
+      const { data: exactMatch, error: exactError } = await supabase
+        .from('club_info')
+        .select('id, name, city')
+        .eq('name', clubName)
+        .maybeSingle();
+
+      if (exactError && exactError.code !== 'PGRST116') {
+        throw exactError;
+      }
+
+      if (exactMatch) {
+        console.log('✅ Exact club match:', exactMatch.name);
+        return exactMatch.id;
+      }
+
+      // 2. Fuzzy-Matching mit allen Vereinen
+      const { data: allClubs, error: clubsError } = await supabase
+        .from('club_info')
+        .select('id, name, city, region');
+
+      if (clubsError) throw clubsError;
+
+      // Berechne Similarity für alle Clubs
+      const matches = allClubs
+        .map(club => ({
+          ...club,
+          similarity: calculateClubSimilarity(clubName, club.name),
+          nameMatch: calculateSimilarity(clubName, club.name)
+        }))
+        .sort((a, b) => b.similarity - a.similarity);
+
+      const bestMatch = matches[0];
+      const confidence = Math.round(bestMatch.similarity * 100);
+
+      console.log('🎯 Best match:', bestMatch.name, 'Confidence:', confidence + '%');
+
+      // 3. Hohe Confidence (>95%) → Automatisch verwenden
+      if (confidence >= 95) {
+        console.log('✅ High confidence match, using automatically');
+        return bestMatch.id;
+      }
+
+      // 4. Mittlere Confidence (70-94%) → Nutzer fragen
+      if (confidence >= 70) {
+        console.log('⚠️ Medium confidence, asking user...');
+        
+        return new Promise((resolve) => {
+          setClubSuggestions({
+            searchTerm: clubName,
+            suggestions: matches.slice(0, 3),
+            onConfirm: (clubId) => {
+              setClubSuggestions(null);
+              resolve(clubId);
+            },
+            onCancel: () => {
+              setClubSuggestions(null);
+              resolve(null);
+            }
+          });
+        });
+      }
+
+      // 5. Niedrige Confidence (<70%) → Verein fehlt
+      throw new Error(
+        `❌ Verein "${clubName}" nicht gefunden!\n\n` +
+        `Ähnlichste Vereine in der DB:\n` +
+        matches.slice(0, 3).map((m, i) => `${i + 1}. ${m.name} (${Math.round(m.similarity * 100)}%)`).join('\n') +
+        `\n\nBitte lege den Verein im "🏢 Vereine" Tab an.`
+      );
+
+    } catch (err) {
+      console.error('❌ Error in findOrSuggestClub:', err);
+      throw err;
+    }
+  };
+
+  /**
+   * Erweiterte Club-Similarity (berücksichtigt Abkürzungen, etc.)
+   */
+  const calculateClubSimilarity = (search, clubName) => {
+    const s1 = search.toLowerCase().trim();
+    const s2 = clubName.toLowerCase().trim();
+    
+    // Exakte Übereinstimmung
+    if (s1 === s2) return 1.0;
+    
+    // Substring-Match (z.B. "VKC Köln" in "VKC Köln e.V.")
+    if (s2.includes(s1) || s1.includes(s2)) return 0.95;
+    
+    // Entferne häufige Suffixe
+    const cleanS1 = s1.replace(/\s*(e\.?v\.?|tennis|tc|sv|tg|thc|gg)\s*/gi, ' ').trim();
+    const cleanS2 = s2.replace(/\s*(e\.?v\.?|tennis|tc|sv|tg|thc|gg)\s*/gi, ' ').trim();
+    
+    if (cleanS1 === cleanS2) return 0.9;
+    
+    // Levenshtein Distance
+    return calculateSimilarity(s1, s2);
+  };
+
+  /**
+   * Verknüpfe Spieler mit Team
+   */
+  const linkPlayerToTeam = async (playerId, teamId, isCaptain) => {
+    try {
+      // Prüfe ob Verknüpfung schon existiert
+      const { data: existing } = await supabase
+        .from('player_teams')
+        .select('id')
+        .eq('player_id', playerId)
+        .eq('team_id', teamId)
+        .maybeSingle();
+
+      if (existing) {
+        console.log('ℹ️ Player already linked to team');
+        return;
+      }
+
+      // Erstelle Verknüpfung
+      await supabase
+        .from('player_teams')
+        .insert({
+          player_id: playerId,
+          team_id: teamId,
+          role: isCaptain ? 'captain' : 'player',
+          is_primary: false // Nur wenn explizit gewünscht
+        });
+
+      console.log('✅ Player linked to team');
+    } catch (err) {
+      console.error('⚠️ Error linking player to team:', err);
+    }
+  };
+
+  /**
+   * Fuzzy-Matching für Spieler (prüft players UND imported_players)
+   */
+  const performPlayerMatching = async (players) => {
+    if (!players || players.length === 0) return [];
+
+    try {
+      // Lade BEIDE: registrierte Spieler UND importierte Spieler
+      const [
+        { data: registeredPlayers, error: playersError },
+        { data: importedPlayers, error: importedError }
+      ] = await Promise.all([
+        supabase.from('players').select('id, name, current_lk'),
+        supabase.from('imported_players').select('id, name, import_lk').eq('status', 'pending')
+      ]);
+
+      if (playersError) throw playersError;
+      if (importedError) console.warn('⚠️ Could not load imported_players:', importedError);
+
+      // Kombiniere beide Listen (normalisiere LK-Feld-Namen)
+      const existingPlayers = [
+        ...(registeredPlayers || []).map(p => ({ ...p, lk: p.current_lk, source: 'players' })),
+        ...(importedPlayers || []).map(p => ({ ...p, lk: p.import_lk, source: 'imported' }))
+      ];
+
+      // Für jeden importierten Spieler: Fuzzy-Match
+      const matchResults = players.map(importPlayer => {
+        // Exakte Übereinstimmung (Name)
+        const exactMatch = existingPlayers.find(
+          p => p.name.toLowerCase() === importPlayer.name.toLowerCase()
+        );
+
+        if (exactMatch) {
+          return {
+            status: 'exact',
+            playerId: exactMatch.id,
+            existingName: exactMatch.name,
+            existingLk: exactMatch.current_lk,
+            confidence: 100
+          };
+        }
+
+        // Fuzzy Match (ähnliche Namen)
+        const fuzzyMatches = existingPlayers
+          .map(p => ({
+            player: p,
+            similarity: calculateSimilarity(importPlayer.name, p.name)
+          }))
+          .filter(m => m.similarity > 0.7)
+          .sort((a, b) => b.similarity - a.similarity);
+
+        if (fuzzyMatches.length > 0) {
+          return {
+            status: 'fuzzy',
+            playerId: fuzzyMatches[0].player.id,
+            existingName: fuzzyMatches[0].player.name,
+            existingLk: fuzzyMatches[0].player.current_lk,
+            confidence: Math.round(fuzzyMatches[0].similarity * 100),
+            alternatives: fuzzyMatches.slice(1, 3)
+          };
+        }
+
+        // Kein Match
+        return {
+          status: 'new',
+          playerId: null,
+          confidence: 0
+        };
+      });
+
+      return matchResults;
+    } catch (err) {
+      console.error('Error performing fuzzy matching:', err);
+      return [];
+    }
+  };
+
+  /**
+   * Einfache String-Similarity (Levenshtein Distance)
+   */
+  const calculateSimilarity = (str1, str2) => {
+    const s1 = str1.toLowerCase();
+    const s2 = str2.toLowerCase();
+    
+    if (s1 === s2) return 1;
+    
+    const len1 = s1.length;
+    const len2 = s2.length;
+    const maxLen = Math.max(len1, len2);
+    
+    if (maxLen === 0) return 1;
+    
+    const distance = levenshteinDistance(s1, s2);
+    return 1 - (distance / maxLen);
+  };
+
+  const levenshteinDistance = (str1, str2) => {
+    const matrix = [];
+    
+    for (let i = 0; i <= str2.length; i++) {
+      matrix[i] = [i];
+    }
+    
+    for (let j = 0; j <= str1.length; j++) {
+      matrix[0][j] = j;
+    }
+    
+    for (let i = 1; i <= str2.length; i++) {
+      for (let j = 1; j <= str1.length; j++) {
+        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+          matrix[i][j] = matrix[i - 1][j - 1];
+        } else {
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j - 1] + 1,
+            matrix[i][j - 1] + 1,
+            matrix[i - 1][j] + 1
+          );
+        }
+      }
+    }
+    
+    return matrix[str2.length][str1.length];
+  };
+
+  /**
    * Beispiel-Text einfügen (für Testing)
    */
   const insertExampleText = () => {
@@ -384,6 +826,15 @@ Kliemt Mathias (-)
 Herren 50 2. Bezirksliga Gr. 054
 Herren 50 1 (4er)
 
+Meldeliste:
+Position	Mannschaft	Name	LK	ID-Nr.	Info	MF	Nation
+1	1	Gregor Kaul	6.8	17160158			GER
+2	1	Hubertus von Henninges	8.2	17403842			GER
+3	1	Gary Meuser	10.4	17104633			GER
+4	1	Mathias Kliemt	13.7	17282054		MF	GER
+5	2	Michael Kostka	14.6	16902597			GER
+
+Spielplan:
 Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele	
 11.10.2025, 18:00	Cologne Sportspark	VKC Köln 1	TG Leverkusen 2	0:0	0:0	0:0	offen
 29.11.2025, 18:00	KölnerTHC Stadion RW	KölnerTHC Stadion RW 2	VKC Köln 1	0:0	0:0	0:0	offen
@@ -393,8 +844,8 @@ Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele
   return (
     <div className="import-tab">
       <div className="import-header">
-        <h2>🤖 KI-gestützter Match-Import</h2>
-        <p>Kopiere TVM-Meldelisten hier rein und lass die KI die Matches automatisch extrahieren.</p>
+        <h2>🤖 Universeller KI-Import</h2>
+        <p>Kopiere TVM-Daten hier rein - die KI erkennt automatisch Matches, Spieler & Teams!</p>
       </div>
 
       {/* Team-Info wird automatisch erkannt */}
@@ -487,7 +938,7 @@ Die KI erkennt automatisch:
       )}
 
       {/* Parsed Matches Vorschau */}
-      {parsedData && (
+      {parsedData && parsedData.matches && parsedData.matches.length > 0 && (
         <div className="import-section">
           <div className="preview-header">
             <h3>🎯 Erkannte Matches ({parsedData.matches.length})</h3>
@@ -588,6 +1039,146 @@ Die KI erkennt automatisch:
         </div>
       )}
 
+      {/* Parsed Players Vorschau */}
+      {parsedData && parsedData.players && parsedData.players.length > 0 && (
+        <div className="import-section">
+          <div className="preview-header">
+            <h3>👥 Erkannte Spieler ({parsedData.players.length})</h3>
+            <div className="preview-meta">
+              {parsedData.season && <span className="meta-badge">📅 {parsedData.season}</span>}
+              <span className="meta-badge">💰 {parsedData.metadata.cost_estimate}</span>
+            </div>
+          </div>
+
+          {/* Manuelle Team-Auswahl (falls keine Team-Info erkannt) */}
+          {!parsedData.team_info && (
+            <div style={{ 
+              padding: '1rem', 
+              background: '#fef3c7', 
+              border: '1px solid #f59e0b', 
+              borderRadius: '8px',
+              marginBottom: '1rem'
+            }}>
+              <div style={{ fontSize: '0.9rem', fontWeight: '600', marginBottom: '0.5rem', color: '#92400e' }}>
+                ⚠️ Keine Team-Informationen erkannt
+              </div>
+              <div style={{ fontSize: '0.85rem', color: '#78350f', marginBottom: '0.75rem' }}>
+                Wähle optional ein Team aus, dem die Spieler zugeordnet werden sollen. 
+                Du kannst Spieler auch ohne Team importieren.
+              </div>
+              <select
+                value={manualTeamId || ''}
+                onChange={(e) => setManualTeamId(e.target.value || null)}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem',
+                  border: '1px solid #f59e0b',
+                  borderRadius: '6px',
+                  fontSize: '0.875rem',
+                  background: 'white'
+                }}
+              >
+                <option value="">🚫 Kein Team (Spieler ohne Zuordnung)</option>
+                {allTeams.map(team => (
+                  <option key={team.id} value={team.id}>
+                    {team.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="players-preview">
+            {parsedData.players.map((player, idx) => {
+              const matchResult = playerMatchResults[idx] || { status: 'new' };
+              
+              return (
+                <div 
+                  key={idx}
+                  className={`player-card ${selectedPlayers.includes(idx) ? 'selected' : ''} ${matchResult.status}`}
+                  onClick={() => {
+                    setSelectedPlayers(prev => 
+                      prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]
+                    );
+                  }}
+                >
+                  <div className="match-checkbox">
+                    <input 
+                      type="checkbox"
+                      checked={selectedPlayers.includes(idx)}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        setSelectedPlayers(prev => 
+                          prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]
+                        );
+                      }}
+                    />
+                  </div>
+                  
+                  <div className="player-details">
+                    <div className="player-header">
+                      <strong className="player-name">{player.name}</strong>
+                      <span className={`player-status-badge ${matchResult.status}`}>
+                        {matchResult.status === 'exact' && `✅ Existiert (${matchResult.confidence}%)`}
+                        {matchResult.status === 'fuzzy' && `⚠️ Ähnlich (${matchResult.confidence}%)`}
+                        {matchResult.status === 'new' && '🆕 Neu'}
+                      </span>
+                    </div>
+                    
+                    <div className="player-info">
+                      <span className="player-lk">🏆 LK {player.lk}</span>
+                      <span className="player-position">📍 Pos. {player.position}</span>
+                      {player.is_captain && <span className="captain-badge">👑 MF</span>}
+                      <span className="player-id">🆔 {player.id_number}</span>
+                    </div>
+                    
+                    {/* Existing Player Info */}
+                    {matchResult.status !== 'new' && matchResult.existingName && (
+                      <div className="existing-player-info">
+                        <div style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                          💾 <strong>Existierender Spieler:</strong> {matchResult.existingName}
+                          {matchResult.existingLk && ` (LK ${matchResult.existingLk})`}
+                        </div>
+                        {player.lk !== matchResult.existingLk && (
+                          <div style={{ fontSize: '0.8rem', color: '#f59e0b', marginTop: '0.25rem' }}>
+                            ⚡ LK-Update: {matchResult.existingLk} → {player.lk}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="import-actions">
+            <button
+              onClick={handleImportPlayers}
+              disabled={selectedPlayers.length === 0 || isProcessing}
+              className="btn-import"
+            >
+              {isProcessing 
+                ? '⏳ Importiere...' 
+                : `👥 ${selectedPlayers.length} Spieler importieren`
+              }
+            </button>
+            
+            <button
+              onClick={() => {
+                setParsedData(null);
+                setSelectedPlayers([]);
+                setPlayerMatchResults([]);
+              }}
+              className="btn-cancel"
+              type="button"
+            >
+              ❌ Abbrechen
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Import Stats */}
       {importStats && (
         <div className="import-stats">
@@ -597,14 +1188,36 @@ Die KI erkennt automatisch:
               <span className="stat-label">Gesamt:</span>
               <span className="stat-value">{importStats.total}</span>
             </div>
-            <div className="stat-item success">
-              <span className="stat-label">Importiert:</span>
-              <span className="stat-value">✅ {importStats.imported}</span>
-            </div>
-            <div className="stat-item warning">
-              <span className="stat-label">Duplikate:</span>
-              <span className="stat-value">⏭️ {importStats.duplicates}</span>
-            </div>
+            {importStats.imported !== undefined && (
+              <div className="stat-item success">
+                <span className="stat-label">Importiert:</span>
+                <span className="stat-value">✅ {importStats.imported}</span>
+              </div>
+            )}
+            {importStats.created !== undefined && (
+              <div className="stat-item success">
+                <span className="stat-label">Erstellt:</span>
+                <span className="stat-value">🆕 {importStats.created}</span>
+              </div>
+            )}
+            {importStats.updated !== undefined && (
+              <div className="stat-item info">
+                <span className="stat-label">Aktualisiert:</span>
+                <span className="stat-value">🔄 {importStats.updated}</span>
+              </div>
+            )}
+            {importStats.duplicates !== undefined && (
+              <div className="stat-item warning">
+                <span className="stat-label">Duplikate:</span>
+                <span className="stat-value">⏭️ {importStats.duplicates}</span>
+              </div>
+            )}
+            {importStats.skipped !== undefined && (
+              <div className="stat-item warning">
+                <span className="stat-label">Übersprungen:</span>
+                <span className="stat-value">⏭️ {importStats.skipped}</span>
+              </div>
+            )}
             <div className="stat-item info">
               <span className="stat-label">Kosten:</span>
               <span className="stat-value">💰 {importStats.cost}</span>
@@ -615,15 +1228,72 @@ Die KI erkennt automatisch:
 
       {/* Info Box */}
       <div className="import-info">
-        <h4>ℹ️ Hinweise</h4>
+        <h4>ℹ️ Wie funktioniert der Smart-Import?</h4>
         <ul>
-          <li>✅ Kopiere Meldelisten direkt aus TVM (Tennisverband Mittelrhein)</li>
-          <li>🤖 Die KI erkennt automatisch Datum, Uhrzeit, Gegner und Spielort</li>
-          <li>🔍 Duplikate werden automatisch erkannt und übersprungen</li>
-          <li>💰 Durchschnittliche Kosten: ~$0.006 pro Import</li>
-          <li>⚡ Parsing dauert ca. 2-5 Sekunden</li>
+          <li>📋 Kopiere die <strong>komplette TVM-Seite</strong> (Team-Info, Spielplan, Meldeliste)</li>
+          <li>🤖 Die KI erkennt <strong>automatisch</strong> was im Text ist:
+            <ul style={{ marginTop: '0.5rem', paddingLeft: '1.5rem' }}>
+              <li>🎾 Team & Verein</li>
+              <li>📅 Matches & Spieltage</li>
+              <li>👥 Spieler & LK</li>
+            </ul>
+          </li>
+          <li>✅ Du wählst aus was importiert werden soll</li>
+          <li>🔍 Duplikate & Schreibfehler werden erkannt</li>
+          <li>💰 Kosten: ~$0.01 pro Import</li>
         </ul>
       </div>
+
+      {/* Club-Suggestion Modal */}
+      {clubSuggestions && (
+        <div className="modal-overlay" onClick={clubSuggestions.onCancel}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>🏢 Verein zuordnen</h3>
+              <button onClick={clubSuggestions.onCancel} className="modal-close">✕</button>
+            </div>
+            
+            <div className="modal-body">
+              <p style={{ marginBottom: '1rem', color: '#6b7280' }}>
+                Der Verein <strong>"{clubSuggestions.searchTerm}"</strong> wurde nicht exakt gefunden.
+                <br />
+                Meinst du einen dieser Vereine?
+              </p>
+              
+              <div className="club-suggestions">
+                {clubSuggestions.suggestions.map((club, idx) => (
+                  <div 
+                    key={club.id}
+                    className="club-suggestion-card"
+                    onClick={() => clubSuggestions.onConfirm(club.id)}
+                  >
+                    <div className="suggestion-header">
+                      <strong>{club.name}</strong>
+                      <span className={`confidence-badge ${club.similarity >= 0.9 ? 'high' : club.similarity >= 0.8 ? 'medium' : 'low'}`}>
+                        {Math.round(club.similarity * 100)}% Match
+                      </span>
+                    </div>
+                    <div className="suggestion-details">
+                      {club.city && <span>📍 {club.city}</span>}
+                      {club.region && <span>🗺️ {club.region}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
+                <button 
+                  onClick={clubSuggestions.onCancel}
+                  className="btn-cancel"
+                  style={{ width: 'auto', padding: '0.75rem 2rem' }}
+                >
+                  ❌ Keiner passt / Abbrechen
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
