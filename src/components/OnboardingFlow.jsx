@@ -332,6 +332,20 @@ function OnboardingFlow() {
 
   return (
     <div className="dashboard container" style={{ paddingTop: '2rem' }}>
+      {/* Bounce Animation für Onboarding */}
+      <style>
+        {`
+          @keyframes bounce {
+            0%, 100% {
+              transform: translateY(0);
+            }
+            50% {
+              transform: translateY(-10px);
+            }
+          }
+        `}
+      </style>
+
       {/* Debug Button */}
       <div style={{ marginBottom: '1rem', textAlign: 'center' }}>
         <button
@@ -1076,48 +1090,78 @@ function OnboardingFlow() {
               </div>
             )}
 
-            {/* Importierte Spieler Suche */}
+            {/* Importierte Spieler Suche - PROMINENT */}
             {!selectedImportedPlayer && (
               <div style={{ 
                 marginBottom: '2rem',
-                padding: '1.5rem',
+                padding: '2rem',
                 background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
-                border: '2px solid #f59e0b',
-                borderRadius: '12px'
+                border: '3px solid #f59e0b',
+                borderRadius: '16px',
+                boxShadow: '0 8px 16px rgba(245, 158, 11, 0.3)'
               }}>
                 <div style={{ 
                   display: 'flex', 
                   alignItems: 'center', 
-                  gap: '0.75rem',
-                  marginBottom: '1rem'
+                  gap: '1rem',
+                  marginBottom: '1.5rem'
                 }}>
-                  <div style={{ fontSize: '1.5rem' }}>🎾</div>
+                  <div style={{ 
+                    fontSize: '3rem',
+                    animation: 'bounce 2s infinite'
+                  }}>🎾</div>
                   <div>
-                    <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: '700', color: '#92400e' }}>
-                      Profil-Turbo aktivieren!
+                    <h4 style={{ 
+                      margin: 0, 
+                      fontSize: '1.3rem', 
+                      fontWeight: '800', 
+                      color: '#92400e',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em'
+                    }}>
+                      ⚡ WICHTIG: Profil-Turbo aktivieren!
                     </h4>
-                    <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: '#78350f' }}>
-                      Einige Spieler wurden bereits über TVM-Meldelisten angelegt – vielleicht bist du dabei? 
-                      Ein schneller Check kann dir Zeit sparen! 😉
+                    <p style={{ 
+                      margin: '0.5rem 0 0 0', 
+                      fontSize: '0.95rem', 
+                      color: '#78350f',
+                      fontWeight: '600',
+                      lineHeight: '1.4'
+                    }}>
+                      🔍 <strong>ZUERST HIER SUCHEN:</strong> Viele Spieler sind bereits aus TVM-Meldelisten angelegt!
+                      <br />
+                      Wenn du dich findest, werden deine Daten automatisch übernommen. ⚡
                     </p>
                   </div>
                 </div>
 
                 <input
                   type="text"
-                  placeholder="🔍 Deinen Namen eingeben..."
+                  placeholder="🔍 Deinen Namen eingeben (z.B. Max Mustermann)..."
                   value={importedPlayerSearch}
                   onChange={(e) => {
                     setImportedPlayerSearch(e.target.value);
                     searchImportedPlayers(e.target.value);
                   }}
+                  autoFocus
                   style={{
                     width: '100%',
-                    padding: '0.75rem',
-                    border: '2px solid #f59e0b',
-                    borderRadius: '8px',
-                    fontSize: '0.95rem',
-                    background: 'white'
+                    padding: '1rem',
+                    border: '3px solid #f59e0b',
+                    borderRadius: '12px',
+                    fontSize: '1.1rem',
+                    fontWeight: '600',
+                    background: 'white',
+                    boxShadow: '0 4px 8px rgba(245, 158, 11, 0.2)',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onFocus={(e) => {
+                    e.target.style.borderColor = '#d97706';
+                    e.target.style.boxShadow = '0 6px 12px rgba(245, 158, 11, 0.4)';
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = '#f59e0b';
+                    e.target.style.boxShadow = '0 4px 8px rgba(245, 158, 11, 0.2)';
                   }}
                 />
 
@@ -1183,15 +1227,33 @@ function OnboardingFlow() {
                 {importedPlayerSearch && importedPlayerResults.length === 0 && importedPlayerSearch.length >= 2 && (
                   <div style={{ 
                     marginTop: '1rem',
-                    padding: '1rem',
+                    padding: '1.5rem',
                     background: 'white',
-                    border: '2px solid #f59e0b',
+                    border: '2px solid #10b981',
+                    borderRadius: '12px',
+                    textAlign: 'center',
+                    color: '#065f46',
+                    fontSize: '0.95rem'
+                  }}>
+                    <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>👍</div>
+                    <strong>Kein Match gefunden?</strong>
+                    <br />
+                    Kein Problem – fülle einfach die Felder unten manuell aus!
+                  </div>
+                )}
+
+                {/* Hinweis: Manuelle Eingabe möglich */}
+                {!importedPlayerSearch && (
+                  <div style={{ 
+                    marginTop: '1rem',
+                    padding: '1rem',
+                    background: 'rgba(255, 255, 255, 0.7)',
                     borderRadius: '8px',
                     textAlign: 'center',
-                    color: '#92400e',
-                    fontSize: '0.85rem'
+                    fontSize: '0.85rem',
+                    color: '#78350f'
                   }}>
-                    😔 Kein Match gefunden. Kein Problem – einfach manuell weiter!
+                    💡 <strong>Tipp:</strong> Wenn du dich nicht findest, kannst du auch manuell fortfahren.
                   </div>
                 )}
               </div>
