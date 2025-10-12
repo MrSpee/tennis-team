@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, MapPin, Users, Clock, Sun, Home, Share2, AlertCircle, CheckCircle, XCircle, Plus } from 'lucide-react';
+import { Calendar, MapPin, Users, Clock, Sun, Home, Share2, AlertCircle, CheckCircle, XCircle, Plus, Download } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { supabase } from '../lib/supabaseClient';
@@ -15,10 +15,20 @@ function Training() {
   const [loading, setLoading] = useState(true);
   const [selectedFilter, setSelectedFilter] = useState('all'); // 'all', 'team', 'mine'
   const [respondingTo, setRespondingTo] = useState(null);
+  const [comment, setComment] = useState(''); // Kommentar für Zu-/Absage
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [editingTraining, setEditingTraining] = useState(null); // Training zum Bearbeiten
   const [isDeleting, setIsDeleting] = useState(null); // Training-ID beim Löschen
+  const [showInviteForm, setShowInviteForm] = useState(null); // Training-ID für Einladungsformular
+  const [inviteFormData, setInviteFormData] = useState({
+    playerName: '',
+    playerLk: '',
+    playerClub: '',
+    playerPhone: '',
+    playerEmail: ''
+  });
+  const [isInviting, setIsInviting] = useState(false);
   
   // Neu: User Teams
   const [userTeams, setUserTeams] = useState([]);
@@ -27,6 +37,7 @@ function Training() {
   const [importedPlayerEmails, setImportedPlayerEmails] = useState({}); // { playerId: email }
   const [importedPlayerSearch, setImportedPlayerSearch] = useState(''); // Suchfeld für importierte Spieler
   const [allImportedPlayers, setAllImportedPlayers] = useState([]); // Alle importierten Spieler (ungefiltered)
+  const [whatsappInviteSent, setWhatsappInviteSent] = useState({}); // { playerId: true/false } - Tracking für gesendete Einladungen
   
   // Form State
   const [formData, setFormData] = useState({
@@ -50,11 +61,17 @@ function Training() {
     externalPlayers: [] // { name, lk, club }
   });
 
-  // Lade Trainings und User Teams
+  // Lade User Teams beim Mount
   useEffect(() => {
-    loadTrainings();
     loadUserTeams();
   }, [player]);
+
+  // Lade Trainings wenn Teams geladen wurden
+  useEffect(() => {
+    if (userTeams.length > 0) {
+      loadTrainings();
+    }
+  }, [userTeams, player]);
 
   // Lade importierte Spieler beim Öffnen des Formulars (für Privat-Training)
   useEffect(() => {
@@ -65,7 +82,7 @@ function Training() {
     }
   }, [showCreateForm, formData.type]);
 
-  // Filter importierte Spieler basierend auf Suche
+  // Filter ALLE Spieler basierend auf Suche (registriert + importiert)
   useEffect(() => {
     if (!importedPlayerSearch.trim()) {
       setImportedPlayers([]);
@@ -73,11 +90,15 @@ function Training() {
     }
 
     const searchLower = importedPlayerSearch.toLowerCase();
-    const filtered = allImportedPlayers.filter(ip => 
-      ip.name.toLowerCase().includes(searchLower)
+    const filtered = allImportedPlayers.filter(player => 
+      player.name.toLowerCase().includes(searchLower) ||
+      (player.currentLk && player.currentLk.toString().includes(searchLower))
     );
 
-    console.log(`🔍 Filtered ${filtered.length} imported players for search: "${importedPlayerSearch}"`);
+    console.log(`🔍 Filtered ${filtered.length} players for search: "${importedPlayerSearch}"`, {
+      registered: filtered.filter(p => p.source === 'registered').length,
+      imported: filtered.filter(p => p.source === 'imported').length
+    });
     setImportedPlayers(filtered);
   }, [importedPlayerSearch, allImportedPlayers]);
 
@@ -137,40 +158,73 @@ function Training() {
     }
   };
 
-  // Lade ALLE importierten Spieler (clubübergreifend für Privat-Training)
+  // Lade ALLE Spieler (clubübergreifend für Privat-Training)
   const loadImportedPlayersForPrivateTraining = async () => {
     try {
-      console.log('🔍 Querying ALL imported_players (no team filter)');
+      console.log('🔍 Loading ALL players for private training (registered + imported)');
       
-      const { data, error } = await supabase
+      // 1. Lade ALLE registrierten Spieler (vereins-übergreifend)
+      const { data: allPlayers, error: playersError } = await supabase
+        .from('players')
+        .select('id, name, email, current_lk, phone')
+        .eq('is_active', true)
+        .order('name', { ascending: true });
+
+      if (playersError) {
+        console.warn('⚠️ Could not load players:', playersError);
+      }
+
+      // 2. Lade ALLE importierten Spieler (vereins-übergreifend)
+      const { data: importedData, error: importedError } = await supabase
         .from('imported_players')
         .select('id, name, import_lk, team_id')
         .eq('status', 'pending')
         .order('name', { ascending: true });
 
-      if (error) {
-        console.warn('⚠️ Could not load imported players:', error);
-        setImportedPlayers([]);
-        return;
+      if (importedError) {
+        console.warn('⚠️ Could not load imported players:', importedError);
       }
 
-      console.log('📊 Raw imported_players data:', data);
+      console.log('📊 Raw data:', { players: allPlayers?.length, imported: importedData?.length });
 
-      const importedMembers = (data || []).map(ip => ({
+      // 3. Kombiniere registrierte Spieler (ohne eigene ID)
+      const registeredMembers = (allPlayers || [])
+        .filter(p => p.id !== player?.id) // Ausschluss des aktuellen Spielers
+        .map(p => ({
+          id: p.id,
+          name: p.name,
+          email: p.email,
+          currentLk: p.current_lk,
+          phone: p.phone,
+          teamId: null,
+          source: 'registered'
+        }));
+
+      // 4. Kombiniere importierte Spieler
+      const importedMembers = (importedData || []).map(ip => ({
         id: ip.id,
         name: ip.name,
         email: null,
         currentLk: ip.import_lk,
-        teamId: ip.team_id, // Behalte team_id für Info
+        phone: null,
+        teamId: ip.team_id,
         source: 'imported'
       }));
 
-      console.log('✅ Imported players loaded for private training:', importedMembers.length, importedMembers);
-      setAllImportedPlayers(importedMembers); // Speichere ALLE für Suche
+      // 5. Kombiniere alle Spieler
+      const allAvailablePlayers = [...registeredMembers, ...importedMembers];
+
+      console.log('✅ All players loaded for private training:', {
+        registered: registeredMembers.length,
+        imported: importedMembers.length,
+        total: allAvailablePlayers.length
+      });
+      
+      setAllImportedPlayers(allAvailablePlayers); // Speichere ALLE für Suche
       setImportedPlayers([]); // Zeige zunächst keine an (erst bei Suche)
 
     } catch (error) {
-      console.error('❌ Error loading imported players:', error);
+      console.error('❌ Error loading all players:', error);
       setAllImportedPlayers([]);
       setImportedPlayers([]);
     }
@@ -253,8 +307,8 @@ function Training() {
 
       console.log('🔒 Loading trainings for player teams:', playerTeamIds);
 
-      // Lade Trainings mit Teilnahme-Info (NUR für eigene Teams!)
-      const { data: sessionsData, error: sessionsError } = await supabase
+      // Lade Trainings: Team-Trainings (mit team_id) UND Private Trainings (team_id=null, wo ich beteiligt bin)
+      const { data: teamTrainings, error: teamError } = await supabase
         .from('training_sessions')
         .select(`
           *,
@@ -264,11 +318,62 @@ function Training() {
             profile_image
           )
         `)
-        .in('team_id', playerTeamIds)  // 🔒 FILTERUNG: Nur Trainings der eigenen Teams!
+        .in('team_id', playerTeamIds)
         .gte('date', new Date().toISOString())
         .order('date', { ascending: true });
 
-      if (sessionsError) throw sessionsError;
+      if (teamError) throw teamError;
+
+      // Lade PRIVATE Trainings (team_id = null) wo ich Organisator oder eingeladen bin
+      const { data: privateTrainings, error: privateError } = await supabase
+        .from('training_sessions')
+        .select(`
+          *,
+          organizer:organizer_id (
+            id,
+            name,
+            profile_image
+          )
+        `)
+        .is('team_id', null)
+        .eq('type', 'private')
+        .gte('date', new Date().toISOString())
+        .order('date', { ascending: true });
+
+      if (privateError) throw privateError;
+
+      // Filtere private Trainings (mit Debugging)
+      console.log('🔍 Filtering private trainings for player:', player?.id);
+      console.log('📊 Total private trainings:', privateTrainings?.length);
+      
+      const filteredPrivate = (privateTrainings || []).filter(pt => {
+        const isOrganizer = pt.organizer_id === player?.id;
+        const isInvited = pt.invited_players?.includes(player?.id);
+        const isPublic = pt.is_public && pt.needs_substitute;
+        
+        console.log(`Training ${pt.id}:`, { 
+          title: pt.title,
+          organizer: pt.organizer_id, 
+          isOrganizer, 
+          invited: pt.invited_players,
+          isInvited, 
+          isPublic,
+          show: isOrganizer || isInvited || isPublic
+        });
+        
+        return isOrganizer || isInvited || isPublic;
+      });
+
+      console.log('✅ Filtered private trainings:', filteredPrivate.length);
+
+      // Kombiniere Team- und Private-Trainings
+      const sessionsData = [...(teamTrainings || []), ...(privateTrainings || [])];
+      
+      console.log('✅ Trainings loaded:', {
+        team: teamTrainings?.length || 0,
+        private: privateTrainings?.length || 0,
+        total: sessionsData.length
+      });
       
       console.log('✅ Trainings loaded (filtered by player teams):', sessionsData?.length || 0);
 
@@ -394,27 +499,29 @@ function Training() {
         return;
       }
 
-      // 🔧 FIX: Validiere Email für ausgewählte importierte Spieler
-      const selectedImportedPlayerIds = formData.invitedPlayers.filter(id => 
-        importedPlayers.some(ip => ip.id === id)
-      );
-      
-      for (const importedId of selectedImportedPlayerIds) {
-        if (!importedPlayerEmails[importedId]) {
-          alert(`❌ Bitte Email für ${importedPlayers.find(ip => ip.id === importedId)?.name} eingeben!`);
+      // 🔒 BERECHTIGUNG: Vereinstraining nur für eigene Vereins-Mitglieder
+      if (formData.type === 'team' && formData.teamId) {
+        const isTeamMember = userTeams.some(team => team.id === formData.teamId);
+        if (!isTeamMember) {
+          alert('❌ Fehler: Du bist kein Mitglied dieses Teams. Du kannst nur Trainings für deine eigenen Teams erstellen.');
           setIsCreating(false);
           return;
         }
       }
 
-      // 🔧 FIX: Konvertiere importierte Spieler zu external_players (mit Email)
+      // 🔧 FIX: Hole importierte Spieler IDs (Email ist OPTIONAL - WhatsApp-Einladung reicht)
+      const selectedImportedPlayerIds = formData.invitedPlayers.filter(id => 
+        importedPlayers.some(ip => ip.id === id)
+      );
+
+      // 🔧 FIX: Konvertiere importierte Spieler zu external_players (mit optionaler Email)
       const importedAsExternal = selectedImportedPlayerIds.map(id => {
         const importedPlayer = importedPlayers.find(ip => ip.id === id);
         return {
           name: importedPlayer.name,
           lk: importedPlayer.currentLk || '',
           club: 'Wartet auf Registrierung',
-          email: importedPlayerEmails[id],
+          email: importedPlayerEmails[id] || null, // Email ist OPTIONAL
           imported_player_id: id // Referenz behalten
         };
       });
@@ -577,6 +684,7 @@ function Training() {
       });
       setImportedPlayerSearch(''); // 🔧 FIX: Reset Suche
       setImportedPlayerEmails({}); // 🔧 FIX: Reset Emails
+      setWhatsappInviteSent({}); // 🔧 FIX: Reset WhatsApp-Status
       setShowCreateForm(false);
 
       alert(formData.isRecurring 
@@ -610,12 +718,14 @@ function Training() {
     return (endH * 60 + endM) - (startH * 60 + startM);
   };
 
-  // Zu-/Absage
+  // Zu-/Absage mit Kommentar
   const handleResponse = async (sessionId, status) => {
     if (!player) return;
 
     try {
       setRespondingTo(sessionId);
+
+      console.log('🔵 Setting training response:', { sessionId, status, comment });
 
       // Prüfe ob bereits geantwortet
       const training = trainings.find(t => t.id === sessionId);
@@ -627,6 +737,7 @@ function Training() {
           .from('training_attendance')
           .update({
             status,
+            comment: comment || null,
             response_date: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
@@ -641,6 +752,7 @@ function Training() {
             session_id: sessionId,
             player_id: player.id,
             status,
+            comment: comment || null,
             response_date: new Date().toISOString()
           });
 
@@ -650,12 +762,16 @@ function Training() {
         await LoggingService.logTrainingResponse(sessionId, status, player.id);
       }
 
-      // Reload
+      console.log('✅ Training response saved successfully');
+
+      // Reset & Reload
+      setComment('');
+      setRespondingTo(null);
       await loadTrainings();
+      
     } catch (error) {
-      console.error('Error updating attendance:', error);
+      console.error('❌ Error updating attendance:', error);
       alert('Fehler beim Speichern der Antwort');
-    } finally {
       setRespondingTo(null);
     }
   };
@@ -672,7 +788,7 @@ function Training() {
     const message = `🎾 *Tennis-Training - Spieler gesucht!*\n\n` +
       `📅 ${date} um ${time} Uhr\n` +
       `📍 ${training.location} - ${training.venue}\n` +
-      `👥 ${training.stats.confirmed}/${training.target_players} Zusagen\n\n` +
+      `👥 ${training.stats.confirmed}/${training.max_players || 8} Zusagen\n\n` +
       `${training.notes || 'Wer hat Lust mitzumachen?'}\n\n` +
       `Anmelden in der App: ${window.location.origin}/training`;
     
@@ -680,24 +796,27 @@ function Training() {
     window.open(whatsappUrl, '_blank');
   };
 
-  // WhatsApp-Einladung für importierte Spieler (zur App-Registrierung)
-  const inviteImportedPlayerViaWhatsApp = (importedPlayer) => {
-    const appUrl = window.location.origin;
+  // WhatsApp-Einladung für JEDEN Spieler (registriert oder importiert)
+  const invitePlayerViaWhatsApp = (playerId, playerName, playerPhone = null) => {
+    // Platzhirsch-Einladungstext (ohne Emojis wegen Encoding)
+    const message = `*Hey Ballkuenstler!*\n\n` +
+      `Die Zeiten von WhatsApp-Chaos und "Wer kommt heute?" sind vorbei\n\n` +
+      `In der *Platzhirsch App* siehst du sofort, wer trainiert, wann gespielt wird und wie's um deine LK steht\n\n` +
+      `Und das Beste: du kannst direkt deine Verfuegbarkeit fuer Medenspiele eintragen - keine Ausreden mehr!\n\n` +
+      `Hier geht's in dein Revier: https://tennis-team-gamma.vercel.app/\n\n` +
+      `*Werde Platzhirsch!*`;
     
-    const message = `🎾 *Hey ${importedPlayer.name}!*\n\n` +
-      `Du bist in unserer Team-App als Spieler hinterlegt! 🏆\n\n` +
-      `*Deine Vorteile:*\n` +
-      `✅ Immer über Matchdays & Trainings informiert\n` +
-      `✅ Direktes Zu-/Absagen per Klick\n` +
-      `✅ LK-Tracking & Team-Statistiken\n` +
-      `✅ Push-Benachrichtigungen für wichtige Updates\n\n` +
-      `*Jetzt registrieren (1 Minute):*\n` +
-      `${appUrl}/login\n\n` +
-      `Deine Daten sind bereits hinterlegt – du musst nur noch dein Konto aktivieren! 🚀\n\n` +
-      `Bis bald auf dem Platz! 🎾`;
+    // Mit Telefonnummer → Direktlink, sonst nur Message
+    const whatsappUrl = playerPhone 
+      ? `https://wa.me/${playerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`
+      : `https://wa.me/?text=${encodeURIComponent(message)}`;
     
-    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
     window.open(whatsappUrl, '_blank');
+    
+    // Markiere als "Einladung gesendet"
+    setWhatsappInviteSent(prev => ({ ...prev, [playerId]: true }));
+    
+    console.log(`📱 WhatsApp-Einladung gesendet an ${playerName}${playerPhone ? ` (${playerPhone})` : ' (ohne Nummer)'}`);
   };
 
   // Training bearbeiten (nur Organisator)
@@ -806,6 +925,87 @@ function Training() {
     }
   };
 
+  // Weitere Spieler einladen
+  const handleInvitePlayer = async (trainingId) => {
+    if (!inviteFormData.playerName.trim()) {
+      alert('Bitte Spielername eingeben');
+      return;
+    }
+
+    try {
+      setIsInviting(true);
+
+      // Hole aktuelles Training
+      const training = trainings.find(t => t.id === trainingId);
+      if (!training) {
+        alert('Training nicht gefunden');
+        return;
+      }
+
+      // Erstelle neuen externen Spieler
+      const newExternalPlayer = {
+        name: inviteFormData.playerName.trim(),
+        lk: inviteFormData.playerLk.trim() || '',
+        club: inviteFormData.playerClub.trim() || 'Extern',
+        email: inviteFormData.playerEmail.trim() || null,
+        phone: inviteFormData.playerPhone.trim() || null,
+        invited_date: new Date().toISOString(),
+        invited_by: player.id
+      };
+
+      // Aktualisiere external_players Array in der DB
+      const updatedExternalPlayers = [...(training.external_players || []), newExternalPlayer];
+
+      const { error } = await supabase
+        .from('training_sessions')
+        .update({
+          external_players: updatedExternalPlayers,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', trainingId);
+
+      if (error) throw error;
+
+      console.log('✅ External player added to training:', newExternalPlayer);
+
+      // WhatsApp-Einladung senden
+      const whatsappMessage = `🎾 *Tennis-Training Einladung*\n\n` +
+        `Hey ${inviteFormData.playerName}!\n\n` +
+        `Du wurdest zu einem Tennis-Training eingeladen:\n\n` +
+        `📅 ${formatDate(training.date)}\n` +
+        `🕐 ${formatTime(training.start_time)} - ${formatTime(training.end_time)}\n` +
+        `📍 ${training.location} - ${training.venue}\n\n` +
+        `Melde dich in der App an: ${window.location.origin}/training\n\n` +
+        `Viel Spaß beim Training! 🎾`;
+
+      const whatsappUrl = inviteFormData.playerPhone 
+        ? `https://wa.me/${inviteFormData.playerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(whatsappMessage)}`
+        : `https://wa.me/?text=${encodeURIComponent(whatsappMessage)}`;
+
+      window.open(whatsappUrl, '_blank');
+
+      // Reload trainings
+      await loadTrainings();
+
+      // Reset form
+      setInviteFormData({
+        playerName: '',
+        playerLk: '',
+        playerClub: '',
+        playerPhone: '',
+        playerEmail: ''
+      });
+      setShowInviteForm(null);
+
+      alert('✅ Spieler erfolgreich eingeladen und WhatsApp-Nachricht gesendet!');
+    } catch (error) {
+      console.error('❌ Error inviting player:', error);
+      alert(`❌ Fehler beim Einladen: ${error.message}`);
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
   // Formatiere Datum
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString('de-DE', {
@@ -822,21 +1022,26 @@ function Training() {
     return timeString.slice(0, 5);
   };
 
-  // Status Badge
+  // Status Badge - X/Y Format mit Farben
   const getStatusBadge = (training) => {
     const { confirmed } = training.stats;
-    const { target_players, max_players, needs_substitute } = training;
+    const { max_players } = training;
 
-    if (needs_substitute) {
-      return { icon: <AlertCircle size={16} />, text: 'Spieler gesucht', color: '#f59e0b' };
+    const text = `${confirmed}/${max_players}`;
+    
+    // Farbliche Indikation
+    let color;
+    if (confirmed >= max_players) {
+      color = '#10b981'; // Grün - Voll
+    } else if (confirmed >= max_players - 1) {
+      color = '#3b82f6'; // Blau - Fast voll
+    } else if (confirmed >= max_players / 2) {
+      color = '#f59e0b'; // Gelb - Mittel
+    } else {
+      color = '#ef4444'; // Rot - Wenig
     }
-    if (confirmed >= target_players) {
-      return { icon: <CheckCircle size={16} />, text: 'Vollständig', color: '#10b981' };
-    }
-    if (confirmed >= target_players - 2) {
-      return { icon: <Users size={16} />, text: 'Fast voll', color: '#3b82f6' };
-    }
-    return { icon: <Users size={16} />, text: `${confirmed}/${target_players}`, color: '#6b7280' };
+
+    return { text, color };
   };
 
   // Render Training Card
@@ -858,10 +1063,13 @@ function Training() {
           </div>
           <div 
             className="match-count-badge"
-            style={{ backgroundColor: status.color }}
+            style={{ 
+              backgroundColor: status.color,
+              fontSize: '0.9rem',
+              fontWeight: '700'
+            }}
           >
-            {status.icon}
-            <span style={{ marginLeft: '0.35rem' }}>{status.text}</span>
+            {status.text}
           </div>
         </div>
 
@@ -897,14 +1105,36 @@ function Training() {
               </span>
             </div>
 
-            {/* Teilnehmer */}
-            <div className="match-info-row">
-              <Users size={18} color="#6b7280" />
-              <span style={{ fontSize: '0.9rem' }}>
-                {training.stats.confirmed}/{training.target_players} Zusagen
-                {training.max_players !== training.target_players && ` (max. ${training.max_players})`}
-              </span>
-            </div>
+            {/* Kommentare der Spieler */}
+            {training.attendance && training.attendance.some(a => a.comment) && (
+              <div style={{ marginTop: '0.75rem' }}>
+                {training.attendance
+                  .filter(a => a.comment)
+                  .map(a => {
+                    const player = players.find(p => p.id === a.player_id);
+                    if (!player) return null;
+                    
+                    return (
+                      <div key={a.id} style={{
+                        padding: '0.5rem 0.75rem',
+                        background: '#f0f9ff',
+                        border: '1px solid #bae6fd',
+                        borderRadius: '8px',
+                        fontSize: '0.85rem',
+                        marginBottom: '0.5rem'
+                      }}>
+                        <span style={{ fontWeight: '600', color: '#0369a1' }}>
+                          💬 {player.name}:
+                        </span>
+                        <span style={{ color: '#0c4a6e', marginLeft: '0.5rem' }}>
+                          "{a.comment}"
+                        </span>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+
 
             {/* Weather Warning - nur wenn nicht bereits in Notes */}
             {training.weather_dependent && training.location === 'Draußen' && !training.notes?.toLowerCase().includes('wetter') && (
@@ -927,35 +1157,430 @@ function Training() {
               </div>
             )}
 
-            {/* Notes */}
-            {training.notes && (
-              <div 
-                style={{
-                  marginTop: '0.75rem',
-                  padding: '0.75rem',
-                  background: training.notes.toLowerCase().includes('wetter') ? '#fef3c7' : '#f8fafc',
-                  border: training.notes.toLowerCase().includes('wetter') ? '1px solid #fde68a' : '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  fontSize: '0.85rem',
-                  color: training.notes.toLowerCase().includes('wetter') ? '#78350f' : '#475569',
-                  display: 'flex',
-                  alignItems: training.notes.toLowerCase().includes('wetter') ? 'center' : 'flex-start',
-                  gap: '0.5rem'
-                }}
-              >
-                {training.notes.toLowerCase().includes('wetter') && <AlertCircle size={16} />}
-                <span style={{ fontStyle: training.notes.toLowerCase().includes('wetter') ? 'normal' : 'italic' }}>
-                  {training.notes}
-                </span>
+          </div>
+
+          {/* ZU-/ABSAGE FÜR ALLE - NEUES DESIGN */}
+          {(
+            <div style={{ marginTop: '1rem' }}>
+              {/* BEREITS GEANTWORTET? */}
+              {myResponse ? (
+                <div style={{ 
+                  padding: '1rem',
+                  background: myResponse === 'confirmed' ? 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)' : 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
+                  border: `2px solid ${myResponse === 'confirmed' ? '#10b981' : '#ef4444'}`,
+                  borderRadius: '12px',
+                  marginBottom: '1rem'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Deine Antwort:
+                      </div>
+                      <div style={{ fontSize: '1rem', fontWeight: '700', color: myResponse === 'confirmed' ? '#065f46' : '#991b1b', marginTop: '0.25rem' }}>
+                        {myResponse === 'confirmed' ? '✅ Bin dabei!' : '❌ Kann nicht'}
+                      </div>
+                      {training.myAttendance?.comment && (
+                        <div style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                          💬 {training.myAttendance.comment}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
+                      <span style={{ fontSize: '0.7rem', color: '#6b7280', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Zum Kalender
+                      </span>
+                      <button 
+                        style={{
+                          width: '40px',
+                          height: '40px',
+                          background: '#10b981',
+                          border: 'none',
+                          borderRadius: '8px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease'
+                        }}
+                        title="In Kalender speichern"
+                        onClick={() => console.log('📅 Kalender-Speichern für Training:', training.id)}
+                      >
+                        <Download size={16} color="white" />
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* ÄNDERN BUTTON */}
+                  <button
+                    onClick={() => setRespondingTo(training.id)}
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      background: 'white',
+                      color: '#6b7280',
+                      fontWeight: '600',
+                      fontSize: '0.875rem',
+                      cursor: 'pointer',
+                      marginTop: '0.75rem'
+                    }}
+                  >
+                    Antwort ändern
+                  </button>
+                </div>
+              ) : (
+                /* NOCH NICHT GEANTWORTET - MODERNER BUTTON */
+                !respondingTo && (
+                  <button
+                    onClick={() => setRespondingTo(training.id)}
+                    style={{
+                      width: '100%',
+                      padding: '1.25rem',
+                      borderRadius: '12px',
+                      background: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)',
+                      color: 'white',
+                      border: 'none',
+                      fontWeight: '700',
+                      fontSize: '1.1rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.3s ease',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.75rem',
+                      boxShadow: '0 4px 12px rgba(14, 165, 233, 0.3)'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.background = 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)';
+                      e.target.style.transform = 'translateY(-2px)';
+                      e.target.style.boxShadow = '0 6px 16px rgba(14, 165, 233, 0.4)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.background = 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)';
+                      e.target.style.transform = 'translateY(0)';
+                      e.target.style.boxShadow = '0 4px 12px rgba(14, 165, 233, 0.3)';
+                    }}
+                  >
+                    <span style={{ fontSize: '1.2rem' }}>📅</span>
+                    <span>Verfügbarkeit angeben</span>
+                  </button>
+                )
+              )}
+
+              {/* FORMULAR WENN GEÖFFNET */}
+              {respondingTo === training.id && (
+                <div style={{
+                  padding: '1.25rem',
+                  background: '#f9fafb',
+                  borderRadius: '12px',
+                  border: '2px solid #e5e7eb',
+                  marginTop: '1rem'
+                }}>
+                  <div style={{ 
+                    fontSize: '0.875rem', 
+                    fontWeight: '600', 
+                    color: '#374151',
+                    marginBottom: '0.75rem'
+                  }}>
+                    Kannst du am {formatDate(training.date)} teilnehmen?
+                  </div>
+                  
+                  <textarea
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    placeholder="Optional: Kommentar (z.B. 'Komme eventuell 10 Min später')"
+                    rows="2"
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      borderRadius: '8px',
+                      border: '1px solid #e5e7eb',
+                      fontSize: '0.875rem',
+                      marginBottom: '0.75rem',
+                      fontFamily: 'inherit',
+                      resize: 'vertical'
+                    }}
+                  />
+                  
+                  <div style={{ 
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: '0.75rem',
+                    marginBottom: '0.75rem'
+                  }}>
+                    <button
+                      onClick={() => handleResponse(training.id, 'confirmed')}
+                      style={{
+                        padding: '1rem',
+                        borderRadius: '10px',
+                        border: '2px solid #10b981',
+                        background: 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)',
+                        color: '#065f46',
+                        fontWeight: '700',
+                        fontSize: '1rem',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.5rem'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.target.style.background = 'linear-gradient(135deg, #a7f3d0 0%, #6ee7b7 100%)';
+                        e.target.style.transform = 'translateY(-2px)';
+                        e.target.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.3)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.target.style.background = 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)';
+                        e.target.style.transform = 'translateY(0)';
+                        e.target.style.boxShadow = 'none';
+                      }}
+                    >
+                      <CheckCircle size={20} />
+                      <span>Bin dabei!</span>
+                    </button>
+                    <button
+                      onClick={() => handleResponse(training.id, 'declined')}
+                      style={{
+                        padding: '1rem',
+                        borderRadius: '10px',
+                        border: '2px solid #ef4444',
+                        background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
+                        color: '#991b1b',
+                        fontWeight: '700',
+                        fontSize: '1rem',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.5rem'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.target.style.background = 'linear-gradient(135deg, #fecaca 0%, #fca5a5 100%)';
+                        e.target.style.transform = 'translateY(-2px)';
+                        e.target.style.boxShadow = '0 4px 12px rgba(239, 68, 68, 0.3)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.target.style.background = 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)';
+                        e.target.style.transform = 'translateY(0)';
+                        e.target.style.boxShadow = 'none';
+                      }}
+                    >
+                      <XCircle size={20} />
+                      <span>Kann nicht</span>
+                    </button>
+                  </div>
+                  
+                  <button
+                    onClick={() => {
+                      setRespondingTo(null);
+                      setComment('');
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      borderRadius: '8px',
+                      background: 'white',
+                      border: '1px solid #e5e7eb',
+                      color: '#6b7280',
+                      fontWeight: '600',
+                      fontSize: '0.875rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Abbrechen
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+
+          {/* KLARE STRUKTUR: DABEI - ABSAGE - AUSSTEHEND */}
+          <div style={{ marginTop: '1rem' }}>
+            
+            {/* ✅ DABEI */}
+            {training.attendance && training.attendance.some(a => a.status === 'confirmed') && (
+              <div style={{ marginBottom: '1rem' }}>
+                <h4 style={{ 
+                  margin: '0 0 0.5rem 0', 
+                  fontSize: '0.85rem', 
+                  fontWeight: '700',
+                  color: '#6b7280',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>
+                  ✅ Dabei ({training.attendance.filter(a => a.status === 'confirmed').length})
+                </h4>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  {training.attendance
+                    .filter(a => a.status === 'confirmed')
+                    .map(a => {
+                      const player = players.find(p => p.id === a.player_id);
+                      if (!player) return null;
+                      
+                      return (
+                        <span 
+                          key={a.id}
+                          style={{
+                            padding: '0.5rem 0.75rem',
+                            background: '#dcfce7',
+                            border: '1px solid #bbf7d0',
+                            borderRadius: '8px',
+                            fontSize: '0.85rem',
+                            fontWeight: '600',
+                            color: '#14532d',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem'
+                          }}
+                        >
+                          {player.name} {player.current_lk && `(${player.current_lk})`}
+                          {a.player_id === training.organizer_id && (
+                            <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>👑</span>
+                          )}
+                        </span>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+
+            {/* ❌ ABSAGE */}
+            {training.attendance && training.attendance.some(a => a.status === 'declined') && (
+              <div style={{ marginBottom: '1rem' }}>
+                <h4 style={{ 
+                  margin: '0 0 0.5rem 0', 
+                  fontSize: '0.85rem', 
+                  fontWeight: '700',
+                  color: '#6b7280',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>
+                  ❌ Absage ({training.attendance.filter(a => a.status === 'declined').length})
+                </h4>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  {training.attendance
+                    .filter(a => a.status === 'declined')
+                    .map(a => {
+                      const player = players.find(p => p.id === a.player_id);
+                      if (!player) return null;
+                      
+                      return (
+                        <span 
+                          key={a.id}
+                          style={{
+                            padding: '0.5rem 0.75rem',
+                            background: '#fee2e2',
+                            border: '1px solid #fecaca',
+                            borderRadius: '8px',
+                            fontSize: '0.85rem',
+                            fontWeight: '600',
+                            color: '#991b1b',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem'
+                          }}
+                        >
+                          {player.name} {player.current_lk && `(${player.current_lk})`}
+                          {a.player_id === training.organizer_id && (
+                            <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>👑</span>
+                          )}
+                        </span>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+
+            {/* ⏳ FEEDBACK STEHT AUS */}
+            {training.attendance && training.attendance.some(a => !a.status || a.status === 'pending') && (
+              <div style={{ marginBottom: '1rem' }}>
+                <h4 style={{ 
+                  margin: '0 0 0.5rem 0', 
+                  fontSize: '0.85rem', 
+                  fontWeight: '700',
+                  color: '#6b7280',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>
+                  ⏳ Feedback steht aus ({training.attendance.filter(a => !a.status || a.status === 'pending').length})
+                </h4>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  {training.attendance
+                    .filter(a => !a.status || a.status === 'pending')
+                    .map(a => {
+                      const player = players.find(p => p.id === a.player_id);
+                      if (!player) return null;
+                      
+                      return (
+                        <span 
+                          key={a.id}
+                          style={{
+                            padding: '0.5rem 0.75rem',
+                            background: '#f3f4f6',
+                            border: '1px solid #d1d5db',
+                            borderRadius: '8px',
+                            fontSize: '0.85rem',
+                            fontWeight: '600',
+                            color: '#6b7280',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem'
+                          }}
+                        >
+                          {player.name} {player.current_lk && `(${player.current_lk})`}
+                          {a.player_id === training.organizer_id && (
+                            <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>👑</span>
+                          )}
+                        </span>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+
+            {/* EXTERNE SPIELER */}
+            {training.external_players && training.external_players.length > 0 && (
+              <div style={{ marginBottom: '1rem' }}>
+                <h4 style={{ 
+                  margin: '0 0 0.5rem 0', 
+                  fontSize: '0.85rem', 
+                  fontWeight: '700',
+                  color: '#6b7280',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>
+                  📋 Eingeladen ({training.external_players.length})
+                </h4>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  {training.external_players.map((ext, idx) => (
+                    <span 
+                      key={`ext-${idx}`}
+                      style={{
+                        padding: '0.5rem 0.75rem',
+                        background: '#fef3c7',
+                        border: '1px solid #fbbf24',
+                        borderRadius: '8px',
+                        fontSize: '0.85rem',
+                        fontWeight: '600',
+                        color: '#92400e'
+                      }}
+                    >
+                      {ext.name} {ext.lk && `(${ext.lk})`} • Wartet auf Registrierung
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
           </div>
 
-          {/* Actions */}
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-            {/* Bearbeiten & Löschen (nur Organisator) */}
-            {isOrganizer && (
-              <>
+          {/* ORGANISATOR-BUTTONS (ganz unten) */}
+          {isOrganizer && (
+            <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid #e5e7eb' }}>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
                 <button
                   className="btn-modern btn-modern-inactive"
                   onClick={() => handleEditTraining(training)}
@@ -981,121 +1606,162 @@ function Training() {
                 >
                   🗑️ Löschen
                 </button>
-              </>
-            )}
-
-            {/* Zusagen */}
-            {!isOrganizer && (
-              <button
-                className={`btn-modern ${myResponse === 'confirmed' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
-                onClick={() => handleResponse(training.id, 'confirmed')}
-                disabled={respondingTo === training.id}
-                style={{
-                  flex: 1,
-                  background: myResponse === 'confirmed' ? 
-                    'linear-gradient(135deg, #10b981 0%, #059669 100%)' : undefined
-                }}
-              >
-                <CheckCircle size={16} />
-                Bin dabei!
-              </button>
-            )}
-
-            {/* Absagen */}
-            {!isOrganizer && (
-              <button
-                className={`btn-modern ${myResponse === 'declined' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
-                onClick={() => handleResponse(training.id, 'declined')}
-                disabled={respondingTo === training.id}
-                style={{
-                  flex: 1,
-                  background: myResponse === 'declined' ? 
-                    'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)' : undefined
-                }}
-              >
-                <XCircle size={16} />
-                Kann nicht
-              </button>
-            )}
-
-            {/* WhatsApp Share */}
-            {(training.needs_substitute || training.type === 'private' || isOrganizer) && (
-              <button
-                className="btn-modern btn-modern-inactive"
-                onClick={() => shareViaWhatsApp(training)}
-                style={{ flex: '0 0 auto' }}
-                title="In WhatsApp-Gruppe teilen"
-              >
-                <Share2 size={16} />
-                Teilen
-              </button>
-            )}
-          </div>
-
-          {/* Teilnehmer-Liste */}
-          {(training.stats.confirmed > 0 || (training.external_players && training.external_players.length > 0)) && (
-            <div style={{ marginTop: '1rem' }}>
-              <h4 style={{ 
-                margin: '0 0 0.5rem 0', 
-                fontSize: '0.85rem', 
-                fontWeight: '700',
-                color: '#6b7280',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em'
-              }}>
-                ✅ Dabei ({training.stats.confirmed + (training.external_players?.length || 0)})
-              </h4>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                {/* Interne Spieler (mit Zusage) */}
-                {training.attendance
-                  .filter(a => a.status === 'confirmed')
-                  .map(a => {
-                    const attendeePlayer = players.find(p => p.id === a.player_id);
-                    return attendeePlayer ? (
-                      <span 
-                        key={a.id}
-                        style={{
-                          padding: '0.5rem 0.75rem',
-                          background: '#dcfce7',
-                          border: '1px solid #bbf7d0',
-                          borderRadius: '8px',
-                          fontSize: '0.85rem',
-                          fontWeight: '600',
-                          color: '#14532d'
-                        }}
-                      >
-                        {attendeePlayer.name}
-                      </span>
-                    ) : null;
-                  })}
-                
-                {/* Externe Spieler */}
-                {training.external_players && training.external_players.map((ext, idx) => (
-                  <span 
-                    key={`ext-${idx}`}
-                    style={{
-                      padding: '0.5rem 0.75rem',
-                      background: '#e0e7ff',
-                      border: '1px solid #c7d2fe',
-                      borderRadius: '8px',
-                      fontSize: '0.85rem',
-                      fontWeight: '600',
-                      color: '#3730a3',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.25rem'
-                    }}
-                  >
-                    {ext.name}
-                    {ext.lk && ` (${ext.lk})`}
-                    {ext.club && (
-                      <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>
-                        • {ext.club}
-                      </span>
-                    )}
-                  </span>
-                ))}
+                <button
+                  className="btn-modern btn-modern-inactive"
+                  onClick={() => shareViaWhatsApp(training)}
+                  style={{ flex: '0 0 auto' }}
+                  title="In WhatsApp-Gruppe teilen"
+                >
+                  <Share2 size={16} />
+                  Teilen
+                </button>
+                <button
+                  className="btn-modern btn-modern-inactive"
+                  onClick={() => setShowInviteForm(training.id)}
+                  style={{ 
+                    flex: '0 0 auto',
+                    background: '#10b981',
+                    color: 'white'
+                  }}
+                  title="Weitere Spieler einladen"
+                >
+                  👥 Einladen
+                </button>
               </div>
+
+              {/* EINLADUNGSFORMULAR */}
+              {showInviteForm === training.id && (
+                <div style={{
+                  padding: '1.25rem',
+                  background: '#f9fafb',
+                  borderRadius: '12px',
+                  border: '2px solid #e5e7eb'
+                }}>
+                  <h4 style={{ 
+                    margin: '0 0 1rem 0', 
+                    fontSize: '1rem', 
+                    fontWeight: '700',
+                    color: '#374151'
+                  }}>
+                    👥 Weitere Spieler einladen
+                  </h4>
+                  
+                  <div style={{ display: 'grid', gap: '0.75rem', marginBottom: '1rem' }}>
+                    <input
+                      type="text"
+                      placeholder="Spielername *"
+                      value={inviteFormData.playerName}
+                      onChange={(e) => setInviteFormData(prev => ({ ...prev, playerName: e.target.value }))}
+                      style={{
+                        padding: '0.75rem',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '8px',
+                        fontSize: '0.9rem'
+                      }}
+                      required
+                    />
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                      <input
+                        type="text"
+                        placeholder="LK (optional)"
+                        value={inviteFormData.playerLk}
+                        onChange={(e) => setInviteFormData(prev => ({ ...prev, playerLk: e.target.value }))}
+                        style={{
+                          padding: '0.75rem',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '8px',
+                          fontSize: '0.9rem'
+                        }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Verein (optional)"
+                        value={inviteFormData.playerClub}
+                        onChange={(e) => setInviteFormData(prev => ({ ...prev, playerClub: e.target.value }))}
+                        style={{
+                          padding: '0.75rem',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '8px',
+                          fontSize: '0.9rem'
+                        }}
+                      />
+                    </div>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                      <input
+                        type="tel"
+                        placeholder="Telefon (für WhatsApp)"
+                        value={inviteFormData.playerPhone}
+                        onChange={(e) => setInviteFormData(prev => ({ ...prev, playerPhone: e.target.value }))}
+                        style={{
+                          padding: '0.75rem',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '8px',
+                          fontSize: '0.9rem'
+                        }}
+                      />
+                      <input
+                        type="email"
+                        placeholder="Email (optional)"
+                        value={inviteFormData.playerEmail}
+                        onChange={(e) => setInviteFormData(prev => ({ ...prev, playerEmail: e.target.value }))}
+                        style={{
+                          padding: '0.75rem',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '8px',
+                          fontSize: '0.9rem'
+                        }}
+                      />
+                    </div>
+                  </div>
+                  
+                  <div style={{ display: 'flex', gap: '0.75rem' }}>
+                    <button
+                      onClick={() => handleInvitePlayer(training.id)}
+                      disabled={isInviting || !inviteFormData.playerName.trim()}
+                      style={{
+                        flex: 1,
+                        padding: '0.75rem',
+                        background: '#10b981',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        fontSize: '0.9rem',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        opacity: (isInviting || !inviteFormData.playerName.trim()) ? 0.5 : 1
+                      }}
+                    >
+                      {isInviting ? '⏳ Lädt...' : '📱 Einladen & WhatsApp senden'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowInviteForm(null);
+                        setInviteFormData({
+                          playerName: '',
+                          playerLk: '',
+                          playerClub: '',
+                          playerPhone: '',
+                          playerEmail: ''
+                        });
+                      }}
+                      style={{
+                        padding: '0.75rem 1rem',
+                        background: 'white',
+                        color: '#6b7280',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '8px',
+                        fontSize: '0.9rem',
+                        fontWeight: '600',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Abbrechen
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1143,7 +1809,7 @@ function Training() {
             onClick={() => setSelectedFilter('mine')}
           >
             <Users size={18} />
-            Meine Gruppen ({visibleTrainings.filter(t => t.type === 'private' && (t.organizer_id === player?.id || t.invited_players?.includes(player?.id))).length})
+            Meine Trainingseinheiten ({visibleTrainings.filter(t => t.type === 'private' && (t.organizer_id === player?.id || t.invited_players?.includes(player?.id))).length})
           </button>
         </div>
         
@@ -1575,63 +2241,249 @@ function Training() {
                   <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', fontSize: '0.9rem' }}>
                     Mitspieler einladen
                   </label>
-                  
-                  {/* Interne Spieler (aus DB) - REGISTRIERT */}
-                  <div style={{ marginBottom: '1rem' }}>
-                    <div style={{ fontSize: '0.85rem', color: '#6b7280', marginBottom: '0.5rem' }}>
-                      Aus deinem Team (registriert):
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', maxHeight: '200px', overflow: 'auto', padding: '0.5rem', background: '#f8fafc', borderRadius: '8px' }}>
-                      {players.filter(p => p.is_active && p.id !== player?.id).map(p => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => {
-                            setFormData(prev => ({
-                              ...prev,
-                              invitedPlayers: prev.invitedPlayers.includes(p.id)
-                                ? prev.invitedPlayers.filter(id => id !== p.id)
-                                : [...prev.invitedPlayers, p.id]
-                            }));
-                          }}
-                          style={{
-                            padding: '0.5rem 0.75rem',
-                            background: formData.invitedPlayers.includes(p.id) ? '#10b981' : '#ffffff',
-                            color: formData.invitedPlayers.includes(p.id) ? 'white' : '#374151',
-                            border: formData.invitedPlayers.includes(p.id) ? 'none' : '2px solid #e2e8f0',
-                            borderRadius: '8px',
-                            fontSize: '0.85rem',
-                            fontWeight: '600',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s ease'
-                          }}
-                        >
-                          {formData.invitedPlayers.includes(p.id) && '✓ '}
-                          {p.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
 
-                  {/* Importierte Spieler (OHNE Email) mit Suche */}
+                  {/* TRAININGSGRUPPEN-ÜBERSICHT (Ausgewählte Spieler) */}
+                  {formData.invitedPlayers.length > 0 && (
+                    <div style={{ 
+                      marginBottom: '1rem',
+                      padding: '1rem',
+                      background: 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)',
+                      border: '2px solid #10b981',
+                      borderRadius: '12px'
+                    }}>
+                      <div style={{ 
+                        fontSize: '0.9rem', 
+                        fontWeight: '700', 
+                        color: '#14532d',
+                        marginBottom: '0.75rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem'
+                      }}>
+                        👥 Trainingsgruppe ({formData.invitedPlayers.length + formData.externalPlayers.length} Spieler)
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        {/* Registrierte Spieler */}
+                        {formData.invitedPlayers
+                          .filter(id => !importedPlayers.some(ip => ip.id === id))
+                          .map(playerId => {
+                            const p = players.find(pl => pl.id === playerId);
+                            if (!p) return null;
+                            const wasSent = whatsappInviteSent[playerId];
+
+                            return (
+                              <div key={playerId} style={{ 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                gap: '0.5rem',
+                                padding: '0.5rem',
+                                background: 'white',
+                                borderRadius: '6px',
+                                border: '1px solid #bbf7d0'
+                              }}>
+                                <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: '600', color: '#14532d' }}>
+                                  {p.name} {p.current_lk && `(${p.current_lk})`}
+                                </span>
+                                
+                                {/* WhatsApp-Button */}
+                                <button
+                                  type="button"
+                                  onClick={() => invitePlayerViaWhatsApp(p.id, p.name, p.phone)}
+                                  style={{
+                                    padding: '0.25rem 0.5rem',
+                                    background: wasSent ? '#6b7280' : '#25D366',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    fontSize: '0.7rem',
+                                    fontWeight: '600',
+                                    cursor: 'pointer'
+                                  }}
+                                  title={p.phone ? `WhatsApp an ${p.phone}` : 'WhatsApp öffnen'}
+                                >
+                                  📱 {wasSent ? '✓' : 'Einladen'}
+                                </button>
+
+                                {/* Entfernen */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setFormData(prev => ({
+                                      ...prev,
+                                      invitedPlayers: prev.invitedPlayers.filter(id => id !== playerId)
+                                    }));
+                                  }}
+                                  style={{
+                                    padding: '0.25rem 0.5rem',
+                                    background: '#ef4444',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    fontSize: '0.7rem',
+                                    fontWeight: '600',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            );
+                          })}
+
+                        {/* Importierte Spieler */}
+                        {formData.invitedPlayers
+                          .filter(id => allImportedPlayers.some(ip => ip.id === id))
+                          .map(playerId => {
+                            const ip = allImportedPlayers.find(p => p.id === playerId);
+                            if (!ip) return null;
+                            const wasSent = whatsappInviteSent[playerId];
+
+                            return (
+                              <div key={playerId} style={{ 
+                                display: 'flex', 
+                                flexDirection: 'column',
+                                gap: '0.5rem',
+                                padding: '0.5rem',
+                                background: 'white',
+                                borderRadius: '6px',
+                                border: '1px solid #bbf7d0'
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                  <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: '600', color: '#14532d' }}>
+                                    {ip.name} {ip.currentLk && `(LK ${ip.currentLk})`}
+                                    <span style={{ marginLeft: '0.5rem', fontSize: '0.7rem', color: '#f59e0b' }}>⏳</span>
+                                  </span>
+                                  
+                                  {/* WhatsApp-Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => invitePlayerViaWhatsApp(ip.id, ip.name, null)}
+                                    style={{
+                                      padding: '0.25rem 0.5rem',
+                                      background: wasSent ? '#6b7280' : '#25D366',
+                                      color: 'white',
+                                      border: 'none',
+                                      borderRadius: '6px',
+                                      fontSize: '0.7rem',
+                                      fontWeight: '600',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    📱 {wasSent ? '✓' : 'Einladen'}
+                                  </button>
+
+                                  {/* Entfernen */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setFormData(prev => ({
+                                        ...prev,
+                                        invitedPlayers: prev.invitedPlayers.filter(id => id !== playerId)
+                                      }));
+                                      setImportedPlayerEmails(prev => {
+                                        const updated = { ...prev };
+                                        delete updated[playerId];
+                                        return updated;
+                                      });
+                                    }}
+                                    style={{
+                                      padding: '0.25rem 0.5rem',
+                                      background: '#ef4444',
+                                      color: 'white',
+                                      border: 'none',
+                                      borderRadius: '6px',
+                                      fontSize: '0.7rem',
+                                      fontWeight: '600',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+
+                                {/* Email-Eingabe (optional) */}
+                                <input
+                                  type="email"
+                                  placeholder="Email eingeben (optional)..."
+                                  value={importedPlayerEmails[playerId] || ''}
+                                  onChange={(e) => setImportedPlayerEmails(prev => ({ ...prev, [playerId]: e.target.value }))}
+                                  style={{
+                                    padding: '0.5rem',
+                                    border: '1px solid #bbf7d0',
+                                    borderRadius: '6px',
+                                    fontSize: '0.85rem',
+                                    width: '100%'
+                                  }}
+                                />
+                              </div>
+                            );
+                          })}
+
+                        {/* Externe Spieler */}
+                        {formData.externalPlayers.map((ext, idx) => (
+                          <div key={`ext-${idx}`} style={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: '0.5rem',
+                            padding: '0.5rem',
+                            background: 'white',
+                            borderRadius: '6px',
+                            border: '1px solid #bbf7d0'
+                          }}>
+                            <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: '600', color: '#14532d' }}>
+                              {ext.name} {ext.lk && `(LK ${ext.lk})`}
+                              {ext.club && <span style={{ fontSize: '0.75rem', opacity: 0.7 }}> • {ext.club}</span>}
+                            </span>
+                            
+                            {/* Entfernen */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  externalPlayers: prev.externalPlayers.filter((_, i) => i !== idx)
+                                }));
+                              }}
+                              style={{
+                                padding: '0.25rem 0.5rem',
+                                background: '#ef4444',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontSize: '0.7rem',
+                                fontWeight: '600',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  
+                  {/* ALLE VERFÜGBAREN SPIELER (vereins-übergreifend) */}
                   <div style={{ marginBottom: '1rem' }}>
-                    <div style={{ fontSize: '0.85rem', color: '#f59e0b', marginBottom: '0.5rem', fontWeight: '600' }}>
-                      ⏳ Weitere Spieler suchen (warten auf Registrierung):
+                    <div style={{ fontSize: '0.85rem', color: '#1e40af', marginBottom: '0.5rem', fontWeight: '600' }}>
+                      🔍 Alle verfügbaren Spieler suchen ({allImportedPlayers.length} verfügbar):
                     </div>
                     
                     {/* Suchfeld */}
                     <input
                       type="text"
-                      placeholder="Name eingeben zum Suchen..."
+                      placeholder="Spielername oder LK eingeben zum Suchen..."
                       value={importedPlayerSearch}
                       onChange={(e) => setImportedPlayerSearch(e.target.value)}
                       style={{
                         width: '100%',
-                        padding: '0.5rem',
-                        border: '2px solid #f59e0b',
-                        borderRadius: '6px',
-                        fontSize: '0.85rem',
-                        marginBottom: '0.5rem'
+                        padding: '0.75rem',
+                        border: '2px solid #3b82f6',
+                        borderRadius: '8px',
+                        fontSize: '0.9rem',
+                        marginBottom: '0.75rem'
                       }}
                     />
 
@@ -1639,88 +2491,54 @@ function Training() {
                     {importedPlayerSearch && (
                       <>
                         {importedPlayers.length > 0 ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '200px', overflow: 'auto', padding: '0.5rem', background: '#fef3c7', borderRadius: '8px', border: '1px solid #f59e0b' }}>
-                        {importedPlayers.map(ip => {
-                          const isSelected = formData.invitedPlayers.includes(ip.id);
-                          const hasEmail = importedPlayerEmails[ip.id];
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', maxHeight: '300px', overflow: 'auto', padding: '0.75rem', background: '#eff6ff', borderRadius: '8px', border: '1px solid #3b82f6' }}>
+                            {importedPlayers.map(player => {
+                              const isInvited = formData.invitedPlayers.includes(player.id);
 
-                          return (
-                            <div key={ip.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '0.75rem', background: isSelected ? '#10b981' : 'white', borderRadius: '6px', border: isSelected ? 'none' : '1px solid #e2e8f0' }}>
-                              {/* Erste Reihe: Checkbox + Name + WhatsApp-Button */}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <input
-                                  type="checkbox"
-                                  checked={isSelected}
-                                  onChange={() => {
+                              return (
+                                <button
+                                  key={player.id}
+                                  type="button"
+                                  onClick={() => {
                                     setFormData(prev => ({
                                       ...prev,
-                                      invitedPlayers: prev.invitedPlayers.includes(ip.id)
-                                        ? prev.invitedPlayers.filter(id => id !== ip.id)
-                                        : [...prev.invitedPlayers, ip.id]
+                                      invitedPlayers: prev.invitedPlayers.includes(player.id)
+                                        ? prev.invitedPlayers.filter(id => id !== player.id)
+                                        : [...prev.invitedPlayers, player.id]
                                     }));
                                   }}
-                                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                                />
-                                <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: '600', color: isSelected ? 'white' : '#374151' }}>
-                                  {ip.name} {ip.currentLk && `(LK ${ip.currentLk})`}
-                                </span>
-                                {/* WhatsApp-Einladung Button */}
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    inviteImportedPlayerViaWhatsApp(ip);
-                                  }}
                                   style={{
-                                    padding: '0.25rem 0.5rem',
-                                    background: '#25D366',
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '6px',
-                                    fontSize: '0.75rem',
+                                    padding: '0.5rem 0.75rem',
+                                    background: isInvited ? '#3b82f6' : 'white',
+                                    color: isInvited ? 'white' : '#374151',
+                                    border: isInvited ? 'none' : '2px solid #e2e8f0',
+                                    borderRadius: '8px',
+                                    fontSize: '0.85rem',
                                     fontWeight: '600',
                                     cursor: 'pointer',
+                                    transition: 'all 0.2s ease',
                                     display: 'flex',
                                     alignItems: 'center',
-                                    gap: '0.25rem',
-                                    whiteSpace: 'nowrap'
+                                    gap: '0.25rem'
                                   }}
-                                  title="Per WhatsApp zur App einladen"
                                 >
-                                  📱 Einladen
+                                  {isInvited && '✓ '}
+                                  {player.name} {player.currentLk && `(${player.currentLk})`}
+                                  <span style={{ fontSize: '0.7rem', opacity: 0.7 }}>
+                                    {player.source === 'registered' ? '✅' : '⏳'}
+                                  </span>
                                 </button>
-                              </div>
-                              
-                              {/* Zweite Reihe: Email-Eingabe (wenn ausgewählt) */}
-                              {isSelected && (
-                                <input
-                                  type="email"
-                                  placeholder="Email eingeben..."
-                                  value={importedPlayerEmails[ip.id] || ''}
-                                  onChange={(e) => setImportedPlayerEmails(prev => ({ ...prev, [ip.id]: e.target.value }))}
-                                  onClick={(e) => e.stopPropagation()}
-                                  style={{
-                                    padding: '0.5rem',
-                                    border: '2px solid white',
-                                    borderRadius: '6px',
-                                    fontSize: '0.85rem',
-                                    width: '100%'
-                                  }}
-                                  required={isSelected}
-                                />
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+                              );
+                            })}
+                          </div>
                         ) : (
                           <div style={{ 
                             padding: '1rem', 
-                            background: '#fef3c7', 
+                            background: '#eff6ff', 
                             borderRadius: '8px', 
-                            border: '1px solid #f59e0b',
+                            border: '1px solid #3b82f6',
                             textAlign: 'center',
-                            color: '#92400e',
+                            color: '#1e40af',
                             fontSize: '0.85rem'
                           }}>
                             🔍 Keine Spieler gefunden für "{importedPlayerSearch}"
@@ -1730,19 +2548,13 @@ function Training() {
                     )}
 
                     {/* Info-Text */}
-                    {importedPlayers.length > 0 && (
-                      <div style={{ fontSize: '0.75rem', color: '#92400e', marginTop: '0.5rem', fontStyle: 'italic' }}>
-                        💡 Diese Spieler haben noch kein Konto. Du kannst ihnen manuell eine Einladung per Email schicken.
-                      </div>
-                    )}
-
-                    {/* Hinweis wenn keine Suche */}
                     {!importedPlayerSearch && allImportedPlayers.length > 0 && (
-                      <div style={{ fontSize: '0.75rem', color: '#92400e', fontStyle: 'italic' }}>
-                        💡 {allImportedPlayers.length} Spieler verfügbar. Gib einen Namen ein, um zu suchen.
+                      <div style={{ fontSize: '0.75rem', color: '#1e40af', fontStyle: 'italic', textAlign: 'center', padding: '0.5rem' }}>
+                        💡 {allImportedPlayers.length} Spieler verfügbar. Gib einen Namen oder LK ein, um zu suchen.
                       </div>
                     )}
                   </div>
+
 
                   {/* Externe Spieler */}
                   <div>
