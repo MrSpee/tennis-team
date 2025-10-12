@@ -1,0 +1,102 @@
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9fafb;">
+  <div style="background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+
+    <!-- Header mit Logo -->
+    <div style="text-align: center; margin-bottom: 30px;">
+      <img src="https://fyvmyyfuxuconhdbiwoa.supabase.co/storage/v1/object/public/email_pics/app-icon.jpg"
+           alt="Platzhirsch Logo"
+           width="120"
+           height="120"
+           style="display: block; margin: 0 auto; border-radius: 50%; border: 3px solid #e0e7ff; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+      <h1 style="color: #1e40af; font-size: 32px; margin: 20px 0 0 0;">Platzhirsch</h1>
+      <p style="color: #666; font-size: 18px; font-style: italic; margin: 10px 0 0 0;">
+        Deine Matches. Dein Team. Dein Tennis.
+      </p>
+    </div>
+
+    <!-- Willkommenstext -->
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin-bottom: 25px; text-align: center;">
+      <h2 style="margin: 0 0 10px 0; font-size: 24px;">🎉 Willkommen im Team!</h2>
+      <p style="margin: 0; font-size: 16px; opacity: 0.95;">
+        Schön, dass du dabei bist!
+      </p>
+    </div>
+
+    <!-- Haupttext -->
+    <p style="color: #333; font-size: 16px; line-height: 1.6; margin-bottom: 25px;">
+      Hallo! 👋<br><br>
+      Vielen Dank für deine Registrierung beim <strong>Platzhirsch</strong> – deiner Tennis-Team-App!<br><br>
+      Bestätige jetzt deine E-Mail-Adresse, um folgende Funktionen freizuschalten:
+    </p>
+
+    <!-- Feature-Liste -->
+    <div style="background: #eff6ff; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+      <ul style="margin: 0; padding-left: 20px; color: #1e40af;">
+        <li style="margin-bottom: 10px;">💪 <strong>Eigene Entwicklung</strong> verfolgen – sieh, wie sich deine LK verbessert!</li>
+        <li style="margin-bottom: 10px;">📅 <strong>Verfügbarkeit</strong> für Medenspiele einfach organisieren</li>
+        <li style="margin-bottom: 10px;">🎾 <strong>Trainings planen</strong> und mit Teamkollegen abstimmen</li>
+        <li style="margin-bottom: 10px;">🤝 <strong>Spieler finden</strong> für spontane Matches oder Training</li>
+        <li style="margin-bottom: 10px;">🚀 <strong>More to come:</strong> Noch mehr smarte Features sind in Arbeit!</li>
+      </ul>
+    </div>
+
+    <!-- CTA Button -->
+    <div style="text-align: center; margin: 30px 0;">
+      <a href="{{ .ConfirmationURL }}" 
+         style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 40px; text-decoration: none; border-radius: 8px; font-size: 18px; font-weight: bold; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);">
+        ✅ E-Mail bestätigen
+      </a>
+    </div>
+
+    <p style="color: #999; font-size: 13px; text-align: center; margin-top: 10px;">
+      Der Bestätigungslink ist 24 Stunden gültig.
+    </p>
+
+    <!-- 🔍 DEBUG INFO (NUR FÜR TESTING - SPÄTER ENTFERNEN!) -->
+    <div style="background: #fee2e2; border: 2px solid #ef4444; padding: 15px; border-radius: 8px; margin: 20px 0;">
+      <p style="color: #991b1b; font-size: 12px; margin: 0 0 10px 0; font-weight: bold;">
+        🔍 DEBUG INFO (nur für Testing):
+      </p>
+      <p style="color: #991b1b; font-size: 11px; margin: 0; word-break: break-all; font-family: monospace;">
+        Confirmation URL:<br>
+        {{ .ConfirmationURL }}
+      </p>
+      <p style="color: #991b1b; font-size: 11px; margin: 10px 0 0 0; word-break: break-all; font-family: monospace;">
+        Site URL:<br>
+        {{ .SiteURL }}
+      </p>
+      <p style="color: #991b1b; font-size: 11px; margin: 10px 0 0 0; word-break: break-all; font-family: monospace;">
+        Token Hash:<br>
+        {{ .TokenHash }}
+      </p>
+      <p style="color: #991b1b; font-size: 10px; margin: 10px 0 0 0; font-style: italic;">
+        ⚠️ Diese Box nach dem Testing entfernen!
+      </p>
+    </div>
+
+    <!-- Footer -->
+    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+
+    <p style="color: #666; font-size: 14px; line-height: 1.6; margin-bottom: 15px;">
+      <strong>📱 Nach der Bestätigung:</strong><br>
+      Logge dich mit deiner E-Mail und deinem Passwort ein und vervollständige dein Profil mit Namen, Telefonnummer und LK.
+    </p>
+
+    <div style="background: #fef3c7; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b; margin-bottom: 25px;">
+      <p style="color: #92400e; font-size: 14px; margin: 0;">
+        💡 <strong>Tipp:</strong> Speichere die App auf deinem Handy als Homescreen-Icon – so hast du dein Team immer griffbereit!
+      </p>
+    </div>
+
+    <!-- Emotionaler Abschluss -->
+    <p style="color: #333; font-size: 16px; text-align: center; margin-top: 40px;">
+      💚 Wir freuen uns, dass du dabei bist!<br>
+      <strong>Dein Platzhirsch Team</strong>
+    </p>
+
+    <p style="color: #ccc; font-size: 11px; text-align: center; margin-top: 20px;">
+      Falls du dich nicht registriert hast, kannst du diese E-Mail ignorieren.
+    </p>
+
+  </div>
+</div>

@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabaseClient';
 import { ChevronRight, ChevronLeft } from 'lucide-react';
 import ClubAutocomplete from './ClubAutocomplete';
 import { normalizeLK } from '../lib/lkUtils';
+import LoggingService from '../services/activityLogger';
 import './Dashboard.css';
 
 function OnboardingFlow() {
@@ -15,6 +16,7 @@ function OnboardingFlow() {
   const [importedPlayerSearch, setImportedPlayerSearch] = useState('');
   const [importedPlayerResults, setImportedPlayerResults] = useState([]);
   const [selectedImportedPlayer, setSelectedImportedPlayer] = useState(null);
+  const [onboardingStartTime] = useState(new Date()); // Tracking: Start-Zeit
 
   // Form Data
   const [formData, setFormData] = useState({
@@ -33,6 +35,17 @@ function OnboardingFlow() {
     current_lk: '', // Aktuelle Leistungsklasse
     whatsappEnabled: false
   });
+
+  // Beim ersten Laden: Logge Onboarding-Start
+  useEffect(() => {
+    const logStart = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await LoggingService.logOnboardingStart(user.email);
+      }
+    };
+    logStart();
+  }, []); // Nur einmal beim Mount
 
   // Lade verfügbare Teams
   const loadAvailableTeams = async () => {
@@ -85,6 +98,11 @@ function OnboardingFlow() {
 
       console.log('✅ Found imported players:', data?.length || 0);
       setImportedPlayerResults(data || []);
+      
+      // Logge Suche (nur wenn Ergebnisse gefunden)
+      if (data && data.length > 0) {
+        await LoggingService.logImportedPlayerSearch(searchTerm, data.length);
+      }
     } catch (error) {
       console.error('Error searching imported players:', error);
       setImportedPlayerResults([]);
@@ -175,6 +193,9 @@ function OnboardingFlow() {
       console.log('🚀 Starting SUPABASE onboarding completion...');
       console.log('📊 Custom teams:', formData.customTeams);
 
+      // 📊 Tracking: Berechne Onboarding-Dauer
+      const onboardingDuration = Math.round((new Date() - onboardingStartTime) / 1000); // in Sekunden
+
       // 1️⃣ Hole aktuelle User-ID aus Supabase Auth
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       
@@ -211,6 +232,9 @@ function OnboardingFlow() {
       if (selectedImportedPlayer) {
         console.log('🔗 Merging imported player:', selectedImportedPlayer.id);
         
+        // 📊 Logge Smart-Match-Auswahl
+        await LoggingService.logImportedPlayerSelection(selectedImportedPlayer, true);
+        
         const { error: mergeError } = await supabase
           .from('imported_players')
           .update({
@@ -244,9 +268,19 @@ function OnboardingFlow() {
             console.log('✅ Training invites transferred successfully');
           }
         }
+      } else {
+        // 📊 Logge manuelle Dateneingabe (kein Smart-Match)
+        await LoggingService.logManualDataEntry({
+          name: formData.name,
+          current_lk: formData.current_lk,
+          phone: formData.phone
+        });
       }
 
       // 3️⃣ Erstelle player_teams Einträge für alle gewählten Teams
+      let teamsFromDB = 0;
+      let teamsManual = 0;
+      
       for (let i = 0; i < formData.customTeams.length; i++) {
         const team = formData.customTeams[i];
         
@@ -267,6 +301,15 @@ function OnboardingFlow() {
         }
 
         console.log(`✅ Player assigned to team: ${team.category}`);
+        
+        // 📊 Tracking: Zähle Teams aus DB vs. manuelle Eingabe
+        if (team.id.startsWith('custom_')) {
+          teamsManual++;
+          await LoggingService.logManualTeamEntry(team);
+        } else {
+          teamsFromDB++;
+          await LoggingService.logTeamSelectionFromDB(team);
+        }
       }
 
       console.log('✅ All teams assigned successfully');
@@ -309,6 +352,21 @@ function OnboardingFlow() {
 
       console.log('✅ SUPABASE Onboarding abgeschlossen');
 
+      // 📊 Logge Onboarding-Abschluss mit allen Details
+      await LoggingService.logOnboardingCompletion(playerData, {
+        clubs_count: formData.selectedClubs.length,
+        teams_count: formData.customTeams.length,
+        teams_from_db: teamsFromDB,
+        teams_manual: teamsManual,
+        whatsapp_enabled: formData.whatsappEnabled,
+        used_smart_match: !!selectedImportedPlayer,
+        imported_player_id: selectedImportedPlayer?.id || null,
+        imported_player_name: selectedImportedPlayer?.name || null,
+        duration_seconds: onboardingDuration
+      });
+
+      console.log(`📊 Onboarding completed in ${onboardingDuration}s`);
+
       // 8️⃣ Weiterleitung zum Dashboard mit window.location (erzwingt Full-Reload)
       console.log('🔄 Navigating to dashboard with full reload...');
       window.location.href = '/';
@@ -319,15 +377,6 @@ function OnboardingFlow() {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Debug-Funktion: Lokale Daten löschen
-  const clearLocalData = () => {
-    localStorage.removeItem('localPlayerData');
-    localStorage.removeItem('localOnboardingComplete');
-    console.log('🗑️ Local data cleared');
-    alert('Lokale Daten gelöscht! Seite wird neu geladen.');
-    window.location.reload();
   };
 
   return (
@@ -345,24 +394,6 @@ function OnboardingFlow() {
           }
         `}
       </style>
-
-      {/* Debug Button */}
-      <div style={{ marginBottom: '1rem', textAlign: 'center' }}>
-        <button
-          onClick={clearLocalData}
-          style={{
-            padding: '0.5rem 1rem',
-            background: '#fee2e2',
-            color: '#991b1b',
-            border: '1px solid #fca5a5',
-            borderRadius: '8px',
-            fontSize: '0.8rem',
-            cursor: 'pointer'
-          }}
-        >
-          🗑️ Lokale Daten löschen (Debug)
-        </button>
-      </div>
 
       {/* Progress Bar */}
       <div className="fade-in" style={{ marginBottom: '2rem' }}>
@@ -592,7 +623,15 @@ function OnboardingFlow() {
             <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'flex-end' }}>
               <button
                 className="btn-modern btn-modern-active"
-                onClick={() => setCurrentStep(2)}
+                onClick={async () => {
+                  // 📊 Logge Schritt-Abschluss
+                  await LoggingService.logOnboardingStep(1, {
+                    stepName: 'Vereinsauswahl',
+                    clubs_selected: formData.selectedClubs.length,
+                    clubs: formData.selectedClubs
+                  });
+                  setCurrentStep(2);
+                }}
                 disabled={formData.selectedClubs.length === 0}
                 style={{ minWidth: '150px' }}
               >
@@ -1039,7 +1078,16 @@ function OnboardingFlow() {
               </button>
               <button
                 className="btn-modern btn-modern-active"
-                onClick={() => setCurrentStep(3)}
+                onClick={async () => {
+                  // 📊 Logge Schritt-Abschluss
+                  await LoggingService.logOnboardingStep(2, {
+                    stepName: 'Mannschaftsauswahl',
+                    teams_selected: formData.customTeams.length,
+                    teams_from_db: formData.customTeams.filter(t => !t.id.startsWith('custom_')).length,
+                    teams_manual: formData.customTeams.filter(t => t.id.startsWith('custom_')).length
+                  });
+                  setCurrentStep(3);
+                }}
                 disabled={formData.customTeams.length === 0}
                 style={{ minWidth: '150px' }}
               >
@@ -1175,7 +1223,14 @@ function OnboardingFlow() {
                       {importedPlayerResults.map((player) => (
                         <div
                           key={player.id}
-                          onClick={() => {
+                          onClick={async () => {
+                            // 📊 Logge Smart-Match-Auswahl
+                            await LoggingService.logImportedPlayerSearch(
+                              importedPlayerSearch,
+                              importedPlayerResults.length,
+                              player
+                            );
+                            
                             setSelectedImportedPlayer(player);
                             setFormData(prev => ({
                               ...prev,
@@ -1469,7 +1524,18 @@ function OnboardingFlow() {
               </button>
               <button
                 className="btn-modern btn-modern-active"
-                onClick={() => setCurrentStep(4)}
+                onClick={async () => {
+                  // 📊 Logge Schritt-Abschluss
+                  await LoggingService.logOnboardingStep(3, {
+                    stepName: 'Persönliche Daten',
+                    has_name: !!formData.name,
+                    has_lk: !!formData.current_lk,
+                    has_phone: !!formData.phone,
+                    used_smart_match: !!selectedImportedPlayer,
+                    imported_player_name: selectedImportedPlayer?.name || null
+                  });
+                  setCurrentStep(4);
+                }}
                 disabled={!formData.name}
                 style={{ minWidth: '150px' }}
               >

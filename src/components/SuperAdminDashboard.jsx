@@ -40,6 +40,8 @@ function SuperAdminDashboard() {
   const [matchView, setMatchView] = useState('upcoming'); // 'upcoming' | 'completed'
   const [matchSearchTerm, setMatchSearchTerm] = useState('');
   const [matchStatusFilter, setMatchStatusFilter] = useState('all');
+  const [trainingGroups, setTrainingGroups] = useState([]);
+  const [trainingSearchTerm, setTrainingSearchTerm] = useState('');
 
   // State für Sortierung
   const [teamSortField, setTeamSortField] = useState('club'); // 'club', 'category', 'players', 'season'
@@ -184,6 +186,13 @@ function SuperAdminDashboard() {
   useEffect(() => {
     if (selectedTab === 'matches' && allMatches.length === 0) {
       loadMatches();
+    }
+  }, [selectedTab]);
+
+  // Lazy Loading: Lade Trainings nur wenn Trainings-Tab geöffnet wird
+  useEffect(() => {
+    if (selectedTab === 'trainings' && trainingGroups.length === 0) {
+      loadTrainingGroups();
     }
   }, [selectedTab]);
 
@@ -380,12 +389,15 @@ function SuperAdminDashboard() {
             }
           } else {
             // user_id ist NULL - versuche aus entity_id abzuleiten
-            console.warn('⚠️ Log has NULL user_id:', log.action, 'entity_type:', log.entity_type, 'entity_id:', log.entity_id);
+            // Nur in DEV-Mode loggen (zu viel Noise in Production)
+            if (process.env.NODE_ENV === 'development') {
+              console.warn('⚠️ Log has NULL user_id:', log.action, 'entity_type:', log.entity_type, 'entity_id:', log.entity_id);
+            }
             
             // Wenn entity_type = 'player', ist entity_id wahrscheinlich die player_id
             if (log.entity_type === 'player' && log.entity_id) {
               player = minimalPlayersData.find(p => p.id === log.entity_id);
-              if (player) {
+              if (player && process.env.NODE_ENV === 'development') {
                 console.log('✅ Inferred player from entity_id:', player.name);
               }
             }
@@ -399,7 +411,20 @@ function SuperAdminDashboard() {
         
         console.log('✅ Logs enriched with player data');
         console.log('🔍 First enriched log:', enrichedLogs[0]);
-        console.log('🔍 Logs without player:', enrichedLogs.filter(l => !l.player).length);
+        
+        // 🔧 NEU: Filtere Logs ohne Player (außer System-Actions)
+        const systemActions = ['page_navigation', 'error_occurred'];
+        const filteredLogs = enrichedLogs.filter(log => 
+          log.player !== null || systemActions.includes(log.action)
+        );
+        
+        const removedCount = enrichedLogs.length - filteredLogs.length;
+        if (removedCount > 0) {
+          console.log(`🗑️ Filtered out ${removedCount} logs without player (not system actions)`);
+        }
+        
+        console.log('🔍 Logs after filtering:', filteredLogs.length);
+        enrichedLogs = filteredLogs;
       }
 
       setActivityLogs(enrichedLogs);
@@ -605,6 +630,102 @@ function SuperAdminDashboard() {
 
     } catch (error) {
       console.error('Error loading teams:', error);
+    }
+  };
+
+  const loadTrainingGroups = async () => {
+    try {
+      console.log('🔵 Loading training groups for Trainings tab...');
+
+      // Lade alle Trainings gruppiert nach title
+      const { data: trainingsData, error: trainingsError } = await supabase
+        .from('training_sessions')
+        .select(`
+          id,
+          title,
+          type,
+          organizer_id,
+          team_id,
+          is_public,
+          max_players,
+          target_players,
+          location,
+          venue,
+          created_at,
+          team_info(
+            club_name,
+            team_name,
+            category
+          )
+        `)
+        .order('created_at', { ascending: false });
+
+      if (trainingsError) {
+        console.error('❌ Error loading trainings:', trainingsError);
+        return;
+      }
+
+      console.log('✅ Trainings loaded:', trainingsData?.length || 0, 'sessions');
+
+      // Lade Organisator-Namen
+      const organizerIds = [...new Set(trainingsData.map(t => t.organizer_id))];
+      const { data: organizersData, error: orgError } = await supabase
+        .from('players')
+        .select('id, name')
+        .in('id', organizerIds);
+
+      if (orgError) {
+        console.error('❌ Error loading organizers:', orgError);
+      }
+
+      const organizersMap = {};
+      (organizersData || []).forEach(o => {
+        organizersMap[o.id] = o.name;
+      });
+
+      // Gruppiere nach title + organizer (Trainingsgruppe)
+      const groupsMap = {};
+      trainingsData.forEach(training => {
+        const groupKey = `${training.title}_${training.organizer_id}_${training.type}`;
+        
+        if (!groupsMap[groupKey]) {
+          groupsMap[groupKey] = {
+            title: training.title,
+            type: training.type,
+            organizer_id: training.organizer_id,
+            organizer_name: organizersMap[training.organizer_id] || 'Unbekannt',
+            team_id: training.team_id,
+            team_info: training.team_info,
+            is_public: training.is_public,
+            max_players: training.max_players,
+            target_players: training.target_players,
+            location: training.location,
+            venue: training.venue,
+            sessions: [],
+            session_count: 0,
+            first_session_date: training.created_at,
+            last_session_date: training.created_at
+          };
+        }
+
+        groupsMap[groupKey].sessions.push(training);
+        groupsMap[groupKey].session_count++;
+        
+        // Update first/last session dates
+        if (new Date(training.created_at) < new Date(groupsMap[groupKey].first_session_date)) {
+          groupsMap[groupKey].first_session_date = training.created_at;
+        }
+        if (new Date(training.created_at) > new Date(groupsMap[groupKey].last_session_date)) {
+          groupsMap[groupKey].last_session_date = training.created_at;
+        }
+      });
+
+      const groups = Object.values(groupsMap);
+      console.log('✅ Training groups created:', groups.length, 'groups');
+      setTrainingGroups(groups);
+
+    } catch (error) {
+      console.error('Error loading training groups:', error);
     }
   };
 
@@ -821,6 +942,13 @@ function SuperAdminDashboard() {
       'team_created': 'Mannschaft erstellt',
       'profile_updated': 'Profil aktualisiert',
       'onboarding_completed': 'Onboarding abgeschlossen',
+      'onboarding_started': 'Onboarding gestartet',
+      'onboarding_step': 'Onboarding-Schritt',
+      'onboarding_search': 'Smart-Match Suche',
+      'onboarding_smart_match': 'Smart-Match Auswahl',
+      'onboarding_manual_entry': 'Manuelle Dateneingabe',
+      'onboarding_team_from_db': 'Team aus DB ausgewählt',
+      'onboarding_team_manual': 'Team manuell erstellt',
       'training_created': 'Training erstellt',
       'training_confirm': 'Training zugesagt',
       'training_decline': 'Training abgesagt',
@@ -845,6 +973,13 @@ function SuperAdminDashboard() {
       'team_created': '🏆',
       'profile_updated': '👤',
       'onboarding_completed': '✅',
+      'onboarding_started': '🚀',
+      'onboarding_step': '📍',
+      'onboarding_search': '🔍',
+      'onboarding_smart_match': '⚡',
+      'onboarding_manual_entry': '✏️',
+      'onboarding_team_from_db': '🏆',
+      'onboarding_team_manual': '➕',
       'training_created': '🏃',
       'training_confirm': '✅',
       'training_decline': '❌',
@@ -869,6 +1004,13 @@ function SuperAdminDashboard() {
       'team_created': '#10b981',
       'profile_updated': '#8b5cf6',
       'onboarding_completed': '#10b981',
+      'onboarding_started': '#3b82f6',
+      'onboarding_step': '#6366f1',
+      'onboarding_search': '#f59e0b',
+      'onboarding_smart_match': '#22c55e',
+      'onboarding_manual_entry': '#f97316',
+      'onboarding_team_from_db': '#10b981',
+      'onboarding_team_manual': '#f59e0b',
       'training_created': '#f59e0b',
       'training_confirm': '#10b981',
       'training_decline': '#ef4444',
@@ -944,6 +1086,7 @@ function SuperAdminDashboard() {
               { id: 'clubs', label: '🏢 Vereine', icon: Building2 },
               { id: 'teams', label: '🏆 Teams', icon: Users },
               { id: 'matches', label: '🎾 Matches', icon: Activity },
+              { id: 'trainings', label: '🏃 Trainings', icon: Activity },
               { id: 'logs', label: '📝 Aktivitäten', icon: Activity },
               { id: 'users', label: '👥 Benutzer', icon: Users },
               { id: 'import', label: '📥 Import', icon: Download }
@@ -1000,20 +1143,33 @@ function SuperAdminDashboard() {
                   }}
                 >
                   <option value="all">Alle Aktionen</option>
-                  <option value="club_selected">Vereinsauswahl</option>
-                  <option value="team_created">Team erstellt</option>
-                  <option value="profile_updated">Profil aktualisiert</option>
-                  <option value="onboarding_completed">Onboarding abgeschlossen</option>
-                  <option value="training_created">Training erstellt</option>
-                  <option value="training_confirm">Training zugesagt</option>
-                  <option value="training_decline">Training abgesagt</option>
-                  <option value="matchday_confirm">Matchday zugesagt</option>
-                  <option value="matchday_decline">Matchday abgesagt</option>
-                  <option value="profile_edited">Profil bearbeitet</option>
-                  <option value="lk_changed">LK geändert</option>
-                  <option value="match_result_entered">Match-Ergebnis eingegeben</option>
-                  <option value="page_navigation">Seiten-Navigation</option>
-                  <option value="error_occurred">Fehler aufgetreten</option>
+                  <optgroup label="📋 Onboarding">
+                    <option value="onboarding_started">🚀 Onboarding gestartet</option>
+                    <option value="onboarding_step">📍 Onboarding-Schritt</option>
+                    <option value="onboarding_search">🔍 Smart-Match Suche</option>
+                    <option value="onboarding_smart_match">⚡ Smart-Match Auswahl</option>
+                    <option value="onboarding_manual_entry">✏️ Manuelle Dateneingabe</option>
+                    <option value="onboarding_team_from_db">🏆 Team aus DB</option>
+                    <option value="onboarding_team_manual">➕ Team manuell</option>
+                    <option value="onboarding_completed">✅ Onboarding abgeschlossen</option>
+                  </optgroup>
+                  <optgroup label="🎾 Aktivitäten">
+                    <option value="club_selected">Vereinsauswahl</option>
+                    <option value="team_created">Team erstellt</option>
+                    <option value="profile_updated">Profil aktualisiert</option>
+                    <option value="training_created">Training erstellt</option>
+                    <option value="training_confirm">Training zugesagt</option>
+                    <option value="training_decline">Training abgesagt</option>
+                    <option value="matchday_confirm">Matchday zugesagt</option>
+                    <option value="matchday_decline">Matchday abgesagt</option>
+                    <option value="profile_edited">Profil bearbeitet</option>
+                    <option value="lk_changed">LK geändert</option>
+                    <option value="match_result_entered">Match-Ergebnis eingegeben</option>
+                  </optgroup>
+                  <optgroup label="🔧 System">
+                    <option value="page_navigation">Seiten-Navigation</option>
+                    <option value="error_occurred">Fehler aufgetreten</option>
+                  </optgroup>
                 </select>
               </div>
             )}
@@ -1202,13 +1358,28 @@ function SuperAdminDashboard() {
                 </div>
               </div>
 
-              {/* Trainings → keine Detailseite (vorerst) */}
-              <div className="personality-card">
+              {/* Trainings → Trainings Tab */}
+              <div 
+                className="personality-card"
+                onClick={() => setSelectedTab('trainings')}
+                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-4px)';
+                  e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.1)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '';
+                }}
+              >
                 <div className="personality-icon">🏃</div>
                 <div className="personality-content">
-                  <h4>Trainings</h4>
+                  <h4>Training-Sessions</h4>
                   <p style={{ fontSize: '1.5rem', fontWeight: '700', margin: 0 }}>
                     {stats.totalTrainings || 0}
+                  </p>
+                  <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                    Klicken für Details →
                   </p>
                 </div>
               </div>
@@ -2917,6 +3088,203 @@ function SuperAdminDashboard() {
                           <span>🏆 {match.team_info?.category || 'Unbekannt'}</span>
                           <span>📅 {match.season}</span>
                           <span>📊 {match.total_responses} Rückmeldungen</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* Trainings Tab */}
+      {selectedTab === 'trainings' && (
+        <div className="lk-card-full">
+          <div className="formkurve-header">
+            <div className="formkurve-title">🏃 Trainings-Verwaltung</div>
+            <div className="formkurve-subtitle">
+              {trainingGroups.length} Trainingsgruppen • {stats.totalTrainings || 0} Sessions gesamt
+            </div>
+          </div>
+          <div className="season-content">
+            {/* Suchfeld */}
+            <div style={{ marginBottom: '1.5rem' }}>
+              <input
+                type="text"
+                placeholder="🔍 Suche nach Trainingsgruppe, Organisator, Ort..."
+                value={trainingSearchTerm}
+                onChange={(e) => setTrainingSearchTerm(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '8px',
+                  fontSize: '0.875rem'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+              />
+            </div>
+
+            {trainingGroups.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '3rem', color: '#9ca3af' }}>
+                <Activity size={48} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
+                <p>Keine Trainingsgruppen gefunden</p>
+              </div>
+            ) : (() => {
+              // Filter Trainingsgruppen
+              const filteredGroups = trainingGroups.filter(group => {
+                if (!trainingSearchTerm) return true;
+                const searchLower = trainingSearchTerm.toLowerCase();
+                return (
+                  group.title?.toLowerCase().includes(searchLower) ||
+                  group.organizer_name?.toLowerCase().includes(searchLower) ||
+                  group.location?.toLowerCase().includes(searchLower) ||
+                  group.venue?.toLowerCase().includes(searchLower) ||
+                  group.team_info?.club_name?.toLowerCase().includes(searchLower)
+                );
+              });
+
+              if (filteredGroups.length === 0) {
+                return (
+                  <div style={{ textAlign: 'center', padding: '3rem', color: '#9ca3af' }}>
+                    <Activity size={48} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
+                    <p>Keine Trainingsgruppen gefunden für "{trainingSearchTerm}"</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {filteredGroups.map((group, index) => {
+                    const typeColors = {
+                      team: { bg: '#dbeafe', border: '#3b82f6', text: '#1e40af', icon: '🏢' },
+                      private: { bg: '#fef3c7', border: '#f59e0b', text: '#92400e', icon: '🔒' }
+                    };
+                    const colors = typeColors[group.type] || typeColors.private;
+
+                    return (
+                      <div
+                        key={index}
+                        style={{
+                          padding: '1.5rem',
+                          border: `2px solid ${colors.border}`,
+                          borderRadius: '12px',
+                          background: 'white',
+                          transition: 'transform 0.2s, box-shadow 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'translateY(-2px)';
+                          e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.1)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'translateY(0)';
+                          e.currentTarget.style.boxShadow = 'none';
+                        }}
+                      >
+                        {/* Header */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                          <div style={{ flex: 1 }}>
+                            {/* Type Badge */}
+                            <div style={{ marginBottom: '0.5rem' }}>
+                              <span style={{
+                                padding: '0.25rem 0.75rem',
+                                background: colors.bg,
+                                color: colors.text,
+                                borderRadius: '6px',
+                                fontSize: '0.75rem',
+                                fontWeight: '700',
+                                textTransform: 'uppercase'
+                              }}>
+                                {colors.icon} {group.type === 'team' ? 'Vereinstraining' : 'Privates Training'}
+                              </span>
+                            </div>
+
+                            {/* Title */}
+                            <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem', fontWeight: '700', color: '#1f2937' }}>
+                              {group.title || 'Unbenanntes Training'}
+                            </h3>
+
+                            {/* Organisator */}
+                            <div style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.5rem' }}>
+                              👤 Organisator: <strong>{group.organizer_name}</strong>
+                            </div>
+
+                            {/* Team-Info (falls Vereinstraining) */}
+                            {group.type === 'team' && group.team_info && (
+                              <div style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.5rem' }}>
+                                🏢 {group.team_info.club_name} • {group.team_info.team_name || group.team_info.category}
+                              </div>
+                            )}
+
+                            {/* Location */}
+                            <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                              📍 {group.location} {group.venue && `• ${group.venue}`}
+                            </div>
+                          </div>
+
+                          {/* Session Count Badge */}
+                          <div style={{
+                            padding: '1rem 1.5rem',
+                            background: colors.bg,
+                            borderRadius: '12px',
+                            textAlign: 'center',
+                            minWidth: '120px'
+                          }}>
+                            <div style={{ fontSize: '0.75rem', color: colors.text, fontWeight: '600', marginBottom: '0.25rem' }}>
+                              EINHEITEN
+                            </div>
+                            <div style={{ fontSize: '2rem', fontWeight: '700', color: colors.text }}>
+                              {group.session_count}
+                            </div>
+                            <div style={{ fontSize: '0.7rem', color: colors.text, marginTop: '0.25rem' }}>
+                              Sessions
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Stats Row */}
+                        <div style={{
+                          paddingTop: '1rem',
+                          borderTop: '1px solid #e5e7eb',
+                          display: 'flex',
+                          gap: '1.5rem',
+                          flexWrap: 'wrap',
+                          fontSize: '0.8rem',
+                          color: '#6b7280'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <span style={{
+                              padding: '0.25rem 0.5rem',
+                              background: '#e0e7ff',
+                              color: '#4338ca',
+                              borderRadius: '4px',
+                              fontWeight: '600',
+                              fontSize: '0.75rem'
+                            }}>
+                              👥 {group.target_players}/{group.max_players} Spieler
+                            </span>
+                          </div>
+                          <div>
+                            📅 Erstellt: {new Date(group.first_session_date).toLocaleDateString('de-DE')}
+                          </div>
+                          <div>
+                            🔄 Zuletzt: {new Date(group.last_session_date).toLocaleDateString('de-DE')}
+                          </div>
+                          {group.is_public && (
+                            <div style={{
+                              padding: '0.25rem 0.5rem',
+                              background: '#dcfce7',
+                              color: '#15803d',
+                              borderRadius: '4px',
+                              fontWeight: '600',
+                              fontSize: '0.75rem'
+                            }}>
+                              🌐 Öffentlich
+                            </div>
+                          )}
                         </div>
                       </div>
                     );

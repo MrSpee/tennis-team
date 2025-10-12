@@ -144,13 +144,111 @@ class LoggingService {
   }
 
   /**
-   * Loggt Onboarding-Abschluss
+   * Loggt Onboarding-Start (Schritt 1)
    */
-  static async logOnboardingCompletion(playerData) {
+  static async logOnboardingStart(userEmail) {
+    return this.logActivity('onboarding_started', 'player', null, {
+      user_email: userEmail,
+      step: 1,
+      source: 'onboarding'
+    });
+  }
+
+  /**
+   * Loggt Onboarding Schritt-Navigation
+   */
+  static async logOnboardingStep(step, stepData = {}) {
+    return this.logActivity('onboarding_step', 'player', null, {
+      step: step,
+      step_name: stepData.stepName || `Step ${step}`,
+      ...stepData,
+      source: 'onboarding'
+    });
+  }
+
+  /**
+   * Loggt Importierter-Spieler-Suche
+   */
+  static async logImportedPlayerSearch(searchTerm, resultsCount, selectedPlayer = null) {
+    return this.logActivity('onboarding_search', 'player', null, {
+      search_term: searchTerm,
+      results_count: resultsCount,
+      player_selected: !!selectedPlayer,
+      selected_player_id: selectedPlayer?.id || null,
+      selected_player_name: selectedPlayer?.name || null,
+      source: 'onboarding_step3'
+    });
+  }
+
+  /**
+   * Loggt Importierter-Spieler-Auswahl (Smart-Match)
+   */
+  static async logImportedPlayerSelection(importedPlayer, willMerge = true) {
+    return this.logActivity('onboarding_smart_match', 'player', importedPlayer.id, {
+      imported_player_name: importedPlayer.name,
+      imported_player_lk: importedPlayer.import_lk,
+      imported_player_team: importedPlayer.team_info?.club_name || null,
+      will_merge: willMerge,
+      source: 'onboarding_step3'
+    });
+  }
+
+  /**
+   * Loggt manuelle Dateneingabe (kein Smart-Match)
+   */
+  static async logManualDataEntry(playerData) {
+    return this.logActivity('onboarding_manual_entry', 'player', null, {
+      player_name: playerData.name,
+      has_lk: !!playerData.current_lk,
+      has_phone: !!playerData.phone,
+      source: 'onboarding_step3'
+    });
+  }
+
+  /**
+   * Loggt Team-Auswahl aus Datenbank
+   */
+  static async logTeamSelectionFromDB(teamData) {
+    return this.logActivity('onboarding_team_from_db', 'team', teamData.id, {
+      team_name: teamData.category || teamData.team_name,
+      club_name: teamData.club_name,
+      league: teamData.league,
+      season: teamData.season,
+      source: 'onboarding_step2'
+    });
+  }
+
+  /**
+   * Loggt manuelle Team-Eingabe
+   */
+  static async logManualTeamEntry(teamData) {
+    return this.logActivity('onboarding_team_manual', 'team', null, {
+      team_name: teamData.category,
+      club_name: teamData.club_name,
+      league: teamData.league,
+      team_size: teamData.team_size,
+      is_custom: true,
+      source: 'onboarding_step2'
+    });
+  }
+
+  /**
+   * Loggt Onboarding-Abschluss (ERWEITERT)
+   */
+  static async logOnboardingCompletion(playerData, onboardingStats = {}) {
     const result = await this.logActivity('onboarding_completed', 'player', playerData.id, {
-      clubs_count: playerData.clubs?.length || 0,
-      teams_count: playerData.teams?.length || 0,
-      whatsapp_enabled: playerData.whatsapp_enabled || false,
+      player_name: playerData.name,
+      player_lk: playerData.current_lk,
+      player_phone: playerData.phone,
+      clubs_count: onboardingStats.clubs_count || 0,
+      teams_count: onboardingStats.teams_count || 0,
+      teams_from_db: onboardingStats.teams_from_db || 0,
+      teams_manual: onboardingStats.teams_manual || 0,
+      whatsapp_enabled: onboardingStats.whatsapp_enabled || false,
+      used_smart_match: onboardingStats.used_smart_match || false,
+      imported_player_id: onboardingStats.imported_player_id || null,
+      imported_player_name: onboardingStats.imported_player_name || null,
+      duration_seconds: onboardingStats.duration_seconds || null,
       source: 'onboarding'
     });
 
@@ -158,6 +256,11 @@ class LoggingService {
     if (result) {
       await this.updateStat('onboarding_completed');
       await this.updateStat('daily_active_users');
+      
+      // Smart-Match-Statistik
+      if (onboardingStats.used_smart_match) {
+        await this.updateStat('smart_match_used');
+      }
     }
 
     return result;
