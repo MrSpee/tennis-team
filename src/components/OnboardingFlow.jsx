@@ -225,6 +225,24 @@ function OnboardingFlow() {
           // Nicht kritisch, weiter machen
         } else {
           console.log('✅ Imported player merged successfully');
+          
+          // 🔧 NEU: Übertrage Training-Einladungen von external_players zu training_attendance
+          console.log('🔄 Transferring training invites from external_players to attendance...');
+          
+          const { error: trainingMergeError } = await supabase.rpc(
+            'merge_training_invites_after_onboarding',
+            {
+              p_imported_player_id: selectedImportedPlayer.id,
+              p_new_player_id: playerData.id
+            }
+          );
+
+          if (trainingMergeError) {
+            console.error('⚠️ Error transferring training invites:', trainingMergeError);
+            // Nicht kritisch, weiter machen
+          } else {
+            console.log('✅ Training invites transferred successfully');
+          }
         }
       }
 

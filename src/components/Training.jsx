@@ -509,27 +509,30 @@ function Training() {
         }
       }
 
-      // 🔧 FIX: Hole importierte Spieler IDs (Email ist OPTIONAL - WhatsApp-Einladung reicht)
-      const selectedImportedPlayerIds = formData.invitedPlayers.filter(id => 
-        importedPlayers.some(ip => ip.id === id)
+      // 🔧 FIX: Trenne registrierte Spieler von importierten Spielern
+      const registeredPlayerIds = formData.invitedPlayers.filter(id => 
+        allImportedPlayers.some(p => p.id === id && p.source === 'registered')
       );
 
-      // 🔧 FIX: Konvertiere importierte Spieler zu external_players (mit optionaler Email)
-      const importedAsExternal = selectedImportedPlayerIds.map(id => {
-        const importedPlayer = importedPlayers.find(ip => ip.id === id);
+      const importedPlayerIds = formData.invitedPlayers.filter(id => 
+        allImportedPlayers.some(p => p.id === id && p.source === 'imported')
+      );
+
+      console.log('🔍 Registered players:', registeredPlayerIds);
+      console.log('🔍 Imported players:', importedPlayerIds);
+
+      // 🔧 FIX: Konvertiere importierte Spieler zu external_players
+      const importedAsExternal = importedPlayerIds.map(id => {
+        const importedPlayer = allImportedPlayers.find(p => p.id === id && p.source === 'imported');
         return {
           name: importedPlayer.name,
           lk: importedPlayer.currentLk || '',
           club: 'Wartet auf Registrierung',
-          email: importedPlayerEmails[id] || null, // Email ist OPTIONAL
-          imported_player_id: id // Referenz behalten
+          email: importedPlayer.email || null,
+          phone: importedPlayer.phone || null,
+          imported_player_id: id // Referenz behalten für späteres Merge
         };
       });
-
-      // 🔧 FIX: Nur registrierte Spieler in invited_players
-      const registeredPlayerIds = formData.invitedPlayers.filter(id => 
-        !importedPlayers.some(ip => ip.id === id)
-      );
 
       console.log('📊 Invited players breakdown:', {
         registered: registeredPlayerIds.length,
@@ -589,6 +592,47 @@ function Training() {
         }
 
         console.log(`✅ ${trainingsToCreate.length} wiederkehrende Trainings erstellt`);
+
+        // 🔧 FIX: Bei PRIVATEM wiederkehrendem Training → Auto-Create Attendance für eingeladene Spieler
+        if (formData.type === 'private' && registeredPlayerIds.length > 0) {
+          console.log('📧 Creating auto-attendance for recurring trainings...');
+          
+          // Hole die erstellten Training-IDs
+          const { data: createdTrainings, error: fetchError } = await supabase
+            .from('training_sessions')
+            .select('id')
+            .eq('organizer_id', player.id)
+            .eq('title', formData.title || 'Privates Training')
+            .order('created_at', { ascending: false })
+            .limit(trainingsToCreate.length);
+
+          if (fetchError) {
+            console.warn('⚠️ Could not fetch created trainings:', fetchError);
+          } else if (createdTrainings) {
+            // Erstelle Attendance-Einträge für alle wiederkehrenden Trainings
+            const allAttendanceEntries = [];
+            createdTrainings.forEach(training => {
+              registeredPlayerIds.forEach(playerId => {
+                allAttendanceEntries.push({
+                  session_id: training.id,
+                  player_id: playerId,
+                  status: 'pending',
+                  response_date: null
+                });
+              });
+            });
+
+            const { error: attendanceError } = await supabase
+              .from('training_attendance')
+              .insert(allAttendanceEntries);
+
+            if (attendanceError) {
+              console.warn('⚠️ Could not create auto-attendance for recurring trainings:', attendanceError);
+            } else {
+              console.log(`✅ Auto-attendance created for ${allAttendanceEntries.length} recurring training entries`);
+            }
+          }
+        }
       } else {
         // Einzelnes Training
         const dateTime = new Date(`${formData.date}T${formData.startTime}`);
@@ -655,6 +699,28 @@ function Training() {
             console.warn('⚠️ Could not create auto-attendance:', attendanceError);
           } else {
             console.log(`✅ Auto-attendance created for ${teamMembers.length} team members`);
+          }
+        }
+
+        // 🔧 FIX: Bei PRIVATEM Training → Auto-Create Attendance für eingeladene Spieler
+        if (formData.type === 'private' && registeredPlayerIds.length > 0) {
+          console.log('📧 Creating auto-attendance for invited players...');
+          
+          const attendanceEntries = registeredPlayerIds.map(playerId => ({
+            session_id: data.id,
+            player_id: playerId,
+            status: 'pending', // Alle starten als "pending"
+            response_date: null
+          }));
+
+          const { error: attendanceError } = await supabase
+            .from('training_attendance')
+            .insert(attendanceEntries);
+
+          if (attendanceError) {
+            console.warn('⚠️ Could not create auto-attendance for invited players:', attendanceError);
+          } else {
+            console.log(`✅ Auto-attendance created for ${registeredPlayerIds.length} invited players`);
           }
         }
       }
