@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, Users, Clock, Award, Info } from 'lucide-react';
+import { X, Users, Clock, Award, Info, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { supabase } from '../lib/supabaseClient';
@@ -75,16 +75,19 @@ function RoundRobinExplainer() {
   useEffect(() => {
     const loadAttendanceData = async () => {
       try {
-        // Lade alle Trainings der letzten 90 Tage
+        // Lade alle Trainings der letzten 90 Tage UND der nächsten 90 Tage!
+        // BEIDE: Vergangene UND zukünftige Trainings!
+        const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+        const ninetyDaysInFuture = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+        
         const { data: trainingsData, error: trainingsError } = await supabase
           .from('training_sessions')
-          .select('id, date, type')
-          .gte('date', new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString());
+          .select('id, date, type, invited_players, title, max_players')
+          .gte('date', ninetyDaysAgo.toISOString()) // Letzten 90 Tage
+          .lte('date', ninetyDaysInFuture.toISOString()) // Nächsten 90 Tage
+          .order('date', { ascending: true });
         
         if (trainingsError) throw trainingsError;
-        
-        console.log('📅 Loaded trainings:', trainingsData?.length);
-        console.log('📅 Sample training:', trainingsData?.[0]);
         
         // Lade Attendance für diese Trainings
         const { data: attendanceData, error: attendanceError } = await supabase
@@ -98,40 +101,18 @@ function RoundRobinExplainer() {
         const enrichedAttendance = (attendanceData || []).map(att => {
           const training = trainingsData.find(t => t.id === att.session_id);
           
-          // WICHTIG: Für die "Tage seit letztem Training"-Berechnung brauchen wir
-          // das tatsächliche DATUM des Trainings (nicht response_date)!
+          if (!training) {
+            return {
+              ...att,
+              training_date: null
+            };
+          }
+          
           return {
             ...att,
-            training_date: training?.date || null,
-            // Debug: Zeige Mismatch
-            _debug: !training ? 'Training nicht gefunden' : 
-                    training?.date && att.response_date && 
-                    Math.abs(new Date(training.date).getTime() - new Date(att.response_date).getTime()) > (7 * 24 * 60 * 60 * 1000) ? 'Mismatch!' : 'OK'
+            training_date: training.date
           };
         });
-        
-        console.log('📊 Loaded attendance data:', enrichedAttendance.length);
-        console.log('📊 Sample attendance:', enrichedAttendance[0]);
-        
-        // Finde ein Training vom 25.10.
-        const trainingFromOct25 = enrichedAttendance.find(a => a.response_date && a.response_date.includes('2025-10-25'));
-        if (trainingFromOct25) {
-          console.log('✅ Training vom 25.10 gefunden:', trainingFromOct25);
-          console.log('📅 Training date:', trainingFromOct25.training_date);
-          console.log('📅 Session ID:', trainingFromOct25.session_id);
-          
-          // Finde das richtige Training in trainingsData
-          const matchingTraining = trainingsData.find(t => t.id === trainingFromOct25.session_id);
-          console.log('📅 Matching training:', matchingTraining);
-          
-          // Finde alle trainings vom 25.10.
-          const trainingsOnOct25 = trainingsData.filter(t => t.date && t.date.includes('2025-10-25'));
-          console.log('📅 Trainings am 25.10:', trainingsOnOct25);
-          
-          // Finde das Training wo Chris am 25.10 dabei war
-          const attendanceForChris = enrichedAttendance.filter(a => a.player_id === '43427aa7-771f-4e47-8858-c8454a1b9fee' && a.response_date && a.response_date.includes('2025-10-25'));
-          console.log('🔍 Chris Attendance am 25.10:', attendanceForChris);
-        }
         
         setAllAttendanceData(enrichedAttendance);
         setAllTrainingsHistory(trainingsData || []);
@@ -150,67 +131,18 @@ function RoundRobinExplainer() {
     const invitedIds = selectedTraining.invited_players || [];
     
     // Berechne training_stats für jeden Spieler basierend auf attendance-Daten
+    // WICHTIG: Füge Organizer automatisch zur Liste hinzu wenn nicht schon dabei
+    const allInvitedIds = [...new Set([...invitedIds, selectedTraining.organizer_id])];
+    
+    // ZENTRALE BERECHNUNG: Verwende RoundRobinService.calculateTrainingStats()
     const trainingGroupWithStats = players
-      .filter(p => invitedIds.includes(p.id))
+      .filter(p => allInvitedIds.includes(p.id))
       .map(player => {
-        const playerAttendance = allAttendanceData.filter(a => a.player_id === player.id);
-        
-        // Berechne Statistiken
-        const total_attended = playerAttendance.filter(a => a.status === 'confirmed').length;
-        const total_declined = playerAttendance.filter(a => a.status === 'declined').length;
-        
-        // Sortiere nach Training-Datum (nicht response_date!)
-        const confirmedAttendances = playerAttendance
-          .filter(a => a.status === 'confirmed' && a.training_date)
-          .sort((a, b) => new Date(b.training_date) - new Date(a.training_date));
-        const last_attended = confirmedAttendances.length > 0 ? confirmedAttendances[0].training_date : null;
-        
-        // Debug: Zeige letztes Training
-        if (player.name === 'Chris Spee' || player.name === 'Markus Wilwerscheid') {
-          console.log(`🔍 ${player.name}:`, {
-            last_attended,
-            total_attended,
-            total_declined,
-            confirmedAttendances: confirmedAttendances.length,
-            allAttendance: playerAttendance.length
-          });
-          
-          if (last_attended) {
-            const daysSince = (Date.now() - new Date(last_attended).getTime()) / (1000 * 60 * 60 * 24);
-            console.log(`🔍 ${player.name} - Days since last:`, daysSince.toFixed(1));
-          }
-        }
-        
-        // Letzte Antwort (sortiert nach Training-Datum)
-        const sortedAttendance = playerAttendance
-          .filter(a => a.training_date)
-          .sort((a, b) => new Date(b.training_date) - new Date(a.training_date));
-        const last_response = sortedAttendance.length > 0 ? sortedAttendance[0].status : null;
-        
-        // Berechne consecutive_declines (nach Training-Datum sortiert)
-        let consecutive_declines = 0;
-        const recentResponses = playerAttendance
-          .filter(a => a.training_date)
-          .sort((a, b) => new Date(b.training_date) - new Date(a.training_date))
-          .slice(0, 3);
-        
-        for (const response of recentResponses) {
-          if (response.status === 'declined') {
-            consecutive_declines++;
-          } else {
-            break;
-          }
-        }
+        const training_stats = RoundRobinService.calculateTrainingStats(player, allAttendanceData);
         
         return {
           ...player,
-          training_stats: {
-            total_attended,
-            total_declined,
-            last_attended,
-            last_response,
-            consecutive_declines
-          }
+          training_stats
         };
       });
     
@@ -242,52 +174,18 @@ function RoundRobinExplainer() {
     
     const preview = futureTrainings.map(training => {
       const invitedIds = training.invited_players || [];
+      // WICHTIG: Füge Organizer automatisch zur Liste hinzu wenn nicht schon dabei
+      const allInvitedIds_future = [...new Set([...invitedIds, training.organizer_id])];
       
-      // Berechne training_stats für jeden Spieler (wie oben)
+      // ZENTRALE BERECHNUNG: Verwende RoundRobinService.calculateTrainingStats()
       const trainingGroupWithStats = players
-        .filter(p => invitedIds.includes(p.id))
+        .filter(p => allInvitedIds_future.includes(p.id))
         .map(player => {
-          const playerAttendance = allAttendanceData.filter(a => a.player_id === player.id);
-          
-          const total_attended = playerAttendance.filter(a => a.status === 'confirmed').length;
-          const total_declined = playerAttendance.filter(a => a.status === 'declined').length;
-          
-          // Sortiere nach Training-Datum (nicht response_date!)
-          const confirmedAttendances = playerAttendance
-            .filter(a => a.status === 'confirmed' && a.training_date)
-            .sort((a, b) => new Date(b.training_date) - new Date(a.training_date));
-          const last_attended = confirmedAttendances.length > 0 ? confirmedAttendances[0].training_date : null;
-          
-          // Letzte Antwort (sortiert nach Training-Datum)
-          const sortedAttendance = playerAttendance
-            .filter(a => a.training_date)
-            .sort((a, b) => new Date(b.training_date) - new Date(a.training_date));
-          const last_response = sortedAttendance.length > 0 ? sortedAttendance[0].status : null;
-          
-          // Berechne consecutive_declines (nach Training-Datum sortiert)
-          let consecutive_declines = 0;
-          const recentResponses = playerAttendance
-            .filter(a => a.training_date)
-            .sort((a, b) => new Date(b.training_date) - new Date(a.training_date))
-            .slice(0, 3);
-          
-          for (const response of recentResponses) {
-            if (response.status === 'declined') {
-              consecutive_declines++;
-            } else {
-              break;
-            }
-          }
+          const training_stats = RoundRobinService.calculateTrainingStats(player, allAttendanceData);
           
           return {
             ...player,
-            training_stats: {
-              total_attended,
-              total_declined,
-              last_attended,
-              last_response,
-              consecutive_declines
-            }
+            training_stats
           };
         });
       
@@ -322,6 +220,28 @@ function RoundRobinExplainer() {
       maxWidth: '1200px',
       margin: '0 auto'
     }}>
+      {/* Zurück Button */}
+      <button
+        onClick={() => navigate('/training')}
+        style={{
+          padding: '0.5rem 1rem',
+          background: '#f3f4f6',
+          border: '1px solid #e5e7eb',
+          borderRadius: '8px',
+          fontSize: '0.9rem',
+          fontWeight: '600',
+          color: '#374151',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          marginBottom: '1rem'
+        }}
+      >
+        <ArrowLeft size={16} />
+        Zurück zu Trainings
+      </button>
+
       {/* Header */}
       <div style={{
         marginBottom: '2rem',
@@ -501,8 +421,8 @@ function RoundRobinExplainer() {
                         📊 Priorität: {p.priority ? `${p.priority.toFixed(2)} Punkte` : '0.00 Punkte'}
                       </div>
                       <div style={{ display: 'grid', gap: '0.25rem' }}>
-                        <div>📅 Teilnahmen: <strong style={{ color: '#059669' }}>{p.player?.training_stats?.total_attended || 0}</strong> • ❌ Absagen: <strong style={{ color: '#dc2626' }}>{p.player?.training_stats?.total_declined || 0}</strong></div>
-                        <div>🕐 Tage seit letztem Training: <strong style={{ color: '#059669' }}>{breakdown.daysSinceLastTraining.toFixed(1)} Tage</strong> {p.player?.name === 'Chris Spee' && breakdown.daysSinceLastTraining > 1000 && '⚠️ Fallsback (nie dabei?)'}</div>
+                        <div>📅 Teilnahmen: <strong style={{ color: '#059669' }}>{p.player?.training_stats?.total_attended || 0}</strong> • ❌ Absagen vergangen: <strong style={{ color: '#dc2626' }}>{p.player?.training_stats?.total_declined || 0}</strong> {p.player?.training_stats?.future_declined > 0 && <span style={{ color: '#f59e0b' }}>• Zukünftige: {p.player?.training_stats?.future_declined}</span>}</div>
+                        <div>🕐 Tage seit letztem Training: <strong style={{ color: '#059669' }}>{Math.floor(breakdown.daysSinceLastTraining)} Tage</strong> {p.player?.training_stats?.total_attended === 0 && '📅 (berechnet ab Saisonstart)'}</div>
                         <div>⏰ Absagen-Bonus: <strong style={{ color: '#059669' }}>+{breakdown.declineBonus.toFixed(1)}</strong></div>
                         <div>🎲 Zufallsfaktor: <strong style={{ color: '#059669' }}>+{breakdown.randomFactor.toFixed(2)}</strong></div>
                       </div>

@@ -6,7 +6,6 @@ import {
   Activity, 
   CheckCircle, 
   XCircle, 
-  Clock, 
   TrendingUp,
   Eye,
   Filter,
@@ -205,9 +204,10 @@ function SuperAdminDashboard() {
 
       // 1. Zähle aktive Benutzer (NUR registrierte mit user_id!)
       const { count: activeUsersCount } = await supabase
-        .from('players')
+        .from('players_unified')
         .select('id', { count: 'exact', head: true })
         .eq('is_active', true)
+        .eq('status', 'active')
         .not('user_id', 'is', null); // Nur registrierte!
 
       // 2. Zähle alle Vereine
@@ -223,8 +223,9 @@ function SuperAdminDashboard() {
 
       // 4. Zähle Spieler die Onboarding abgeschlossen haben (haben mindestens 1 Team)
       const { data: playersWithTeams } = await supabase
-        .from('player_teams')
-        .select('player_id');
+        .from('team_memberships')
+        .select('player_id')
+        .eq('is_active', true);
       const onboardingCompletedCount = new Set(playersWithTeams?.map(pt => pt.player_id) || []).size;
 
       // 5. Zähle alle Teams
@@ -252,9 +253,10 @@ function SuperAdminDashboard() {
 
       // 9. Zähle importierte Spieler (warten auf Registrierung)
       const { count: importedPlayersCount } = await supabase
-        .from('imported_players')
+        .from('players_unified')
         .select('id', { count: 'exact', head: true })
-        .eq('status', 'pending');
+        .eq('status', 'pending')
+        .is('user_id', null); // Noch nicht registriert
 
       console.log('✅ Statistics loaded:', {
         users: activeUsersCount,
@@ -319,13 +321,14 @@ function SuperAdminDashboard() {
 
       // Lade Spieler-Anzahl pro Verein separat
       const { data: clubPlayerCounts } = await supabase
-        .from('player_teams')
+        .from('team_memberships')
         .select(`
           player_id,
           team_info!inner(
             club_name
           )
-        `);
+        `)
+        .eq('is_active', true);
 
       // Erstelle Map: club_name → Anzahl eindeutige Spieler
       const playerCountMap = {};
@@ -352,8 +355,9 @@ function SuperAdminDashboard() {
 
       // Lade minimale Player-Daten für Activity Log Enrichment
       const { data: minimalPlayersData, error: playersError } = await supabase
-        .from('players')
-        .select('id, user_id, name, email');
+        .from('players_unified')
+        .select('id, user_id, name, email')
+        .eq('status', 'active');
 
       if (playersError) {
         console.error('❌ Error loading players for logs:', playersError);
@@ -444,26 +448,22 @@ function SuperAdminDashboard() {
     try {
       console.log('🔵 Loading full player data for Users tab...');
       
-      // Schritt 1: Lade BEIDE - registrierte UND importierte Spieler
-      const [
-        { data: playersData, error: playersError },
-        { data: importedPlayersData, error: importedError }
-      ] = await Promise.all([
-        supabase.from('players').select('*').order('created_at', { ascending: false }),
-        supabase.from('imported_players').select('*').eq('status', 'pending').order('imported_at', { ascending: false })
-      ]);
+      // Schritt 1: Lade ALLE Spieler aus players_unified
+      const { data: allPlayersData, error: playersError } = await supabase
+        .from('players_unified')
+        .select('*')
+        .order('created_at', { ascending: false });
 
       if (playersError) {
         console.error('❌ Error loading players:', playersError);
         return;
       }
 
-      console.log('✅ Players loaded:', playersData?.length || 0, 'registered');
-      console.log('✅ Imported players loaded:', importedPlayersData?.length || 0, 'pending');
+      console.log('✅ Players loaded:', allPlayersData?.length || 0, 'total players');
 
-      // Schritt 2: Lade player_teams mit team_info für alle Spieler
+      // Schritt 2: Lade team_memberships mit team_info für alle Spieler
       const { data: playerTeamsData, error: teamsError } = await supabase
-        .from('player_teams')
+        .from('team_memberships')
         .select(`
           player_id,
           role,
@@ -473,7 +473,8 @@ function SuperAdminDashboard() {
             team_name,
             category
           )
-        `);
+        `)
+        .eq('is_active', true);
 
       if (teamsError) {
         console.error('❌ Error loading player teams:', teamsError);
@@ -481,8 +482,8 @@ function SuperAdminDashboard() {
         console.log('✅ Player teams loaded:', playerTeamsData?.length || 0, 'team assignments');
       }
 
-      // Schritt 3: Merge registrierte Spieler mit Teams
-      const playersWithTeams = playersData.map(player => {
+      // Schritt 3: Merge Spieler mit Teams und markiere Status
+      const playersWithTeams = (allPlayersData || []).map(player => {
         const teams = (playerTeamsData || [])
           .filter(pt => pt.player_id === player.id)
           .map(pt => ({
@@ -491,48 +492,24 @@ function SuperAdminDashboard() {
             team_info: pt.team_info
           }));
         
+        // Bestimme Status-Badge
+        let status_badge = '✅ Registriert';
+        if (player.status === 'pending') {
+          status_badge = '⏳ Wartet auf Registrierung';
+        } else if (!player.user_id) {
+          status_badge = '🔵 Inaktiv';
+        }
+        
         return {
           ...player,
           player_teams: teams,
-          source: 'registered', // Markierung
-          status_badge: '✅ Registriert'
+          source: player.user_id ? 'registered' : 'imported',
+          status_badge
         };
       });
 
-      // Schritt 4: Füge importierte Spieler hinzu (noch nicht registriert)
-      const importedPlayersWithTeams = (importedPlayersData || []).map(imported => {
-        // Finde Team-Info
-        const teamInfo = imported.team_id ? {
-          club_name: 'Wird geladen...', // Würde durch JOIN kommen
-          team_name: '',
-          category: ''
-        } : null;
-        
-        return {
-          id: imported.id,
-          name: imported.name,
-          email: null, // Kein Email (nicht registriert)
-          user_id: null, // Kein user_id
-          current_lk: imported.import_lk,
-          import_lk: imported.import_lk,
-          role: imported.is_captain ? 'captain' : 'player',
-          is_active: false, // Noch nicht aktiv (nicht registriert)
-          created_at: imported.imported_at,
-          player_teams: teamInfo ? [{ team_info: teamInfo }] : [],
-          source: 'imported', // Markierung
-          status_badge: '⏳ Wartet auf Registrierung',
-          tvm_id: imported.tvm_id_number
-        };
-      });
-
-      // Kombiniere BEIDE Listen
-      const allPlayers = [
-        ...playersWithTeams,
-        ...importedPlayersWithTeams
-      ];
-
-      console.log('✅ All players merged:', allPlayers.length, '(registered:', playersWithTeams.length, ', imported:', importedPlayersWithTeams.length, ')');
-      setPlayers(allPlayers);
+      console.log('✅ All players processed:', playersWithTeams.length);
+      setPlayers(playersWithTeams);
 
     } catch (error) {
       console.error('Error loading players:', error);
@@ -584,8 +561,9 @@ function SuperAdminDashboard() {
 
       // Lade Spieler-Anzahl pro Team
       const { data: playerCountsData, error: countsError } = await supabase
-        .from('player_teams')
-        .select('team_id, player_id');
+        .from('team_memberships')
+        .select('team_id, player_id')
+        .eq('is_active', true);
 
       if (countsError) {
         console.error('❌ Error loading player counts:', countsError);
@@ -670,9 +648,10 @@ function SuperAdminDashboard() {
       // Lade Organisator-Namen
       const organizerIds = [...new Set(trainingsData.map(t => t.organizer_id))];
       const { data: organizersData, error: orgError } = await supabase
-        .from('players')
+        .from('players_unified')
         .select('id, name')
-        .in('id', organizerIds);
+        .in('id', organizerIds)
+        .eq('status', 'active');
 
       if (orgError) {
         console.error('❌ Error loading organizers:', orgError);

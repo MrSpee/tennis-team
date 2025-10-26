@@ -36,7 +36,7 @@ const ImportTab = () => {
     try {
       // Lade User-Teams
       const { data, error } = await supabase
-        .from('player_teams')
+        .from('team_memberships')
         .select(`
           team_id,
           is_primary,
@@ -48,6 +48,7 @@ const ImportTab = () => {
           )
         `)
         .eq('player_id', player.id)
+        .eq('is_active', true)
         .order('is_primary', { ascending: false });
 
       if (error) throw error;
@@ -224,13 +225,13 @@ const ImportTab = () => {
       // SCHRITT 3: Formatiere für Supabase (NUR existierende Spalten!)
       const formattedMatches = uniqueMatches.map(match => ({
         team_id: teamId,
-        match_date: match.match_date + ' ' + (match.start_time || '00:00:00'),
+        date_time: match.match_date + ' ' + (match.start_time || '00:00:00'),
         opponent: match.opponent,
         location: match.is_home_match ? 'heim' : 'auswärts',
         venue: match.venue || null,
-        season: parsedData.season?.toLowerCase().includes('winter') ? 'winter' : 'summer',
+        season: parsedData.season?.toLowerCase().includes('winter') ? 'winter_25_26' : 'summer_26',
         players_needed: 4,
-        created_by: player?.id || null
+        organizer_id: player?.id || null
       }));
 
       // Insert in Supabase
@@ -393,16 +394,27 @@ const ImportTab = () => {
       
       const { data, error } = await supabase
         .from('matches')
-        .select('match_date, opponent')
-        .eq('team_id', selectedTeamId)
-        .in('match_date', dates);
-
+        .select('date_time, opponent')
+        .eq('team_id', teamId);
+        
       if (error) throw error;
 
+      // Prüfe auf Duplikate basierend auf Datum (nur Tag) und Opponent
+      const duplicates = (data || []).filter(dbMatch => {
+        const dbDate = new Date(dbMatch.date_time).toISOString().split('T')[0];
+        return matches.some(m => {
+          const matchDate = m.match_date;
+          return matchDate === dbDate && m.opponent === dbMatch.opponent;
+        });
+      });
+
       return {
-        duplicates: data || [],
+        duplicates: duplicates.map(d => ({ match_date: d.date_time.split('T')[0], opponent: d.opponent })),
         unique: matches.filter(m => 
-          !data.some(d => d.match_date === m.match_date && d.opponent === m.opponent)
+          !duplicates.some(d => {
+            const dDate = d.date_time.split('T')[0];
+            return dDate === m.match_date && d.opponent === m.opponent;
+          })
         )
       };
     } catch (err) {
@@ -470,7 +482,7 @@ const ImportTab = () => {
           
           // Update LK wenn sich geändert hat
           const { error: updateError } = await supabase
-            .from('players')
+            .from('players_unified')
             .update({
               current_lk: playerData.lk || null,
               last_lk_update: new Date().toISOString()
@@ -489,20 +501,25 @@ const ImportTab = () => {
           continue;
         }
 
-        // FALL 2: Neuer Spieler → imported_players (OHNE user_id!)
+        // FALL 2: Neuer Spieler → players_unified mit status='pending'
         console.log('🆕 Creating imported player:', playerData.name);
         
         const { data: newImportedPlayer, error: insertError } = await supabase
-          .from('imported_players')
+          .from('players_unified')
           .insert({
             name: playerData.name,
-            import_lk: playerData.lk || null, // Import-LK (Saison-Start)
+            current_lk: playerData.lk || null,
             tvm_id_number: playerData.id_number || null,
-            team_id: teamId || null, // NULL erlaubt (kein Team)
+            primary_team_id: teamId || null, // NULL erlaubt (kein Team)
             position: playerData.position || null,
             is_captain: playerData.is_captain || false,
             status: 'pending',
-            imported_by: player?.user_id || null
+            player_type: 'app_user',
+            onboarding_status: 'not_started',
+            import_source: 'tvm_import',
+            merged_from_player_id: null,
+            invited_at: new Date().toISOString(),
+            onboarded_at: null
           })
           .select('id')
           .single();
@@ -656,10 +673,15 @@ const ImportTab = () => {
    * Verknüpfe Spieler mit Team
    */
   const linkPlayerToTeam = async (playerId, teamId, isCaptain) => {
+    if (!teamId) {
+      console.log('ℹ️ No team provided, skipping team link');
+      return;
+    }
+
     try {
       // Prüfe ob Verknüpfung schon existiert
       const { data: existing } = await supabase
-        .from('player_teams')
+        .from('team_memberships')
         .select('id')
         .eq('player_id', playerId)
         .eq('team_id', teamId)
@@ -672,12 +694,14 @@ const ImportTab = () => {
 
       // Erstelle Verknüpfung
       await supabase
-        .from('player_teams')
+        .from('team_memberships')
         .insert({
           player_id: playerId,
           team_id: teamId,
           role: isCaptain ? 'captain' : 'player',
-          is_primary: false // Nur wenn explizit gewünscht
+          is_primary: false,
+          season: 'winter_25_26',
+          is_active: true
         });
 
       console.log('✅ Player linked to team');
@@ -687,29 +711,26 @@ const ImportTab = () => {
   };
 
   /**
-   * Fuzzy-Matching für Spieler (prüft players UND imported_players)
+   * Fuzzy-Matching für Spieler (prüft players_unified)
    */
   const performPlayerMatching = async (players) => {
     if (!players || players.length === 0) return [];
 
     try {
-      // Lade BEIDE: registrierte Spieler UND importierte Spieler
-      const [
-        { data: registeredPlayers, error: playersError },
-        { data: importedPlayers, error: importedError }
-      ] = await Promise.all([
-        supabase.from('players').select('id, name, current_lk'),
-        supabase.from('imported_players').select('id, name, import_lk').eq('status', 'pending')
-      ]);
+      // Lade ALLE Spieler aus players_unified
+      const { data: allPlayers, error: playersError } = await supabase
+        .from('players_unified')
+        .select('id, name, current_lk, status, player_type')
+        .in('status', ['active', 'pending']);
 
       if (playersError) throw playersError;
-      if (importedError) console.warn('⚠️ Could not load imported_players:', importedError);
 
-      // Kombiniere beide Listen (normalisiere LK-Feld-Namen)
-      const existingPlayers = [
-        ...(registeredPlayers || []).map(p => ({ ...p, lk: p.current_lk, source: 'players' })),
-        ...(importedPlayers || []).map(p => ({ ...p, lk: p.import_lk, source: 'imported' }))
-      ];
+      // Normalisiere LK-Feld
+      const existingPlayers = (allPlayers || []).map(p => ({ 
+        ...p, 
+        lk: p.current_lk, 
+        source: p.player_type 
+      }));
 
       // Für jeden importierten Spieler: Fuzzy-Match
       const matchResults = players.map(importPlayer => {

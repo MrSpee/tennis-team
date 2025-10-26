@@ -78,20 +78,36 @@ export const calculatePlayerPriority = (playerId, training, allPlayers) => {
     priority += daysSinceLastTraining; // Mehr Tage = höhere Priorität
     breakdown.daysSinceLastTraining = daysSinceLastTraining;
   } else {
-    // Noch nie gespielt = maximale Priorität
+    // Fallback: Nutze Saisonstart (wird in RoundRobinExplainer gesetzt)
+    // Hier sollte dieser Code nie erreicht werden, da last_attended immer gesetzt ist
     priority += 1000;
     breakdown.daysSinceLastTraining = 1000;
   }
 
-  // 2. ABSAGEN-BONUS: Mehrfache/kürzliche Absagen
+  // 2. ABSAGEN-BONUS: Berücksichtigt vergangene UND zukünftige Absagen
+  // Vergangene Absagen: +50/+25/+15
+  // Zukünftige Absagen: +10/+5/+2 (nur 20% Gewicht)
   let declineBonus = 0;
+  
+  // Nutze gewichtete Absagen-Quote (Vergangene + 20% Zukünftige)
+  const totalResponses = stats.total_attended + stats.total_declined;
+  const totalWeightedDeclines = (stats.total_declined || 0) + ((stats.future_declined || 0) * 0.2);
+  const totalResponsesWeighted = stats.total_attended + (stats.total_declined || 0) + (stats.future_declined || 0);
+  
   if (stats.consecutive_declines >= 2) {
-    declineBonus = 50; // +50 für mehrfache Absagen hintereinander
+    // Mehrfache vergangene Absagen = hoher Bonus
+    declineBonus = 50; // +50
   } else if (stats.last_response === 'declined') {
-    declineBonus = 25; // +25 für letzte Absage
-  } else if (stats.total_declined > 0 && stats.total_declined / (stats.total_attended + stats.total_declined) > 0.5) {
-    declineBonus = 15; // +15 für hohe Absagen-Quote
+    // Letzte Absage in Vergangenheit = mittlerer Bonus
+    declineBonus = 25; // +25
+  } else if (totalResponsesWeighted > 0 && totalWeightedDeclines / totalResponsesWeighted > 0.5) {
+    // Hohe Absagen-Quote (inkl. Zukunft mit geringem Gewicht) = kleiner Bonus
+    declineBonus = 15; // +15
+  } else if (stats.future_declined > 0) {
+    // Zukünftige Absagen: Sehr geringer Bonus
+    declineBonus = stats.future_declined * 2; // +2 pro zukünftiger Absage
   }
+  
   priority += declineBonus;
   breakdown.declineBonus = declineBonus;
 
@@ -230,6 +246,114 @@ export const updatePlayerStats = async (playerId, status) => {
 };
 
 /**
+ * Konsistente Berechnung von training_stats für einen Spieler
+ * WIRD VON ALLEN KOMPONENTEN VERWENDET
+ * 
+ * @param {object} player - Spieler
+ * @param {array} attendanceData - Array von {player_id, status, training_date}
+ * @returns {object} - training_stats für diesen Spieler
+ */
+export const calculateTrainingStats = (player, attendanceData) => {
+  // Filtere nur relevante Attendance für diesen Spieler
+  const playerAttendance = attendanceData.filter(a => a.player_id === player.id);
+  
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  // SAISONSTART: Nur Trainings ab 18.10.2025 berücksichtigen
+  const seasonStart = new Date('2025-10-18');
+  seasonStart.setHours(0, 0, 0, 0);
+  
+  // 1. Total attended: Nur confirmed Trainings in der Vergangenheit UND nach Saisonstart
+  const pastConfirmed = playerAttendance.filter(a => {
+    if (a.status !== 'confirmed') return false;
+    if (!a.training_date) return false;
+    const trainingDate = new Date(a.training_date);
+    trainingDate.setHours(0, 0, 0, 0);
+    return trainingDate < today && trainingDate >= seasonStart;
+  });
+  
+  const total_attended = pastConfirmed.length;
+  
+  // 2. Total declined: Nur declined Trainings in der Vergangenheit UND nach Saisonstart
+  const pastDeclined = playerAttendance.filter(a => {
+    if (a.status !== 'declined') return false;
+    if (!a.training_date) return false;
+    const trainingDate = new Date(a.training_date);
+    trainingDate.setHours(0, 0, 0, 0);
+    return trainingDate < today && trainingDate >= seasonStart;
+  });
+  
+  const total_declined = pastDeclined.length;
+  
+  // 3. LAST ATTENDED: Neuestes confirmed Training in der Vergangenheit
+  const pastConfirmedSorted = pastConfirmed
+    .filter(a => a.training_date)
+    .sort((a, b) => {
+      const dateA = new Date(a.training_date);
+      const dateB = new Date(b.training_date);
+      return dateB - dateA; // Neuestes zuerst
+    });
+  
+  let last_attended = pastConfirmedSorted.length > 0 ? pastConfirmedSorted[0].training_date : null;
+  
+  // FALLBACK: Wenn nie dabei, nutze Saisonstart als Referenz
+  if (!last_attended) {
+    last_attended = seasonStart.toISOString();
+  }
+  
+  // 4. Letzte Antwort (sortiert nach Training-Datum) - nur vergangene Trainings NACH Saisonstart!
+  const pastAttendance = playerAttendance
+    .filter(a => {
+      if (!a.training_date) return false;
+      const trainingDate = new Date(a.training_date);
+      trainingDate.setHours(0, 0, 0, 0);
+      return trainingDate < today && trainingDate >= seasonStart;
+    })
+    .sort((a, b) => {
+      const dateA = new Date(a.training_date);
+      const dateB = new Date(b.training_date);
+      return dateB - dateA; // Neuestes zuerst
+    });
+  
+  const last_response = pastAttendance.length > 0 ? pastAttendance[0].status : null;
+  
+  // 5. Berechne consecutive_declines - nur vergangene Trainings NACH Saisonstart!
+  let consecutive_declines = 0;
+  for (const response of pastAttendance) {
+    if (response.status === 'declined') {
+      consecutive_declines++;
+    } else {
+      break;
+    }
+  }
+  
+  // 6. ZUKÜNFTIGE Absagen: Zähle sie, aber mit geringerem Gewicht
+  const futureAttendance = playerAttendance.filter(a => {
+    if (!a.training_date) return false;
+    const trainingDate = new Date(a.training_date);
+    trainingDate.setHours(0, 0, 0, 0);
+    return trainingDate >= today && trainingDate >= seasonStart;
+  });
+  
+  const future_declined = futureAttendance.filter(a => a.status === 'declined').length;
+  
+  // Gewichtung: Vergangene Absagen haben 5x mehr Gewicht als zukünftige
+  // Wenn jemand in der Zukunft absagt, wird das mit +10/+5/+2 berücksichtigt statt +50/+25/+15
+  const total_declined_weighted = total_declined + (future_declined * 0.2);
+  
+  return {
+    total_attended,
+    total_declined,
+    future_declined, // NEU: Für Anzeige
+    total_declined_weighted, // Für Berechnung mit Gewichtung
+    last_attended,
+    last_response,
+    consecutive_declines
+  };
+};
+
+/**
  * Automatisches Nachrücken von Warteliste
  * 
  * @param {object} training - Training Session
@@ -351,6 +475,7 @@ export const loadPlayersWithStats = async () => {
  * Export als Service-Objekt
  */
 export const RoundRobinService = {
+  calculateTrainingStats,
   seededRandom,
   calculatePlayerPriority,
   calculateTrainingParticipants,

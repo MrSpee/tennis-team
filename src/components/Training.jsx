@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, Users, Clock, Sun, Home, AlertCircle, CheckCircle, XCircle, Plus, Download } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -23,6 +23,9 @@ function Training() {
   const [isDeleting, setIsDeleting] = useState(null); // Training-ID beim Löschen
   const [showInviteForm, setShowInviteForm] = useState(null); // Training-ID für Einladungsformular
   const [inviteMessage, setInviteMessage] = useState(''); // Editierbarer Einladungstext
+  const [showHistory, setShowHistory] = useState(false); // Zeige Historie mit vergangenen Trainings
+  const [pastTrainings, setPastTrainings] = useState([]); // Vergangene Trainings
+  const [showMineDropdown, setShowMineDropdown] = useState(false); // Dropdown-Status für "Meine Trainingseinheiten"
   
   // Neu: User Teams
   const [userTeams, setUserTeams] = useState([]);
@@ -61,59 +64,7 @@ function Training() {
     roundRobinSeed: null // Seed für reproduzierbare Zufälligkeit
   });
 
-  // Lade User Teams beim Mount und dann Trainings
-  useEffect(() => {
-    const fetchData = async () => {
-      if (player?.id) {
-        await loadUserTeams();
-        await loadTrainings();
-        await loadPlayersWithStats(); // Lade Spieler-Statistiken für Round-Robin
-      }
-    };
-    fetchData();
-  }, [player]);
-  
-  // Lade Spieler mit Statistiken für Round-Robin
-  const loadPlayersWithStats = async () => {
-    try {
-      const data = await RoundRobinService.loadPlayersWithStats();
-      console.log('✅ Loaded players with stats:', data.length);
-      setPlayersWithStats(data);
-    } catch (error) {
-      console.error('❌ Error loading players with stats:', error);
-    }
-  };
-
-  // Lade importierte Spieler beim Öffnen des Formulars (für Privat-Training)
-  useEffect(() => {
-    if (showCreateForm && formData.type === 'private') {
-      // Lade ALLE importierten Spieler (clubübergreifend)
-      console.log('🔍 Loading ALL imported players (club-wide)');
-      loadImportedPlayersForPrivateTraining();
-    }
-  }, [showCreateForm, formData.type]);
-
-  // Filter ALLE Spieler basierend auf Suche (registriert + importiert)
-  useEffect(() => {
-    if (!importedPlayerSearch.trim()) {
-      setImportedPlayers([]);
-      return;
-    }
-
-    const searchLower = importedPlayerSearch.toLowerCase();
-    const filtered = allImportedPlayers.filter(player => 
-      player.name.toLowerCase().includes(searchLower) ||
-      (player.currentLk && player.currentLk.toString().includes(searchLower))
-    );
-
-    console.log(`🔍 Filtered ${filtered.length} players for search: "${importedPlayerSearch}"`, {
-      registered: filtered.filter(p => p.source === 'registered').length,
-      imported: filtered.filter(p => p.source === 'imported').length
-    });
-    setImportedPlayers(filtered);
-  }, [importedPlayerSearch, allImportedPlayers]);
-
-  // Lade Teams des Users
+  // Lade Teams des Users (VOR dem useEffect!)
   const loadUserTeams = async () => {
     if (!player) return;
     
@@ -171,7 +122,7 @@ function Training() {
   };
 
   // Lade ALLE Spieler (clubübergreifend für Privat-Training)
-  const loadImportedPlayersForPrivateTraining = async () => {
+  const loadImportedPlayersForPrivateTraining = useCallback(async () => {
     try {
       console.log('🔍 Loading ALL players for private training (registered + imported)');
       
@@ -215,7 +166,7 @@ function Training() {
       setAllImportedPlayers([]);
       setImportedPlayers([]);
     }
-  };
+  }, [player]);
 
   // Lade Team-Mitglieder (registriert UND importiert)
   const loadTeamMembers = async (teamId) => {
@@ -258,31 +209,83 @@ function Training() {
     }
   };
 
+  // Lade Spieler mit Statistiken für Round-Robin
+  const loadPlayersWithStats = async () => {
+    try {
+      // Lade Spieler aus players_unified
+      const { data: playersData, error: playersError } = await supabase
+        .from('players_unified')
+        .select('id, name, email, current_lk, status')
+        .in('status', ['active', 'pending']);
+
+      if (playersError) throw playersError;
+
+      // Lade Attendance-Daten für die letzen 90 Tage + nächste 90 Tage
+      const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+      const ninetyDaysInFuture = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+      
+      const { data: trainingsData, error: trainingsError } = await supabase
+        .from('training_sessions')
+        .select('id, date, type, invited_players')
+        .gte('date', ninetyDaysAgo.toISOString())
+        .lte('date', ninetyDaysInFuture.toISOString());
+
+      if (trainingsError) throw trainingsError;
+
+      const { data: attendanceData, error: attendanceError } = await supabase
+        .from('training_attendance')
+        .select('*')
+        .in('session_id', trainingsData.map(t => t.id));
+
+      if (attendanceError) throw attendanceError;
+
+      // Verknüpfe Attendance mit Training-Daten
+      const enrichedAttendance = (attendanceData || []).map(att => {
+        const training = trainingsData.find(t => t.id === att.session_id);
+        return {
+          ...att,
+          training_date: training?.date || null
+        };
+      });
+
+      // Berechne training_stats für jeden Spieler mit zentraler Funktion
+      const playersWithTrainingStats = (playersData || []).map(player => {
+        const training_stats = RoundRobinService.calculateTrainingStats(player, enrichedAttendance);
+        return {
+          ...player,
+          training_stats
+        };
+      });
+
+      console.log('✅ Loaded players with stats:', playersWithTrainingStats.length);
+      setPlayersWithStats(playersWithTrainingStats);
+    } catch (error) {
+      console.error('❌ Error loading players with stats:', error);
+      setPlayersWithStats([]);
+    }
+  };
+
+  // Lade Trainings
   const loadTrainings = async () => {
+    // Wenn noch keine Teams geladen sind, skippe
+    if (!userTeams || userTeams.length === 0) {
+      console.log('⏭️ Skipping loadTrainings - userTeams not loaded yet');
+      return;
+    }
+    
     try {
       setLoading(true);
       
-      // 🔒 FILTERUNG: Hole nur Team-IDs des Spielers
       const playerTeamIds = userTeams.map(t => t.id);
-      
       console.log('🔒 Loading trainings for player teams:', playerTeamIds);
 
-      // Lade Trainings: Team-Trainings (mit team_id) UND Private Trainings (team_id=null, wo ich beteiligt bin)
       let teamTrainings = [];
       let teamError = null;
       
       if (playerTeamIds.length > 0) {
-        console.log('🔒 Loading team trainings for:', playerTeamIds);
         const { data, error } = await supabase
           .from('training_sessions')
-          .select(`
-            *,
-            organizer:organizer_id (
-              id,
-              name,
-              profile_image
-            )
-          `)
+          .select(`*, organizer:organizer_id (id, name, profile_image)`)
           .in('team_id', playerTeamIds)
           .gte('date', new Date().toISOString())
           .order('date', { ascending: true });
@@ -293,17 +296,9 @@ function Training() {
 
       if (teamError) throw teamError;
 
-      // Lade PRIVATE Trainings (team_id = null) wo ich Organisator oder eingeladen bin
       const { data: privateTrainings, error: privateError } = await supabase
         .from('training_sessions')
-        .select(`
-          *,
-          organizer:organizer_id (
-            id,
-            name,
-            profile_image
-          )
-        `)
+        .select(`*, organizer:organizer_id (id, name, profile_image)`)
         .is('team_id', null)
         .eq('type', 'private')
         .gte('date', new Date().toISOString())
@@ -311,58 +306,33 @@ function Training() {
 
       if (privateError) throw privateError;
 
-      // Filtere private Trainings (mit Debugging)
-      console.log('🔍 Filtering private trainings for player:', player?.id);
-      console.log('📊 Total private trainings:', privateTrainings?.length);
-      
       const filteredPrivate = (privateTrainings || []).filter(pt => {
         const isOrganizer = pt.organizer_id === player?.id;
         const isInvited = pt.invited_players?.includes(player?.id);
         const isPublic = pt.is_public && pt.needs_substitute;
-        
-        const shouldShow = isOrganizer || isInvited || isPublic;
-        
-        return shouldShow;
+        return isOrganizer || isInvited || isPublic;
       });
 
-      console.log('✅ Filtered private trainings:', filteredPrivate.length);
+      const sessionsData = [...(teamTrainings || []), ...(filteredPrivate || [])];
 
-      // Kombiniere Team- und Private-Trainings
-      const sessionsData = [...(teamTrainings || []), ...(privateTrainings || [])];
-      
-      console.log('✅ Trainings loaded:', {
-        team: teamTrainings?.length || 0,
-        private: privateTrainings?.length || 0,
-        total: sessionsData.length
-      });
-      
-      console.log('✅ Trainings loaded (filtered by player teams):', sessionsData?.length || 0);
-
-      // Lade alle Teilnahmen
       const { data: attendanceData, error: attendanceError } = await supabase
         .from('training_attendance')
         .select('*');
 
       if (attendanceError) throw attendanceError;
 
-      // Kombiniere Daten
       const trainingsWithAttendance = (sessionsData || []).map(session => {
         const attendance = (attendanceData || []).filter(a => a.session_id === session.id);
         const myAttendance = attendance.find(a => a.player_id === player?.id);
         
         const confirmed = attendance.filter(a => a.status === 'confirmed').length;
         const declined = attendance.filter(a => a.status === 'declined').length;
-        const pending = players.filter(p => p.is_active).length - (confirmed + declined);
 
         return {
           ...session,
           attendance,
           myAttendance,
-          stats: {
-            confirmed,
-            declined,
-            pending
-          }
+          stats: { confirmed, declined, pending: 0 }
         };
       });
 
@@ -371,6 +341,138 @@ function Training() {
       console.error('Error loading trainings:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Schließe Dropdown wenn außerhalb geklickt wird
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (!event.target.closest('.mine-dropdown-container')) {
+        setShowMineDropdown(false);
+      }
+    };
+
+    if (showMineDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showMineDropdown]);
+
+  // Lade User Teams beim Mount
+  useEffect(() => {
+    if (player?.id) {
+      loadUserTeams();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [player]);
+
+  // Lade Trainings wenn userTeams gesetzt wurde
+  useEffect(() => {
+    if (userTeams && userTeams.length > 0 && player?.id) {
+      loadTrainings();
+      loadPlayersWithStats();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userTeams, player]);
+
+  // Lade importierte Spieler beim Öffnen des Formulars (für Privat-Training)
+  useEffect(() => {
+    if (showCreateForm && formData.type === 'private') {
+      console.log('🔍 Loading ALL imported players (club-wide)');
+      loadImportedPlayersForPrivateTraining();
+    }
+  }, [showCreateForm, formData.type, loadImportedPlayersForPrivateTraining]);
+
+  // Filter ALLE Spieler basierend auf Suche (registriert + importiert)
+  useEffect(() => {
+    if (!importedPlayerSearch.trim()) {
+      setImportedPlayers([]);
+      return;
+    }
+
+    const searchLower = importedPlayerSearch.toLowerCase();
+    const filtered = allImportedPlayers.filter(player => 
+      player.name.toLowerCase().includes(searchLower) ||
+      (player.currentLk && player.currentLk.toString().includes(searchLower))
+    );
+
+    console.log(`🔍 Filtered ${filtered.length} players for search: "${importedPlayerSearch}"`, {
+      registered: filtered.filter(p => p.source === 'registered').length,
+      imported: filtered.filter(p => p.source === 'imported').length
+    });
+    setImportedPlayers(filtered);
+  }, [importedPlayerSearch, allImportedPlayers]);
+
+  // Lade vergangene Trainings für Historie
+  const loadPastTrainings = async () => {
+    if (!player) return;
+    
+    try {
+      const playerTeamIds = userTeams.map(t => t.id);
+      
+      let pastTeamTrainings = [];
+      if (playerTeamIds.length > 0) {
+        const { data } = await supabase
+          .from('training_sessions')
+          .select('*')
+          .in('team_id', playerTeamIds)
+          .lt('date', new Date().toISOString())
+          .order('date', { ascending: false })
+          .limit(20);
+        
+        pastTeamTrainings = data || [];
+      }
+
+      const { data: privatePast } = await supabase
+        .from('training_sessions')
+        .select('*')
+        .is('team_id', null)
+        .eq('type', 'private')
+        .lt('date', new Date().toISOString())
+        .order('date', { ascending: false })
+        .limit(20);
+
+      const filteredPrivatePast = (privatePast || []).filter(pt => {
+        const isOrganizer = pt.organizer_id === player?.id;
+        const isInvited = pt.invited_players?.includes(player?.id);
+        return isOrganizer || isInvited;
+      });
+
+      const allPastTrainings = [...pastTeamTrainings, ...filteredPrivatePast];
+      const pastIds = allPastTrainings.map(t => t.id);
+      
+      if (pastIds.length > 0) {
+        const { data: attendanceData } = await supabase
+          .from('training_attendance')
+          .select('*')
+          .in('session_id', pastIds);
+
+        const pastWithAttendance = allPastTrainings.map(training => {
+          const attendance = (attendanceData || []).filter(a => a.session_id === training.id);
+          const myAttendance = attendance.find(a => a.player_id === player?.id);
+          
+          const confirmed = attendance.filter(a => a.status === 'confirmed').length;
+          const declined = attendance.filter(a => a.status === 'declined').length;
+          
+          return {
+            ...training,
+            attendance,
+            myAttendance,
+            stats: {
+              confirmed,
+              declined,
+              pending: 0
+            }
+          };
+        });
+
+        setPastTrainings(pastWithAttendance);
+      }
+    } catch (error) {
+      console.error('Error loading past trainings:', error);
     }
   };
 
@@ -1074,20 +1176,43 @@ Wir sehen uns auf dem Platz! 🎾`;
     // 🎲 ROUND-ROBIN: Verwende nur EINGELADENE Spieler für Round-Robin
     let roundRobinPlayers = [];
     
+    // WICHTIG: Füge Organizer automatisch zur Liste hinzu wenn nicht schon dabei
+    const allInvitedIds = [...new Set([...(training.invited_players || []), training.organizer_id])];
+    
     if (training.round_robin_enabled && training.type === 'private' && training.invited_players) {
-      // Filtere nur eingeladene Spieler
-      const invitedIds = training.invited_players;
-      roundRobinPlayers = players.filter(p => invitedIds.includes(p.id));
+      // Filtere nur eingeladene Spieler + Organizer
+      roundRobinPlayers = players.filter(p => allInvitedIds.includes(p.id));
       // Logging ausgestellt wegen Spam
     } else {
       // Fallback: Alle Spieler (für Team-Trainings oder wenn keine invited_players)
       roundRobinPlayers = players;
     }
     
+    // WICHTIG: Berechne training_stats für jeden Spieler mit der ZENTRALEN Funktion
+    // Verwende die Stats aus playersWithStats (die bereits geladen wurden in loadPlayersWithStats)
+    const roundRobinPlayersWithStats = roundRobinPlayers.map(player => {
+      // Versuche Stats aus playersWithStats zu holen
+      const existingStats = playersWithStats.find(p => p.id === player.id);
+      
+      // Fallback: Leere Stats wenn nicht gefunden
+      const training_stats = existingStats?.training_stats || {
+        total_attended: 0,
+        total_declined: 0,
+        last_attended: null,
+        last_response: null,
+        consecutive_declines: 0
+      };
+      
+      return {
+        ...player,
+        training_stats
+      };
+    });
+    
     // 🎲 ROUND-ROBIN: Berechne wer spielen kann und wer wartet
     const { canPlay, waitlist, isOverbooked } = RoundRobinService.calculateTrainingParticipants(
       training, 
-      roundRobinPlayers
+      roundRobinPlayersWithStats
     );
     
     const status = getStatusBadge(training);
@@ -1694,6 +1819,26 @@ Wir sehen uns auf dem Platz! 🎾`;
 
           </div>
 
+          {/* TEILNAHME ERKLÄRT BUTTON - NUR BEI ÜBERBUCHUNG */}
+          {waitlist.length > 0 && (
+            <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid #e5e7eb' }}>
+              <button
+                className="btn-modern btn-modern-inactive"
+                onClick={() => {
+                  navigate('/round-robin');
+                }}
+                style={{ 
+                  width: '100%',
+                  background: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)',
+                  color: 'white'
+                }}
+                title="Teilnahme-System erklären"
+              >
+                📊 Teilnahme erklärt ({waitlist.length} auf Warteliste)
+              </button>
+            </div>
+          )}
+
           {/* ORGANISATOR-BUTTONS (ganz unten) */}
           {isOrganizer && (
             <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid #e5e7eb' }}>
@@ -1906,24 +2051,111 @@ Wir sehen uns auf dem Platz! 🎾`;
             <Users size={18} />
             Team-Training ({visibleTrainings.filter(t => t.type === 'team').length})
           </button>
-          <button
-            className={`btn-modern ${selectedFilter === 'mine' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
-            onClick={() => setSelectedFilter('mine')}
-          >
-            <Users size={18} />
-            Meine Trainingseinheiten ({visibleTrainings.filter(t => t.type === 'private' && (t.organizer_id === player?.id || t.invited_players?.includes(player?.id))).length})
-          </button>
+          
+          {/* Meine Trainingseinheiten mit Historie-Dropdown */}
+          <div className="mine-dropdown-container" style={{ position: 'relative', display: 'inline-block' }}>
+            <button
+              className={`btn-modern ${selectedFilter === 'mine' ? 'btn-modern-active' : 'btn-modern-inactive'}`}
+              onClick={() => {
+                setShowMineDropdown(!showMineDropdown);
+                setSelectedFilter('mine');
+              }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', paddingRight: '2rem' }}
+            >
+              <Users size={18} />
+              <span>Meine Trainingseinheiten ({visibleTrainings.filter(t => t.type === 'private' && (t.organizer_id === player?.id || t.invited_players?.includes(player?.id))).length})</span>
+              <span style={{ 
+                position: 'absolute', 
+                right: '0.5rem',
+                fontSize: '0.75rem',
+                opacity: 0.7,
+                transform: showMineDropdown ? 'rotate(180deg)' : 'rotate(0deg)',
+                transition: 'transform 0.2s'
+              }}>
+                ▼
+              </span>
+            </button>
+            
+            {/* Dropdown Menu */}
+            {showMineDropdown && (
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                right: 0,
+                marginTop: '0.25rem',
+                background: 'white',
+                border: '2px solid #e5e7eb',
+                borderRadius: '8px',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                zIndex: 1000,
+                minWidth: '200px'
+              }}>
+              <button
+                onClick={() => {
+                  setSelectedFilter('mine');
+                  setShowHistory(false);
+                  setShowMineDropdown(false);
+                }}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem 1rem',
+                  border: 'none',
+                  background: 'transparent',
+                  textAlign: 'left',
+                  fontSize: '0.9rem',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  color: '#374151',
+                  borderBottom: '1px solid #f3f4f6',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  transition: 'background 0.2s'
+                }}
+                onMouseEnter={(e) => e.target.style.background = '#f9fafb'}
+                onMouseLeave={(e) => e.target.style.background = 'transparent'}
+              >
+                <Calendar size={16} color="#3b82f6" />
+                Aktuell anzeigen
+              </button>
+              <button
+                onClick={() => {
+                  setShowHistory(!showHistory);
+                  setShowMineDropdown(false);
+                  if (!showHistory && pastTrainings.length === 0) {
+                    loadPastTrainings();
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem 1rem',
+                  border: 'none',
+                  background: showHistory ? '#eff6ff' : 'transparent',
+                  textAlign: 'left',
+                  fontSize: '0.9rem',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  color: showHistory ? '#1e40af' : '#374151',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  transition: 'background 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  if (!showHistory) e.target.style.background = '#f9fafb';
+                }}
+                onMouseLeave={(e) => {
+                  if (!showHistory) e.target.style.background = 'transparent';
+                }}
+              >
+                <span>📜</span>
+                Historie{pastTrainings.length > 0 ? ` (${pastTrainings.length})` : ''}
+              </button>
+            </div>
+            )}
+          </div>
         </div>
-        
-        {/* Round-Robin Erklären Button */}
-        <button
-          className="btn-modern btn-modern-inactive"
-          onClick={() => navigate('/round-robin')}
-          style={{ flex: '0 0 auto' }}
-          title="Round-Robin System erklären"
-        >
-          🎲 Round-Robin
-        </button>
         
         {/* Create Training Button */}
         <button
@@ -1954,6 +2186,35 @@ Wir sehen uns auf dem Platz! 🎾`;
         </div>
       ) : (
         <>
+          {/* VERGANGENE TRAININGS (HISTORIE) */}
+          {showHistory && (() => {
+            // Filtere: Nur Trainings die VOR heute stattfanden
+            const now = new Date();
+            const trulyPastTrainings = pastTrainings.filter(t => {
+              const trainingDate = new Date(t.date);
+              return trainingDate < now;
+            });
+
+            return trulyPastTrainings.length > 0 ? (
+              <div className="fade-in" style={{ marginBottom: '2rem' }}>
+                <h2 style={{ 
+                  margin: '0 0 1rem 0', 
+                  fontSize: '1.1rem', 
+                  fontWeight: '700',
+                  color: '#374151',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}>
+                  📜 Vergangene Trainings ({trulyPastTrainings.length})
+                </h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {trulyPastTrainings.map(renderTrainingCard)}
+                </div>
+              </div>
+            ) : null;
+          })()}
+
           {/* Diese Woche */}
           {groupedTrainings.thisWeek.length > 0 && (
             <div className="fade-in" style={{ marginBottom: '2rem' }}>
