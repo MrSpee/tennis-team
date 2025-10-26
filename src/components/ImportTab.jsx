@@ -225,7 +225,7 @@ const ImportTab = () => {
       // SCHRITT 3: Formatiere für Supabase (NUR existierende Spalten!)
       const formattedMatches = uniqueMatches.map(match => ({
         team_id: teamId,
-        date_time: match.match_date + ' ' + (match.start_time || '00:00:00'),
+        match_date: match.match_date + ' ' + (match.start_time || '00:00:00'),
         opponent: match.opponent,
         location: match.is_home_match ? 'heim' : 'auswärts',
         venue: match.venue || null,
@@ -394,14 +394,14 @@ const ImportTab = () => {
       
       const { data, error } = await supabase
         .from('matches')
-        .select('date_time, opponent')
+        .select('match_date, opponent')
         .eq('team_id', teamId);
         
       if (error) throw error;
 
       // Prüfe auf Duplikate basierend auf Datum (nur Tag) und Opponent
       const duplicates = (data || []).filter(dbMatch => {
-        const dbDate = new Date(dbMatch.date_time).toISOString().split('T')[0];
+        const dbDate = new Date(dbMatch.match_date).toISOString().split('T')[0];
         return matches.some(m => {
           const matchDate = m.match_date;
           return matchDate === dbDate && m.opponent === dbMatch.opponent;
@@ -409,10 +409,10 @@ const ImportTab = () => {
       });
 
       return {
-        duplicates: duplicates.map(d => ({ match_date: d.date_time.split('T')[0], opponent: d.opponent })),
+        duplicates: duplicates.map(d => ({ match_date: d.match_date.split('T')[0], opponent: d.opponent })),
         unique: matches.filter(m => 
           !duplicates.some(d => {
-            const dDate = d.date_time.split('T')[0];
+            const dDate = d.match_date.split('T')[0];
             return dDate === m.match_date && d.opponent === m.opponent;
           })
         )
