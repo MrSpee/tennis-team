@@ -88,7 +88,7 @@ export function DataProvider({ children }) {
       window.removeEventListener('reloadPlayers', handleReloadPlayers);
       window.removeEventListener('reloadTeams', handleReloadTeams);
     };
-  }, [configured, isAuthenticated, authLoading]);
+  }, [configured, isAuthenticated, authLoading, player?.id]); // player?.id hinzugefügt für bessere Dependency
 
   // Reload TeamInfo wenn selectedTeamId sich ändert (Matches werden nicht gefiltert)
   useEffect(() => {
@@ -136,7 +136,7 @@ export function DataProvider({ children }) {
       
       // Lade Spieler-Name für Test-Daten-Check
       const { data: playerData } = await supabase
-        .from('players')
+        .from('players_unified')
         .select('name')
         .eq('id', playerId)
         .single();
@@ -146,7 +146,7 @@ export function DataProvider({ children }) {
       setCurrentPlayerName(playerName); // Speichere für Test-Daten-Filter
       
       const { data, error } = await supabase
-        .from('player_teams')
+        .from('team_memberships')
         .select(`
           *,
           team_info (
@@ -160,6 +160,7 @@ export function DataProvider({ children }) {
           )
         `)
         .eq('player_id', playerId)
+        .eq('is_active', true)
         .order('is_primary', { ascending: false });
 
       if (error) {
@@ -217,7 +218,7 @@ export function DataProvider({ children }) {
           isTestData: true
         });
       } else if (tcKoelnTestData.enabled && !isTheoTester) {
-        console.log('⚠️ TC Köln test data SKIPPED for', playerName, '(not Theo Tester)');
+        // console.log('⚠️ TC Köln test data SKIPPED for', playerName, '(not Theo Tester)');
       }
       
       setPlayerTeams(teams);
@@ -226,6 +227,10 @@ export function DataProvider({ children }) {
       // 🔧 FIX: Lade Matches NACHDEM playerTeams gesetzt wurde!
       console.log('🔄 Now loading matches with team filter...');
       await loadMatches(teams); // Übergebe teams direkt!
+      
+      // 🔧 FIX: Lade auch Players für Spieler-Ansicht!
+      console.log('🔄 Now loading players...');
+      await loadPlayers();
       
       // Setze Primary-Team als Default (für Results.jsx Filterung)
       const primaryTeam = teams.find(t => t.is_primary) || teams[0];
@@ -246,12 +251,7 @@ export function DataProvider({ children }) {
       const teamsForFilter = teamsToFilter || playerTeams;
       const playerTeamIds = teamsForFilter.map(t => t.id);
       
-      console.log('🔍 loadMatches called with:', {
-        teamsToFilterParam: teamsToFilter?.length || 0,
-        playerTeamsState: playerTeams.length,
-        finalTeamsToUse: teamsForFilter.length,
-        playerTeamIds
-      });
+      // console.log('🔍 loadMatches called with:', { teamsToFilterParam: teamsToFilter?.length || 0, playerTeamIds });
       
       if (playerTeamIds.length === 0) {
         console.log('⚠️ No teams found for player, no matches to load');
@@ -259,13 +259,13 @@ export function DataProvider({ children }) {
         return;
       }
 
-      console.log('🔒 Loading matches for player teams:', playerTeamIds);
+      // console.log('🔒 Loading matches for player teams:', playerTeamIds);
 
       const { data, error } = await supabase
         .from('matches')
         .select(`
           *,
-          team_info (
+          team_info!matches_team_id_fkey (
             id,
             club_name,
             team_name,
@@ -348,7 +348,7 @@ export function DataProvider({ children }) {
         transformedMatches = [...transformedMatches, ...testMatches];
         console.log('✅ Total matches (DB + Test):', transformedMatches.length);
       } else if (tcKoelnTestData.enabled && !isTheoTester) {
-        console.log('⚠️ TC Köln test matches SKIPPED for', currentPlayerName, '(not Theo Tester)');
+        // console.log('⚠️ TC Köln test matches SKIPPED for', currentPlayerName, '(not Theo Tester)');
       }
 
       setMatches(transformedMatches);
@@ -359,10 +359,12 @@ export function DataProvider({ children }) {
 
   // Lade Spieler (für Rangliste)
   const loadPlayers = async () => {
+    console.log('🔄 Loading players from players_unified...');
     const { data, error } = await supabase
-      .from('players')
+      .from('players_unified')
       .select('*')
       .eq('is_active', true)
+      .eq('player_type', 'app_user') // Nur App-User für Frontend
       .order('points', { ascending: false });
 
     if (error) {
@@ -370,33 +372,14 @@ export function DataProvider({ children }) {
       return;
     }
 
+    console.log('✅ Players loaded:', data?.length || 0, 'players');
     setPlayers(data);
   };
 
-  // Lade Tabelle
+  // Lade Tabelle (DEAKTIVIERT - Tabelle existiert nicht)
   const loadLeagueStandings = async () => {
-    const { data, error } = await supabase
-      .from('league_standings')
-      .select('*')
-      .eq('season', 'winter')
-      .order('position', { ascending: true });
-
-    if (error) {
-      console.error('Error loading standings:', error);
-      return;
-    }
-
-    // Transformiere für Kompatibilität
-    const transformed = data.map(row => ({
-      position: row.position,
-      team: row.team_name,
-      matches: row.matches_played,
-      wins: row.wins,
-      losses: row.losses,
-      points: row.points
-    }));
-
-    setLeagueStandings(transformed);
+    // console.log('⚠️ League standings loading deactivated - table does not exist');
+    setLeagueStandings([]);
   };
 
   // Lade Team Info (mit Team-Filter Support)
@@ -442,6 +425,12 @@ export function DataProvider({ children }) {
       }
       
       // Fallback: Vereinfachte Team-Info-Ladung ohne Season-Filter
+      // Nur laden wenn noch keine Team Info vorhanden ist
+      if (teamInfo) {
+        console.log('🔵 Team info already loaded, skipping fallback');
+        return;
+      }
+      
       console.log('🔵 Loading team info (fallback - no season filter)');
 
       const { data, error } = await supabase
@@ -456,7 +445,7 @@ export function DataProvider({ children }) {
       }
 
       if (data) {
-        console.log('✅ Team info loaded:', data);
+        console.log('✅ Team info loaded (fallback):', data);
         setTeamInfo({
           id: data.id,
           teamName: data.team_name,
@@ -518,11 +507,11 @@ export function DataProvider({ children }) {
       )
       .subscribe();
 
-    // Players (für Rangliste)
+    // Players (für Rangliste) - aktualisiert für players_unified
     const playersSubscription = supabase
       .channel('players-channel')
       .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'players' },
+        { event: '*', schema: 'public', table: 'players_unified' },
         () => loadPlayers()
       )
       .subscribe();
@@ -773,7 +762,7 @@ export function DataProvider({ children }) {
   const getPlayerProfile = async (playerId) => {
     try {
       const { data, error } = await supabase
-        .from('players')
+        .from('players_unified')
         .select('*')
         .eq('id', playerId)
         .single();
@@ -792,7 +781,7 @@ export function DataProvider({ children }) {
   const updatePlayerProfile = async (playerId, profileData) => {
     try {
       const { data, error } = await supabase
-        .from('players')
+        .from('players_unified')
         .update(profileData)
         .eq('id', playerId)
         .select()

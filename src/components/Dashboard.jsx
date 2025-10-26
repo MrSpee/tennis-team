@@ -17,13 +17,15 @@ function Dashboard() {
     playerTeams
   } = useData();
   
-  // Debug: Prüfe was geladen wurde
-  console.log('🔍 Dashboard Debug:', {
-    playerTeams: playerTeams,
-    playerTeamsLength: playerTeams?.length,
-    teamInfo: teamInfo,
-    player: player
-  });
+  // Debug: Prüfe was geladen wurde (nur bei signifikanten Änderungen)
+  useEffect(() => {
+    console.log('🔍 Dashboard State Changed:', {
+      playerTeamsLength: playerTeams?.length,
+      hasTeamInfo: !!teamInfo,
+      hasPlayer: !!player,
+      totalMatches: matches.length
+    });
+  }, [playerTeams?.length, !!teamInfo, !!player, matches.length]);
   
   // State für Live-Timer
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -66,22 +68,14 @@ function Dashboard() {
     }
   }
   
-  // Debug: Zeige was geladen wurde
-  console.log('🔵 Dashboard Debug:', {
-    totalMatches: matches.length,
-    currentSeason,
-    seasonDisplay,
-    currentMonth,
-    currentTime: now.toLocaleString('de-DE'),
-    allMatches: matches.map(m => ({ 
-      opponent: m.opponent, 
-      date: m.date.toLocaleString('de-DE'),
-      dateISO: m.date.toISOString(),
-      season: m.season,
-      hoursSinceStart: ((now - m.date) / (1000 * 60 * 60)).toFixed(2),
-      isFuture: m.date > now
-    }))
-  });
+  // Debug: Zeige was geladen wurde (nur bei Änderungen)
+  useEffect(() => {
+    console.log('🔵 Dashboard Data:', {
+      totalMatches: matches.length,
+      currentSeason,
+      seasonDisplay
+    });
+  }, [matches.length, currentSeason, seasonDisplay]);
   
   // Kommende Spiele (noch nicht begonnen)
   const upcomingMatches = matches
@@ -97,8 +91,8 @@ function Dashboard() {
     })
     .sort((a, b) => b.date - a.date); // Neueste zuerst
 
-  console.log('🔵 Upcoming matches for', currentSeason, ':', upcomingMatches.length);
-  console.log('🔵 Finished matches for', currentSeason, ':', recentlyFinishedMatches.length);
+  // console.log('🔵 Upcoming matches for', currentSeason, ':', upcomingMatches.length);
+  // console.log('🔵 Finished matches for', currentSeason, ':', recentlyFinishedMatches.length);
 
   // Für Countdown: Das allernächste ZUKÜNFTIGE Spiel (egal welche Saison)
   // Nur Spiele die noch nicht begonnen haben
@@ -118,13 +112,7 @@ function Dashboard() {
     
     const firstName = (playerName || 'Spieler').split(' ')[0];
     
-    console.log('🔵 Greeting debug:', { 
-      playerName: player?.name, 
-      userMetadata: currentUser?.user_metadata?.name,
-      email: currentUser?.email,
-      finalName: playerName,
-      firstName 
-    });
+    // console.log('🔵 Greeting debug:', { playerName, firstName });
     
     if (hour < 6) return `Gute Nacht, ${firstName}! 🌙`;
     if (hour < 11) return `Guten Morgen, ${firstName}! ☀️`;
@@ -201,15 +189,8 @@ function Dashboard() {
     }
   };
 
-  // Debug Player Data
-  console.log('🔍 Dashboard Player Data:', {
-    player,
-    hasCurrentLK: !!player?.current_lk,
-    currentLK: player?.current_lk,
-    startLK: player?.start_lk,
-    seasonImprovement: player?.season_improvement,
-    ranking: player?.ranking
-  });
+  // Debug Player Data (reduziert)
+  // console.log('🔍 Dashboard Player Data:', { hasCurrentLK: !!player?.current_lk, currentLK: player?.current_lk });
 
   return (
     <div className="dashboard container">
@@ -240,7 +221,7 @@ function Dashboard() {
             {/* Große Sparkline mit Monatslabels */}
                 {player.current_lk && (() => {
                   // Nutze gemeinsame parseLK Funktion aus lkUtils
-                  const startLK = parseLK(player.start_lk || player.season_start_lk || player.current_lk);
+                  const startLK = parseLK(player.start_lk || player.season_start_lk || player.current_lk || 'LK 12.3');
                   const currentLKValue = parseLK(player.current_lk);
                   const improvement = player.season_improvement || 0;
                   
@@ -318,14 +299,7 @@ function Dashboard() {
                     });
                   }
                   
-                  console.log('📊 Monthly Sparkline Data:', {
-                    currentMonth: monthNames[currentMonth],
-                    weeksSinceStart,
-                    startLK,
-                    currentLKValue,
-                    improvement,
-                    monthlyData
-                  });
+                  // console.log('📊 Monthly Sparkline Data:', { currentMonth: monthNames[currentMonth], startLK, currentLKValue });
                   
                   return (
                     <div className="sparkline-container">

@@ -18,6 +18,7 @@ import LiveResultsWithDB from './components/LiveResultsWithDB';
 import MatchdayResults from './components/MatchdayResults';
 import Results from './components/Results';
 import Training from './components/Training';
+import RoundRobinExplainer from './components/RoundRobinExplainer';
 import OnboardingFlow from './components/OnboardingFlow';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
 import EmailVerificationError from './components/EmailVerificationError';
@@ -206,6 +207,12 @@ function AppContent() {
           <Route path="/training" element={
             <ProtectedRoute>
               <Training />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/round-robin" element={
+            <ProtectedRoute>
+              <RoundRobinExplainer />
             </ProtectedRoute>
           } />
           

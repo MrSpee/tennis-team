@@ -12,7 +12,7 @@ import './Dashboard.css';
 function Matches() {
   const navigate = useNavigate();
   const { player } = useAuth();
-  const { matches, updateMatchAvailability, playerTeams } = useData();
+  const { matches, updateMatchAvailability, playerTeams, players } = useData();
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [comment, setComment] = useState('');
   const [searchParams] = useSearchParams();
@@ -176,10 +176,29 @@ function Matches() {
               const availableCount = Object.values(match.availability || {})
                 .filter(a => a.status === 'available').length;
 
+              // Sortiere verfügbare Spieler nach Saisonstart-LK (niedrigste LK = beste Spieler)
               const availablePlayers = Object.entries(match.availability || {})
                 .filter(([, data]) => data.status === 'available')
-                .map(([, data]) => data.playerName)
-                .filter(name => name && name !== 'Unbekannt');
+                .map(([playerId, data]) => {
+                  // Hole echte Spieler-Daten aus der players Tabelle
+                  const playerData = players?.find(p => p.id === playerId);
+                  return {
+                    id: playerId,
+                    name: data.playerName,
+                    seasonStartLk: playerData?.season_start_lk || playerData?.current_lk || 'LK 12.0',
+                    currentLk: playerData?.current_lk || 'LK 12.0',
+                    comment: data.comment
+                  };
+                })
+                .filter(player => player.name && player.name !== 'Unbekannt')
+                .sort((a, b) => {
+                  // Extrahiere LK-Wert für Sortierung (z.B. "LK 8.5" -> 8.5)
+                  const getLKValue = (lkString) => {
+                    const match = lkString.match(/LK\s*(\d+(?:\.\d+)?)/i);
+                    return match ? parseFloat(match[1]) : 12.0;
+                  };
+                  return getLKValue(a.seasonStartLk) - getLKValue(b.seasonStartLk);
+                });
 
               return (
                 <div 
@@ -206,7 +225,7 @@ function Matches() {
                         </span>
                         <span className="badge-value">
                           {availableCount}/{match.playersNeeded}
-                        </span>
+                            </span>
                       </div>
                     </div>
                   </div>
@@ -251,7 +270,7 @@ function Matches() {
                     )}
                   </div>
 
-                  {/* ES SPIELEN MIT - Prominent anzeigen */}
+                  {/* AUFSTELLUNG - Nach LK sortiert */}
                   {availablePlayers.length > 0 && (
                     <div style={{ marginBottom: '1rem' }}>
                       <div style={{ 
@@ -260,22 +279,144 @@ function Matches() {
                         fontWeight: '700',
                         textTransform: 'uppercase',
                         letterSpacing: '0.05em',
-                        marginBottom: '0.5rem' 
+                        marginBottom: '0.75rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem'
                       }}>
-                        Es spielen mit ({availablePlayers.length}):
+                        🏆 Aufstellung ({availablePlayers.length}/{match.playersNeeded}):
+                        <span style={{ 
+                          fontSize: '0.7rem', 
+                          color: '#10b981',
+                          fontWeight: '600'
+                        }}>
+                          Sortiert nach Saisonstart-LK
+                        </span>
                       </div>
-                      <div className="player-badges">
-                        {availablePlayers.map((playerName, index) => (
-                          <span 
-                            key={index} 
-                            className="player-badge-small"
-                            onClick={() => navigate(`/player/${encodeURIComponent(playerName)}`)}
-                            title={`Profil von ${playerName}`}
-                          >
-                            {playerName}
-                          </span>
-                        ))}
+                      
+                      <div style={{ 
+                        display: 'flex', 
+                        flexDirection: 'column',
+                        gap: '0.5rem'
+                      }}>
+                        {availablePlayers.map((player, index) => {
+                          const isStarter = index < match.playersNeeded;
+                          const position = index + 1;
+                          
+                          return (
+                            <div 
+                              key={player.id} 
+                              style={{
+                                padding: '0.75rem',
+                                background: isStarter 
+                                  ? 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)'
+                                  : 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+                                border: `2px solid ${isStarter ? '#10b981' : '#f59e0b'}`,
+                                borderRadius: '8px',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease',
+                                position: 'relative'
+                              }}
+                              onClick={() => navigate(`/player/${encodeURIComponent(player.name)}`)}
+                              title={`Profil von ${player.name} - ${player.lk}`}
+                              onMouseEnter={(e) => {
+                                e.target.style.transform = 'translateY(-2px)';
+                                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.target.style.transform = 'translateY(0)';
+                                e.target.style.boxShadow = 'none';
+                              }}
+                            >
+                              {/* Position Badge */}
+                              <div style={{
+                                position: 'absolute',
+                                top: '-8px',
+                                left: '-8px',
+                                width: '24px',
+                                height: '24px',
+                                background: isStarter ? '#10b981' : '#f59e0b',
+                                color: 'white',
+                                borderRadius: '50%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '0.7rem',
+                                fontWeight: '700'
+                              }}>
+                                {position}
+                              </div>
+                              
+                              {/* Spieler Info */}
+                              <div style={{ marginLeft: '8px' }}>
+                                <div style={{ 
+                                  fontSize: '0.85rem', 
+                                  fontWeight: '700',
+                                  color: isStarter ? '#14532d' : '#92400e',
+                                  marginBottom: '0.25rem'
+                                }}>
+                                  {player.name}
+                                </div>
+                                <div style={{ 
+                                  fontSize: '0.75rem', 
+                                  color: isStarter ? '#059669' : '#d97706',
+                                  fontWeight: '600'
+                                }}>
+                                  {player.seasonStartLk}
+                                  {player.currentLk !== player.seasonStartLk && (
+                                    <span style={{ 
+                                      fontSize: '0.7rem', 
+                                      color: '#6b7280',
+                                      marginLeft: '0.25rem'
+                                    }}>
+                                      → {player.currentLk}
+                                    </span>
+                                  )}
+                                </div>
+                                {player.comment && (
+                                  <div style={{ 
+                                    fontSize: '0.7rem', 
+                                    color: '#6b7280',
+                                    fontStyle: 'italic',
+                                    marginTop: '0.25rem'
+                                  }}>
+                                    💬 {player.comment}
+                                  </div>
+                                )}
+                              </div>
+                              
+                              {/* Status Badge */}
+                              <div style={{
+                                position: 'absolute',
+                                top: '8px',
+                                right: '8px',
+                                fontSize: '0.7rem',
+                                fontWeight: '600',
+                                color: isStarter ? '#10b981' : '#f59e0b'
+                              }}>
+                                {isStarter ? '✅ Starter' : '⏳ Reserve'}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
+                      
+                      {/* Info Text */}
+                      {availablePlayers.length > match.playersNeeded && (
+                        <div style={{
+                          marginTop: '0.75rem',
+                          padding: '0.75rem',
+                          background: '#f0f9ff',
+                          border: '1px solid #bae6fd',
+                          borderRadius: '6px',
+                          fontSize: '0.8rem',
+                          color: '#0c4a6e',
+                          textAlign: 'center'
+                        }}>
+                          💡 Die ersten {match.playersNeeded} Spieler sind als Starter eingeplant. 
+                          Die anderen stehen als Reserve zur Verfügung.
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -384,15 +525,15 @@ function Matches() {
                           </button>
                         </div>
                         
-                        <button
-                          onClick={() => {
-                            setSelectedMatch(null);
-                            setComment('');
-                          }}
+                          <button
+                            onClick={() => {
+                              setSelectedMatch(null);
+                              setComment('');
+                            }}
                           className="btn-cancel"
-                        >
-                          Abbrechen
-                        </button>
+                          >
+                            Abbrechen
+                          </button>
                       </div>
                     )}
                   </div>
@@ -405,19 +546,61 @@ function Matches() {
                         <span>Alle Rückmeldungen ({Object.keys(match.availability).length})</span>
                       </summary>
                       <div className="availability-list-modern">
-                        {Object.entries(match.availability).map(([playerId, data]) => (
-                          <div key={playerId} className="availability-item-modern">
-                            <div className="availability-player-info">
-                              <span className={`status-indicator ${data.status}`}>
-                                {data.status === 'available' ? '✅' : '❌'}
-                              </span>
-                              <span className="player-name-text">
-                                {data.playerName || 'Unbekannter Spieler'}
-                              </span>
+                        {Object.entries(match.availability)
+                          .map(([playerId, data]) => {
+                            // Hole echte Spieler-Daten aus der players Tabelle
+                            const playerData = players?.find(p => p.id === playerId);
+                            return {
+                              id: playerId,
+                              name: data.playerName || 'Unbekannter Spieler',
+                              seasonStartLk: playerData?.season_start_lk || playerData?.current_lk || 'LK 12.0',
+                              currentLk: playerData?.current_lk || 'LK 12.0',
+                              status: data.status,
+                              comment: data.comment
+                            };
+                          })
+                          .sort((a, b) => {
+                            // Sortiere: Erst verfügbare Spieler nach Saisonstart-LK, dann nicht verfügbare
+                            if (a.status === 'available' && b.status !== 'available') return -1;
+                            if (a.status !== 'available' && b.status === 'available') return 1;
+                            if (a.status === 'available' && b.status === 'available') {
+                              const getLKValue = (lkString) => {
+                                const match = lkString.match(/LK\s*(\d+(?:\.\d+)?)/i);
+                                return match ? parseFloat(match[1]) : 12.0;
+                              };
+                              return getLKValue(a.seasonStartLk) - getLKValue(b.seasonStartLk);
+                            }
+                            return 0;
+                          })
+                          .map((player) => (
+                            <div key={player.id} className="availability-item-modern">
+                              <div className="availability-player-info">
+                                <span className={`status-indicator ${player.status}`}>
+                                  {player.status === 'available' ? '✅' : '❌'}
+                                </span>
+                                <span className="player-name-text">
+                                  {player.name}
+                                </span>
+                                <span style={{ 
+                                  fontSize: '0.7rem', 
+                                  color: '#6b7280',
+                                  marginLeft: '0.5rem'
+                                }}>
+                                  {player.seasonStartLk}
+                                  {player.currentLk !== player.seasonStartLk && (
+                                    <span style={{ 
+                                      fontSize: '0.65rem', 
+                                      color: '#9ca3af',
+                                      marginLeft: '0.25rem'
+                                    }}>
+                                      → {player.currentLk}
+                                    </span>
+                                  )}
+                                </span>
                             </div>
-                            {data.comment && (
-                              <div className="player-comment">
-                                💬 {data.comment}
+                              {player.comment && (
+                                <div className="player-comment">
+                                  💬 {player.comment}
                               </div>
                             )}
                           </div>
@@ -451,12 +634,12 @@ function Matches() {
           
           <div className="season-content">
             <div className="season-matches">
-              {pastMatches.map(match => (
+            {pastMatches.map(match => (
                 <div key={match.id} className="match-preview-card finished">
                   <div className="match-preview-header">
                     <div className="match-preview-date">
                       {format(match.date, 'EEE, dd. MMM', { locale: de })}
-                    </div>
+                </div>
                     <div className="match-preview-badge">Beendet</div>
                   </div>
                   <div className="match-preview-opponent">{match.opponent}</div>
@@ -465,7 +648,7 @@ function Matches() {
                   </div>
                 </div>
               ))}
-            </div>
+              </div>
           </div>
         </div>
       )}

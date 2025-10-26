@@ -105,9 +105,9 @@ export function AuthProvider({ children }) {
       async (event, session) => {
         console.log('🔵 Auth state change - Event:', event, 'Session:', session ? 'exists' : 'none');
         
-        // Ignoriere den initialen SIGNED_IN event beim Laden
-        if (!initialCheckDone) {
-          console.log('⏳ Initial check not done yet, skipping auth state change');
+        // Ignoriere den initialen SIGNED_IN und INITIAL_SESSION event beim Laden
+        if (!initialCheckDone && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
+          console.log('⏳ Initial check not done yet, skipping auth state change:', event);
           return;
         }
         
@@ -157,9 +157,10 @@ export function AuthProvider({ children }) {
       console.log('🔄 Manual Auth reload triggered');
       if (currentUser?.id) {
         const { data, error } = await supabase
-          .from('players')
+          .from('players_unified')
           .select('*')
           .eq('user_id', currentUser.id)
+          .eq('player_type', 'app_user')
           .maybeSingle();
         
         if (data) {
@@ -167,9 +168,10 @@ export function AuthProvider({ children }) {
           
           // Prüfe Teams
           const { data: playerTeams } = await supabase
-            .from('player_teams')
+            .from('team_memberships')
             .select('team_id')
             .eq('player_id', data.id)
+            .eq('is_active', true)
             .limit(1);
           
           setNeedsOnboarding(!playerTeams || playerTeams.length === 0);
@@ -188,9 +190,10 @@ export function AuthProvider({ children }) {
     
     try {
       const { data, error } = await supabase
-        .from('players')
+        .from('players_unified')
         .select('*')
         .eq('user_id', userId)
+        .eq('player_type', 'app_user')
         .maybeSingle();
       
       console.log('🔵 Player query result - data:', data ? 'Found' : 'Not found', 'error:', error);
@@ -201,9 +204,10 @@ export function AuthProvider({ children }) {
         
         // Prüfe ob Spieler einem Team zugeordnet ist
         const { data: playerTeams, error: teamError } = await supabase
-          .from('player_teams')
+          .from('team_memberships')
           .select('team_id')
           .eq('player_id', data.id)
+          .eq('is_active', true)
           .limit(1);
 
         if (!teamError && (!playerTeams || playerTeams.length === 0)) {
@@ -246,15 +250,15 @@ export function AuthProvider({ children }) {
           
           // Erstelle Player-Eintrag
           const { data: newPlayer, error: insertError } = await supabase
-            .from('players')
+            .from('players_unified')
             .insert({
               user_id: user.id,
               email: user.email,
               name: playerName,
               phone: user.user_metadata?.phone || null,
               ranking: user.user_metadata?.ranking || null,
-              role: 'player',
               points: 0,
+              player_type: 'app_user',
               is_active: true
             })
             .select()
@@ -371,7 +375,7 @@ export function AuthProvider({ children }) {
 
     try {
       const { error } = await supabase
-        .from('players')
+        .from('players_unified')
         .update({
           name: profileData.name,
           phone: profileData.phone || null,

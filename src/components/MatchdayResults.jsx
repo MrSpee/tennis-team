@@ -309,24 +309,48 @@ const MatchdayResults = () => {
     let guestScore = 0;
     let completedMatches = 0;
 
+    // KORRIGIERTE MULTI-TEAM LOGIK:
+    // Berücksichtige die Team-Perspektive basierend auf match.location
+    const isPlayerHome = match?.location === 'Home';
+
     results.forEach(result => {
       // Prüfe zuerst, ob bereits ein winner in der DB gesetzt ist
       if (result.status === 'completed' && result.winner) {
         completedMatches++;
-        if (result.winner === 'home') {
-          homeScore++;
-        } else if (result.winner === 'guest') {
-          guestScore++;
+        // Multi-Team-Logik: winner bezieht sich auf Heim-Team vs Gast-Team
+        if (isPlayerHome) {
+          // Wir spielen Heim: home = unser Team, guest = Gegner
+          if (result.winner === 'home') {
+            homeScore++;
+          } else if (result.winner === 'guest') {
+            guestScore++;
+          }
+        } else {
+          // Wir spielen Auswärts: guest = unser Team, home = Gegner
+          if (result.winner === 'guest') {
+            homeScore++; // guest = unser Team
+          } else if (result.winner === 'home') {
+            guestScore++; // home = Gegner
+          }
         }
       } else {
         // Fallback: Berechne den Gewinner aus den Sätzen
         const matchWinner = calculateMatchWinnerFromSets(result);
-        if (matchWinner === 'home') {
+        if (matchWinner) {
           completedMatches++;
-          homeScore++;
-        } else if (matchWinner === 'guest') {
-          completedMatches++;
-          guestScore++;
+          if (isPlayerHome) {
+            if (matchWinner === 'home') {
+              homeScore++;
+            } else if (matchWinner === 'guest') {
+              guestScore++;
+            }
+          } else {
+            if (matchWinner === 'guest') {
+              homeScore++; // guest = unser Team
+            } else if (matchWinner === 'home') {
+              guestScore++; // home = Gegner
+            }
+          }
         }
       }
     });

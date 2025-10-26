@@ -1,0 +1,130 @@
+-- FRONTEND UPDATE: DataContext.jsx für Unified Player System
+-- Ersetze die loadPlayers Funktion mit der neuen Struktur
+
+-- Aktuelle loadPlayers Funktion (zu ersetzen):
+-- const loadPlayers = async () => {
+--   console.log('🔄 Loading players...');
+--   const { data, error } = await supabase
+--     .from('players')
+--     .select('*')
+--     .eq('is_active', true)
+--     .order('points', { ascending: false });
+-- 
+--   if (error) {
+--     console.error('Error loading players:', error);
+--     return;
+--   }
+-- 
+--   console.log('✅ Players loaded:', data?.length || 0, 'players');
+--   setPlayers(data);
+-- };
+
+-- NEUE loadPlayers Funktion für Unified System:
+-- const loadPlayers = async () => {
+--   console.log('🔄 Loading unified players...');
+--   const { data, error } = await supabase
+--     .from('players_for_results')
+--     .select('*')
+--     .eq('is_active', true)
+--     .order('current_lk', { ascending: true });
+-- 
+--   if (error) {
+--     console.error('Error loading unified players:', error);
+--     return;
+--   }
+-- 
+--   console.log('✅ Unified players loaded:', data?.length || 0, 'players');
+--   setPlayers(data);
+-- };
+
+-- NEUE loadTeamPlayers Funktion:
+-- const loadTeamPlayers = async (teamId) => {
+--   console.log('🔄 Loading team players for team:', teamId);
+--   const { data, error } = await supabase
+--     .rpc('get_team_players', { team_id_param: teamId });
+-- 
+--   if (error) {
+--     console.error('Error loading team players:', error);
+--     return [];
+--   }
+-- 
+--   console.log('✅ Team players loaded:', data?.length || 0, 'players');
+--   return data;
+-- };
+
+-- NEUE searchPlayers Funktion:
+-- const searchPlayers = async (searchTerm) => {
+--   if (!searchTerm || searchTerm.length < 2) return [];
+-- 
+--   console.log('🔍 Searching players:', searchTerm);
+--   const { data, error } = await supabase
+--     .rpc('search_players', { search_term: searchTerm });
+-- 
+--   if (error) {
+--     console.error('Error searching players:', error);
+--     return [];
+--   }
+-- 
+--   console.log('✅ Search results:', data?.length || 0, 'players');
+--   return data;
+-- };
+
+-- NEUE loadPlayerResults Funktion für Results.jsx:
+-- const loadPlayerResults = async (seasonMatches) => {
+--   try {
+--     if (!players || players.length === 0) return;
+-- 
+--     // 🔧 FIX: Verwende neue unified players
+--     const playerTeamIds = playerTeams.map(team => team.id);
+--     
+--     console.log('🔍 Loading team players for teams:', playerTeamIds);
+-- 
+--     // Lade nur Spieler aus den eigenen Mannschaften
+--     const { data: teamPlayers, error: teamPlayersError } = await supabase
+--       .from('players_for_results')
+--       .select('*')
+--       .in('team_id', playerTeamIds)
+--       .eq('is_active', true);
+-- 
+--     if (teamPlayersError) {
+--       console.error('Error loading team players:', teamPlayersError);
+--       return;
+--     }
+-- 
+--     console.log('🔍 Team Players Filter:', {
+--       totalPlayers: players.length,
+--       playerTeamIds: playerTeamIds,
+--       teamPlayers: teamPlayers.length,
+--       teamPlayerNames: teamPlayers.map(p => p.name)
+--     });
+-- 
+--     if (teamPlayers.length === 0) {
+--       console.warn('⚠️ No team players found for player results');
+--       return;
+--     }
+-- 
+--     const playerResultsMap = {};
+-- 
+--     for (const player of teamPlayers) {
+--       // ... rest der Logik bleibt gleich
+--     }
+-- 
+--     setPlayerResults(playerResultsMap);
+--   } catch (error) {
+--     console.error('❌ Error loading player results:', error);
+--   }
+-- };
+
+-- NEUE Context-Exports:
+-- return (
+--   <DataContext.Provider value={{
+--     // ... existing values
+--     players,
+--     loadPlayers,
+--     loadTeamPlayers,
+--     searchPlayers,
+--     loadPlayerResults
+--   }}>
+--     {children}
+--   </DataContext.Provider>
+-- );

@@ -1,0 +1,149 @@
+-- FRONTEND UPDATE: DataContext.jsx Multi-Team Filtering
+-- Erweitert das aktuelle System für zukünftige Liga-Übersichten
+
+-- Aktuelle loadMatches Funktion (Zeile 281):
+-- .in('team_id', playerTeamIds)  // 🔒 FILTERUNG: Nur Matches der eigenen Teams!
+
+-- NEUE ERWEITERTE VERSION:
+-- 
+-- const loadMatches = async (teams, options = {}) => {
+--   const { 
+--     includeLeagueMatches = false, 
+--     leagueId = null,
+--     season = null 
+--   } = options;
+--   
+--   try {
+--     let query = supabase
+--       .from('matches')
+--       .select(`
+--         *,
+--         team_info!inner(id, club_name, team_name, category, league_id),
+--         leagues(id, name, region, level),
+--         match_availability(status, comment, player_id, players(name))
+--       `);
+--     
+--     // Filterung basierend auf Optionen
+--     if (leagueId) {
+--       // Spezifische Liga (für Liga-Übersichten)
+--       query = query.eq('team_info.league_id', leagueId);
+--     } else if (includeLeagueMatches) {
+--       // Eigene Teams + Liga-Zugriff
+--       const playerTeamIds = teams.map(t => t.id);
+--       query = query.or(`team_id.in.(${playerTeamIds.join(',')}),team_info.league_id.in.(select league_id from player_league_access where player_id = '${player?.id}')`);
+--     } else {
+--       // Nur eigene Teams (aktuelles Verhalten)
+--       const playerTeamIds = teams.map(t => t.id);
+--       query = query.in('team_id', playerTeamIds);
+--     }
+--     
+--     // Saison-Filter
+--     if (season) {
+--       query = query.eq('season', season);
+--     }
+--     
+--     query = query.order('match_date', { ascending: true });
+--     
+--     const { data, error } = await query;
+--     
+--     if (error) {
+--       console.error('Error loading matches:', error);
+--       return;
+--     }
+--     
+--     // Transformiere Daten mit Liga-Info
+--     const transformedMatches = data.map(match => ({
+--       id: match.id,
+--       date: new Date(match.match_date),
+--       opponent: match.opponent,
+--       location: match.location,
+--       venue: match.venue,
+--       season: match.season,
+--       playersNeeded: match.players_needed,
+--       teamId: match.team_id,
+--       teamInfo: match.team_info ? {
+--         id: match.team_info.id,
+--         clubName: match.team_info.club_name,
+--         teamName: match.team_info.team_name,
+--         category: match.team_info.category,
+--         leagueId: match.team_info.league_id
+--       } : null,
+--       leagueInfo: match.leagues ? {
+--         id: match.leagues.id,
+--         name: match.leagues.name,
+--         region: match.leagues.region,
+--         level: match.leagues.level
+--       } : null,
+--       availability: match.match_availability.reduce((acc, avail) => {
+--         acc[avail.player_id] = {
+--           status: avail.status,
+--           comment: avail.comment,
+--           playerName: avail.players?.name || 'Unbekannt'
+--         };
+--         return acc;
+--       }, {})
+--     }));
+--     
+--     setMatches(transformedMatches);
+--   } catch (error) {
+--     console.error('Error in loadMatches:', error);
+--   }
+-- };
+
+-- NEUE FUNKTIONEN FÜR LIGA-ÜBERSICHTEN:
+-- 
+-- const loadLeagueMatches = async (leagueId, season = null) => {
+--   await loadMatches(playerTeams, { 
+--     includeLeagueMatches: false, 
+--     leagueId, 
+--     season 
+--   });
+-- };
+-- 
+-- const loadAllLeagueMatches = async (season = null) => {
+--   await loadMatches(playerTeams, { 
+--     includeLeagueMatches: true, 
+--     leagueId: null, 
+--     season 
+--   });
+-- };
+-- 
+-- const loadLeagues = async () => {
+--   const { data, error } = await supabase
+--     .from('leagues')
+--     .select(`
+--       *,
+--       team_info(id, club_name, team_name, category)
+--     `)
+--     .eq('is_active', true)
+--     .order('name');
+--   
+--   if (error) {
+--     console.error('Error loading leagues:', error);
+--     return;
+--   }
+--   
+--   setAllLeagues(data);
+-- };
+
+-- NEUE STATE VARIABLEN:
+-- const [allLeagues, setAllLeagues] = useState([]);
+-- const [selectedLeagueId, setSelectedLeagueId] = useState(null);
+-- const [viewMode, setViewMode] = useState('own_teams'); // 'own_teams', 'league', 'all_leagues'
+
+-- NEUE CONTEXT EXPORTS:
+-- return (
+--   <DataContext.Provider value={{
+--     // ... existing values
+--     allLeagues,
+--     selectedLeagueId,
+--     setSelectedLeagueId,
+--     viewMode,
+--     setViewMode,
+--     loadLeagueMatches,
+--     loadAllLeagueMatches,
+--     loadLeagues
+--   }}>
+--     {children}
+--   </DataContext.Provider>
+-- );

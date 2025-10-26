@@ -51,3 +51,4 @@ ORDER BY ordinal_position;
 
 -- Fertig!
 SELECT '✅ Phase 1 Setup abgeschlossen!' as status;
+

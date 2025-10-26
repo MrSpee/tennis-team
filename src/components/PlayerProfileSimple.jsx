@@ -23,7 +23,7 @@ function PlayerProfileSimple() {
   useEffect(() => {
     // ProtectedRoute garantiert bereits, dass User eingeloggt ist
     if (playerName) {
-      loadPlayerProfile();
+    loadPlayerProfile();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playerName]);
@@ -45,17 +45,18 @@ function PlayerProfileSimple() {
       
       // Erste versuche mit allen Feldern
       let { data, error } = await supabase
-        .from('players')
+        .from('players_unified')
         .select('*')
         .eq('name', decodedName)
         .eq('is_active', true)
+        .eq('player_type', 'app_user')
         .single();
 
       // Falls das fehlschlägt, versuche mit grundlegenden Feldern
       if (error) {
         console.log('🔄 Trying with basic fields...');
         const result = await supabase
-          .from('players')
+          .from('players_unified')
           .select(`
             id,
             name,
@@ -63,7 +64,9 @@ function PlayerProfileSimple() {
             phone,
             ranking,
             points,
-            role,
+            current_lk,
+            season_start_lk,
+            player_type,
             is_active,
             user_id,
             created_at,
@@ -71,6 +74,7 @@ function PlayerProfileSimple() {
           `)
           .eq('name', decodedName)
           .eq('is_active', true)
+          .eq('player_type', 'app_user')
           .single();
         
         data = result.data;
@@ -114,7 +118,7 @@ function PlayerProfileSimple() {
       
       // Lade Player-Teams mit Team-Info
       const { data: teamsData, error: teamsError } = await supabase
-        .from('player_teams')
+        .from('team_memberships')
         .select(`
           *,
           team_info (
@@ -133,6 +137,7 @@ function PlayerProfileSimple() {
           )
         `)
         .eq('player_id', playerId)
+        .eq('is_active', true)
         .order('is_primary', { ascending: false });
 
       if (teamsError) {
@@ -147,7 +152,7 @@ function PlayerProfileSimple() {
         ...pt.team_info,
         is_primary: pt.is_primary,
         role: pt.role,
-        player_team_id: pt.id
+        team_membership_id: pt.id
       }));
       
       setPlayerTeams(teams);
@@ -195,9 +200,9 @@ function PlayerProfileSimple() {
     try {
       console.log('💾 Saving team changes:', { teamId, changes });
       
-      // Aktualisiere player_teams Tabelle
+      // Aktualisiere team_memberships Tabelle
       const { error } = await supabase
-        .from('player_teams')
+        .from('team_memberships')
         .update({
           role: changes.role,
           is_primary: changes.is_primary
@@ -227,7 +232,7 @@ function PlayerProfileSimple() {
       console.log('🗑️ Removing team:', playerTeamId);
       
       const { error } = await supabase
-        .from('player_teams')
+        .from('team_memberships')
         .delete()
         .eq('id', playerTeamId);
 
@@ -292,40 +297,40 @@ function PlayerProfileSimple() {
         <div className="season-content">
           {/* Navigation */}
           <div className="profile-header" style={{ marginBottom: '1rem' }}>
-            <button 
-              onClick={() => navigate(-1)}
-              className="back-button"
-            >
-              <ArrowLeft size={20} />
-              Zurück
-            </button>
-            
-            {isOwnProfile && (
-              <button 
-                onClick={() => navigate('/profile')}
-                className="edit-button"
-              >
-                Profil bearbeiten
-              </button>
-            )}
-          </div>
+        <button 
+          onClick={() => navigate(-1)}
+          className="back-button"
+        >
+          <ArrowLeft size={20} />
+          Zurück
+        </button>
+        
+        {isOwnProfile && (
+          <button 
+            onClick={() => navigate('/profile')}
+            className="edit-button"
+          >
+            Profil bearbeiten
+          </button>
+        )}
+      </div>
 
           {/* Hero-Section */}
           <div className="profile-hero-modern">
             <div className="profile-image-large">
-              {player.profile_image ? (
-                <img 
-                  src={player.profile_image} 
-                  alt={`Profilbild von ${player.name}`}
-                  className="profile-image"
-                />
-              ) : (
+          {player.profile_image ? (
+            <img 
+              src={player.profile_image} 
+              alt={`Profilbild von ${player.name}`}
+              className="profile-image"
+            />
+          ) : (
                 <div className="profile-image-placeholder-large">
-                  🎾
-                </div>
-              )}
+              🎾
             </div>
-            
+          )}
+        </div>
+        
             <div className="profile-info-modern">
               <h2 className="player-name-large">{player.name}</h2>
               
@@ -344,31 +349,31 @@ function PlayerProfileSimple() {
                     </span>
                   </span>
                 )}
-              </div>
-              
+          </div>
+          
               {/* Kontakt-Chips */}
               <div className="contact-chips">
-                {player.phone && (
-                  <a 
-                    href={`https://wa.me/${formatPhoneForWhatsApp(player.phone)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
+            {player.phone && (
+              <a 
+                href={`https://wa.me/${formatPhoneForWhatsApp(player.phone)}`}
+                target="_blank"
+                rel="noopener noreferrer"
                     className="contact-chip whatsapp"
-                  >
+              >
                     <span className="chip-icon">📱</span>
                     <span className="chip-text">WhatsApp</span>
-                  </a>
-                )}
-                
-                {player.email && (
-                  <a 
-                    href={`mailto:${player.email}`}
+              </a>
+            )}
+            
+            {player.email && (
+              <a 
+                href={`mailto:${player.email}`}
                     className="contact-chip email"
-                  >
+              >
                     <span className="chip-icon">📧</span>
                     <span className="chip-text">E-Mail</span>
-                  </a>
-                )}
+              </a>
+            )}
               </div>
             </div>
           </div>
@@ -546,7 +551,7 @@ function PlayerProfileSimple() {
                           
                           {!team.is_primary && (
                             <button
-                              onClick={() => handleRemoveTeam(team.player_team_id)}
+                              onClick={() => handleRemoveTeam(team.team_membership_id)}
                               style={{
                                 padding: '0.375rem 0.75rem',
                                 fontSize: '0.75rem',
@@ -581,56 +586,56 @@ function PlayerProfileSimple() {
           
           <div className="season-content">
             <div className="personality-grid">
-              {player.favorite_shot && (
+            {player.favorite_shot && (
                 <div className="personality-card">
                   <div className="personality-icon">🎯</div>
                   <div className="personality-content">
                     <h4>Lieblingsschlag</h4>
-                    <p>{player.favorite_shot}</p>
-                  </div>
+                  <p>{player.favorite_shot}</p>
                 </div>
-              )}
-              
-              {player.tennis_motto && (
+              </div>
+            )}
+            
+            {player.tennis_motto && (
                 <div className="personality-card">
                   <div className="personality-icon">💭</div>
                   <div className="personality-content">
                     <h4>Tennis-Motto</h4>
-                    <p>"{player.tennis_motto}"</p>
-                  </div>
+                  <p>"{player.tennis_motto}"</p>
                 </div>
-              )}
-              
-              {player.fun_fact && (
+              </div>
+            )}
+            
+            {player.fun_fact && (
                 <div className="personality-card">
                   <div className="personality-icon">😄</div>
                   <div className="personality-content">
                     <h4>Lustiger Fakt</h4>
-                    <p>{player.fun_fact}</p>
-                  </div>
+                  <p>{player.fun_fact}</p>
                 </div>
-              )}
-              
-              {player.superstition && (
+              </div>
+            )}
+            
+            {player.superstition && (
                 <div className="personality-card">
                   <div className="personality-icon">🔮</div>
                   <div className="personality-content">
                     <h4>Tennis-Aberglaube</h4>
-                    <p>{player.superstition}</p>
-                  </div>
+                  <p>{player.superstition}</p>
                 </div>
-              )}
-              
-              {player.pre_match_routine && (
+              </div>
+            )}
+            
+            {player.pre_match_routine && (
                 <div className="personality-card">
                   <div className="personality-icon">⚡</div>
                   <div className="personality-content">
                     <h4>Pre-Match Routine</h4>
-                    <p>{player.pre_match_routine}</p>
-                  </div>
+                  <p>{player.pre_match_routine}</p>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+          </div>
           </div>
         </div>
       )}
@@ -644,47 +649,47 @@ function PlayerProfileSimple() {
           </div>
           
           <div className="season-content">
-            <div className="moments-grid">
-              {player.best_tennis_memory && (
-                <div className="moment-card positive">
-                  <div className="moment-icon">🏆</div>
-                  <div className="moment-content">
+          <div className="moments-grid">
+            {player.best_tennis_memory && (
+              <div className="moment-card positive">
+                <div className="moment-icon">🏆</div>
+                <div className="moment-content">
                     <h4>Bester Moment</h4>
-                    <p>{player.best_tennis_memory}</p>
-                  </div>
+                  <p>{player.best_tennis_memory}</p>
                 </div>
-              )}
-              
-              {player.worst_tennis_memory && (
-                <div className="moment-card funny">
-                  <div className="moment-icon">😅</div>
-                  <div className="moment-content">
+              </div>
+            )}
+            
+            {player.worst_tennis_memory && (
+              <div className="moment-card funny">
+                <div className="moment-icon">😅</div>
+                <div className="moment-content">
                     <h4>Peinlichster Moment</h4>
-                    <p>{player.worst_tennis_memory}</p>
-                  </div>
+                  <p>{player.worst_tennis_memory}</p>
                 </div>
-              )}
-              
-              {player.favorite_opponent && (
-                <div className="moment-card neutral">
-                  <div className="moment-icon">🤝</div>
-                  <div className="moment-content">
+              </div>
+            )}
+            
+            {player.favorite_opponent && (
+              <div className="moment-card neutral">
+                <div className="moment-icon">🤝</div>
+                <div className="moment-content">
                     <h4>Lieblingsgegner</h4>
-                    <p>{player.favorite_opponent}</p>
-                  </div>
+                  <p>{player.favorite_opponent}</p>
                 </div>
-              )}
-              
-              {player.dream_match && (
-                <div className="moment-card dream">
-                  <div className="moment-icon">🌟</div>
-                  <div className="moment-content">
+              </div>
+            )}
+            
+            {player.dream_match && (
+              <div className="moment-card dream">
+                <div className="moment-icon">🌟</div>
+                <div className="moment-content">
                     <h4>Traum-Match</h4>
-                    <p>{player.dream_match}</p>
-                  </div>
+                  <p>{player.dream_match}</p>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+          </div>
           </div>
         </div>
       )}
@@ -783,7 +788,7 @@ function PlayerProfileSimple() {
               </button>
               
               <button
-                onClick={() => handleSaveTeamChanges(editingTeam.player_team_id, {
+                onClick={() => handleSaveTeamChanges(editingTeam.team_membership_id, {
                   role: editingTeam.role,
                   is_primary: editingTeam.is_primary
                 })}

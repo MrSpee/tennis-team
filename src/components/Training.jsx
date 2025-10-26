@@ -1,15 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, MapPin, Users, Clock, Sun, Home, Share2, AlertCircle, CheckCircle, XCircle, Plus, Download } from 'lucide-react';
+import { Calendar, Users, Clock, Sun, Home, AlertCircle, CheckCircle, XCircle, Plus, Download } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { supabase } from '../lib/supabaseClient';
 import { LoggingService } from '../services/activityLogger';
+import { RoundRobinService } from '../services/roundRobinService';
 import './Dashboard.css';
 
 function Training() {
   const navigate = useNavigate();
-  const { player, currentUser } = useAuth();
+  const { player } = useAuth();
   const { players } = useData();
   const [trainings, setTrainings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -21,14 +22,7 @@ function Training() {
   const [editingTraining, setEditingTraining] = useState(null); // Training zum Bearbeiten
   const [isDeleting, setIsDeleting] = useState(null); // Training-ID beim Löschen
   const [showInviteForm, setShowInviteForm] = useState(null); // Training-ID für Einladungsformular
-  const [inviteFormData, setInviteFormData] = useState({
-    playerName: '',
-    playerLk: '',
-    playerClub: '',
-    playerPhone: '',
-    playerEmail: ''
-  });
-  const [isInviting, setIsInviting] = useState(false);
+  const [inviteMessage, setInviteMessage] = useState(''); // Editierbarer Einladungstext
   
   // Neu: User Teams
   const [userTeams, setUserTeams] = useState([]);
@@ -38,6 +32,9 @@ function Training() {
   const [importedPlayerSearch, setImportedPlayerSearch] = useState(''); // Suchfeld für importierte Spieler
   const [allImportedPlayers, setAllImportedPlayers] = useState([]); // Alle importierten Spieler (ungefiltered)
   const [whatsappInviteSent, setWhatsappInviteSent] = useState({}); // { playerId: true/false } - Tracking für gesendete Einladungen
+  
+  // Round-Robin States
+  const [playersWithStats, setPlayersWithStats] = useState([]); // Spieler mit training_stats für Prioritäts-Berechnung
   
   // Form State
   const [formData, setFormData] = useState({
@@ -58,20 +55,34 @@ function Training() {
     weekday: 3, // 3 = Mittwoch
     notes: '',
     invitedPlayers: [], // Player-IDs aus DB
-    externalPlayers: [] // { name, lk, club }
+    externalPlayers: [], // { name, lk, club }
+    roundRobinEnabled: false, // Intelligente Platzvergabe aktivieren
+    isPriority: false, // Prio-Training (z.B. Medenspiel)
+    roundRobinSeed: null // Seed für reproduzierbare Zufälligkeit
   });
 
-  // Lade User Teams beim Mount
+  // Lade User Teams beim Mount und dann Trainings
   useEffect(() => {
-    loadUserTeams();
+    const fetchData = async () => {
+      if (player?.id) {
+        await loadUserTeams();
+        await loadTrainings();
+        await loadPlayersWithStats(); // Lade Spieler-Statistiken für Round-Robin
+      }
+    };
+    fetchData();
   }, [player]);
-
-  // Lade Trainings wenn Teams geladen wurden
-  useEffect(() => {
-    if (userTeams.length > 0) {
-      loadTrainings();
+  
+  // Lade Spieler mit Statistiken für Round-Robin
+  const loadPlayersWithStats = async () => {
+    try {
+      const data = await RoundRobinService.loadPlayersWithStats();
+      console.log('✅ Loaded players with stats:', data.length);
+      setPlayersWithStats(data);
+    } catch (error) {
+      console.error('❌ Error loading players with stats:', error);
     }
-  }, [userTeams, player]);
+  };
 
   // Lade importierte Spieler beim Öffnen des Formulars (für Privat-Training)
   useEffect(() => {
@@ -110,7 +121,7 @@ function Training() {
       console.log('🔍 Loading teams for player:', player.id);
       
       const { data, error } = await supabase
-        .from('player_teams')
+        .from('team_memberships')
         .select(`
           *,
           team_info!inner (
@@ -120,14 +131,15 @@ function Training() {
             category
           )
         `)
-        .eq('player_id', player.id);
+        .eq('player_id', player.id)
+        .eq('is_active', true);
 
       if (error) {
         console.error('❌ Error loading user teams:', error);
         throw error;
       }
 
-      console.log('📊 Raw player_teams data:', data);
+      console.log('📊 Raw team_memberships data:', data);
 
       if (!data || data.length === 0) {
         console.warn('⚠️ No teams found for player');
@@ -163,60 +175,35 @@ function Training() {
     try {
       console.log('🔍 Loading ALL players for private training (registered + imported)');
       
-      // 1. Lade ALLE registrierten Spieler (vereins-übergreifend)
+      // 1. Lade ALLE Spieler aus players_unified (vereins-übergreifend)
       const { data: allPlayers, error: playersError } = await supabase
-        .from('players')
-        .select('id, name, email, current_lk, phone')
-        .eq('is_active', true)
+        .from('players_unified')
+        .select('id, name, email, current_lk, phone, season_start_lk')
+        .eq('status', 'active')
         .order('name', { ascending: true });
 
       if (playersError) {
         console.warn('⚠️ Could not load players:', playersError);
       }
 
-      // 2. Lade ALLE importierten Spieler (vereins-übergreifend)
-      const { data: importedData, error: importedError } = await supabase
-        .from('imported_players')
-        .select('id, name, import_lk, team_id')
-        .eq('status', 'pending')
-        .order('name', { ascending: true });
+      // 2. Keine separate imported_players Tabelle mehr - alle Spieler sind in players_unified
 
-      if (importedError) {
-        console.warn('⚠️ Could not load imported players:', importedError);
-      }
+      console.log('📊 Raw data:', { players: allPlayers?.length });
 
-      console.log('📊 Raw data:', { players: allPlayers?.length, imported: importedData?.length });
-
-      // 3. Kombiniere registrierte Spieler (ohne eigene ID)
-      const registeredMembers = (allPlayers || [])
+      // 3. Kombiniere alle Spieler (ohne eigene ID)
+      const allAvailablePlayers = (allPlayers || [])
         .filter(p => p.id !== player?.id) // Ausschluss des aktuellen Spielers
         .map(p => ({
           id: p.id,
           name: p.name,
           email: p.email,
-          currentLk: p.current_lk,
+          currentLk: p.current_lk || p.season_start_lk,
           phone: p.phone,
-          teamId: null,
+          teamId: p.primary_team_id,
           source: 'registered'
         }));
 
-      // 4. Kombiniere importierte Spieler
-      const importedMembers = (importedData || []).map(ip => ({
-        id: ip.id,
-        name: ip.name,
-        email: null,
-        currentLk: ip.import_lk,
-        phone: null,
-        teamId: ip.team_id,
-        source: 'imported'
-      }));
-
-      // 5. Kombiniere alle Spieler
-      const allAvailablePlayers = [...registeredMembers, ...importedMembers];
-
       console.log('✅ All players loaded for private training:', {
-        registered: registeredMembers.length,
-        imported: importedMembers.length,
         total: allAvailablePlayers.length
       });
       
@@ -235,56 +222,36 @@ function Training() {
     if (!teamId) return;
     
     try {
-      // 1. Registrierte Spieler (mit Email)
-      const { data: registeredData, error: registeredError } = await supabase
-        .from('player_teams')
+      // Lade Team-Mitglieder aus team_memberships
+      const { data: teamMembersData, error: registeredError } = await supabase
+        .from('team_memberships')
         .select(`
           *,
           player:player_id (
             id,
             name,
             email,
-            current_lk
+            current_lk,
+            season_start_lk
           )
         `)
-        .eq('team_id', teamId);
+        .eq('team_id', teamId)
+        .eq('is_active', true);
 
       if (registeredError) throw registeredError;
 
-      const registeredMembers = registeredData.map(pt => ({
-        id: pt.player.id,
-        name: pt.player.name,
-        email: pt.player.email,
-        currentLk: pt.player.current_lk,
-        isPrimary: pt.is_primary,
-        role: pt.role,
+      const teamMembers = (teamMembersData || []).map(tm => ({
+        id: tm.player.id,
+        name: tm.player.name,
+        email: tm.player.email,
+        currentLk: tm.player.current_lk || tm.player.season_start_lk,
+        isPrimary: tm.is_primary,
+        role: tm.role,
         source: 'registered'
       }));
 
-      setTeamMembers(registeredMembers);
-
-      // 2. Importierte Spieler (OHNE Email, warten auf Registrierung)
-      const { data: importedData, error: importedError } = await supabase
-        .from('imported_players')
-        .select('id, name, import_lk, team_id')
-        .eq('team_id', teamId)
-        .eq('status', 'pending');
-
-      if (importedError) {
-        console.warn('⚠️ Could not load imported players:', importedError);
-        setImportedPlayers([]);
-        return;
-      }
-
-      const importedMembers = (importedData || []).map(ip => ({
-        id: ip.id,
-        name: ip.name,
-        email: null, // Noch keine Email
-        currentLk: ip.import_lk,
-        source: 'imported'
-      }));
-
-      setImportedPlayers(importedMembers);
+      setTeamMembers(teamMembers);
+      setImportedPlayers([]); // Keine separate imported_players mehr
 
     } catch (error) {
       console.error('Error loading team members:', error);
@@ -298,29 +265,31 @@ function Training() {
       // 🔒 FILTERUNG: Hole nur Team-IDs des Spielers
       const playerTeamIds = userTeams.map(t => t.id);
       
-      if (playerTeamIds.length === 0) {
-        console.log('⚠️ No teams found for player, no trainings to load');
-        setTrainings([]);
-        setLoading(false);
-        return;
-      }
-
       console.log('🔒 Loading trainings for player teams:', playerTeamIds);
 
       // Lade Trainings: Team-Trainings (mit team_id) UND Private Trainings (team_id=null, wo ich beteiligt bin)
-      const { data: teamTrainings, error: teamError } = await supabase
-        .from('training_sessions')
-        .select(`
-          *,
-          organizer:organizer_id (
-            id,
-            name,
-            profile_image
-          )
-        `)
-        .in('team_id', playerTeamIds)
-        .gte('date', new Date().toISOString())
-        .order('date', { ascending: true });
+      let teamTrainings = [];
+      let teamError = null;
+      
+      if (playerTeamIds.length > 0) {
+        console.log('🔒 Loading team trainings for:', playerTeamIds);
+        const { data, error } = await supabase
+          .from('training_sessions')
+          .select(`
+            *,
+            organizer:organizer_id (
+              id,
+              name,
+              profile_image
+            )
+          `)
+          .in('team_id', playerTeamIds)
+          .gte('date', new Date().toISOString())
+          .order('date', { ascending: true });
+        
+        teamTrainings = data;
+        teamError = error;
+      }
 
       if (teamError) throw teamError;
 
@@ -351,17 +320,9 @@ function Training() {
         const isInvited = pt.invited_players?.includes(player?.id);
         const isPublic = pt.is_public && pt.needs_substitute;
         
-        console.log(`Training ${pt.id}:`, { 
-          title: pt.title,
-          organizer: pt.organizer_id, 
-          isOrganizer, 
-          invited: pt.invited_players,
-          isInvited, 
-          isPublic,
-          show: isOrganizer || isInvited || isPublic
-        });
+        const shouldShow = isOrganizer || isInvited || isPublic;
         
-        return isOrganizer || isInvited || isPublic;
+        return shouldShow;
       });
 
       console.log('✅ Filtered private trainings:', filteredPrivate.length);
@@ -510,11 +471,14 @@ function Training() {
       }
 
       // 🔧 FIX: Trenne registrierte Spieler von importierten Spielern
+      // Registrierte Spieler: Direkt in players Tabelle prüfen
       const registeredPlayerIds = formData.invitedPlayers.filter(id => 
-        allImportedPlayers.some(p => p.id === id && p.source === 'registered')
+        players.some(p => p.id === id)
       );
 
+      // Importierte Spieler: Nur die, die NICHT in players sind
       const importedPlayerIds = formData.invitedPlayers.filter(id => 
+        !players.some(p => p.id === id) && 
         allImportedPlayers.some(p => p.id === id && p.source === 'imported')
       );
 
@@ -574,7 +538,10 @@ function Training() {
             external_players: [...formData.externalPlayers, ...importedAsExternal].length > 0 
               ? [...formData.externalPlayers, ...importedAsExternal] 
               : null, // 🔧 FIX: Inkl. importierte mit Email
-            status: 'scheduled'
+            status: 'scheduled',
+            round_robin_enabled: formData.roundRobinEnabled || false,
+            is_priority: formData.isPriority || false,
+            round_robin_seed: formData.roundRobinEnabled ? Date.now() + i : null
           };
           
           trainingsToCreate.push(trainingData);
@@ -659,7 +626,10 @@ function Training() {
           external_players: [...formData.externalPlayers, ...importedAsExternal].length > 0 
             ? [...formData.externalPlayers, ...importedAsExternal] 
             : null, // 🔧 FIX: Inkl. importierte mit Email
-          status: 'scheduled'
+          status: 'scheduled',
+          round_robin_enabled: formData.roundRobinEnabled || false,
+          is_priority: formData.isPriority || false,
+          round_robin_seed: formData.roundRobinEnabled ? Date.now() : null
         };
 
         console.log('🔵 Inserting single training:', trainingData);
@@ -746,7 +716,10 @@ function Training() {
         weekday: 3,
         notes: '',
         invitedPlayers: [],
-        externalPlayers: []
+        externalPlayers: [],
+        roundRobinEnabled: false,
+        isPriority: false,
+        roundRobinSeed: null
       });
       setImportedPlayerSearch(''); // 🔧 FIX: Reset Suche
       setImportedPlayerEmails({}); // 🔧 FIX: Reset Emails
@@ -809,7 +782,10 @@ function Training() {
           })
           .eq('id', existingResponse.id);
 
-        if (error) throw error;
+        if (error) {
+          console.error('❌ Supabase Update Error:', error);
+          throw new Error(`Update fehlgeschlagen: ${error.message}`);
+        }
       } else {
         // Insert
         const { error } = await supabase
@@ -822,45 +798,95 @@ function Training() {
             response_date: new Date().toISOString()
           });
 
-        if (error) throw error;
+        if (error) {
+          console.error('❌ Supabase Insert Error:', error);
+          throw new Error(`Speichern fehlgeschlagen: ${error.message}`);
+        }
         
         // Log Training-Zusage/Absage
-        await LoggingService.logTrainingResponse(sessionId, status, player.id);
+        try {
+          await LoggingService.logTrainingResponse(sessionId, status, player.id);
+        } catch (logError) {
+          console.warn('⚠️ Logging failed (non-critical):', logError);
+        }
       }
 
       console.log('✅ Training response saved successfully');
 
+      // 🔥 AUTOMATISCHES NACHRÜCKEN VON WARTELISTE
+      if (status === 'declined' && training?.round_robin_enabled) {
+        console.log('🔔 Player declined, checking waitlist for auto-promotion...');
+        try {
+          const promoted = await RoundRobinService.handleAutoPromotion(training, playersWithStats);
+          if (promoted) {
+            alert(`✅ ${promoted.playerName} ist von der Warteliste nachgerückt!`);
+          }
+        } catch (promotionError) {
+          console.warn('⚠️ Auto-promotion failed (non-critical):', promotionError);
+        }
+      }
+
+      // Update Spieler-Statistiken
+      try {
+        await RoundRobinService.updatePlayerStats(player.id, status);
+      } catch (statsError) {
+        console.warn('⚠️ Stats update failed (non-critical):', statsError);
+      }
+
       // Reset & Reload
       setComment('');
       setRespondingTo(null);
+      
+      // 🔧 FIX: Scroll-Position beibehalten
+      // const trainingCardElement = document.querySelector(`[data-training-id="${sessionId}"]`); // Nicht verwendet
+      
       await loadTrainings();
+      await loadPlayersWithStats(); // Reload stats nach Update
+      
+      // 🔧 FIX: Nach Reload zurück zur Training-Card scrollen
+      setTimeout(() => {
+        const updatedTrainingCard = document.querySelector(`[data-training-id="${sessionId}"]`);
+        if (updatedTrainingCard) {
+          updatedTrainingCard.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'start',
+            inline: 'nearest'
+          });
+          
+          // Zusätzlich: Training-Card kurz hervorheben
+          updatedTrainingCard.style.transition = 'box-shadow 0.3s ease';
+          updatedTrainingCard.style.boxShadow = '0 0 0 3px rgba(16, 185, 129, 0.3)';
+          setTimeout(() => {
+            updatedTrainingCard.style.boxShadow = '';
+          }, 2000);
+        }
+      }, 150);
       
     } catch (error) {
       console.error('❌ Error updating attendance:', error);
-      alert('Fehler beim Speichern der Antwort');
+      
+      // 🔧 FIX: Detaillierte Fehlermeldung
+      let errorMessage = 'Fehler beim Speichern der Antwort';
+      
+      if (error.message.includes('permission') || error.message.includes('policy')) {
+        errorMessage = '❌ Keine Berechtigung. Bitte melde dich erneut an.';
+      } else if (error.message.includes('null value')) {
+        errorMessage = '❌ Fehlende Daten. Bitte versuche es erneut.';
+      } else if (error.message.includes('duplicate key')) {
+        errorMessage = '❌ Du hast bereits geantwortet.';
+      } else if (error.message.includes('foreign key')) {
+        errorMessage = '❌ Training nicht gefunden.';
+      } else if (error.message.includes('network') || error.message.includes('fetch')) {
+        errorMessage = '❌ Netzwerkfehler. Bitte prüfe deine Internetverbindung.';
+      } else {
+        errorMessage = `❌ ${error.message}`;
+      }
+      
+      alert(errorMessage);
       setRespondingTo(null);
     }
   };
 
-  // WhatsApp Share - Training teilen
-  const shareViaWhatsApp = (training) => {
-    const date = new Date(training.date).toLocaleDateString('de-DE', {
-      weekday: 'long',
-      day: '2-digit',
-      month: '2-digit'
-    });
-    const time = training.start_time?.slice(0, 5) || '';
-    
-    const message = `🎾 *Tennis-Training - Spieler gesucht!*\n\n` +
-      `📅 ${date} um ${time} Uhr\n` +
-      `📍 ${training.location} - ${training.venue}\n` +
-      `👥 ${training.stats.confirmed}/${training.max_players || 8} Zusagen\n\n` +
-      `${training.notes || 'Wer hat Lust mitzumachen?'}\n\n` +
-      `Anmelden in der App: ${window.location.origin}/training`;
-    
-    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
-    window.open(whatsappUrl, '_blank');
-  };
 
   // WhatsApp-Einladung für JEDEN Spieler (registriert oder importiert)
   const invitePlayerViaWhatsApp = (playerId, playerName, playerPhone = null) => {
@@ -991,88 +1017,21 @@ function Training() {
     }
   };
 
-  // Weitere Spieler einladen
-  const handleInvitePlayer = async (trainingId) => {
-    if (!inviteFormData.playerName.trim()) {
-      alert('Bitte Spielername eingeben');
-      return;
-    }
 
-    try {
-      setIsInviting(true);
+  // Generiere Standard-Einladungstext
+  const generateDefaultInviteMessage = (training) => {
+    return `Hi [],
 
-      // Hole aktuelles Training
-      const training = trainings.find(t => t.id === trainingId);
-      if (!training) {
-        alert('Training nicht gefunden');
-        return;
-      }
+wir haben einen freien Platz bei unserem Training! 🚀
 
-      // Erstelle neuen externen Spieler
-      const newExternalPlayer = {
-        name: inviteFormData.playerName.trim(),
-        lk: inviteFormData.playerLk.trim() || '',
-        club: inviteFormData.playerClub.trim() || 'Extern',
-        email: inviteFormData.playerEmail.trim() || null,
-        phone: inviteFormData.playerPhone.trim() || null,
-        invited_date: new Date().toISOString(),
-        invited_by: player.id
-      };
+📅 ${formatDate(training.date)} um ${formatTime(training.start_time)} Uhr
+📍 ${training.location} - ${training.venue}
 
-      // Aktualisiere external_players Array in der DB
-      const updatedExternalPlayers = [...(training.external_players || []), newExternalPlayer];
+Schreib mir gerne, ob du dabei bist oder melde dich direkt in der App an:
+https://tennis-team-gamma.vercel.app/
 
-      const { error } = await supabase
-        .from('training_sessions')
-        .update({
-          external_players: updatedExternalPlayers,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', trainingId);
-
-      if (error) throw error;
-
-      console.log('✅ External player added to training:', newExternalPlayer);
-
-      // WhatsApp-Einladung senden
-      const whatsappMessage = `🎾 *Tennis-Training Einladung*\n\n` +
-        `Hey ${inviteFormData.playerName}!\n\n` +
-        `Du wurdest zu einem Tennis-Training eingeladen:\n\n` +
-        `📅 ${formatDate(training.date)}\n` +
-        `🕐 ${formatTime(training.start_time)} - ${formatTime(training.end_time)}\n` +
-        `📍 ${training.location} - ${training.venue}\n\n` +
-        `Melde dich in der App an: ${window.location.origin}/training\n\n` +
-        `Viel Spaß beim Training! 🎾`;
-
-      const whatsappUrl = inviteFormData.playerPhone 
-        ? `https://wa.me/${inviteFormData.playerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(whatsappMessage)}`
-        : `https://wa.me/?text=${encodeURIComponent(whatsappMessage)}`;
-
-      window.open(whatsappUrl, '_blank');
-
-      // Reload trainings
-      await loadTrainings();
-
-      // Reset form
-      setInviteFormData({
-        playerName: '',
-        playerLk: '',
-        playerClub: '',
-        playerPhone: '',
-        playerEmail: ''
-      });
-      setShowInviteForm(null);
-
-      alert('✅ Spieler erfolgreich eingeladen und WhatsApp-Nachricht gesendet!');
-    } catch (error) {
-      console.error('❌ Error inviting player:', error);
-      alert(`❌ Fehler beim Einladen: ${error.message}`);
-    } finally {
-      setIsInviting(false);
-    }
+Wir sehen uns auf dem Platz! 🎾`;
   };
-
-  // Formatiere Datum
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString('de-DE', {
       weekday: 'long',
@@ -1112,30 +1071,58 @@ function Training() {
 
   // Render Training Card
   const renderTrainingCard = (training) => {
+    // 🎲 ROUND-ROBIN: Verwende nur EINGELADENE Spieler für Round-Robin
+    let roundRobinPlayers = [];
+    
+    if (training.round_robin_enabled && training.type === 'private' && training.invited_players) {
+      // Filtere nur eingeladene Spieler
+      const invitedIds = training.invited_players;
+      roundRobinPlayers = players.filter(p => invitedIds.includes(p.id));
+      // Logging ausgestellt wegen Spam
+    } else {
+      // Fallback: Alle Spieler (für Team-Trainings oder wenn keine invited_players)
+      roundRobinPlayers = players;
+    }
+    
+    // 🎲 ROUND-ROBIN: Berechne wer spielen kann und wer wartet
+    const { canPlay, waitlist, isOverbooked } = RoundRobinService.calculateTrainingParticipants(
+      training, 
+      roundRobinPlayers
+    );
+    
     const status = getStatusBadge(training);
     const myResponse = training.myAttendance?.status;
     const isOrganizer = training.organizer_id === player?.id;
     const isPrivate = training.type === 'private';
-    const totalParticipants = (training.invited_players?.length || 0) + (training.external_players?.length || 0);
+    
+    // Mein Round-Robin Status
+    const amIPlaying = canPlay.some(p => p.player_id === player?.id);
+    const amIOnWaitlist = waitlist.some(p => p.player_id === player?.id);
+    const myWaitlistPosition = waitlist.find(p => p.player_id === player?.id)?.position || waitlist.findIndex(p => p.player_id === player?.id) + 1;
 
     return (
-      <div key={training.id} className="fade-in lk-card-full">
+      <div key={training.id} className="fade-in lk-card-full" data-training-id={training.id}>
         {/* Header */}
         <div className="formkurve-header">
           <div className="formkurve-title">
-            {isPrivate && !training.needs_substitute && '🔒 '}
+            {training.is_priority && '⭐ '}
+            {training.round_robin_enabled && '🎲 '}
+            {isPrivate && !training.needs_substitute && !training.round_robin_enabled && '🔒 '}
             {training.needs_substitute && '🔔 '}
             {training.title || 'Training'}
           </div>
-          <div 
-            className="match-count-badge"
-            style={{ 
-              backgroundColor: status.color,
-              fontSize: '0.9rem',
-              fontWeight: '700'
-            }}
-          >
-            {status.text}
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <div 
+              className="match-count-badge"
+              style={{ 
+                backgroundColor: status.color,
+                fontSize: '0.9rem',
+                fontWeight: '700'
+              }}
+            >
+              {canPlay.length}/{training.max_players}
+              {isOverbooked && waitlist.length > 0 && ` (+${waitlist.length})`}
+            </div>
           </div>
         </div>
 
@@ -1193,7 +1180,7 @@ function Training() {
                           💬 {player.name}:
                         </span>
                         <span style={{ color: '#0c4a6e', marginLeft: '0.5rem' }}>
-                          "{a.comment}"
+                          &ldquo;{a.comment}&rdquo;
                         </span>
                       </div>
                     );
@@ -1225,29 +1212,62 @@ function Training() {
 
           </div>
 
-          {/* ZU-/ABSAGE FÜR ALLE - NEUES DESIGN */}
+          {/* ZU-/ABSAGE FÜR ALLE - NEUES DESIGN MIT ROUND-ROBIN */}
           {(
             <div style={{ marginTop: '1rem' }}>
               {/* BEREITS GEANTWORTET? */}
               {myResponse ? (
                 <div style={{ 
                   padding: '1rem',
-                  background: myResponse === 'confirmed' ? 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)' : 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
-                  border: `2px solid ${myResponse === 'confirmed' ? '#10b981' : '#ef4444'}`,
+                  background: myResponse === 'confirmed' 
+                    ? (training.round_robin_enabled && amIPlaying 
+                        ? 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)'
+                        : training.round_robin_enabled && amIOnWaitlist
+                          ? 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)'
+                          : 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)')
+                    : 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
+                  border: `2px solid ${
+                    myResponse === 'confirmed' 
+                      ? (training.round_robin_enabled && amIOnWaitlist ? '#f59e0b' : '#10b981')
+                      : '#ef4444'
+                  }`,
                   borderRadius: '12px',
                   marginBottom: '1rem'
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
+                    <div style={{ flex: 1 }}>
                       <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                         Deine Antwort:
                       </div>
                       <div style={{ fontSize: '1rem', fontWeight: '700', color: myResponse === 'confirmed' ? '#065f46' : '#991b1b', marginTop: '0.25rem' }}>
-                        {myResponse === 'confirmed' ? '✅ Bin dabei!' : '❌ Kann nicht'}
+                        {myResponse === 'confirmed' 
+                          ? (training.round_robin_enabled && amIPlaying 
+                              ? '✅ Du bist dabei!'
+                              : training.round_robin_enabled && amIOnWaitlist
+                                ? `⏳ Warteliste - Position ${myWaitlistPosition}`
+                                : '✅ Bin dabei!')
+                          : '❌ Kann nicht'}
                       </div>
+                      
+                      {/* Auto-Nachrücken Info nur bei Warteliste */}
+                      {training.round_robin_enabled && amIOnWaitlist && (
+                        <div style={{ 
+                          marginTop: '0.75rem', 
+                          padding: '0.75rem', 
+                          background: '#e0f2fe', 
+                          borderRadius: '6px',
+                          fontSize: '0.85rem', 
+                          color: '#0c4a6e',
+                          fontWeight: '600',
+                          textAlign: 'center'
+                        }}>
+                          🚀 Du rückst automatisch nach, wenn ein Platz frei wird!
+                        </div>
+                      )}
+                      
                       {training.myAttendance?.comment && (
                         <div style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                          💬 {training.myAttendance.comment}
+                          💬 &ldquo;{training.myAttendance.comment}&rdquo;
                         </div>
                       )}
                     </div>
@@ -1355,7 +1375,7 @@ function Training() {
                   <textarea
                     value={comment}
                     onChange={(e) => setComment(e.target.value)}
-                    placeholder="Optional: Kommentar (z.B. 'Komme eventuell 10 Min später')"
+                    placeholder="Optional: Kommentar (z.B. &lsquo;Komme eventuell 10 Min später&rsquo;)"
                     rows="2"
                     style={{
                       width: '100%',
@@ -1464,11 +1484,11 @@ function Training() {
           )}
 
 
-          {/* KLARE STRUKTUR: DABEI - ABSAGE - AUSSTEHEND */}
+          {/* KLARE STRUKTUR: DABEI - WARTELISTE - ABSAGE - AUSSTEHEND */}
           <div style={{ marginTop: '1rem' }}>
             
-            {/* ✅ DABEI */}
-            {training.attendance && training.attendance.some(a => a.status === 'confirmed') && (
+            {/* ✅ DABEI (mit Round-Robin Priorität) */}
+            {canPlay.length > 0 && (
               <div style={{ marginBottom: '1rem' }}>
                 <h4 style={{ 
                   margin: '0 0 0.5rem 0', 
@@ -1478,38 +1498,102 @@ function Training() {
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em'
                 }}>
-                  ✅ Dabei ({training.attendance.filter(a => a.status === 'confirmed').length})
+                  ✅ Dabei ({canPlay.length}/{training.max_players})
+                  {training.round_robin_enabled && <span style={{ fontSize: '0.7rem', opacity: 0.7 }}> • Sortiert nach Priorität</span>}
                 </h4>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  {training.attendance
-                    .filter(a => a.status === 'confirmed')
-                    .map(a => {
-                      const player = players.find(p => p.id === a.player_id);
-                      if (!player) return null;
-                      
-                      return (
-                        <span 
-                          key={a.id}
-                          style={{
-                            padding: '0.5rem 0.75rem',
-                            background: '#dcfce7',
-                            border: '1px solid #bbf7d0',
-                            borderRadius: '8px',
-                            fontSize: '0.85rem',
-                            fontWeight: '600',
-                            color: '#14532d',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.25rem'
-                          }}
-                        >
-                          {player.name} {player.current_lk && `(${player.current_lk})`}
-                          {a.player_id === training.organizer_id && (
-                            <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>👑</span>
-                          )}
-                        </span>
-                      );
-                    })}
+                  {canPlay.map(a => {
+                    const p = players.find(pl => pl.id === a.player_id);
+                    if (!p) return null;
+                    
+                    return (
+                      <span 
+                        key={a.id}
+                        style={{
+                          padding: '0.5rem 0.75rem',
+                          background: '#dcfce7',
+                          border: '1px solid #bbf7d0',
+                          borderRadius: '8px',
+                          fontSize: '0.85rem',
+                          fontWeight: '600',
+                          color: '#14532d',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.25rem'
+                        }}
+                        title={training.round_robin_enabled ? `Position ${a.position} in der Rangliste` : ''}
+                      >
+                        {training.round_robin_enabled && (
+                          <span style={{ 
+                            fontSize: '0.7rem', 
+                            fontWeight: '700',
+                            color: '#059669',
+                            marginRight: '0.25rem'
+                          }}>
+                            #{a.position}
+                          </span>
+                        )}
+                        {p.name} {p.current_lk && `(${p.current_lk})`}
+                        {a.player_id === training.organizer_id && (
+                          <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>👑</span>
+                        )}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            
+            {/* ⏳ WARTELISTE */}
+            {waitlist.length > 0 && (
+              <div style={{ marginBottom: '1rem' }}>
+                <h4 style={{ 
+                  margin: '0 0 0.5rem 0', 
+                  fontSize: '0.85rem', 
+                  fontWeight: '700',
+                  color: '#6b7280',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>
+                  ⏳ Warteliste ({waitlist.length})
+                  {training.round_robin_enabled && <span style={{ fontSize: '0.7rem', opacity: 0.7 }}> • Automatisches Nachrücken</span>}
+                </h4>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  {waitlist.map(a => {
+                    const p = players.find(pl => pl.id === a.player_id);
+                    if (!p) return null;
+                    
+                    return (
+                      <span 
+                        key={a.id}
+                        style={{
+                          padding: '0.5rem 0.75rem',
+                          background: '#fef3c7',
+                          border: '1px solid #fbbf24',
+                          borderRadius: '8px',
+                          fontSize: '0.85rem',
+                          fontWeight: '600',
+                          color: '#92400e',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.25rem'
+                        }}
+                        title={training.round_robin_enabled ? `Position ${a.position} in der Rangliste` : ''}
+                      >
+                        {training.round_robin_enabled && (
+                          <span style={{ 
+                            fontSize: '0.7rem', 
+                            fontWeight: '700',
+                            color: '#d97706',
+                            marginRight: '0.25rem'
+                          }}>
+                            #{a.position}
+                          </span>
+                        )}
+                        {p.name} {p.current_lk && `(${p.current_lk})`}
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1608,39 +1692,6 @@ function Training() {
               </div>
             )}
 
-            {/* EXTERNE SPIELER */}
-            {training.external_players && training.external_players.length > 0 && (
-              <div style={{ marginBottom: '1rem' }}>
-                <h4 style={{ 
-                  margin: '0 0 0.5rem 0', 
-                  fontSize: '0.85rem', 
-                  fontWeight: '700',
-                  color: '#6b7280',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em'
-                }}>
-                  📋 Eingeladen ({training.external_players.length})
-                </h4>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  {training.external_players.map((ext, idx) => (
-                    <span 
-                      key={`ext-${idx}`}
-                      style={{
-                        padding: '0.5rem 0.75rem',
-                        background: '#fef3c7',
-                        border: '1px solid #fbbf24',
-                        borderRadius: '8px',
-                        fontSize: '0.85rem',
-                        fontWeight: '600',
-                        color: '#92400e'
-                      }}
-                    >
-                      {ext.name} {ext.lk && `(${ext.lk})`} • Wartet auf Registrierung
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* ORGANISATOR-BUTTONS (ganz unten) */}
@@ -1674,24 +1725,18 @@ function Training() {
                 </button>
                 <button
                   className="btn-modern btn-modern-inactive"
-                  onClick={() => shareViaWhatsApp(training)}
-                  style={{ flex: '0 0 auto' }}
-                  title="In WhatsApp-Gruppe teilen"
-                >
-                  <Share2 size={16} />
-                  Teilen
-                </button>
-                <button
-                  className="btn-modern btn-modern-inactive"
-                  onClick={() => setShowInviteForm(training.id)}
+                  onClick={() => {
+                    setShowInviteForm(training.id);
+                    setInviteMessage(generateDefaultInviteMessage(training));
+                  }}
                   style={{ 
                     flex: '0 0 auto',
                     background: '#10b981',
                     color: 'white'
                   }}
-                  title="Weitere Spieler einladen"
+                  title="Spieler einladen & WhatsApp senden"
                 >
-                  👥 Einladen
+                  📱 Einladen & Teilen
                 </button>
               </div>
 
@@ -1709,109 +1754,100 @@ function Training() {
                     fontWeight: '700',
                     color: '#374151'
                   }}>
-                    👥 Weitere Spieler einladen
+                    📱 Spieler einladen & WhatsApp senden
                   </h4>
                   
-                  <div style={{ display: 'grid', gap: '0.75rem', marginBottom: '1rem' }}>
-                    <input
-                      type="text"
-                      placeholder="Spielername *"
-                      value={inviteFormData.playerName}
-                      onChange={(e) => setInviteFormData(prev => ({ ...prev, playerName: e.target.value }))}
-                      style={{
-                        padding: '0.75rem',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '8px',
-                        fontSize: '0.9rem'
-                      }}
-                      required
-                    />
-                    
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                      <input
-                        type="text"
-                        placeholder="LK (optional)"
-                        value={inviteFormData.playerLk}
-                        onChange={(e) => setInviteFormData(prev => ({ ...prev, playerLk: e.target.value }))}
-                        style={{
-                          padding: '0.75rem',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '8px',
-                          fontSize: '0.9rem'
-                        }}
-                      />
-                      <input
-                        type="text"
-                        placeholder="Verein (optional)"
-                        value={inviteFormData.playerClub}
-                        onChange={(e) => setInviteFormData(prev => ({ ...prev, playerClub: e.target.value }))}
-                        style={{
-                          padding: '0.75rem',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '8px',
-                          fontSize: '0.9rem'
-                        }}
-                      />
+                  <div style={{ marginBottom: '1rem' }}>
+                    <div style={{ fontSize: '0.9rem', fontWeight: '600', color: '#374151', marginBottom: '0.5rem' }}>
+                      📱 WhatsApp-Nachricht bearbeiten:
                     </div>
-                    
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                      <input
-                        type="tel"
-                        placeholder="Telefon (für WhatsApp)"
-                        value={inviteFormData.playerPhone}
-                        onChange={(e) => setInviteFormData(prev => ({ ...prev, playerPhone: e.target.value }))}
+                    <textarea
+                      value={inviteMessage}
+                      onChange={(e) => setInviteMessage(e.target.value)}
+                      placeholder="Deine persönliche Einladung..."
+                      rows="8"
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem',
+                        border: '2px solid #e5e7eb',
+                        borderRadius: '8px',
+                        fontSize: '0.85rem',
+                        fontFamily: 'inherit',
+                        resize: 'vertical',
+                        lineHeight: '1.4'
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                      <button
+                        type="button"
+                        onClick={() => setInviteMessage(generateDefaultInviteMessage(training))}
                         style={{
-                          padding: '0.75rem',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '8px',
-                          fontSize: '0.9rem'
+                          padding: '0.5rem 0.75rem',
+                          background: '#f3f4f6',
+                          color: '#6b7280',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '6px',
+                          fontSize: '0.8rem',
+                          fontWeight: '600',
+                          cursor: 'pointer'
                         }}
-                      />
-                      <input
-                        type="email"
-                        placeholder="Email (optional)"
-                        value={inviteFormData.playerEmail}
-                        onChange={(e) => setInviteFormData(prev => ({ ...prev, playerEmail: e.target.value }))}
+                      >
+                        🔄 Standard-Text laden
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setInviteMessage('')}
                         style={{
-                          padding: '0.75rem',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '8px',
-                          fontSize: '0.9rem'
+                          padding: '0.5rem 0.75rem',
+                          background: '#fef2f2',
+                          color: '#dc2626',
+                          border: '1px solid #fecaca',
+                          borderRadius: '6px',
+                          fontSize: '0.8rem',
+                          fontWeight: '600',
+                          cursor: 'pointer'
                         }}
-                      />
+                      >
+                        🗑️ Leeren
+                      </button>
                     </div>
                   </div>
                   
                   <div style={{ display: 'flex', gap: '0.75rem' }}>
                     <button
-                      onClick={() => handleInvitePlayer(training.id)}
-                      disabled={isInviting || !inviteFormData.playerName.trim()}
+                      onClick={() => {
+                        // Verwende editierbaren Text oder Standard-Text
+                        const message = inviteMessage.trim() || generateDefaultInviteMessage(training);
+                        
+                        const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
+                        window.open(whatsappUrl, '_blank');
+                        
+                        // Schließe Formular
+                        setShowInviteForm(null);
+                        setInviteMessage(''); // Reset für nächstes Mal
+                      }}
+                      disabled={!inviteMessage.trim() && !generateDefaultInviteMessage(training)}
                       style={{
                         flex: 1,
                         padding: '0.75rem',
-                        background: '#10b981',
+                        background: '#25D366',
                         color: 'white',
                         border: 'none',
                         borderRadius: '8px',
                         fontSize: '0.9rem',
                         fontWeight: '600',
                         cursor: 'pointer',
-                        opacity: (isInviting || !inviteFormData.playerName.trim()) ? 0.5 : 1
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.5rem',
+                        opacity: (!inviteMessage.trim() && !generateDefaultInviteMessage(training)) ? 0.5 : 1
                       }}
                     >
-                      {isInviting ? '⏳ Lädt...' : '📱 Einladen & WhatsApp senden'}
+                      📱 WhatsApp öffnen
                     </button>
                     <button
-                      onClick={() => {
-                        setShowInviteForm(null);
-                        setInviteFormData({
-                          playerName: '',
-                          playerLk: '',
-                          playerClub: '',
-                          playerPhone: '',
-                          playerEmail: ''
-                        });
-                      }}
+                      onClick={() => setShowInviteForm(null)}
                       style={{
                         padding: '0.75rem 1rem',
                         background: 'white',
@@ -1878,6 +1914,16 @@ function Training() {
             Meine Trainingseinheiten ({visibleTrainings.filter(t => t.type === 'private' && (t.organizer_id === player?.id || t.invited_players?.includes(player?.id))).length})
           </button>
         </div>
+        
+        {/* Round-Robin Erklären Button */}
+        <button
+          className="btn-modern btn-modern-inactive"
+          onClick={() => navigate('/round-robin')}
+          style={{ flex: '0 0 auto' }}
+          title="Round-Robin System erklären"
+        >
+          🎲 Round-Robin
+        </button>
         
         {/* Create Training Button */}
         <button
@@ -2540,7 +2586,7 @@ function Training() {
                     {/* Suchfeld */}
                     <input
                       type="text"
-                      placeholder="Spielername oder LK eingeben zum Suchen..."
+                      placeholder="Spielername oder LK eingeben zum Suchen ..."
                       value={importedPlayerSearch}
                       onChange={(e) => setImportedPlayerSearch(e.target.value)}
                       style={{
@@ -2607,7 +2653,7 @@ function Training() {
                             color: '#1e40af',
                             fontSize: '0.85rem'
                           }}>
-                            🔍 Keine Spieler gefunden für "{importedPlayerSearch}"
+                            🔍 Keine Spieler gefunden für &ldquo;{importedPlayerSearch}&rdquo;
                           </div>
                         )}
                       </>
@@ -2649,6 +2695,74 @@ function Training() {
                       🔔 Spieler gesucht (für alle sichtbar machen)
                     </span>
                   </label>
+                </div>
+              )}
+
+              {/* Round-Robin Aktivieren */}
+              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={formData.roundRobinEnabled}
+                    onChange={(e) => setFormData(prev => ({ 
+                      ...prev, 
+                      roundRobinEnabled: e.target.checked,
+                      roundRobinSeed: e.target.checked ? Date.now() : null
+                    }))}
+                    style={{ width: '20px', height: '20px', cursor: 'pointer' }}
+                  />
+                  <span style={{ fontSize: '0.9rem', fontWeight: '600' }}>
+                    🎲 Intelligente Platzvergabe aktivieren
+                  </span>
+                </label>
+                {formData.roundRobinEnabled && (
+                  <div style={{ 
+                    marginTop: '0.5rem', 
+                    padding: '0.75rem', 
+                    background: '#eff6ff', 
+                    borderRadius: '8px',
+                    border: '1px solid #3b82f6'
+                  }}>
+                    <div style={{ fontSize: '0.8rem', color: '#1e40af', marginBottom: '0.5rem' }}>
+                      💡 <strong>Intelligente Platzvergabe</strong>
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: '1.5rem', fontSize: '0.75rem', color: '#1e40af' }}>
+                      <li>Bei Überbuchung wird automatisch eine Warteliste erstellt</li>
+                      <li>Spieler mit besserer Teilnahme-Quote haben höhere Priorität</li>
+                      <li>Automatisches Nachrücken bei Absagen</li>
+                      <li>Faire Rotation durch Zufallsfaktor</li>
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              {/* Prio-Training */}
+              {formData.roundRobinEnabled && (
+                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={formData.isPriority}
+                      onChange={(e) => setFormData(prev => ({ ...prev, isPriority: e.target.checked }))}
+                      style={{ width: '20px', height: '20px', cursor: 'pointer' }}
+                    />
+                    <span style={{ fontSize: '0.9rem', fontWeight: '600' }}>
+                      ⭐ Prio-Training (z.B. Medenspiel-Vorbereitung)
+                    </span>
+                  </label>
+                  {formData.isPriority && (
+                    <div style={{ 
+                      marginTop: '0.5rem', 
+                      padding: '0.75rem', 
+                      background: '#fef3c7', 
+                      borderRadius: '8px',
+                      border: '1px solid #f59e0b',
+                      fontSize: '0.8rem',
+                      color: '#92400e'
+                    }}>
+                      🏆 Alle Spieler erhalten +30% Priorität bei diesem wichtigen Training
+                    </div>
+                  )}
                 </div>
               )}
 

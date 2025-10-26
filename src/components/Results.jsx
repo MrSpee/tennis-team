@@ -144,7 +144,7 @@ const Results = () => {
 
         return {
           matchId: match.id,
-          score: (!resultsError && resultsData) ? calculateMatchScore(resultsData, match.season) : null
+          score: (!resultsError && resultsData) ? calculateMatchScore(resultsData, match.season, match.location) : null
         };
       });
 
@@ -184,114 +184,161 @@ const Results = () => {
     try {
       if (!players || players.length === 0) return;
 
-      const playerResultsMap = {};
+      // 🔧 SIMPLE APPROACH: Lade alle Spieler aus den eigenen Mannschaften
+      const playerTeamIds = playerTeams.map(team => team.id);
+      
+      console.log('🔍 Loading team players for teams:', playerTeamIds);
 
-      for (const player of players) {
+      // Lade alle Spieler aus den eigenen Teams
+      const { data: teamPlayers, error: playerTeamsError } = await supabase
+        .from('team_memberships')
+        .select(`
+          players_unified!team_memberships_player_id_fkey(
+            id, 
+            name, 
+            email, 
+            current_lk, 
+            season_start_lk, 
+            ranking,
+            player_type
+          )
+        `)
+        .in('team_id', playerTeamIds)
+        .eq('is_active', true)
+        .eq('players_unified.player_type', 'app_user'); // Nur App-User
+
+      if (playerTeamsError) {
+        console.error('Error loading team players:', playerTeamsError);
+        return;
+      }
+
+      // Extrahiere eindeutige Spieler
+      const uniquePlayers = teamPlayers
+        .map(pt => pt.players_unified)
+        .filter((player, index, self) => 
+          index === self.findIndex(p => p.id === player.id)
+        );
+
+      console.log('🔍 Team Players Found:', {
+        totalPlayers: uniquePlayers.length,
+        playerNames: uniquePlayers.map(p => p.name),
+        playerTeamIds: playerTeamIds
+      });
+
+      if (uniquePlayers.length === 0) {
+        console.warn('⚠️ No team players found for player results');
+        return;
+      }
+
+      // Erstelle Player-Results mit Match-Ergebnissen
+      const playerResultsMap = {};
+      
+      for (const player of uniquePlayers) {
+        console.log(`🔍 Loading matches for player: ${player.name}`);
         const playerMatches = [];
 
+        // Lade Match-Ergebnisse für diesen Spieler
         for (const match of seasonMatches) {
           const { data: resultsData } = await supabase
             .from('match_results')
             .select('*')
-            .eq('match_id', match.id);
+            .eq('match_id', match.id)
+            .or(`home_player_id.eq.${player.id},home_player1_id.eq.${player.id},home_player2_id.eq.${player.id}`);
 
-          if (resultsData) {
+          if (resultsData && resultsData.length > 0) {
+            console.log(`  📊 Found ${resultsData.length} matches for ${player.name} in ${match.opponent}`);
+            
             for (const result of resultsData) {
-              const isPlayerInvolved = 
-                result.home_player_id === player.id ||
-                result.home_player1_id === player.id ||
-                result.home_player2_id === player.id;
+              // Lade Gegner-Daten
+              let opponentName = 'Unbekannt';
+              let opponentLK = null;
+              let partnerName = null;
+              let partnerLK = null;
 
-              if (isPlayerInvolved) {
-                let opponentName = 'Unbekannt';
-                let opponentLK = null;
-                let partnerName = null;
-                let partnerLK = null;
-                let opponent1Name = null;
-                let opponent1LK = null;
-                let opponent2Name = null;
-                let opponent2LK = null;
-
-                if (result.match_type === 'Einzel' && result.guest_player_id) {
-                  const { data: oppData } = await supabase
-                    .from('opponent_players')
-                    .select('name, lk')
-                    .eq('id', result.guest_player_id)
+                        if (result.match_type === 'Einzel' && result.guest_player_id) {
+                          const { data: oppData } = await supabase
+                            .from('players_unified')
+                            .select('name, current_lk')
+                            .eq('id', result.guest_player_id)
+                            .eq('player_type', 'opponent')
+                            .single();
+                          
+                          if (oppData) {
+                            opponentName = oppData.name;
+                            opponentLK = oppData.current_lk;
+                          } else {
+                            // Fallback: Verwende generische Namen
+                            opponentName = 'Gegner';
+                            opponentLK = 'LK ?';
+                          }
+                        } else if (result.match_type === 'Doppel') {
+                          // Lade beide Gegner
+                          const { data: opp1Data } = await supabase
+                            .from('players_unified')
+                            .select('name, current_lk')
+                            .eq('id', result.guest_player1_id)
+                            .eq('player_type', 'opponent')
+                            .single();
+                          
+                          const { data: opp2Data } = await supabase
+                            .from('players_unified')
+                            .select('name, current_lk')
+                            .eq('id', result.guest_player2_id)
+                            .eq('player_type', 'opponent')
+                            .single();
+                          
+                          opponentName = `${opp1Data?.name || 'Gegner 1'} / ${opp2Data?.name || 'Gegner 2'}`;
+                
+                // Lade Partner-Daten
+                const partnerId = result.home_player1_id === player.id 
+                  ? result.home_player2_id 
+                  : result.home_player1_id;
+                
+                if (partnerId) {
+                  const { data: partnerData } = await supabase
+                    .from('players_unified')
+                    .select('name, current_lk, season_start_lk, ranking')
+                    .eq('id', partnerId)
+                    .eq('player_type', 'app_user')
                     .single();
                   
-                  if (oppData) {
-                    opponentName = oppData.name;
-                    opponentLK = oppData.lk;
-                  }
-                } else if (result.match_type === 'Doppel') {
-                  const { data: opp1Data } = await supabase
-                    .from('opponent_players')
-                    .select('name, lk')
-                    .eq('id', result.guest_player1_id)
-                    .single();
-                  
-                  const { data: opp2Data } = await supabase
-                    .from('opponent_players')
-                    .select('name, lk')
-                    .eq('id', result.guest_player2_id)
-                    .single();
-                  
-                  opponent1Name = opp1Data?.name || 'Unbekannt';
-                  opponent1LK = opp1Data?.lk || null;
-                  opponent2Name = opp2Data?.name || 'Unbekannt';
-                  opponent2LK = opp2Data?.lk || null;
-                  
-                  const partnerId = result.home_player1_id === player.id 
-                    ? result.home_player2_id 
-                    : result.home_player1_id;
-                  
-                  if (partnerId) {
-                    const { data: partnerData } = await supabase
-                      .from('players')
-                      .select('name, current_lk, season_start_lk, ranking, profile_image')
-                      .eq('id', partnerId)
-                      .single();
-                    
-                    if (partnerData) {
-                      partnerName = partnerData.name;
-                      partnerLK = partnerData.current_lk || partnerData.season_start_lk || partnerData.ranking;
-                    }
+                  if (partnerData) {
+                    partnerName = partnerData.name;
+                    partnerLK = partnerData.current_lk || partnerData.season_start_lk || partnerData.ranking;
                   }
                 }
-
-                playerMatches.push({
-                  ...result,
-                  opponent: match.opponent,
-                  matchDate: match.date,
-                  opponentPlayerName: opponentName,
-                  opponentPlayerLK: opponentLK,
-                  partnerName,
-                  partnerLK,
-                  opponent1Name,
-                  opponent1LK,
-                  opponent2Name,
-                  opponent2LK
-                });
               }
+
+                        playerMatches.push({
+                          ...result,
+                          opponent: match.opponent,
+                          matchDate: match.date,
+                          matchLocation: match.location, // WICHTIG: Füge location hinzu
+                          opponentPlayerName: opponentName,
+                          opponentPlayerLK: opponentLK,
+                          partnerName,
+                          partnerLK
+                        });
             }
           }
         }
 
-        if (playerMatches.length > 0) {
-          const sortedMatches = playerMatches.sort((a, b) => {
-            if (a.match_type !== b.match_type) {
-              return a.match_type === 'Einzel' ? -1 : 1;
-            }
-            return new Date(a.matchDate) - new Date(b.matchDate);
-          });
+        // Sortiere Matches nach Datum
+        const sortedMatches = playerMatches.sort((a, b) => new Date(a.matchDate) - new Date(b.matchDate));
 
-          playerResultsMap[player.id] = {
-            player: player,
-            matches: sortedMatches
-          };
-        }
+        playerResultsMap[player.id] = {
+          player: player,
+          matches: sortedMatches
+        };
+        
+        console.log(`  ✅ ${player.name}: ${sortedMatches.length} matches`);
       }
 
+      console.log('🎯 Final playerResultsMap:', {
+        totalPlayers: Object.keys(playerResultsMap).length,
+        playerNames: Object.values(playerResultsMap).map(p => p.player.name)
+      });
+      
       setPlayerResults(playerResultsMap);
     } catch (error) {
       console.error('❌ Error loading player results:', error);
@@ -354,7 +401,7 @@ const Results = () => {
     return null;
   };
 
-  const calculateMatchScore = (results, matchSeason) => {
+  const calculateMatchScore = (results, matchSeason, matchLocation) => {
     let homeScore = 0;
     let guestScore = 0;
     let completedMatches = 0;
@@ -375,16 +422,30 @@ const Results = () => {
 
       if (result.status === 'completed' && result.winner) {
         completedMatches++;
-        if (result.winner === 'home') homeScore++;
-        else if (result.winner === 'guest') guestScore++;
+        // KORRIGIERTE MULTI-TEAM LOGIK:
+        // winner bezieht sich auf das Heim-Team vs Gast-Team
+        // Wir müssen das in "unser Team" vs "Gegner-Team" umwandeln
+        if (matchLocation === 'Home') {
+          // Wir spielen Heim: home = unser Team, guest = Gegner
+          if (result.winner === 'home') homeScore++;
+          else if (result.winner === 'guest') guestScore++;
+        } else {
+          // Wir spielen Auswärts: guest = unser Team, home = Gegner
+          if (result.winner === 'guest') homeScore++; // guest = unser Team gewinnt
+          else if (result.winner === 'home') guestScore++; // home = Gegner gewinnt
+        }
       } else {
         const matchWinner = calculateMatchWinner(result);
-        if (matchWinner === 'home') {
+        if (matchWinner) {
           completedMatches++;
-          homeScore++;
-        } else if (matchWinner === 'guest') {
-          completedMatches++;
-          guestScore++;
+          // Gleiche Logik für berechnete Winner
+          if (matchLocation === 'Home') {
+            if (matchWinner === 'home') homeScore++;
+            else if (matchWinner === 'guest') guestScore++;
+          } else {
+            if (matchWinner === 'guest') homeScore++; // guest = unser Team gewinnt
+            else if (matchWinner === 'home') guestScore++; // home = Gegner gewinnt
+          }
         }
       }
     });
@@ -395,10 +456,32 @@ const Results = () => {
       completedMatches, 
       expectedTotal,
       actualEntriesInDB: results.length,
-      season: matchSeason
+      season: matchSeason,
+      location: matchLocation
     });
 
     return { home: homeScore, guest: guestScore, completed: completedMatches, total: expectedTotal };
+  };
+
+  // Neue Funktion: Berechne Score aus Spieler-Perspektive
+  const calculatePlayerPerspectiveScore = (rawScore, matchLocation) => {
+    if (!rawScore) {
+      return {
+        playerScore: 0,
+        opponentScore: 0,
+        completed: 0,
+        total: 6
+      };
+    }
+    
+    // VEREINFACHT: calculateMatchScore hat bereits die richtige Perspektive berechnet
+    // rawScore.home = unser Team, rawScore.guest = Gegner
+    return {
+      playerScore: rawScore.home,
+      opponentScore: rawScore.guest,
+      completed: rawScore.completed,
+      total: rawScore.total
+    };
   };
 
   const getMatchStatus = (match) => {
@@ -488,30 +571,34 @@ const Results = () => {
       {viewMode === 'mannschaft' ? (
         /* Mannschafts-Ansicht Card */
         (() => {
-          // Filter Matches basierend auf selectedTeamId
+          // Filter Matches basierend auf Spieler-Teams
           const filteredMatches = matches.filter(match => {
-            // Wenn kein Team ausgewählt → zeige alle Matches
-            if (!selectedTeamId) {
+            // Nur Matches der Mannschaften des Spielers anzeigen
+            const playerTeamIds = playerTeams.map(team => team.id);
+            
+            // Wenn Match teamInfo hat: Prüfe ob es zu einer Spieler-Mannschaft gehört
+            if (match.teamInfo) {
+              return playerTeamIds.includes(match.teamInfo.id);
+            }
+            
+            // Matches ohne teamInfo: Nur anzeigen wenn selectedTeamId gesetzt ist (Fallback)
+            if (selectedTeamId) {
               return true;
             }
             
-            // Wenn Team ausgewählt:
-            // - Match MIT teamInfo: Prüfe ob ID übereinstimmt
-            // - Match OHNE teamInfo: Zeige trotzdem an (alte Daten)
-            if (match.teamInfo) {
-              return match.teamInfo.id === selectedTeamId;
-            }
-            
-            // Matches ohne teamInfo immer anzeigen (Fallback)
-            return true;
+            // Standard: Keine Matches ohne teamInfo anzeigen
+            return false;
           });
           
           console.log('🔍 Filter Debug:', {
             totalMatches: matches.length,
+            playerTeamIds: playerTeams.map(team => team.id),
+            playerTeamNames: playerTeams.map(team => `${team.club_name} - ${team.team_name}`),
             selectedTeamId: selectedTeamId,
             filteredMatches: filteredMatches.length,
             matchesWithTeamInfo: matches.filter(m => m.teamInfo).length,
-            matchTeamIds: matches.map(m => m.teamInfo?.id).filter(Boolean)
+            matchTeamIds: matches.map(m => m.teamInfo?.id).filter(Boolean),
+            filteredMatchOpponents: filteredMatches.map(m => m.opponent)
           });
           
           return (
@@ -521,6 +608,26 @@ const Results = () => {
                 <div className="match-count-badge">
                   {filteredMatches.length} {filteredMatches.length === 1 ? 'Spiel' : 'Spiele'}
                 </div>
+              </div>
+              
+              {/* Spieler-Teams Info */}
+              <div style={{ 
+                padding: '0.75rem 1rem', 
+                background: '#f0f9ff', 
+                border: '1px solid #bae6fd',
+                borderRadius: '8px',
+                margin: '0 1rem',
+                fontSize: '0.8rem',
+                color: '#0c4a6e'
+              }}>
+                <div style={{ fontWeight: '600', marginBottom: '0.25rem' }}>
+                  👤 Deine Mannschaften:
+                </div>
+                {playerTeams.map(team => (
+                  <div key={team.id} style={{ marginLeft: '1rem' }}>
+                    🏢 {team.club_name} - {team.team_name} ({team.category})
+                  </div>
+                ))}
               </div>
               
               {/* Team-Selector - nur in Mannschafts-Ansicht und nur wenn > 1 Team */}
@@ -553,40 +660,43 @@ const Results = () => {
               ) : (
                 <div className="season-matches">
                   {filteredMatches.map((match) => {
-              const score = matchScores[match.id];
+              const rawScore = matchScores[match.id];
               const status = getMatchStatus(match);
+              
+              // Berechne Score aus Spieler-Perspektive
+              const playerScore = calculatePlayerPerspectiveScore(rawScore, match.location);
               
               // Prüfe ob das Medenspiel komplett abgeschlossen ist (alle 6 bzw. 9 Spiele)
               const expectedTotal = match.season === 'summer' ? 9 : 6;
-              const isMedenspieleCompleted = score && score.completed >= expectedTotal;
+              const isMedenspieleCompleted = rawScore && rawScore.completed >= expectedTotal;
               
-              // Outcome basierend auf Medenspiel-Status
+              // Outcome basierend auf Spieler-Perspektive
               let outcome, outcomeLabel;
               
-              if (!score || score.completed === 0) {
+              if (!rawScore || rawScore.completed === 0) {
                 // Keine Ergebnisse
                 outcome = status === 'live' ? 'live' : 'upcoming';
                 outcomeLabel = '';
               } else if (isMedenspieleCompleted) {
-                // ALLE Spiele abgeschlossen → Finaler Sieger
-                if (score.home > score.guest) {
+                // ALLE Spiele abgeschlossen → Finaler Sieger aus Spieler-Perspektive
+                if (playerScore.playerScore > playerScore.opponentScore) {
                   outcome = 'win';
                   outcomeLabel = '🏆 Sieg';
-                } else if (score.home < score.guest) {
+                } else if (playerScore.playerScore < playerScore.opponentScore) {
                   outcome = 'loss';
-                  outcomeLabel = '🏆 Niederlage';
+                  outcomeLabel = '😢 Niederlage';
                 } else {
                   outcome = 'draw';
-                  outcomeLabel = '🏆 Remis';
+                  outcomeLabel = '🤝 Remis';
                 }
               } else {
-                // Spiel läuft noch (1-5 Spiele bei Winter, 1-8 bei Sommer)
-                if (score.home > score.guest) {
+                // Spiel läuft noch - aus Spieler-Perspektive
+                if (playerScore.playerScore > playerScore.opponentScore) {
                   outcome = 'leading';
-                  outcomeLabel = '🏠 Heim führt';
-                } else if (score.home < score.guest) {
+                  outcomeLabel = '📈 Wir führen';
+                } else if (playerScore.playerScore < playerScore.opponentScore) {
                   outcome = 'trailing';
-                  outcomeLabel = '✈️ Gast führt';
+                  outcomeLabel = '📉 Gegner führt';
                 } else {
                   outcome = 'tied';
                   outcomeLabel = '⚖️ Unentschieden';
@@ -641,32 +751,28 @@ const Results = () => {
                       </span>
                     </div>
 
-                    {/* Score Compact - Reihenfolge basierend auf Home/Away */}
-                    {score && score.completed > 0 ? (
+                    {/* Heim/Auswärts Row */}
+                    <div className="results-match-row">
+                      <span className="results-info-label">
+                        {match.location === 'Home' ? '🏠' : '✈️'}
+                      </span>
+                      <span className="results-info-value">
+                        {match.location === 'Home' ? 'Heimspiel' : 'Auswärtsspiel'}
+                      </span>
+                    </div>
+
+                    {/* Score Compact - Aus Spieler-Perspektive */}
+                    {rawScore && rawScore.completed > 0 ? (
                       <div className="results-score-compact">
-                        {match.location === 'Home' ? (
-                          <>
-                            <span className={`score-digit ${score.home > score.guest ? 'winner' : ''}`}>
-                              {score.home}
-                            </span>
-                            <span className="score-sep">:</span>
-                            <span className={`score-digit ${score.guest > score.home ? 'winner' : ''}`}>
-                              {score.guest}
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <span className={`score-digit ${score.guest > score.home ? 'winner' : ''}`}>
-                              {score.guest}
-                            </span>
-                            <span className="score-sep">:</span>
-                            <span className={`score-digit ${score.home > score.guest ? 'winner' : ''}`}>
-                              {score.home}
-                            </span>
-                          </>
-                        )}
-                        {score.completed < score.total && (
-                          <span className="score-progress">({score.completed}/{score.total})</span>
+                        <span className={`score-digit ${playerScore.playerScore > playerScore.opponentScore ? 'winner' : ''}`}>
+                          {playerScore.playerScore}
+                        </span>
+                        <span className="score-sep">:</span>
+                        <span className={`score-digit ${playerScore.opponentScore > playerScore.playerScore ? 'winner' : ''}`}>
+                          {playerScore.opponentScore}
+                        </span>
+                        {rawScore.completed < rawScore.total && (
+                          <span className="score-progress">({rawScore.completed}/{rawScore.total})</span>
                         )}
                       </div>
                     ) : (
@@ -685,7 +791,7 @@ const Results = () => {
                         {outcome === 'draw' && '🤝 Remis'}
                       </div>
                     )}
-                    {!isMedenspieleCompleted && score && score.completed > 0 && (
+                    {!isMedenspieleCompleted && rawScore && rawScore.completed > 0 && (
                       <div className="outcome-badge in-progress">
                         {outcomeLabel}
                       </div>
@@ -738,12 +844,20 @@ const Results = () => {
                   .map(({ player, matches: playerMatches }) => {
                     const wins = playerMatches.filter(m => {
                       const winner = m.winner || calculateMatchWinner(m);
-                      return winner === 'home';
+                      
+                      // REALITÄT: In der Datenbank ist die Struktur anders!
+                      // Bei Auswärtsspielen sind unsere Spieler in home_player* Feldern
+                      // Das bedeutet: winner = "guest" = unser Team gewinnt
+                      return winner === 'guest';
                     }).length;
                     
                     const losses = playerMatches.filter(m => {
                       const winner = m.winner || calculateMatchWinner(m);
-                      return winner === 'guest';
+                      
+                      // REALITÄT: In der Datenbank ist die Struktur anders!
+                      // Bei Auswärtsspielen sind unsere Spieler in home_player* Feldern  
+                      // Das bedeutet: winner = "home" = Gegner gewinnt
+                      return winner === 'home';
                     }).length;
 
                     return (

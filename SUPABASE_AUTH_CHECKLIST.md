@@ -291,3 +291,4 @@ LIMIT 20;
 **Gehe jetzt die Checklist durch und sag mir, was du siehst!** 🔍
 
 Welcher Schritt schlägt fehl? 🤔
+
