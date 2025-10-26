@@ -174,25 +174,31 @@ export function DataProvider({ children }) {
       // WICHTIG: Unterstütze ALLE möglichen Season-Werte ('winter_25_26', 'Winter 2025/26', etc.)
       const teamsWithSeasons = await Promise.all(
         data.map(async (pt) => {
-          // Versuche ZUERST mit 'winter_25_26'
+          console.log(`📊 Loading data for team: ${pt.team_info.team_name || pt.team_info.category} (ID: ${pt.team_info.id})`);
+          
+          // Lade team_seasons - versuche beide Season-Formate
+          // WICHTIG: Die DB verwendet 'Winter 2025/26' als Standard
           let { data: seasonData } = await supabase
             .from('team_seasons')
             .select('*')
             .eq('team_id', pt.team_info.id)
-            .eq('season', 'winter_25_26')
+            .eq('season', 'Winter 2025/26')
             .eq('is_active', true)
             .maybeSingle();
           
-          // Wenn nicht gefunden, versuche mit 'Winter 2025/26'
+          console.log(`🔍 Querying 'Winter 2025/26' for ${pt.team_info.team_name || pt.team_info.category}:`, seasonData);
+          
+          // Fallback auf 'winter_25_26' (für alte Einträge)
           if (!seasonData) {
             const { data: fallbackData } = await supabase
               .from('team_seasons')
               .select('*')
               .eq('team_id', pt.team_info.id)
-              .eq('season', 'Winter 2025/26')
+              .eq('season', 'winter_25_26')
               .eq('is_active', true)
               .maybeSingle();
             seasonData = fallbackData;
+            console.log(`🔍 Fallback 'winter_25_26' for ${pt.team_info.team_name || pt.team_info.category}:`, fallbackData);
           }
           
           // Lade Anzahl aktiver Spieler für dieses Team
@@ -202,7 +208,7 @@ export function DataProvider({ children }) {
             .eq('team_id', pt.team_info.id)
             .eq('is_active', true);
           
-          return {
+          const result = {
             ...pt.team_info,
             is_primary: pt.is_primary,
             role: pt.role,
@@ -213,6 +219,14 @@ export function DataProvider({ children }) {
             season: seasonData?.season || null,
             player_count: playerCount || null
           };
+          
+          console.log(`✅ Final data for ${pt.team_info.team_name || pt.team_info.category}:`, {
+            league: result.league,
+            group_name: result.group_name,
+            player_count: result.player_count
+          });
+          
+          return result;
         })
       );
       
