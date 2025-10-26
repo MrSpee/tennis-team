@@ -231,7 +231,7 @@ const ImportTab = () => {
         venue: match.venue || null,
         season: parsedData.season?.toLowerCase().includes('winter') ? 'winter_25_26' : 'summer_26',
         players_needed: 4,
-        organizer_id: player?.id || null
+        created_by: player?.id || null
       }));
 
       // Insert in Supabase
