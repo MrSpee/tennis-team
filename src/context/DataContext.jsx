@@ -173,12 +173,20 @@ export function DataProvider({ children }) {
       // Lade team_seasons für jedes Team
       const teamsWithSeasons = await Promise.all(
         data.map(async (pt) => {
-          const { data: seasonData } = await supabase
+          const { data: seasonData, error } = await supabase
             .from('team_seasons')
             .select('*')
             .eq('team_id', pt.team_info.id)
+            .eq('season', 'winter_25_26')
             .eq('is_active', true)
-            .single();
+            .maybeSingle();
+          
+          // Lade Anzahl aktiver Spieler für dieses Team
+          const { count: playerCount } = await supabase
+            .from('team_memberships')
+            .select('*', { count: 'exact', head: true })
+            .eq('team_id', pt.team_info.id)
+            .eq('is_active', true);
           
           return {
             ...pt.team_info,
@@ -189,7 +197,7 @@ export function DataProvider({ children }) {
             group_name: seasonData?.group_name || null,
             team_size: seasonData?.team_size || null,
             season: seasonData?.season || null,
-            player_count: seasonData?.team_size || null
+            player_count: playerCount || null
           };
         })
       );
