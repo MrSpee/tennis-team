@@ -171,15 +171,29 @@ export function DataProvider({ children }) {
       console.log('✅ Player teams loaded from DB:', data);
       
       // Lade team_seasons für jedes Team
+      // WICHTIG: Unterstütze ALLE möglichen Season-Werte ('winter_25_26', 'Winter 2025/26', etc.)
       const teamsWithSeasons = await Promise.all(
         data.map(async (pt) => {
-          const { data: seasonData, error } = await supabase
+          // Versuche ZUERST mit 'winter_25_26'
+          let { data: seasonData } = await supabase
             .from('team_seasons')
             .select('*')
             .eq('team_id', pt.team_info.id)
             .eq('season', 'winter_25_26')
             .eq('is_active', true)
             .maybeSingle();
+          
+          // Wenn nicht gefunden, versuche mit 'Winter 2025/26'
+          if (!seasonData) {
+            const { data: fallbackData } = await supabase
+              .from('team_seasons')
+              .select('*')
+              .eq('team_id', pt.team_info.id)
+              .eq('season', 'Winter 2025/26')
+              .eq('is_active', true)
+              .maybeSingle();
+            seasonData = fallbackData;
+          }
           
           // Lade Anzahl aktiver Spieler für dieses Team
           const { count: playerCount } = await supabase
