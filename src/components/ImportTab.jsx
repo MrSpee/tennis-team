@@ -223,6 +223,7 @@ const ImportTab = () => {
       }
 
       // SCHRITT 3: Formatiere für Supabase (NUR existierende Spalten!)
+      // SPALTEN: team_id, match_date, opponent, location, venue, season, players_needed, created_by
       const formattedMatches = uniqueMatches.map(match => ({
         team_id: teamId,
         match_date: match.match_date + ' ' + (match.start_time || '00:00:00'),
