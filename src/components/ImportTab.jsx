@@ -516,6 +516,8 @@ const ImportTab = () => {
             is_captain: playerData.is_captain || false,
             status: 'pending',
             player_type: 'app_user',
+            is_active: false, // ⚠️ WICHTIG: Noch kein Account!
+            user_id: null, // ⚠️ WICHTIG: Noch kein Login!
             onboarding_status: 'not_started',
             import_source: 'tvm_import',
             merged_from_player_id: null,

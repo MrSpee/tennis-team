@@ -2,9 +2,6 @@ import { createContext, useContext, useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import { useAuth } from './AuthContext';
 
-// Lokale Test-Daten für TC Köln (nur für Theo Tester)
-import tcKoelnTestData from '../../testdata-tc-koeln/tc-koeln-team.json';
-
 const DataContext = createContext();
 
 export function useData() {
@@ -234,28 +231,7 @@ export function DataProvider({ children }) {
       
       console.log('🔍 Teams with seasons data:', teams);
       
-      // LOKALE TEST-DATEN: Füge TC Köln hinzu NUR für Theo Tester
-      const isTheoTester = playerName === 'Theo Tester';
-      if (tcKoelnTestData.enabled && isTheoTester) {
-        console.log('🧪 Adding TC Köln test team for Theo Tester');
-        teams.push({
-          id: tcKoelnTestData.team.id,
-          club_name: tcKoelnTestData.team.club_name,
-          team_name: tcKoelnTestData.team.team_name,
-          category: tcKoelnTestData.team.category,
-          league: tcKoelnTestData.team.league,
-          group_name: tcKoelnTestData.team.group_name,
-          region: tcKoelnTestData.team.region,
-          tvm_link: tcKoelnTestData.team.tvm_link,
-          season: tcKoelnTestData.team.season,
-          season_year: tcKoelnTestData.team.season_year,
-          is_primary: false,
-          role: 'player',
-          isTestData: true
-        });
-      } else if (tcKoelnTestData.enabled && !isTheoTester) {
-        // console.log('⚠️ TC Köln test data SKIPPED for', playerName, '(not Theo Tester)');
-      }
+      // TEST-DATEN deaktiviert für sauberes Development
       
       setPlayerTeams(teams);
       console.log('✅ playerTeams state updated with', teams.length, 'teams');
@@ -357,35 +333,7 @@ export function DataProvider({ children }) {
         }, {})
       }));
 
-      // LOKALE TEST-DATEN: Füge TC Köln Matches hinzu NUR für Theo Tester
-      const isTheoTester = currentPlayerName === 'Theo Tester';
-      if (tcKoelnTestData.enabled && tcKoelnTestData.matches && isTheoTester) {
-        console.log('🧪 Adding', tcKoelnTestData.matches.length, 'TC Köln test matches for Theo Tester');
-        
-        const testMatches = tcKoelnTestData.matches.map(match => ({
-          id: match.id,
-          date: new Date(match.match_date),
-          opponent: match.opponent,
-          location: match.location,
-          venue: match.venue,
-          season: match.season,
-          playersNeeded: match.players_needed,
-          teamId: match.team_id,
-          teamInfo: {
-            id: tcKoelnTestData.team.id, // WICHTIG: ID für Filterung!
-            clubName: tcKoelnTestData.team.club_name,
-            teamName: tcKoelnTestData.team.team_name,
-            category: tcKoelnTestData.team.category
-          },
-          availability: match.availability || {},
-          isTestData: true
-        }));
-        
-        transformedMatches = [...transformedMatches, ...testMatches];
-        console.log('✅ Total matches (DB + Test):', transformedMatches.length);
-      } else if (tcKoelnTestData.enabled && !isTheoTester) {
-        // console.log('⚠️ TC Köln test matches SKIPPED for', currentPlayerName, '(not Theo Tester)');
-      }
+      // TEST-DATEN deaktiviert für sauberes Development
 
       setMatches(transformedMatches);
     } catch (error) {
@@ -399,8 +347,8 @@ export function DataProvider({ children }) {
     const { data, error } = await supabase
       .from('players_unified')
       .select('*')
-      .eq('is_active', true)
-      .eq('player_type', 'app_user') // Nur App-User für Frontend
+      // ⚠️ KOMMENTAR: Zeige ALLE Spieler (auch externe Vereinsspieler)
+      // .eq('is_active', true) // REMOVED: Zeige auch inaktive für Rangliste
       .order('points', { ascending: false });
 
     if (error) {
