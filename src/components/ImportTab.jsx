@@ -223,15 +223,29 @@ const ImportTab = () => {
         return;
       }
 
-      // SCHRITT 3: Hole unser Team für home_team_id
+      // SCHRITT 3: Hole unser Team für home_team_id (NUR existierende Felder!)
       const { data: ourTeamData, error: teamError } = await supabase
         .from('team_info')
-        .select('id, club_name, team_name, category, league, group_name')
+        .select('id, club_name, team_name, category')
         .eq('id', teamId)
         .single();
 
       if (teamError || !ourTeamData) {
         throw new Error('Unser Team wurde nicht gefunden');
+      }
+
+      // Hole league und group_name aus team_seasons (falls vorhanden)
+      const { data: seasonData } = await supabase
+        .from('team_seasons')
+        .select('league, group_name')
+        .eq('team_id', teamId)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      // Merge season data falls vorhanden
+      if (seasonData) {
+        ourTeamData.league = seasonData.league;
+        ourTeamData.group_name = seasonData.group_name;
       }
 
       // SCHRITT 4: Finde Gegner-Teams und erstelle matchdays
@@ -275,8 +289,8 @@ const ImportTab = () => {
           venue: match.venue || null,
           location: isHomeMatch ? 'Home' : 'Away',
           season: parsedData.season?.toLowerCase().includes('winter') ? 'winter' : 'summer',
-          league: match.league || ourTeamData.league || null,
-          group_name: match.group_name || ourTeamData.group_name || null,
+          league: parsedData.league || ourTeamData.league || null,
+          group_name: parsedData.group_name || ourTeamData.group_name || null,
           status: match.status === 'offen' ? 'scheduled' : 'completed',
           home_score: homeScore,
           away_score: awayScore,
