@@ -834,7 +834,7 @@ const MatchdayResults = () => {
           <div className="score-teams">
             {match?.location === 'Home' ? (
               <>
-                <span className="team-name-score home">SV Rot-Gelb Sürth</span>
+                <span className="team-name-score home">{match?.team_info?.club_name || 'Heim-Team'}</span>
                 <span className="team-separator">:</span>
                 <span className="team-name-score guest">{match?.opponent || 'Gegner'}</span>
               </>
@@ -842,7 +842,7 @@ const MatchdayResults = () => {
               <>
                 <span className="team-name-score guest">{match?.opponent || 'Gegner'}</span>
                 <span className="team-separator">:</span>
-                <span className="team-name-score home">SV Rot-Gelb Sürth</span>
+                <span className="team-name-score home">{match?.team_info?.club_name || 'Heim-Team'}</span>
               </>
             )}
           </div>

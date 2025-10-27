@@ -600,6 +600,238 @@
   transform: translateY(0);
 }
 
+/* ============================================
+   EDITABLE MATCH CARDS - Mobile Optimiert
+   ============================================ */
+.match-card-editable {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.match-header-editable h3 {
+  margin: 0 0 1rem 0;
+  color: #1f2937;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+/* Match Teams Info */
+.match-teams-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.team-badge {
+  padding: 0.625rem 1rem;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 120px;
+}
+
+.team-badge.home {
+  background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+  border: 2px solid #22c55e;
+}
+
+.team-badge.away {
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  border: 2px solid #ef4444;
+}
+
+.team-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #374151;
+}
+
+.team-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.vs-badge {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: #6b7280;
+  padding: 0.5rem;
+}
+
+.player-selection-editable {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.player-row-editable {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.player-label-editable {
+  font-weight: 600;
+  color: #374151;
+  font-size: 0.875rem;
+  margin-bottom: 0.125rem;
+}
+
+.vs-divider {
+  text-align: center;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #6b7280;
+  padding: 0.25rem 0;
+  margin: 0.25rem 0;
+}
+
+.player-select {
+  width: 100%;
+  padding: 0.625rem;
+  border: 2px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  background: white;
+  color: #374151;
+  min-height: 44px; /* Touch-freundlich */
+}
+
+.player-select:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.score-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.set-input {
+  background: #f9fafb;
+  padding: 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.set-label {
+  font-weight: 600;
+  color: #374151;
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+  text-align: center;
+}
+
+.score-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.score-input {
+  width: 70px;
+  padding: 0.625rem;
+  border: 2px solid #d1d5db;
+  border-radius: 8px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 1.1rem;
+  background: white;
+  color: #374151;
+  min-height: 50px; /* Touch-freundlich */
+}
+
+.score-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.score-separator {
+  font-weight: 700;
+  font-size: 1.5rem;
+  color: #6b7280;
+}
+
+.comment-section-editable {
+  margin-bottom: 1rem;
+}
+
+.comment-section-editable label {
+  display: block;
+  font-weight: 600;
+  color: #374151;
+  font-size: 0.875rem;
+  margin-bottom: 0.375rem;
+}
+
+.comment-textarea {
+  width: 100%;
+  padding: 0.625rem;
+  border: 2px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 60px;
+}
+
+.comment-textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.save-button-editable {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.625rem;
+  padding: 0.875rem;
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-height: 50px; /* Touch-freundlich */
+  box-shadow: 0 4px 12px rgba(5, 150, 105, 0.3);
+}
+
+.save-button-editable:hover {
+  background: linear-gradient(135deg, #047857 0%, #065f46 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(5, 150, 105, 0.4);
+}
+
+.save-button-editable:active {
+  transform: translateY(0);
+}
+
+.save-button-editable:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .live-results-page {

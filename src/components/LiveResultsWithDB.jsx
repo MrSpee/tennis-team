@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, MessageCircle, Save } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
-import { getOpponentPlayers } from '../services/liveResultsService';
+// import { getOpponentPlayers } from '../services/liveResultsService'; // Gegner werden jetzt als Freitext eingegeben
 import './LiveResults.css';
 
 const LiveResultsWithDB = () => {
@@ -19,6 +19,11 @@ const LiveResultsWithDB = () => {
   // State für Match-Ergebnisse
   const [matchResults, setMatchResults] = useState([]);
   const [saving, setSaving] = useState(false);
+  
+  // State für Freitext-Eingaben (neue Spieler)
+  const [showFreeTextModal, setShowFreeTextModal] = useState(false);
+  const [freeTextContext, setFreeTextContext] = useState(null); // {matchId, playerType}
+  const [freeTextValue, setFreeTextValue] = useState('');
 
   // Lade echte Daten aus der Datenbank
   useEffect(() => {
@@ -34,10 +39,38 @@ const LiveResultsWithDB = () => {
       setLoading(true);
       setError(null);
 
-      // Lade Match-Daten
+      // Lade aktuellen User
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setError('Benutzer nicht authentifiziert');
+        return;
+      }
+
+      // Lade Spieler-Daten des aktuellen Users
+      const { data: currentPlayer, error: playerError } = await supabase
+        .from('players_unified')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .single();
+
+      if (playerError || !currentPlayer) {
+        setError('Spieler-Profil nicht gefunden');
+        return;
+      }
+
+      // Lade Match-Daten mit Team-Info
       const { data: matchData, error: matchError } = await supabase
         .from('matches')
-        .select('*')
+        .select(`
+          *,
+          team_info!matches_team_id_fkey (
+            id,
+            club_name,
+            team_name,
+            category
+          )
+        `)
         .eq('id', matchId)
         .single();
 
@@ -48,28 +81,58 @@ const LiveResultsWithDB = () => {
       }
 
       setMatch(matchData);
+      
+      // Hole team_id und Team-Info vom Match (Heim-Team)
+      const matchTeamId = matchData.team_id;
+      const homeTeamInfo = matchData.team_info;
+      if (!matchTeamId) {
+        setError('Match hat keine Team-Zuordnung');
+        return;
+      }
+      
+      // Finde Gegner-Team anhand des opponent-Namens
+      let opponentTeamId = null;
+      if (matchData.opponent) {
+        const { data: opponentTeam, error: opponentTeamError } = await supabase
+          .from('team_info')
+          .select('id, team_name, club_name')
+          .ilike('team_name', `%${matchData.opponent}%`)
+          .limit(1)
+          .single();
+        
+        if (!opponentTeamError && opponentTeam) {
+          opponentTeamId = opponentTeam.id;
+          console.log('✅ Gegner-Team gefunden:', opponentTeam.team_name, 'ID:', opponentTeamId);
+        } else {
+          console.warn('⚠️ Konnte Gegner-Team nicht finden für:', matchData.opponent);
+        }
+      }
 
-      // Lade unsere Spieler
-      const { data: playersData, error: playersError } = await supabase
-        .from('players')
-        .select('id, name, ranking')
-        .eq('is_active', true)
+      // Lade Team-Mitglieder des Match-Teams (Heim-Spieler)
+      const { data: teamMembers, error: teamError } = await supabase
+        .from('team_memberships')
+        .select('player_id')
+        .eq('team_id', matchTeamId);
+
+      const teamMemberIds = (teamMembers || []).map(tm => tm.player_id);
+
+      // Lade unsere Spieler aus dem Team (Heim-Spieler) - ALLE (aktiv + inaktiv)
+      const { data: teamPlayersData, error: teamPlayersError } = await supabase
+        .from('players_unified')
+        .select('id, name, current_lk, season_start_lk, ranking')
+        .in('id', teamMemberIds)
         .order('name');
 
-      if (playersError) {
-        console.error('Error loading players:', playersError);
-        setError('Spieler konnten nicht geladen werden');
+      if (teamPlayersError) {
+        console.error('Error loading team players:', teamPlayersError);
+        setError('Team-Spieler konnten nicht geladen werden');
         return;
       }
 
       // Lade Verfügbarkeits-Daten für das Match
       const { data: availabilityData, error: availabilityError } = await supabase
         .from('match_availability')
-        .select(`
-          player_id,
-          status,
-          players!inner(id, name, ranking)
-        `)
+        .select('player_id, status')
         .eq('match_id', matchId);
 
       if (availabilityError) {
@@ -78,23 +141,52 @@ const LiveResultsWithDB = () => {
       }
 
       // Gruppiere Spieler: Zuerst angemeldete, dann alle anderen
-      const allPlayers = playersData || [];
+      const allTeamPlayers = teamPlayersData || [];
       const availablePlayerIds = (availabilityData || [])
         .filter(avail => avail.status === 'available')
         .map(avail => avail.player_id);
 
-      const availablePlayers = allPlayers.filter(player => availablePlayerIds.includes(player.id));
-      const otherPlayers = allPlayers.filter(player => !availablePlayerIds.includes(player.id));
+      const availablePlayers = allTeamPlayers.filter(player => availablePlayerIds.includes(player.id));
+      const otherPlayers = allTeamPlayers.filter(player => !availablePlayerIds.includes(player.id));
 
       setHomePlayers({
         available: availablePlayers,
         others: otherPlayers
       });
 
-      // Lade Gegner-Spieler (basierend auf Match-Opponent)
-      if (matchData?.opponent) {
-        const guestPlayers = await getOpponentPlayers(matchData.opponent, '2024/25');
-        setOpponentPlayers(guestPlayers || []);
+      // Lade Gegner-Spieler: Nur Spieler der Gegner-Mannschaft
+      let allOpponents = [];
+      if (opponentTeamId) {
+        // Lade Team-Mitglieder des Gegner-Teams
+        const { data: opponentTeamMembers, error: opponentTeamError } = await supabase
+          .from('team_memberships')
+          .select('player_id')
+          .eq('team_id', opponentTeamId);
+        
+        const opponentTeamMemberIds = (opponentTeamMembers || []).map(tm => tm.player_id);
+        
+        if (opponentTeamMemberIds.length > 0) {
+          // Lade Spieler der Gegner-Mannschaft - ALLE (aktiv + inaktiv)
+          const { data: opponentsData, error: opponentsError } = await supabase
+            .from('players_unified')
+            .select('id, name, current_lk, season_start_lk')
+            .in('id', opponentTeamMemberIds)
+            .order('name');
+          
+          if (opponentsError) {
+            console.warn('⚠️ Konnte Gegner-Spieler nicht laden:', opponentsError);
+            setOpponentPlayers([]);
+          } else {
+            allOpponents = opponentsData || [];
+            setOpponentPlayers(allOpponents);
+          }
+        } else {
+          console.warn('⚠️ Gegner-Mannschaft hat keine Spieler');
+          setOpponentPlayers([]);
+        }
+      } else {
+        console.warn('⚠️ Konnte Gegner-Team nicht identifizieren');
+        setOpponentPlayers([]);
       }
 
       // Lade bereits gespeicherte Ergebnisse
@@ -310,6 +402,13 @@ const LiveResultsWithDB = () => {
   };
 
   const handlePlayerSelect = (matchId, playerType, playerId) => {
+    // Prüfe ob Freitext-Modal geöffnet werden soll
+    if (playerId === '__freetext__') {
+      setFreeTextContext({ matchId, playerType });
+      setShowFreeTextModal(true);
+      return;
+    }
+    
     setMatchResults(prev => prev.map(match => {
       if (match.id === matchId) {
         if (match.type === 'Einzel') {
@@ -324,6 +423,64 @@ const LiveResultsWithDB = () => {
       }
       return match;
     }));
+  };
+  
+  const handleFreeTextSubmit = () => {
+    if (!freeTextValue.trim()) {
+      alert('Bitte gib einen Spieler-Namen ein!');
+      return;
+    }
+    
+    // Schließe Modal und speichere Freitext-Wert
+    if (freeTextContext) {
+      const { matchId, playerType } = freeTextContext;
+      handlePlayerSelect(matchId, playerType, freeTextValue.trim());
+      setShowFreeTextModal(false);
+      setFreeTextValue('');
+      setFreeTextContext(null);
+    }
+  };
+  
+  // Helper-Funktion: Erstelle einen neuen Spieler in players_unified
+  const createNewPlayer = async (playerName) => {
+    try {
+      // Prüfe zuerst, ob Spieler bereits existiert
+      const { data: existingPlayer } = await supabase
+        .from('players_unified')
+        .select('id')
+        .ilike('name', playerName)
+        .limit(1)
+        .single();
+      
+      if (existingPlayer) {
+        return existingPlayer.id;
+      }
+      
+      // Erstelle neuen Spieler als inactive opponent
+      const { data: newPlayer, error: createError } = await supabase
+        .from('players_unified')
+        .insert({
+          name: playerName,
+          is_active: false,
+          player_type: 'opponent',
+          current_lk: null,
+          season_start_lk: null,
+          ranking: null
+        })
+        .select('id')
+        .single();
+      
+      if (createError) {
+        console.error('Error creating new player:', createError);
+        throw createError;
+      }
+      
+      console.log('✅ Neuer Spieler erstellt:', newPlayer.id);
+      return newPlayer.id;
+    } catch (error) {
+      console.error('Error in createNewPlayer:', error);
+      throw error;
+    }
   };
 
   const handleCommentChange = (matchId, comment) => {
@@ -365,19 +522,69 @@ const LiveResultsWithDB = () => {
         match_number: parseInt(matchData.id), // Stelle sicher, dass es eine Zahl ist
         match_type: matchData.type,
         entered_by: user.id,
-        notes: matchData.comment,
+        notes: '', // Wird später befüllt mit Kommentar + Gegner-Namen
         status: hasScoreData ? 'in_progress' : 'pending'
       };
+      
+      // Füge Kommentar hinzu (wenn vorhanden)
+      if (matchData.comment && matchData.comment.trim() !== '') {
+        resultData.notes = matchData.comment;
+      }
 
       // Füge Spieler-IDs hinzu (nur wenn nicht leer)
       if (matchData.type === 'Einzel') {
         resultData.home_player_id = matchData.homePlayer && matchData.homePlayer !== '' ? matchData.homePlayer : null;
-        resultData.guest_player_id = matchData.guestPlayer && matchData.guestPlayer !== '' ? matchData.guestPlayer : null;
+        
+        // Prüfe ob guestPlayer eine UUID ist oder ein Text
+        const guestPlayer = matchData.guestPlayer && matchData.guestPlayer !== '' ? matchData.guestPlayer : null;
+        if (guestPlayer) {
+          // Prüfe ob es eine UUID ist (enthält Bindestriche und ist 36 Zeichen lang)
+          if (guestPlayer.includes('-') && guestPlayer.length === 36) {
+            resultData.guest_player_id = guestPlayer;
+          } else {
+            // Es ist ein Text-Name - erstelle neuen Spieler in players_unified
+            console.log('🆕 Erstelle neuen Spieler:', guestPlayer);
+            const newPlayerId = await createNewPlayer(guestPlayer);
+            resultData.guest_player_id = newPlayerId;
+          }
+        } else {
+          resultData.guest_player_id = null;
+        }
       } else {
         resultData.home_player1_id = matchData.homePlayers[0] && matchData.homePlayers[0] !== '' ? matchData.homePlayers[0] : null;
         resultData.home_player2_id = matchData.homePlayers[1] && matchData.homePlayers[1] !== '' ? matchData.homePlayers[1] : null;
-        resultData.guest_player1_id = matchData.guestPlayers[0] && matchData.guestPlayers[0] !== '' ? matchData.guestPlayers[0] : null;
-        resultData.guest_player2_id = matchData.guestPlayers[1] && matchData.guestPlayers[1] !== '' ? matchData.guestPlayers[1] : null;
+        
+        // Prüfe beide Gegner-Spieler
+        const guestPlayer1 = matchData.guestPlayers[0] && matchData.guestPlayers[0] !== '' ? matchData.guestPlayers[0] : null;
+        const guestPlayer2 = matchData.guestPlayers[1] && matchData.guestPlayers[1] !== '' ? matchData.guestPlayers[1] : null;
+        
+        if (guestPlayer1) {
+          // Prüfe ob es eine UUID ist
+          if (guestPlayer1.includes('-') && guestPlayer1.length === 36) {
+            resultData.guest_player1_id = guestPlayer1;
+          } else {
+            // Erstelle neuen Spieler in players_unified
+            console.log('🆕 Erstelle neuen Spieler:', guestPlayer1);
+            const newPlayerId = await createNewPlayer(guestPlayer1);
+            resultData.guest_player1_id = newPlayerId;
+          }
+        } else {
+          resultData.guest_player1_id = null;
+        }
+        
+        if (guestPlayer2) {
+          // Prüfe ob es eine UUID ist
+          if (guestPlayer2.includes('-') && guestPlayer2.length === 36) {
+            resultData.guest_player2_id = guestPlayer2;
+          } else {
+            // Erstelle neuen Spieler in players_unified
+            console.log('🆕 Erstelle neuen Spieler:', guestPlayer2);
+            const newPlayerId = await createNewPlayer(guestPlayer2);
+            resultData.guest_player2_id = newPlayerId;
+          }
+        } else {
+          resultData.guest_player2_id = null;
+        }
       }
 
       // Füge Satz-Ergebnisse hinzu (nur wenn nicht leer)
@@ -558,54 +765,105 @@ const LiveResultsWithDB = () => {
   };
 
   const renderPlayerSelect = (matchData, playerType, playerId) => {
+    // Prüfe ob der aktuelle Wert ein Freitext ist (keine UUID)
+    const isFreeText = playerId && !playerId.includes('-') && playerId.length !== 36 && playerId !== '';
+    
     if (playerType.includes('home')) {
-      // Heim-Spieler: Gruppiert anzeigen
+      // Heim-Spieler: Kompaktes Dropdown
       return (
-        <select
-          value={playerId}
-          onChange={(e) => handlePlayerSelect(matchData.id, playerType, e.target.value)}
-          className="player-select"
-        >
-          <option value="">Spieler wählen...</option>
-          
-          {/* Angemeldete Spieler */}
-          {homePlayers.available && homePlayers.available.length > 0 && (
-            <optgroup label="✅ Angemeldete Spieler">
-              {homePlayers.available.map(player => (
-                <option key={player.id} value={player.id}>
-                  {player.name} {player.ranking && `(${player.ranking})`}
-                </option>
-              ))}
+        <div style={{ position: 'relative' }}>
+          <select
+            value={playerId}
+            onChange={(e) => handlePlayerSelect(matchData.id, playerType, e.target.value)}
+            className="player-select"
+          >
+            <option value="">Spieler wählen...</option>
+            
+            {/* Angemeldete Spieler */}
+            {homePlayers.available && homePlayers.available.length > 0 && (
+              <optgroup label="✅ Angemeldete Spieler">
+                {homePlayers.available.map(player => (
+                  <option key={player.id} value={player.id}>
+                    {player.name} {(player.current_lk || player.season_start_lk || player.ranking) && `(${player.current_lk || player.season_start_lk || player.ranking})`}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            
+            {/* Alle anderen Spieler */}
+            {homePlayers.others && homePlayers.others.length > 0 && (
+              <optgroup label="👥 Alle Spieler">
+                {homePlayers.others.map(player => (
+                  <option key={player.id} value={player.id}>
+                    {player.name} {(player.current_lk || player.season_start_lk || player.ranking) && `(${player.current_lk || player.season_start_lk || player.ranking})`}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            
+            {/* Option für Freitext-Eingabe */}
+            <optgroup label="➕">
+              <option value="__freetext__">➕ Spieler hinzufügen...</option>
             </optgroup>
-          )}
-          
-          {/* Alle anderen Spieler */}
-          {homePlayers.others && homePlayers.others.length > 0 && (
-            <optgroup label="👥 Alle Spieler">
-              {homePlayers.others.map(player => (
-                <option key={player.id} value={player.id}>
-                  {player.name} {player.ranking && `(${player.ranking})`}
-                </option>
-              ))}
-            </optgroup>
-          )}
-        </select>
+          </select>
+        </div>
       );
     } else {
-      // Gast-Spieler: Normal anzeigen
+      // Gast-Spieler: Dropdown mit allen verfügbaren Spielern + Freitext-Option
       return (
-        <select
-          value={playerId}
-          onChange={(e) => handlePlayerSelect(matchData.id, playerType, e.target.value)}
-          className="player-select"
-        >
-          <option value="">Spieler wählen...</option>
-          {opponentPlayers.map(player => (
-            <option key={player.id} value={player.id}>
-              {player.name} {player.lk && `(LK ${player.lk})`}
-            </option>
-          ))}
-        </select>
+        <div style={{ position: 'relative' }}>
+          {isFreeText ? (
+            // Zeige den Freitext-Wert als display-field
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <div 
+                style={{
+                  flex: 1,
+                  padding: '0.5rem',
+                  borderRadius: '6px',
+                  border: '1px solid #d1d5db',
+                  backgroundColor: '#f9fafb',
+                  fontSize: '0.875rem'
+                }}
+              >
+                ✏️ {playerId}
+              </div>
+              <button
+                onClick={() => {
+                  handlePlayerSelect(matchData.id, playerType, '');
+                }}
+                style={{
+                  padding: '0.5rem',
+                  borderRadius: '6px',
+                  border: '1px solid #d1d5db',
+                  backgroundColor: 'white',
+                  cursor: 'pointer'
+                }}
+              >
+                ✏️
+              </button>
+            </div>
+          ) : (
+            <select
+              value={playerId}
+              onChange={(e) => handlePlayerSelect(matchData.id, playerType, e.target.value)}
+              className="player-select"
+            >
+              <option value="">Gegner-Spieler wählen...</option>
+              
+              {/* Verfügbare Spieler aus der DB */}
+              {opponentPlayers.map(player => (
+                <option key={player.id} value={player.id}>
+                  {player.name} {(player.current_lk || player.season_start_lk) && `(LK ${player.current_lk || player.season_start_lk})`}
+                </option>
+              ))}
+              
+              {/* Option für Freitext-Eingabe */}
+              <optgroup label="➕">
+                <option value="__freetext__">➕ Spieler hinzufügen...</option>
+              </optgroup>
+            </select>
+          )}
+        </div>
       );
     }
   };
@@ -647,63 +905,64 @@ const LiveResultsWithDB = () => {
 
   const renderMatchCard = (matchData) => {
     return (
-      <div key={matchData.id} className="match-card">
-        <div className="match-header">
+      <div key={matchData.id} className="match-card-editable">
+        <div className="match-header-editable">
           <h3>{matchData.title} - {matchData.type}</h3>
         </div>
 
         {matchData.type === 'Einzel' ? (
-          <div className="player-selection">
-            <div className="player-info">
-              <div className="player-icon">🏆</div>
+          <div className="player-selection-editable">
+            <div className="player-row-editable">
+              <span className="player-label-editable">🏆 Heim-Spieler:</span>
               {renderPlayerSelect(matchData, 'homePlayer', matchData.homePlayer)}
             </div>
-            <div className="vs">vs</div>
-            <div className="player-info">
-              <div className="player-icon">🤡</div>
+            <div className="vs-divider">vs</div>
+            <div className="player-row-editable">
+              <span className="player-label-editable">🤡 Gegner:</span>
               {renderPlayerSelect(matchData, 'guestPlayer', matchData.guestPlayer)}
             </div>
           </div>
         ) : (
-          <div className="player-selection">
-            <div className="team-players">
-              <div className="team-players-inline">
-                <div className="player-icon">🏆</div>
-                {renderPlayerSelect(matchData, 'homePlayer1', matchData.homePlayers[0])}
-                <span className="and">und</span>
-                {renderPlayerSelect(matchData, 'homePlayer2', matchData.homePlayers[1])}
-              </div>
+          <div className="player-selection-editable">
+            <div className="player-row-editable">
+              <span className="player-label-editable">🏆 Heim-Spieler 1:</span>
+              {renderPlayerSelect(matchData, 'homePlayer1', matchData.homePlayers[0])}
             </div>
-            <div className="vs">vs</div>
-            <div className="team-players">
-              <div className="team-players-inline">
-                <div className="player-icon">🤡</div>
-                {renderPlayerSelect(matchData, 'guestPlayer1', matchData.guestPlayers[0])}
-                <span className="and">und</span>
-                {renderPlayerSelect(matchData, 'guestPlayer2', matchData.guestPlayers[1])}
-              </div>
+            <div className="player-row-editable">
+              <span className="player-label-editable">🏆 Heim-Spieler 2:</span>
+              {renderPlayerSelect(matchData, 'homePlayer2', matchData.homePlayers[1])}
+            </div>
+            <div className="vs-divider">vs</div>
+            <div className="player-row-editable">
+              <span className="player-label-editable">🤡 Gegner 1:</span>
+              {renderPlayerSelect(matchData, 'guestPlayer1', matchData.guestPlayers[0])}
+            </div>
+            <div className="player-row-editable">
+              <span className="player-label-editable">🤡 Gegner 2:</span>
+              {renderPlayerSelect(matchData, 'guestPlayer2', matchData.guestPlayers[1])}
             </div>
           </div>
         )}
 
         {renderScoreInputs(matchData)}
 
-        <div className="comment-section">
-          <label>Kommentar:</label>
+        <div className="comment-section-editable">
+          <label>💬 Kommentar:</label>
           <textarea
             value={matchData.comment}
             onChange={(e) => handleCommentChange(matchData.id, e.target.value)}
             placeholder="Zusätzliche Notizen..."
-            rows="2"
+            rows="3"
+            className="comment-textarea"
           />
         </div>
 
         <button
           onClick={() => saveMatchResult(matchData)}
           disabled={saving}
-          className="save-button"
+          className="save-button-editable"
         >
-          <Save size={16} />
+          <Save size={20} />
           {saving ? 'Speichere...' : 'Ergebnis speichern'}
         </button>
       </div>
@@ -742,6 +1001,19 @@ const LiveResultsWithDB = () => {
             </button>
             <h1>🎾 Live-Ergebnisse</h1>
           </div>
+          {match?.team_info && (
+            <div className="match-teams-info">
+              <div className="team-badge home">
+                <span className="team-label">Heim:</span>
+                <span className="team-name">{match.team_info.club_name} {match.team_info.team_name}</span>
+              </div>
+              <span className="vs-badge">vs</span>
+              <div className="team-badge away">
+                <span className="team-label">Auswärts:</span>
+                <span className="team-name">{match.opponent}</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -775,6 +1047,91 @@ const LiveResultsWithDB = () => {
           Zurück zur Spielübersicht
         </button>
       </div>
+      
+      {/* Freitext-Modal für neue Spieler */}
+      {showFreeTextModal && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
+          }}
+        >
+          <div 
+            style={{
+              backgroundColor: 'white',
+              padding: '2rem',
+              borderRadius: '12px',
+              maxWidth: '400px',
+              width: '90%',
+              boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+            }}
+          >
+            <h3 style={{ margin: '0 0 1rem 0' }}>✏️ Neuer Spieler</h3>
+            <p style={{ margin: '0 0 1rem 0', color: '#666' }}>
+              Gib den Namen des Gegners ein:
+            </p>
+            <input
+              type="text"
+              value={freeTextValue}
+              onChange={(e) => setFreeTextValue(e.target.value)}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') {
+                  handleFreeTextSubmit();
+                }
+              }}
+              placeholder="Spieler-Name eingeben..."
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                borderRadius: '6px',
+                border: '1px solid #d1d5db',
+                fontSize: '1rem',
+                marginBottom: '1rem'
+              }}
+              autoFocus
+            />
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => {
+                  setShowFreeTextModal(false);
+                  setFreeTextValue('');
+                  setFreeTextContext(null);
+                }}
+                style={{
+                  padding: '0.5rem 1rem',
+                  borderRadius: '6px',
+                  border: '1px solid #d1d5db',
+                  backgroundColor: 'white',
+                  cursor: 'pointer'
+                }}
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={handleFreeTextSubmit}
+                style={{
+                  padding: '0.5rem 1rem',
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: '#3b82f6',
+                  color: 'white',
+                  cursor: 'pointer'
+                }}
+              >
+                Übernehmen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
