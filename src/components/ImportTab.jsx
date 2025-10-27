@@ -272,22 +272,39 @@ const ImportTab = () => {
         // Bestimme home/away (basierend auf Spielort oder is_home_match)
         const isHomeMatch = match.is_home_match || match.venue?.toLowerCase().includes(ourTeamData.club_name?.toLowerCase() || '');
         
+        // WICHTIG: Wenn Gegner nicht gefunden wurde, setze IMMER unser Team als home_team
+        // und opponent als away_team (auch wenn NULL)
+        const homeTeamId = opponentTeamData 
+          ? (isHomeMatch ? ourTeamData.id : opponentTeamData.id)
+          : ourTeamData.id; // Fallback: unser Team als home_team
+        
+        const awayTeamId = opponentTeamData 
+          ? (isHomeMatch ? opponentTeamData.id : ourTeamData.id)
+          : null; // NULL ist erlaubt für away_team_id
+        
         // Parse Score (z.B. "2:1" → home_score=2, away_score=1)
         let homeScore = 0;
         let awayScore = 0;
         if (match.match_points && match.match_points.includes(':')) {
           const [h, a] = match.match_points.split(':').map(s => parseInt(s.trim()) || 0);
-          homeScore = isHomeMatch ? h : a;
-          awayScore = isHomeMatch ? a : h;
+          // Wenn Gegner nicht gefunden, nehmen wir an, dass unser Team immer "home" spielt
+          if (opponentTeamData) {
+            homeScore = isHomeMatch ? h : a;
+            awayScore = isHomeMatch ? a : h;
+          } else {
+            // Wenn kein Gegner gefunden, übernehme Score unverändert
+            homeScore = h;
+            awayScore = a;
+          }
         }
 
         matchdaysToCreate.push({
-          home_team_id: isHomeMatch ? ourTeamData.id : opponentTeamData?.id,
-          away_team_id: isHomeMatch ? opponentTeamData?.id : ourTeamData.id,
+          home_team_id: homeTeamId,
+          away_team_id: awayTeamId,
           match_date: matchDateTime.toISOString(),
           start_time: startTime.substring(0, 5), // "15:00"
           venue: match.venue || null,
-          location: isHomeMatch ? 'Home' : 'Away',
+          location: opponentTeamData ? (isHomeMatch ? 'Home' : 'Away') : 'Home',
           season: parsedData.season?.toLowerCase().includes('winter') ? 'winter' : 'summer',
           league: parsedData.league || ourTeamData.league || null,
           group_name: parsedData.group_name || ourTeamData.group_name || null,
