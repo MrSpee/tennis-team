@@ -248,21 +248,46 @@ const ImportTab = () => {
         ourTeamData.group_name = seasonData.group_name;
       }
 
-      // SCHRITT 4: Finde Gegner-Teams und erstelle matchdays
+      // SCHRITT 4: Finde oder erstelle Gegner-Teams und erstelle matchdays
       const matchdaysToCreate = [];
       
       for (const match of uniqueMatches) {
         // Finde Gegner-Team per Name-Lookup
-        const { data: opponentTeamData } = await supabase
+        let { data: opponentTeamData } = await supabase
           .from('team_info')
           .select('id')
           .or(`team_name.ilike.%${match.opponent}%,club_name.ilike.%${match.opponent}%`)
           .limit(1)
-          .single();
+          .maybeSingle();
 
-        // Wenn Gegner nicht gefunden, Warnung aber trotzdem importieren (away_team_id = NULL ist erlaubt)
+        // Wenn Gegner nicht gefunden, erstelle ein neues Team automatisch
         if (!opponentTeamData) {
-          console.warn(`⚠️ Gegner-Team "${match.opponent}" nicht gefunden. Import mit NULL away_team_id.`);
+          console.warn(`⚠️ Gegner-Team "${match.opponent}" nicht gefunden. Erstelle automatisch...`);
+          
+          // Parse Gegner-Name (z.B. "TV Dellbrück 1" → club: "TV Dellbrück", team: "1")
+          const opponentParts = match.opponent.split(' ');
+          const clubName = opponentParts.slice(0, -1).join(' ') || match.opponent;
+          const teamName = opponentParts[opponentParts.length - 1] || null;
+          
+          // Erstelle Gegner-Team
+          const { data: newTeam, error: createError } = await supabase
+            .from('team_info')
+            .insert({
+              club_name: clubName,
+              team_name: teamName,
+              category: 'Gegner',
+              is_active: false // Markiere als inaktives Gegner-Team
+            })
+            .select('id')
+            .single();
+          
+          if (createError || !newTeam) {
+            console.error(`❌ Fehler beim Erstellen des Gegner-Teams "${match.opponent}":`, createError);
+            throw new Error(`Gegner-Team "${match.opponent}" konnte nicht erstellt werden`);
+          }
+          
+          opponentTeamData = newTeam;
+          console.log(`✅ Gegner-Team erstellt: ${clubName} ${teamName} (ID: ${newTeam.id})`);
         }
 
         // Parse Datum und Zeit
@@ -272,15 +297,9 @@ const ImportTab = () => {
         // Bestimme home/away (basierend auf Spielort oder is_home_match)
         const isHomeMatch = match.is_home_match || match.venue?.toLowerCase().includes(ourTeamData.club_name?.toLowerCase() || '');
         
-        // WICHTIG: Wenn Gegner nicht gefunden wurde, setze IMMER unser Team als home_team
-        // und opponent als away_team (auch wenn NULL)
-        const homeTeamId = opponentTeamData 
-          ? (isHomeMatch ? ourTeamData.id : opponentTeamData.id)
-          : ourTeamData.id; // Fallback: unser Team als home_team
-        
-        const awayTeamId = opponentTeamData 
-          ? (isHomeMatch ? opponentTeamData.id : ourTeamData.id)
-          : null; // NULL ist erlaubt für away_team_id
+        // Jetzt haben wir IMMER ein opponentTeamData (entweder gefunden oder erstellt)
+        const homeTeamId = isHomeMatch ? ourTeamData.id : opponentTeamData.id;
+        const awayTeamId = isHomeMatch ? opponentTeamData.id : ourTeamData.id;
         
         // Parse Score (z.B. "2:1" → home_score=2, away_score=1)
         let homeScore = 0;
