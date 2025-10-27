@@ -618,13 +618,19 @@ const Results = () => {
                 color: '#0c4a6e'
               }}>
                 <div style={{ fontWeight: '600', marginBottom: '0.25rem' }}>
-                  👤 Deine Mannschaften:
+                  👤 {selectedTeamId ? 'Gefilterte Mannschaft:' : 'Deine Mannschaften:'}
                 </div>
-                {playerTeams.map(team => (
-                  <div key={team.id} style={{ marginLeft: '1rem' }}>
-                    🏢 {team.club_name} - {team.team_name} ({team.category})
+                {selectedTeamId ? (
+                  <div style={{ marginLeft: '1rem' }}>
+                    🏢 {playerTeams.find(t => t.id === selectedTeamId)?.club_name} - {playerTeams.find(t => t.id === selectedTeamId)?.team_name} ({playerTeams.find(t => t.id === selectedTeamId)?.category})
                   </div>
-                ))}
+                ) : (
+                  playerTeams.map(team => (
+                    <div key={team.id} style={{ marginLeft: '1rem' }}>
+                      🏢 {team.club_name} - {team.team_name} ({team.category})
+                    </div>
+                  ))
+                )}
               </div>
               
               {/* Team-Selector - nur in Mannschafts-Ansicht und nur wenn > 1 Team */}
