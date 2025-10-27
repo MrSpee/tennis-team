@@ -907,7 +907,9 @@ function Training() {
         
         // Log Training-Zusage/Absage
         try {
-          await LoggingService.logTrainingResponse(sessionId, status, player.id);
+          // Mappe 'confirmed'/'declined' zu 'confirm'/'decline' für Logging
+          const logStatus = status === 'confirmed' ? 'confirm' : 'decline';
+          await LoggingService.logTrainingResponse(sessionId, logStatus, player.id);
         } catch (logError) {
           console.warn('⚠️ Logging failed (non-critical):', logError);
         }

@@ -28,3 +28,4 @@ SELECT 'VKC Köln Club' as info, id, name, city, is_verified
 FROM club_info
 WHERE name = 'VKC Köln';
 
+

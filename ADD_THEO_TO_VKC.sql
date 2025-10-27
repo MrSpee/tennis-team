@@ -66,3 +66,4 @@ JOIN players_unified pu ON tm.player_id = pu.id
 WHERE pu.name = 'Theo Tester'
   AND ti.club_name = 'VKC Köln';
 
+

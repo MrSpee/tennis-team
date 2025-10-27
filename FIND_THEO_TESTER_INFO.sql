@@ -27,3 +27,4 @@ WHERE m.team_id IN (
   FROM team_memberships tm 
   WHERE tm.player_id = (SELECT id FROM players_unified WHERE email = 'jorzig@gmail.com' LIMIT 1)
 );
+

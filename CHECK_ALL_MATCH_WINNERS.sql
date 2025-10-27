@@ -42,3 +42,4 @@ WHERE calculated_winner IS NOT NULL
 ORDER BY 
   CASE WHEN stored_winner != calculated_winner THEN 0 ELSE 1 END,
   match_id;
+

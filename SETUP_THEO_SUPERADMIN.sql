@@ -54,3 +54,4 @@ WHERE pu.id = 'faaf92cf-e050-421f-8d2b-5880d5f11a62'
   AND ti.club_name = 'VKC Köln'
 ORDER BY tm.is_primary DESC;
 
+

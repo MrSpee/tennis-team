@@ -228,3 +228,4 @@ LIMIT 1;
 
 Bei Problemen: Check Browser Console & Supabase Logs
 
+

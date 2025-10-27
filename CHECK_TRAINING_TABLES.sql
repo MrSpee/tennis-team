@@ -26,3 +26,4 @@ SELECT * FROM training_attendance LIMIT 3;
 SELECT * FROM training_sessions LIMIT 3;
 SELECT * FROM training_sessions_with_access LIMIT 3;
 
+

@@ -47,3 +47,4 @@ WHERE ts.organizer_id IS NOT NULL
     OR NOT (ts.organizer_id = ANY(ts.invited_players))
   );
 
+

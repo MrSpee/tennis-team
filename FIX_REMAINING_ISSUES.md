@@ -47,3 +47,4 @@ Für sofortiges Testing können wir auch diese SQL-Scripts erstellen:
 - ⚠️ KI-Import API nur in Vercel Production verfügbar
 - 💡 Workaround: Manueller Import via SQL oder Parse-Logic ohne API
 
+

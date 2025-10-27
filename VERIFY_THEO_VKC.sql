@@ -31,3 +31,4 @@ FROM team_info
 WHERE club_name = 'VKC Köln'
 ORDER BY team_name, category;
 
+

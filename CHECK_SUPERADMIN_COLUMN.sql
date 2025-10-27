@@ -11,3 +11,4 @@ FROM information_schema.columns
 WHERE table_name = 'players_unified'
 ORDER BY ordinal_position;
 
+

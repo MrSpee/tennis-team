@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
+import { LoggingService } from '../services/activityLogger';
 import './ImportTab.css';
 
 const ImportTab = () => {
@@ -244,6 +245,23 @@ const ImportTab = () => {
       if (insertError) throw insertError;
 
       console.log('✅ Import successful:', data);
+
+      // Log KI-Match Import Aktivität
+      try {
+        for (const match of data) {
+          await LoggingService.logActivity('ki_import_match', 'match', match.id, {
+            match_date: match.match_date,
+            opponent: match.opponent,
+            location: match.location,
+            venue: match.venue,
+            season: match.season,
+            team_id: teamId,
+            import_source: 'tvm_import'
+          });
+        }
+      } catch (logError) {
+        console.warn('⚠️ Logging failed (non-critical):', logError);
+      }
 
       // Stats
       setImportStats({
@@ -530,6 +548,20 @@ const ImportTab = () => {
           // Verknüpfe Spieler mit Team
           if (teamId) {
             await linkPlayerToTeam(newImportedPlayer.id, teamId, playerData.is_captain);
+          }
+
+          // Log KI-Import Aktivität
+          try {
+            await LoggingService.logActivity('ki_import_player', 'player', newImportedPlayer.id, {
+              player_name: playerData.name,
+              player_lk: playerData.lk,
+              tvm_id_number: playerData.id_number,
+              is_captain: playerData.is_captain,
+              team_id: teamId,
+              import_source: 'tvm_import'
+            });
+          } catch (logError) {
+            console.warn('⚠️ Logging failed (non-critical):', logError);
           }
         }
       }

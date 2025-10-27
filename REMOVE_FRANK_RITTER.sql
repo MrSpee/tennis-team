@@ -56,3 +56,4 @@ AND ts.date >= CURRENT_DATE;
 -- entfernt. Vergangene Trainings bleiben unberührt.
 -- ============================================================================
 
+

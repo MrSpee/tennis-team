@@ -941,7 +941,9 @@ function SuperAdminDashboard() {
       'page_navigation': 'Seiten-Navigation',
       'error_occurred': 'Fehler aufgetreten',
       'club_approve': 'Verein genehmigt',
-      'club_reject': 'Verein abgelehnt'
+      'club_reject': 'Verein abgelehnt',
+      'ki_import_player': 'KI-Import: Spieler',
+      'ki_import_match': 'KI-Import: Match'
     };
     return labelMap[action] || action.replace(/_/g, ' ');
   };
@@ -972,7 +974,9 @@ function SuperAdminDashboard() {
       'page_navigation': '🧭',
       'error_occurred': '⚠️',
       'club_approve': '✅',
-      'club_reject': '❌'
+      'club_reject': '❌',
+      'ki_import_player': '🤖',
+      'ki_import_match': '🤖'
     };
     return iconMap[action] || '📝';
   };
@@ -1001,7 +1005,9 @@ function SuperAdminDashboard() {
       'page_navigation': '#6b7280',
       'error_occurred': '#ef4444',
       'club_approve': '#10b981',
-      'club_reject': '#ef4444'
+      'club_reject': '#ef4444',
+      'ki_import_player': '#8b5cf6',
+      'ki_import_match': '#8b5cf6'
     };
     return colorMap[action] || '#6b7280';
   };
@@ -1773,10 +1779,10 @@ function SuperAdminDashboard() {
                               borderRadius: '4px',
                               fontSize: '0.75rem',
                               fontWeight: '600',
-                              background: log.details.response === 'available' ? '#dcfce7' : '#fee2e2',
-                              color: log.details.response === 'available' ? '#15803d' : '#991b1b'
+                              background: (log.details.response === 'available' || log.details.response === 'confirm' || log.details.response === 'confirmed') ? '#dcfce7' : '#fee2e2',
+                              color: (log.details.response === 'available' || log.details.response === 'confirm' || log.details.response === 'confirmed') ? '#15803d' : '#991b1b'
                             }}>
-                              {log.details.response === 'available' ? '✅ Verfügbar' : '❌ Nicht verfügbar'}
+                              {log.details.response === 'available' || log.details.response === 'confirm' || log.details.response === 'confirmed' ? '✅ Verfügbar' : '❌ Nicht verfügbar'}
                             </div>
                           )}
                         </div>

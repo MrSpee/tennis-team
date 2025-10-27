@@ -58,3 +58,4 @@ WHERE '43427aa7-771f-4e47-8858-c8454a1b9fee' = ANY(ts.invited_players)
 ORDER BY ts.date DESC
 LIMIT 10;
 
+

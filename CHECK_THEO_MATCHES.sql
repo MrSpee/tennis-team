@@ -19,3 +19,4 @@ JOIN team_info ti ON m.team_id = ti.id
 WHERE ti.club_name = 'VKC Köln'
 ORDER BY m.match_date DESC
 LIMIT 10;
+

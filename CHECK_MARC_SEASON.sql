@@ -50,3 +50,4 @@ WHERE ta.status = 'confirmed'
   AND DATE(ts.date) <= CURRENT_DATE -- Nur vergangene Trainings
   AND ts.type = 'private';
 
+
