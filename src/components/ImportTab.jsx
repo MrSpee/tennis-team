@@ -279,8 +279,8 @@ const ImportTab = () => {
             .insert({
               club_name: clubName,
               team_name: teamName,
-              category: category,
-              is_active: false // Nicht aktiv in unserer App, aber vollwertig in der DB
+              category: category
+              // Kein is_active Feld - team_info hat das nicht!
             })
             .select('id')
             .single();
