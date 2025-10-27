@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Users, TrendingUp } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { supabase } from '../lib/supabaseClient';
@@ -463,10 +463,21 @@ function Rankings() {
   // 5. RENDER
   // ==========================================
   
-  const availableClubs = [...new Set(playerTeams?.map(t => ({
-    id: t.club_id || t.team_info?.club_id,
-    name: t.club_name || t.team_info?.club_name
-  })).filter(c => c.id && c.name) || [])];
+  // Extrahiere eindeutige Vereine basierend auf club_id
+  const availableClubs = useMemo(() => {
+    if (!playerTeams || playerTeams.length === 0) return [];
+    
+    const clubsMap = new Map();
+    playerTeams.forEach(team => {
+      const clubId = team.club_id || team.team_info?.club_id;
+      const clubName = team.club_name || team.team_info?.club_name;
+      if (clubId && clubName && !clubsMap.has(clubId)) {
+        clubsMap.set(clubId, { id: clubId, name: clubName });
+      }
+    });
+    
+    return Array.from(clubsMap.values());
+  }, [playerTeams]);
   
   return (
     <div className="dashboard container">
