@@ -510,19 +510,12 @@ const ImportTab = () => {
           .insert({
             name: playerData.name,
             current_lk: playerData.lk || null,
-            tvm_id_number: playerData.id_number || null,
-            primary_team_id: teamId || null, // NULL erlaubt (kein Team)
-            position: playerData.position || null,
+            tvm_id_number: playerData.id_number || null, // ⚠️ WICHTIG: Für eindeutige Zuordnung!
             is_captain: playerData.is_captain || false,
-            status: 'pending',
             player_type: 'app_user',
             is_active: false, // ⚠️ WICHTIG: Noch kein Account!
             user_id: null, // ⚠️ WICHTIG: Noch kein Login!
-            onboarding_status: 'not_started',
-            import_source: 'tvm_import',
-            merged_from_player_id: null,
-            invited_at: new Date().toISOString(),
-            onboarded_at: null
+            import_source: 'tvm_import'
           })
           .select('id')
           .single();
@@ -532,7 +525,12 @@ const ImportTab = () => {
           skipped++;
         } else {
           created++;
-          console.log('✅ Imported player created (will be linked during onboarding)');
+          console.log('✅ Imported player created:', playerData.name, 'ID:', newImportedPlayer.id);
+          
+          // Verknüpfe Spieler mit Team
+          if (teamId) {
+            await linkPlayerToTeam(newImportedPlayer.id, teamId, playerData.is_captain);
+          }
         }
       }
 
