@@ -269,14 +269,18 @@ const ImportTab = () => {
           const clubName = opponentParts.slice(0, -1).join(' ') || match.opponent;
           const teamName = opponentParts[opponentParts.length - 1] || null;
           
-          // Erstelle Gegner-Team
+          // Versuche, category aus dem Team-Namen abzuleiten (z.B. "Herren 40 1" → "Herren 40")
+          // oder verwende die category vom eigenen Team als Referenz
+          const category = ourTeamData.category || null;
+          
+          // Erstelle Gegner-Team als vollwertiges Team in unserer Datenbank
           const { data: newTeam, error: createError } = await supabase
             .from('team_info')
             .insert({
               club_name: clubName,
               team_name: teamName,
-              category: 'Gegner',
-              is_active: false // Markiere als inaktives Gegner-Team
+              category: category,
+              is_active: false // Nicht aktiv in unserer App, aber vollwertig in der DB
             })
             .select('id')
             .single();
