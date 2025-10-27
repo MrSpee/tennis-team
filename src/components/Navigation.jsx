@@ -15,7 +15,7 @@ function Navigation() {
       
       <NavLink to="/matches" className="nav-item">
         <Calendar size={24} />
-        <span>Verfügbarkeit</span>
+        <span>Saison</span>
       </NavLink>
       
       <NavLink to="/training" className="nav-item">

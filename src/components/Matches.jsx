@@ -155,7 +155,7 @@ function Matches() {
       {/* Header - Moderner Dashboard-Stil */}
       <div className="fade-in" style={{ marginBottom: '1rem', paddingTop: '0.5rem' }}>
         <h1 className="hi">
-          Meine Verfügbarkeit 📅
+          Meine Saison planen 📅
         </h1>
       </div>
 
@@ -474,7 +474,7 @@ function Matches() {
                           className="btn-availability-main"
                         >
                           <span style={{ fontSize: '1.2rem' }}>📅</span>
-                          <span>Verfügbarkeit angeben</span>
+                          <span>Teilnahme angeben</span>
                         </button>
                       ) : null
                     )}
@@ -616,7 +616,7 @@ function Matches() {
           <div className="no-results">
             <div style={{ fontSize: '3rem' }}>📅</div>
             <h3>Keine kommenden Spiele</h3>
-            <p>Sobald neue Spiele geplant sind, kannst du hier deine Verfügbarkeit angeben.</p>
+            <p>Sobald neue Spiele geplant sind, kannst du hier deine Teilnahme angeben.</p>
           </div>
         )}
         </div>
