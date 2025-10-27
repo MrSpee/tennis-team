@@ -571,23 +571,20 @@ const Results = () => {
       {viewMode === 'mannschaft' ? (
         /* Mannschafts-Ansicht Card */
         (() => {
-          // Filter Matches basierend auf Spieler-Teams
+          // Filter Matches basierend auf gewähltem Team (oder alle Teams)
           const filteredMatches = matches.filter(match => {
-            // Nur Matches der Mannschaften des Spielers anzeigen
-            const playerTeamIds = playerTeams.map(team => team.id);
-            
-            // Wenn Match teamInfo hat: Prüfe ob es zu einer Spieler-Mannschaft gehört
-            if (match.teamInfo) {
-              return playerTeamIds.includes(match.teamInfo.id);
+            if (!match.teamInfo) {
+              return false; // Keine Matches ohne teamInfo anzeigen
             }
             
-            // Matches ohne teamInfo: Nur anzeigen wenn selectedTeamId gesetzt ist (Fallback)
+            // Wenn ein spezifisches Team ausgewählt ist: Nur Matches von diesem Team
             if (selectedTeamId) {
-              return true;
+              return match.teamInfo.id === selectedTeamId;
             }
             
-            // Standard: Keine Matches ohne teamInfo anzeigen
-            return false;
+            // Wenn kein Team ausgewählt: Zeige alle Matches von allen Spieler-Teams
+            const playerTeamIds = playerTeams.map(team => team.id);
+            return playerTeamIds.includes(match.teamInfo.id);
           });
           
           console.log('🔍 Filter Debug:', {
