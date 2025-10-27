@@ -273,30 +273,76 @@ export function DataProvider({ children }) {
 
       // console.log('🔒 Loading matches for player teams:', playerTeamIds);
 
-      const { data, error } = await supabase
-        .from('matches')
-        .select(`
-          *,
-          team_info!matches_team_id_fkey (
-            id,
-            club_name,
-            team_name,
-            category
-          ),
-          match_availability (
-            id,
-            player_id,
-            status,
-            comment,
-            players (
+      // Versuche zuerst matchdays zu laden (neue Struktur)
+      let data = null;
+      let error = null;
+      
+      try {
+        const result = await supabase
+          .from('matchdays')
+          .select(`
+            *,
+            home_team:home_team_id (
               id,
-              name,
-              ranking
+              club_name,
+              team_name,
+              category
+            ),
+            away_team:away_team_id (
+              id,
+              club_name,
+              team_name,
+              category
+            ),
+            match_availability (
+              id,
+              player_id,
+              status,
+              comment,
+              player:player_id (
+                id,
+                name,
+                ranking
+              )
             )
-          )
-        `)
-        .in('team_id', playerTeamIds)  // 🔒 FILTERUNG: Nur Matches der eigenen Teams!
-        .order('match_date', { ascending: true });
+          `)
+          .or(`home_team_id.in.(${playerTeamIds.join(',')}),away_team_id.in.(${playerTeamIds.join(',')})`)
+          .order('match_date', { ascending: true });
+        
+        data = result.data;
+        error = result.error;
+      } catch (err) {
+        console.warn('⚠️ matchdays Tabelle existiert noch nicht, versuche matches:', err);
+        
+        // Fallback: Nutze alte matches Tabelle
+        const result = await supabase
+          .from('matches')
+          .select(`
+            *,
+            team_info!matches_team_id_fkey (
+              id,
+              club_name,
+              team_name,
+              category
+            ),
+            match_availability (
+              id,
+              player_id,
+              status,
+              comment,
+              players!inner (
+                id,
+                name,
+                ranking
+              )
+            )
+          `)
+          .in('team_id', playerTeamIds)
+          .order('match_date', { ascending: true });
+        
+        data = result.data;
+        error = result.error;
+      }
 
       if (error) {
         console.error('Error loading matches:', error);
@@ -305,33 +351,69 @@ export function DataProvider({ children }) {
 
       console.log('✅ Matches loaded from DB (filtered by player teams):', data?.length || 0, 'matches');
 
-      // Transformiere Daten - verwende playerId als Key (nicht Name!)
-      let transformedMatches = data.map(match => ({
-        id: match.id,
-        date: new Date(match.match_date),
-        opponent: match.opponent,
-        location: match.location,
-        venue: match.venue,
-        season: match.season,
-        playersNeeded: match.players_needed,
-        teamId: match.team_id,
-        // Team-Info für Badge UND Filter
-        teamInfo: match.team_info ? {
-          id: match.team_info.id, // WICHTIG: ID für Filterung!
-          clubName: match.team_info.club_name,
-          teamName: match.team_info.team_name,
-          category: match.team_info.category
-        } : null,
-        availability: match.match_availability.reduce((acc, avail) => {
-          // Verwende player_id als Key für schnellen Zugriff
-          acc[avail.player_id] = {
-            status: avail.status,
-            comment: avail.comment,
-            playerName: avail.players?.name || 'Unbekannt'
+      // Transformiere Daten - handle sowohl matchdays als auch matches
+      let transformedMatches = data.map(matchday => {
+        // Prüfe ob es matchdays (neue Struktur) oder matches (alte Struktur) ist
+        const isNewStructure = matchday.home_team_id || matchday.away_team_id;
+        
+        if (isNewStructure) {
+          // Neue Struktur: matchdays mit home_team_id und away_team_id
+          const isHomeTeam = matchday.home_team && matchday.home_team.id && playerTeamIds.includes(matchday.home_team.id);
+          const ourTeam = isHomeTeam ? matchday.home_team : matchday.away_team;
+          const opponentTeam = isHomeTeam ? matchday.away_team : matchday.home_team;
+          
+          return {
+            id: matchday.id,
+            date: new Date(matchday.match_date),
+            opponent: opponentTeam ? `${opponentTeam.club_name} ${opponentTeam.team_name}` : 'Gegner',
+            location: matchday.location,
+            venue: matchday.venue,
+            season: matchday.season,
+            playersNeeded: null,
+            teamId: ourTeam?.id,
+            teamInfo: ourTeam ? {
+              id: ourTeam.id,
+              clubName: ourTeam.club_name,
+              teamName: ourTeam.team_name,
+              category: ourTeam.category
+            } : null,
+            availability: (matchday.match_availability || []).reduce((acc, avail) => {
+              acc[avail.player_id] = {
+                status: avail.status,
+                comment: avail.comment,
+                playerName: avail.player?.name || avail.players?.name || 'Unbekannt'
+              };
+              return acc;
+            }, {})
           };
-          return acc;
-        }, {})
-      }));
+        } else {
+          // Alte Struktur: matches (Fallback)
+          return {
+            id: matchday.id,
+            date: new Date(matchday.match_date),
+            opponent: matchday.opponent,
+            location: matchday.location,
+            venue: matchday.venue,
+            season: matchday.season,
+            playersNeeded: matchday.players_needed,
+            teamId: matchday.team_id,
+            teamInfo: matchday.team_info ? {
+              id: matchday.team_info.id,
+              clubName: matchday.team_info.club_name,
+              teamName: matchday.team_info.team_name,
+              category: matchday.team_info.category
+            } : null,
+            availability: (matchday.match_availability || []).reduce((acc, avail) => {
+              acc[avail.player_id] = {
+                status: avail.status,
+                comment: avail.comment,
+                playerName: avail.players?.name || 'Unbekannt'
+              };
+              return acc;
+            }, {})
+          };
+        }
+      });
 
       // TEST-DATEN deaktiviert für sauberes Development
 
@@ -584,12 +666,12 @@ export function DataProvider({ children }) {
     console.log('🗑️ DataContext - deleteMatch called for:', matchId);
     
     try {
-      // 1. Lösche zuerst alle match_availability Einträge für dieses Match
+      // 1. Lösche zuerst alle match_availability Einträge für diesen Matchday
       console.log('🔵 Deleting match_availability entries...');
       const { error: availabilityError } = await supabase
         .from('match_availability')
         .delete()
-        .eq('match_id', matchId);
+        .eq('matchday_id', matchId);
 
       if (availabilityError) {
         console.error('❌ Error deleting availability:', availabilityError);
@@ -602,7 +684,7 @@ export function DataProvider({ children }) {
       const { error: resultsError } = await supabase
         .from('match_results')
         .delete()
-        .eq('match_id', matchId);
+        .eq('matchday_id', matchId);
 
       if (resultsError) {
         console.warn('⚠️ Error deleting results (might not exist):', resultsError);
@@ -611,18 +693,18 @@ export function DataProvider({ children }) {
         console.log('✅ Match results deleted (if any)');
       }
 
-      // 3. Lösche das Match selbst
-      console.log('🔵 Deleting match...');
-      const { error: matchError } = await supabase
-        .from('matches')
+      // 3. Lösche den Matchday selbst
+      console.log('🔵 Deleting matchday...');
+      const { error: matchdayError } = await supabase
+        .from('matchdays')
         .delete()
         .eq('id', matchId);
 
-      if (matchError) {
-        console.error('❌ Error deleting match:', matchError);
-        throw matchError;
+      if (matchdayError) {
+        console.error('❌ Error deleting matchday:', matchdayError);
+        throw matchdayError;
       }
-      console.log('✅ Match deleted');
+      console.log('✅ Matchday deleted');
 
       // 4. Lade alle Matches neu
       console.log('🔵 Reloading matches...');
@@ -652,7 +734,7 @@ export function DataProvider({ children }) {
       const { data: existing, error: selectError } = await supabase
         .from('match_availability')
         .select('id')
-        .eq('match_id', matchId)
+        .eq('matchday_id', matchId)
         .eq('player_id', playerId)
         .maybeSingle();
 
@@ -677,7 +759,7 @@ export function DataProvider({ children }) {
         const { error } = await supabase
           .from('match_availability')
           .insert({
-            match_id: matchId,
+            matchday_id: matchId,
             player_id: playerId,
             status,
             comment: comment || null
@@ -788,7 +870,7 @@ export function DataProvider({ children }) {
     try {
       console.log('🔍 Importing historical availability data...');
       
-      // Lade alle Verfügbarkeits-Daten mit Spieler- und Match-Informationen
+      // Lade alle Verfügbarkeits-Daten mit Spieler- und Matchday-Informationen
       const { data: availabilityData, error } = await supabase
         .from('match_availability')
         .select(`
@@ -796,9 +878,19 @@ export function DataProvider({ children }) {
           players!match_availability_player_id_fkey (
             name
           ),
-          matches!match_availability_match_id_fkey (
-            opponent,
-            match_date
+          matchday:matchday_id (
+            id,
+            match_date,
+            home_team:home_team_id (
+              id,
+              team_name,
+              club_name
+            ),
+            away_team:away_team_id (
+              id,
+              team_name,
+              club_name
+            )
           )
         `)
         .order('created_at', { ascending: false });
@@ -811,17 +903,24 @@ export function DataProvider({ children }) {
       console.log('📊 Found historical availability records:', availabilityData?.length || 0);
 
       // Konvertiere zu Log-Format
-      const historicalLogs = availabilityData?.map(record => ({
-        timestamp: record.created_at || new Date().toISOString(),
-        playerName: record.players?.name || 'Unbekannter Spieler',
-        playerId: record.player_id,
-        matchInfo: record.matches ? `${record.matches.opponent} (${new Date(record.matches.match_date).toLocaleDateString('de-DE')})` : 'Unbekanntes Match',
-        matchId: record.match_id,
-        status: record.status,
-        comment: record.comment || null,
-        action: 'imported', // Kennzeichnung als importierte historische Daten
-        originalId: record.id
-      })) || [];
+      const historicalLogs = availabilityData?.map(record => {
+        const matchday = record.matchday;
+        const matchInfo = matchday ? 
+          `${matchday.home_team?.club_name || 'Home'} vs ${matchday.away_team?.club_name || 'Away'} (${new Date(matchday.match_date).toLocaleDateString('de-DE')})` 
+          : 'Unbekanntes Match';
+        
+        return {
+          timestamp: record.created_at || new Date().toISOString(),
+          playerName: record.players?.name || 'Unbekannter Spieler',
+          playerId: record.player_id,
+          matchInfo,
+          matchId: record.matchday_id,
+          status: record.status,
+          comment: record.comment || null,
+          action: 'imported', // Kennzeichnung als importierte historische Daten
+          originalId: record.id
+        };
+      }) || [];
 
       console.log('📝 Converted to log format:', historicalLogs.length, 'entries');
 

@@ -143,27 +143,41 @@ const MatchdayResults = () => {
       setLoading(true);
       setError(null);
 
-      // Lade Match-Daten
-      console.log('📡 Fetching match data...');
+      // Lade Matchday-Daten
+      console.log('📡 Fetching matchday data...');
       const { data: matchData, error: matchError } = await supabase
-        .from('matches')
-        .select('*')
+        .from('matchdays')
+        .select(`
+          *,
+          home_team:home_team_id (
+            id,
+            club_name,
+            team_name,
+            category
+          ),
+          away_team:away_team_id (
+            id,
+            club_name,
+            team_name,
+            category
+          )
+        `)
         .eq('id', matchId)
         .single();
 
       if (matchError) {
-        console.error('Error loading match:', matchError);
-        setError('Match nicht gefunden');
+        console.error('Error loading matchday:', matchError);
+        setError('Matchday nicht gefunden');
         return;
       }
 
       setMatch(matchData);
 
-      // Lade Match-Ergebnisse
+      // Lade Match-Ergebnisse (nutze matchday_id)
       const { data: resultsData, error: resultsError } = await supabase
         .from('match_results')
         .select('*')
-        .eq('match_id', matchId)
+        .eq('matchday_id', matchId)
         .order('match_number', { ascending: true });
 
       if (resultsError) {

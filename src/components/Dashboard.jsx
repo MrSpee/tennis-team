@@ -223,14 +223,11 @@ function Dashboard() {
                   // Nutze gemeinsame parseLK Funktion aus lkUtils
                   const startLK = parseLK(player.start_lk || player.season_start_lk || player.current_lk || 'LK 12.3');
                   const currentLKValue = parseLK(player.current_lk);
-                  const improvement = player.season_improvement || 0;
                   
                   // Dynamische Monate basierend auf heutigem Datum
                   const now = new Date();
                   const currentMonth = now.getMonth(); // 0=Jan, 11=Dez
                   const currentYear = now.getFullYear();
-                  const seasonStartDate = new Date('2025-09-01');
-                  const weeksSinceStart = Math.max(0, (now - seasonStartDate) / (7 * 24 * 60 * 60 * 1000));
                   
                   const monthNames = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
                   const monthlyData = [];
@@ -309,18 +306,29 @@ function Dashboard() {
                             <stop offset="0%" style={{ stopColor: 'var(--accent)', stopOpacity: 0.4 }} />
                             <stop offset="100%" style={{ stopColor: 'var(--accent)', stopOpacity: 0.05 }} />
                           </linearGradient>
-                          {/* Schraffur-Pattern für Prognose - SICHTBAR */}
-                          <pattern id="diagonalHatch" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)">
-                            <line x1="0" y1="0" x2="0" y2="8" style={{ stroke: 'var(--accent)', strokeWidth: 1.5, opacity: 0.4 }} />
+                          
+                          {/* Grüne Schraffur für Verbesserung (LK sinkt) */}
+                          <pattern id="diagonalHatchGreen" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)">
+                            <line x1="0" y1="0" x2="0" y2="8" style={{ stroke: '#059669', strokeWidth: 1.5, opacity: 0.5 }} />
                           </pattern>
-                          {/* Gestrichelte Linie für Prognose */}
-                          <linearGradient id="gradForecast" x1="0%" y1="0%" x2="0%" y2="100%">
-                            <stop offset="0%" style={{ stopColor: 'var(--accent)', stopOpacity: 0.25 }} />
-                            <stop offset="100%" style={{ stopColor: 'var(--accent)', stopOpacity: 0.1 }} />
-                          </linearGradient>
+                          
+                          {/* Rote Schraffur für Verschlechterung (LK steigt) */}
+                          <pattern id="diagonalHatchRed" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)">
+                            <line x1="0" y1="0" x2="0" y2="8" style={{ stroke: '#dc2626', strokeWidth: 1.5, opacity: 0.5 }} />
+                          </pattern>
                         </defs>
                         {(() => {
                           const points = monthlyData.map(d => d.lk);
+                          
+                          // Bestimme ob LK verbessert oder verschlechtert
+                          const currentLK = points[2]; // Okt (aktuell)
+                          const forecastLK = points[3]; // Nov (Prognose)
+                          const lkChange = forecastLK - currentLK;
+                          
+                          // LK wird BESSER wenn sie NIEDRIGER wird (sinkt)
+                          // LK wird SCHLECHTER wenn sie HÖHER wird (steigt)
+                          const isImprovement = lkChange < 0; // LK sinkt = Besser
+                          const forecastClass = isImprovement ? 'improvement' : 'decline';
                           
                           // Normalisiere auf SVG-Koordinaten
                           const minLK = Math.min(...points);
@@ -336,13 +344,13 @@ function Dashboard() {
                           // Pfade für normale Area (Aug-Sep-Okt)
                           const historicalPath = `M${svgPoints[0].x},${svgPoints[0].y} L${svgPoints[1].x},${svgPoints[1].y} L${svgPoints[2].x},${svgPoints[2].y} L${svgPoints[2].x},105 L${svgPoints[0].x},105 Z`;
                           
-                          // Pfad für Prognose-Area (Okt-Nov, schraffiert)
+                          // Pfad für Prognose-Area (Okt-Nov, schraffiert mit Farbe)
                           const forecastPath = `M${svgPoints[2].x},${svgPoints[2].y} L${svgPoints[3].x},${svgPoints[3].y} L${svgPoints[3].x},105 L${svgPoints[2].x},105 Z`;
                           
                           // Linien-Pfad für Vergangenheit (durchgezogen)
                           const historicalLine = `M${svgPoints[0].x},${svgPoints[0].y} L${svgPoints[1].x},${svgPoints[1].y} L${svgPoints[2].x},${svgPoints[2].y}`;
                           
-                          // Linien-Pfad für Prognose (gestrichelt)
+                          // Linien-Pfad für Prognose (gestrichelt mit Farbe)
                           const forecastLine = `M${svgPoints[2].x},${svgPoints[2].y} L${svgPoints[3].x},${svgPoints[3].y}`;
                           
                           return (
@@ -350,14 +358,14 @@ function Dashboard() {
                               {/* Normale Area (Aug-Sep-Okt) mit Gradient */}
                               <path className="area" d={historicalPath} fill="url(#grad)" />
                               
-                              {/* Schraffierte Prognose-Area (Okt-Nov) - DEUTLICH SICHTBAR */}
-                              <path className="area-forecast" d={forecastPath} fill="url(#diagonalHatch)" opacity="0.8" />
+                              {/* Schraffierte Prognose-Area (Okt-Nov) - FARBIG */}
+                              <path className={`area-forecast ${forecastClass}`} d={forecastPath} opacity="0.8" />
                               
                               {/* Durchgezogene Linie für Vergangenheit */}
                               <path className="line" d={historicalLine} strokeDasharray="none" />
                               
-                              {/* GESTRICHELTE Linie für Prognose */}
-                              <path className="line-forecast" d={forecastLine} strokeDasharray="8,4" opacity="0.7" />
+                              {/* GESTRICHELTE Linie für Prognose - FARBIG */}
+                              <path className={`line-forecast ${forecastClass}`} d={forecastLine} strokeDasharray="8,4" opacity="0.9" strokeWidth="3" />
                               
                               {/* Punkte */}
                               {svgPoints.map((p, i) => (

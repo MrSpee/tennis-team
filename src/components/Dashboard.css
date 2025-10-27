@@ -66,7 +66,7 @@
 
 /* Große Formkurve Card */
 .lk-card-full {
-  background: var(--card);
+  background: #f9fafb; /* Weiß-Grau */
   border: 1px solid var(--border);
   border-radius: 18px;
   box-shadow: var(--shadow);
@@ -177,6 +177,9 @@
 .sparkline-container {
   width: 100%;
   margin-top: 8px;
+  background: white; /* Weißer Hintergrund für die Grafik */
+  padding: 12px;
+  border-radius: 12px;
 }
 
 /* Große Sparkline (SVG) */
@@ -210,6 +213,22 @@
 
 .spark-large path.area-forecast{
   fill: url(#diagonalHatch);
+}
+
+.spark-large path.area-forecast.improvement {
+  fill: url(#diagonalHatchGreen);
+}
+
+.spark-large path.area-forecast.decline {
+  fill: url(#diagonalHatchRed);
+}
+
+.spark-large path.line-forecast.improvement {
+  stroke: #059669; /* Grün */
+}
+
+.spark-large path.line-forecast.decline {
+  stroke: #dc2626; /* Rot */
 }
 
 .spark-large circle{ 

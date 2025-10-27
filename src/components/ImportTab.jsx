@@ -198,8 +198,8 @@ const ImportTab = () => {
       
       if (duplicateCheck.duplicates.length > 0) {
         const confirmImport = window.confirm(
-          `⚠️ ${duplicateCheck.duplicates.length} Match(es) existieren bereits:\n\n` +
-          duplicateCheck.duplicates.map(d => `${d.match_date} - ${d.opponent}`).join('\n') +
+          `⚠️ ${duplicateCheck.duplicates.length} Matchday(s) existieren bereits:\n\n` +
+          duplicateCheck.duplicates.map(d => `${d.match_date}`).join('\n') +
           '\n\nTrotzdem importieren? (Duplikate werden übersprungen)'
         );
         
@@ -223,23 +223,73 @@ const ImportTab = () => {
         return;
       }
 
-      // SCHRITT 3: Formatiere für Supabase (NUR existierende Spalten!)
-      // SPALTEN: team_id, match_date, opponent, location, venue, season, players_needed, created_by
-      const formattedMatches = uniqueMatches.map(match => ({
-        team_id: teamId,
-        match_date: match.match_date + ' ' + (match.start_time || '00:00:00'),
-        opponent: match.opponent,
-        location: match.is_home_match ? 'heim' : 'auswärts',
-        venue: match.venue || null,
-        season: parsedData.season?.toLowerCase().includes('winter') ? 'winter_25_26' : 'summer_26',
-        players_needed: 4,
-        created_by: player?.id || null
-      }));
+      // SCHRITT 3: Hole unser Team für home_team_id
+      const { data: ourTeamData, error: teamError } = await supabase
+        .from('team_info')
+        .select('id, club_name, team_name, category, league, group_name')
+        .eq('id', teamId)
+        .single();
+
+      if (teamError || !ourTeamData) {
+        throw new Error('Unser Team wurde nicht gefunden');
+      }
+
+      // SCHRITT 4: Finde Gegner-Teams und erstelle matchdays
+      const matchdaysToCreate = [];
+      
+      for (const match of uniqueMatches) {
+        // Finde Gegner-Team per Name-Lookup
+        const { data: opponentTeamData } = await supabase
+          .from('team_info')
+          .select('id')
+          .or(`team_name.ilike.%${match.opponent}%,club_name.ilike.%${match.opponent}%`)
+          .limit(1)
+          .single();
+
+        // Wenn Gegner nicht gefunden, Warnung aber trotzdem importieren (away_team_id = NULL ist erlaubt)
+        if (!opponentTeamData) {
+          console.warn(`⚠️ Gegner-Team "${match.opponent}" nicht gefunden. Import mit NULL away_team_id.`);
+        }
+
+        // Parse Datum und Zeit
+        const matchDateTime = new Date(match.match_date);
+        const startTime = match.start_time || matchDateTime.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+
+        // Bestimme home/away (basierend auf Spielort oder is_home_match)
+        const isHomeMatch = match.is_home_match || match.venue?.toLowerCase().includes(ourTeamData.club_name?.toLowerCase() || '');
+        
+        // Parse Score (z.B. "2:1" → home_score=2, away_score=1)
+        let homeScore = 0;
+        let awayScore = 0;
+        if (match.match_points && match.match_points.includes(':')) {
+          const [h, a] = match.match_points.split(':').map(s => parseInt(s.trim()) || 0);
+          homeScore = isHomeMatch ? h : a;
+          awayScore = isHomeMatch ? a : h;
+        }
+
+        matchdaysToCreate.push({
+          home_team_id: isHomeMatch ? ourTeamData.id : opponentTeamData?.id,
+          away_team_id: isHomeMatch ? opponentTeamData?.id : ourTeamData.id,
+          match_date: matchDateTime.toISOString(),
+          start_time: startTime.substring(0, 5), // "15:00"
+          venue: match.venue || null,
+          location: isHomeMatch ? 'Home' : 'Away',
+          season: parsedData.season?.toLowerCase().includes('winter') ? 'winter' : 'summer',
+          league: match.league || ourTeamData.league || null,
+          group_name: match.group_name || ourTeamData.group_name || null,
+          status: match.status === 'offen' ? 'scheduled' : 'completed',
+          home_score: homeScore,
+          away_score: awayScore,
+          final_score: match.match_points || null
+        });
+      }
+
+      console.log('📝 Creating matchdays:', matchdaysToCreate);
 
       // Insert in Supabase
       const { data, error: insertError } = await supabase
-        .from('matches')
-        .insert(formattedMatches)
+        .from('matchdays')
+        .insert(matchdaysToCreate)
         .select();
 
       if (insertError) throw insertError;
@@ -248,14 +298,15 @@ const ImportTab = () => {
 
       // Log KI-Match Import Aktivität
       try {
-        for (const match of data) {
-          await LoggingService.logActivity('ki_import_match', 'match', match.id, {
-            match_date: match.match_date,
-            opponent: match.opponent,
-            location: match.location,
-            venue: match.venue,
-            season: match.season,
-            team_id: teamId,
+        for (const matchday of data) {
+          await LoggingService.logActivity('ki_import_match', 'matchday', matchday.id, {
+            match_date: matchday.match_date,
+            home_team_id: matchday.home_team_id,
+            away_team_id: matchday.away_team_id,
+            location: matchday.location,
+            venue: matchday.venue,
+            season: matchday.season,
+            status: matchday.status,
             import_source: 'tvm_import'
           });
         }
@@ -273,7 +324,7 @@ const ImportTab = () => {
 
       setSuccessMessage(
         `🎉 Import erfolgreich!\n\n` +
-        `✅ ${uniqueMatches.length} neue Match(es) importiert\n` +
+        `✅ ${uniqueMatches.length} neue Matchday(s) importiert\n` +
         `⏭️ ${duplicateCheck.duplicates.length} Duplikat(e) übersprungen\n` +
         `💰 Kosten: ${parsedData.metadata.cost_estimate}`
       );
@@ -409,30 +460,40 @@ const ImportTab = () => {
    */
   const checkForDuplicates = async (matches, teamId) => {
     try {
-      const dates = matches.map(m => m.match_date);
-      
-      const { data, error } = await supabase
-        .from('matches')
-        .select('match_date, opponent')
-        .eq('team_id', teamId);
+      // Hole unser Team
+      const { data: ourTeamData } = await supabase
+        .from('team_info')
+        .select('id')
+        .eq('id', teamId)
+        .single();
+
+      // Prüfe auf vorhandene matchdays für unser Team
+      const { data: existingMatchdays, error } = await supabase
+        .from('matchdays')
+        .select('match_date, home_team_id, away_team_id')
+        .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`);
         
       if (error) throw error;
 
-      // Prüfe auf Duplikate basierend auf Datum (nur Tag) und Opponent
-      const duplicates = (data || []).filter(dbMatch => {
-        const dbDate = new Date(dbMatch.match_date).toISOString().split('T')[0];
+      // Prüfe auf Duplikate basierend auf Datum (nur Tag)
+      const duplicates = (existingMatchdays || []).filter(dbMatchday => {
+        const dbDate = new Date(dbMatchday.match_date).toISOString().split('T')[0];
         return matches.some(m => {
-          const matchDate = m.match_date;
-          return matchDate === dbDate && m.opponent === dbMatch.opponent;
+          const matchDate = new Date(m.match_date).toISOString().split('T')[0];
+          return matchDate === dbDate;
         });
       });
 
       return {
-        duplicates: duplicates.map(d => ({ match_date: d.match_date.split('T')[0], opponent: d.opponent })),
+        duplicates: duplicates.map(d => ({ 
+          match_date: d.match_date.split('T')[0], 
+          opponent: 'Gegner' // Kann nicht mehr opponent sein, nur Datum
+        })),
         unique: matches.filter(m => 
           !duplicates.some(d => {
-            const dDate = d.match_date.split('T')[0];
-            return dDate === m.match_date && d.opponent === m.opponent;
+            const dDate = new Date(d.match_date).toISOString().split('T')[0];
+            const mDate = new Date(m.match_date).toISOString().split('T')[0];
+            return dDate === mDate;
           })
         )
       };

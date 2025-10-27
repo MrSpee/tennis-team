@@ -59,12 +59,18 @@ const LiveResultsWithDB = () => {
         return;
       }
 
-      // Lade Match-Daten mit Team-Info
+      // Lade Matchday-Daten mit Team-Info
       const { data: matchData, error: matchError } = await supabase
-        .from('matches')
+        .from('matchdays')
         .select(`
           *,
-          team_info!matches_team_id_fkey (
+          home_team:home_team_id (
+            id,
+            club_name,
+            team_name,
+            category
+          ),
+          away_team:away_team_id (
             id,
             club_name,
             team_name,
@@ -82,37 +88,23 @@ const LiveResultsWithDB = () => {
 
       setMatch(matchData);
       
-      // Hole team_id und Team-Info vom Match (Heim-Team)
-      const matchTeamId = matchData.team_id;
-      const homeTeamInfo = matchData.team_info;
-      if (!matchTeamId) {
-        setError('Match hat keine Team-Zuordnung');
+      // Hole Team-IDs vom Matchday
+      const homeTeamId = matchData.home_team_id;
+      const awayTeamId = matchData.away_team_id;
+      
+      if (!homeTeamId || !awayTeamId) {
+        setError('Matchday hat keine Team-Zuordnung');
         return;
       }
       
-      // Finde Gegner-Team anhand des opponent-Namens
-      let opponentTeamId = null;
-      if (matchData.opponent) {
-        const { data: opponentTeam, error: opponentTeamError } = await supabase
-          .from('team_info')
-          .select('id, team_name, club_name')
-          .ilike('team_name', `%${matchData.opponent}%`)
-          .limit(1)
-          .single();
-        
-        if (!opponentTeamError && opponentTeam) {
-          opponentTeamId = opponentTeam.id;
-          console.log('✅ Gegner-Team gefunden:', opponentTeam.team_name, 'ID:', opponentTeamId);
-        } else {
-          console.warn('⚠️ Konnte Gegner-Team nicht finden für:', matchData.opponent);
-        }
-      }
+      console.log('✅ Heim-Team:', matchData.home_team?.club_name, matchData.home_team?.team_name);
+      console.log('✅ Auswärts-Team:', matchData.away_team?.club_name, matchData.away_team?.team_name);
 
-      // Lade Team-Mitglieder des Match-Teams (Heim-Spieler)
+      // Lade Team-Mitglieder des Heim-Teams
       const { data: teamMembers, error: teamError } = await supabase
         .from('team_memberships')
         .select('player_id')
-        .eq('team_id', matchTeamId);
+        .eq('team_id', homeTeamId);
 
       const teamMemberIds = (teamMembers || []).map(tm => tm.player_id);
 
@@ -154,42 +146,35 @@ const LiveResultsWithDB = () => {
         others: otherPlayers
       });
 
-      // Lade Gegner-Spieler: Nur Spieler der Gegner-Mannschaft
-      let allOpponents = [];
-      if (opponentTeamId) {
-        // Lade Team-Mitglieder des Gegner-Teams
-        const { data: opponentTeamMembers, error: opponentTeamError } = await supabase
-          .from('team_memberships')
-          .select('player_id')
-          .eq('team_id', opponentTeamId);
+      // Lade Gegner-Spieler: Nur Spieler des Auswärts-Teams
+      const { data: opponentTeamMembers, error: opponentTeamError } = await supabase
+        .from('team_memberships')
+        .select('player_id')
+        .eq('team_id', awayTeamId);
+      
+      const opponentTeamMemberIds = (opponentTeamMembers || []).map(tm => tm.player_id);
+      
+      if (opponentTeamMemberIds.length > 0) {
+        // Lade Spieler der Gegner-Mannschaft - ALLE (aktiv + inaktiv)
+        const { data: opponentsData, error: opponentsError } = await supabase
+          .from('players_unified')
+          .select('id, name, current_lk, season_start_lk')
+          .in('id', opponentTeamMemberIds)
+          .order('name');
         
-        const opponentTeamMemberIds = (opponentTeamMembers || []).map(tm => tm.player_id);
-        
-        if (opponentTeamMemberIds.length > 0) {
-          // Lade Spieler der Gegner-Mannschaft - ALLE (aktiv + inaktiv)
-          const { data: opponentsData, error: opponentsError } = await supabase
-            .from('players_unified')
-            .select('id, name, current_lk, season_start_lk')
-            .in('id', opponentTeamMemberIds)
-            .order('name');
-          
-          if (opponentsError) {
-            console.warn('⚠️ Konnte Gegner-Spieler nicht laden:', opponentsError);
-            setOpponentPlayers([]);
-          } else {
-            allOpponents = opponentsData || [];
-            setOpponentPlayers(allOpponents);
-          }
-        } else {
-          console.warn('⚠️ Gegner-Mannschaft hat keine Spieler');
+        if (opponentsError) {
+          console.warn('⚠️ Konnte Gegner-Spieler nicht laden:', opponentsError);
           setOpponentPlayers([]);
+        } else {
+          setOpponentPlayers(opponentsData || []);
+          console.log('✅ Gegner-Spieler geladen:', opponentsData?.length || 0);
         }
       } else {
-        console.warn('⚠️ Konnte Gegner-Team nicht identifizieren');
+        console.warn('⚠️ Gegner-Mannschaft hat keine Spieler');
         setOpponentPlayers([]);
       }
 
-      // Lade bereits gespeicherte Ergebnisse
+      // Lade bereits gespeicherte Ergebnisse (nutze matchday_id)
       await loadExistingResults(matchId);
 
     } catch (err) {
@@ -200,15 +185,15 @@ const LiveResultsWithDB = () => {
     }
   };
 
-  const loadExistingResults = async (matchId) => {
+  const loadExistingResults = async (matchdayId) => {
     try {
-      console.log('🔍 Loading existing results for match:', matchId);
+      console.log('🔍 Loading existing results for matchday:', matchdayId);
       
-      // Lade bereits gespeicherte Ergebnisse aus der Datenbank
+      // Lade bereits gespeicherte Ergebnisse aus der Datenbank (nutze matchday_id)
       const { data: existingResults, error } = await supabase
         .from('match_results')
         .select('*')
-        .eq('match_id', matchId);
+        .eq('matchday_id', matchdayId);
 
       if (error) {
         console.error('❌ Error loading existing results:', error);
@@ -518,7 +503,7 @@ const LiveResultsWithDB = () => {
 
       // Bereite Daten für Supabase vor
       const resultData = {
-        match_id: matchId,
+        matchday_id: matchId,  // Referenz zum Matchday
         match_number: parseInt(matchData.id), // Stelle sicher, dass es eine Zahl ist
         match_type: matchData.type,
         entered_by: user.id,
@@ -715,7 +700,7 @@ const LiveResultsWithDB = () => {
       const { error } = await supabase
         .from('match_results')
         .upsert(resultData, {
-          onConflict: 'match_id,match_number',
+          onConflict: 'matchday_id,match_number',  // Aktualisiert für matchday_id
           ignoreDuplicates: false
         });
 
@@ -1001,16 +986,16 @@ const LiveResultsWithDB = () => {
             </button>
             <h1>🎾 Live-Ergebnisse</h1>
           </div>
-          {match?.team_info && (
+          {match?.home_team && match?.away_team && (
             <div className="match-teams-info">
               <div className="team-badge home">
                 <span className="team-label">Heim:</span>
-                <span className="team-name">{match.team_info.club_name} {match.team_info.team_name}</span>
+                <span className="team-name">{match.home_team.club_name} {match.home_team.team_name}</span>
               </div>
               <span className="vs-badge">vs</span>
               <div className="team-badge away">
                 <span className="team-label">Auswärts:</span>
-                <span className="team-name">{match.opponent}</span>
+                <span className="team-name">{match.away_team.club_name} {match.away_team.team_name}</span>
               </div>
             </div>
           )}

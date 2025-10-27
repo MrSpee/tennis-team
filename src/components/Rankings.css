@@ -209,8 +209,8 @@
 }
 
 .lk-card-full {
-  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  border: 2px solid #fbbf24;
+  background: #f9fafb; /* Weiß-Grau statt gelber Gradient */
+  border: 1px solid #e5e7eb;
   border-radius: 12px;
   padding: 1.5rem;
 }
