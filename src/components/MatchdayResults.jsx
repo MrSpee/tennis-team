@@ -4,12 +4,14 @@ import { ArrowLeft, Edit, Clock, CheckCircle, PlayCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { supabase } from '../lib/supabaseClient';
+import { useData } from '../context/DataContext';
 import './LiveResults.css';
 import './Dashboard.css';
 
 const MatchdayResults = () => {
   const { matchId } = useParams();
   const navigate = useNavigate();
+  const { playerTeams } = useData();
 
   // State für Daten
   const [match, setMatch] = useState(null);
@@ -171,6 +173,46 @@ const MatchdayResults = () => {
         return;
       }
 
+      // Berechne opponent Name aus Teams
+      const opponent = matchData.away_team 
+        ? (matchData.away_team.team_name 
+            ? `${matchData.away_team.club_name} ${matchData.away_team.team_name}` 
+            : matchData.away_team.club_name)
+        : 'Gegner';
+      
+      // Erstelle team_info Objekt für Kompatibilität
+      const teamInfo = matchData.home_team ? {
+        club_name: matchData.home_team.club_name,
+        team_name: matchData.home_team.team_name,
+        category: matchData.home_team.category
+      } : null;
+      
+      // WICHTIG: Nutze die GLEICHE Logik wie DataContext!
+      // playerTeams kommt aus DataContext und enthält die Teams des Users
+      const playerTeamIds = playerTeams.map(t => t.id);
+      console.log('✅ User teams from DataContext:', playerTeamIds);
+      
+      // Prüfe, ob unser Team Home oder Away ist
+      const isHomeTeam = playerTeamIds.includes(matchData.home_team_id);
+      const isAwayTeam = playerTeamIds.includes(matchData.away_team_id);
+      
+      const ourTeam = isHomeTeam ? matchData.home_team : matchData.away_team;
+      const opponentTeam = isHomeTeam ? matchData.away_team : matchData.home_team;
+      
+      console.log('✅ Match perspective:', {
+        userInHome: isHomeTeam,
+        userInAway: isAwayTeam,
+        ourTeam: ourTeam?.club_name,
+        opponentTeam: opponentTeam?.club_name
+      });
+      
+      // Füge Felder für Kompatibilität hinzu
+      matchData.opponent = opponent;
+      matchData.team_info = teamInfo;
+      matchData.our_team = ourTeam; // Unser Team (vom User)
+      matchData.opponent_team = opponentTeam; // Gegner-Team
+      // matchData.location sollte bereits im DB-Schema sein
+      
       setMatch(matchData);
 
       // Lade Match-Ergebnisse (nutze matchday_id)
@@ -202,45 +244,73 @@ const MatchdayResults = () => {
         });
       }
 
-      // Lade alle Spieler-Daten separat (mit Profilbild und LK!)
-      console.log('📡 Fetching home players data...');
-      const { data: homePlayersData, error: homeError } = await supabase
-        .from('players')
-        .select('id, name, profile_image, current_lk, ranking')
-        .order('name', { ascending: true });
+      // WICHTIG: Lade Spieler über team_memberships!
+      const homeTeamId = matchData.home_team_id;
+      const awayTeamId = matchData.away_team_id;
 
-      console.log('👥 Home players loaded:', homePlayersData);
+      console.log('📡 Fetching home team players for team:', homeTeamId);
+      // Lade Team-Mitglieder für Home-Team
+      const { data: homeTeamMembers, error: homeTeamError } = await supabase
+        .from('team_memberships')
+        .select(`
+          player_id,
+          player:player_id (
+            id,
+            name,
+            profile_image,
+            current_lk,
+            ranking
+          )
+        `)
+        .eq('team_id', homeTeamId)
+        .eq('is_active', true);
 
-      console.log('📡 Fetching opponent players data...');
-      const { data: opponentPlayersData, error: opponentError } = await supabase
-        .from('opponent_players')
-        .select('id, name, lk');
-      
-      console.log('👥 Opponent players loaded:', opponentPlayersData);
-
-      if (homeError) {
-        console.error('❌ Error loading home players:', homeError);
+      if (homeTeamError) {
+        console.error('❌ Error loading home team members:', homeTeamError);
       } else {
         const playersMap = {};
-        homePlayersData?.forEach(player => {
-          playersMap[player.id] = player;
-          console.log(`  ✅ Loaded player: ${player.name} | LK: ${player.current_lk || player.ranking || 'N/A'}`);
+        homeTeamMembers?.forEach(({ player }) => {
+          if (player) {
+            playersMap[player.id] = player;
+            console.log(`  ✅ Home player: ${player.name}`);
+          }
         });
-        console.log('📦 Home players map created:', playersMap);
         setHomePlayers(playersMap);
+        console.log('📦 Home players map created:', Object.keys(playersMap).length, 'players');
       }
 
-      if (opponentError) {
-        console.error('❌ Error loading opponent players:', opponentError);
+      console.log('📡 Fetching away team players for team:', awayTeamId);
+      // Lade Team-Mitglieder für Away-Team
+      const { data: awayTeamMembers, error: awayTeamError } = await supabase
+        .from('team_memberships')
+        .select(`
+          player_id,
+          player:player_id (
+            id,
+            name,
+            current_lk
+          )
+        `)
+        .eq('team_id', awayTeamId)
+        .eq('is_active', true);
+
+      if (awayTeamError) {
+        console.error('❌ Error loading away team members:', awayTeamError);
       } else {
         const playersMap = {};
-        opponentPlayersData?.forEach(player => {
-          playersMap[player.id] = player;
-          console.log(`  ✅ Loaded opponent: ${player.name} | LK: ${player.lk || 'N/A'}`);
+        awayTeamMembers?.forEach(({ player }) => {
+          if (player) {
+            playersMap[player.id] = {
+              ...player,
+              lk: player.current_lk // Altes Feld 'lk' für Kompatibilität
+            };
+            console.log(`  ✅ Away player: ${player.name}`);
+          }
         });
-        console.log('📦 Opponent players map created:', playersMap);
         setOpponentPlayers(playersMap);
+        console.log('📦 Away players map created:', Object.keys(playersMap).length, 'players');
       }
+
 
       // Berechne Gesamtpunktzahl
       calculateTotalScore(resultsData || []);
@@ -844,21 +914,19 @@ const MatchdayResults = () => {
         </div>
         
         <div className="scoreboard-content-new">
-          {/* Team Namen über Score - Reihenfolge basierend auf Home/Away */}
+          {/* Team Namen über Score: UNSER TEAM vs GEGNER */}
           <div className="score-teams">
-            {match?.location === 'Home' ? (
-              <>
-                <span className="team-name-score home">{match?.team_info?.club_name || 'Heim-Team'}</span>
-                <span className="team-separator">:</span>
-                <span className="team-name-score guest">{match?.opponent || 'Gegner'}</span>
-              </>
-            ) : (
-              <>
-                <span className="team-name-score guest">{match?.opponent || 'Gegner'}</span>
-                <span className="team-separator">:</span>
-                <span className="team-name-score home">{match?.team_info?.club_name || 'Heim-Team'}</span>
-              </>
-            )}
+            <span className="team-name-score home">
+              {match?.our_team?.team_name 
+                ? `${match.our_team.club_name} ${match.our_team.team_name}` 
+                : match?.our_team?.club_name || 'Heim-Team'}
+            </span>
+            <span className="team-separator">:</span>
+            <span className="team-name-score guest">
+              {match?.opponent_team?.team_name 
+                ? `${match.opponent_team.club_name} ${match.opponent_team.team_name}` 
+                : match?.opponent_team?.club_name || 'Gast-Team'}
+            </span>
           </div>
           
           {/* Großer Score - Reihenfolge basierend auf Home/Away */}

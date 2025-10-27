@@ -75,12 +75,40 @@ function Dashboard() {
       currentSeason,
       seasonDisplay
     });
-  }, [matches.length, currentSeason, seasonDisplay]);
+    
+    // Debug: Zeige Details zu allen Matches
+    if (matches.length > 0) {
+      console.log('📋 All matches:', matches.map(m => ({
+        id: m.id,
+        date: m.date?.toISOString?.() || m.date,
+        opponent: m.opponent,
+        season: m.season,
+        isAfterNow: m.date > now,
+        seasonMatches: m.season === currentSeason
+      })));
+    }
+  }, [matches, currentSeason, seasonDisplay, now]);
   
   // Kommende Spiele (noch nicht begonnen)
   const upcomingMatches = matches
     .filter(m => {
-      return m.date > now && m.season === currentSeason;
+      const isAfterNow = m.date > now;
+      const isCurrentSeason = m.season === currentSeason;
+      const matchesFilter = isAfterNow && isCurrentSeason;
+      
+      if (matches.length <= 10) { // Nur bei wenigen Matches loggen
+        console.log(`🔍 Match ${m.opponent}:`, { 
+          isAfterNow, 
+          isCurrentSeason, 
+          date: m.date?.toISOString?.() || m.date, 
+          now: now.toISOString?.() || now, 
+          season: m.season, 
+          currentSeason,
+          matchesFilter 
+        });
+      }
+      
+      return matchesFilter;
     })
     .sort((a, b) => a.date - b.date);
 

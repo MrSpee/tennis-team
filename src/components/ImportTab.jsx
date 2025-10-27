@@ -212,8 +212,7 @@ const ImportTab = () => {
       // Filtere Duplikate raus
       const uniqueMatches = matchesToImport.filter((match, idx) => {
         return !duplicateCheck.duplicates.some(d => 
-          d.match_date === match.match_date && 
-          d.opponent === match.opponent
+          d.match_date === match.match_date
         );
       });
 
@@ -251,84 +250,92 @@ const ImportTab = () => {
       // SCHRITT 4: Finde oder erstelle Gegner-Teams und erstelle matchdays
       const matchdaysToCreate = [];
       
-      for (const match of uniqueMatches) {
-        // Finde Gegner-Team per Name-Lookup
-        let { data: opponentTeamData } = await supabase
+      // Helper: Finde oder erstelle Team
+      const findOrCreateTeamByName = async (teamName) => {
+        // Parse Team-Name (z.B. "SV RG Sürth 1" → club: "SV RG Sürth", team: "1")
+        const parts = teamName.split(' ');
+        const clubName = parts.slice(0, -1).join(' ') || teamName;
+        const tn = parts[parts.length - 1] || null;
+        
+        // Suche zuerst in DB
+        let { data: teamData } = await supabase
           .from('team_info')
           .select('id')
-          .or(`team_name.ilike.%${match.opponent}%,club_name.ilike.%${match.opponent}%`)
+          .or(`team_name.ilike.%${tn}%,club_name.ilike.%${clubName}%`)
           .limit(1)
           .maybeSingle();
-
-        // Wenn Gegner nicht gefunden, erstelle ein neues Team automatisch
-        if (!opponentTeamData) {
-          console.warn(`⚠️ Gegner-Team "${match.opponent}" nicht gefunden. Erstelle automatisch...`);
-          
-          // Parse Gegner-Name (z.B. "TV Dellbrück 1" → club: "TV Dellbrück", team: "1")
-          const opponentParts = match.opponent.split(' ');
-          const clubName = opponentParts.slice(0, -1).join(' ') || match.opponent;
-          const teamName = opponentParts[opponentParts.length - 1] || null;
-          
-          // Versuche, category aus dem Team-Namen abzuleiten (z.B. "Herren 40 1" → "Herren 40")
-          // oder verwende die category vom eigenen Team als Referenz
-          const category = ourTeamData.category || null;
-          
-          // Erstelle Gegner-Team als vollwertiges Team in unserer Datenbank
-          const { data: newTeam, error: createError } = await supabase
-            .from('team_info')
-            .insert({
-              club_name: clubName,
-              team_name: teamName,
-              category: category
-              // Kein is_active Feld - team_info hat das nicht!
-            })
-            .select('id')
-            .single();
-          
-          if (createError || !newTeam) {
-            console.error(`❌ Fehler beim Erstellen des Gegner-Teams "${match.opponent}":`, createError);
-            throw new Error(`Gegner-Team "${match.opponent}" konnte nicht erstellt werden`);
-          }
-          
-          opponentTeamData = newTeam;
-          console.log(`✅ Gegner-Team erstellt: ${clubName} ${teamName} (ID: ${newTeam.id})`);
+        
+        if (teamData) return teamData.id;
+        
+        // Team nicht gefunden → erstelle automatisch
+        console.warn(`⚠️ Team "${teamName}" nicht gefunden. Erstelle automatisch...`);
+        
+        const { data: newTeam, error: createError } = await supabase
+          .from('team_info')
+          .insert({
+            club_name: clubName,
+            team_name: tn,
+            category: ourTeamData.category || null
+          })
+          .select('id')
+          .single();
+        
+        if (createError || !newTeam) {
+          throw new Error(`Team "${teamName}" konnte nicht erstellt werden: ${createError?.message}`);
         }
+        
+        console.log(`✅ Team erstellt: ${clubName} ${tn} (ID: ${newTeam.id})`);
+        return newTeam.id;
+      };
+      
+      for (const match of uniqueMatches) {
+        // WICHTIG: Extrahiere beide Teams aus dem geparsten Match!
+        const homeTeamName = match.home_team;
+        const awayTeamName = match.away_team;
+        
+        if (!homeTeamName || !awayTeamName) {
+          console.error('❌ Match fehlt home_team oder away_team:', match);
+          continue;
+        }
+        
+        console.log('🔍 Parsing match:', { home: homeTeamName, away: awayTeamName });
+        
+        // Finde oder erstelle BEIDE Teams
+        const homeTeamId = await findOrCreateTeamByName(homeTeamName);
+        const awayTeamId = await findOrCreateTeamByName(awayTeamName);
+        
+        console.log('✅ Teams resolved:', { home: homeTeamId, away: awayTeamId });
 
         // Parse Datum und Zeit
         const matchDateTime = new Date(match.match_date);
         const startTime = match.start_time || matchDateTime.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-
-        // Bestimme home/away (basierend auf Spielort oder is_home_match)
-        const isHomeMatch = match.is_home_match || match.venue?.toLowerCase().includes(ourTeamData.club_name?.toLowerCase() || '');
         
-        // Jetzt haben wir IMMER ein opponentTeamData (entweder gefunden oder erstellt)
-        const homeTeamId = isHomeMatch ? ourTeamData.id : opponentTeamData.id;
-        const awayTeamId = isHomeMatch ? opponentTeamData.id : ourTeamData.id;
-        
-        // Parse Score (z.B. "2:1" → home_score=2, away_score=1)
+        // Parse Score (z.B. "1:5" → home_score=1, away_score=5)
         let homeScore = 0;
         let awayScore = 0;
         if (match.match_points && match.match_points.includes(':')) {
           const [h, a] = match.match_points.split(':').map(s => parseInt(s.trim()) || 0);
-          // Wenn Gegner nicht gefunden, nehmen wir an, dass unser Team immer "home" spielt
-          if (opponentTeamData) {
-            homeScore = isHomeMatch ? h : a;
-            awayScore = isHomeMatch ? a : h;
-          } else {
-            // Wenn kein Gegner gefunden, übernehme Score unverändert
-            homeScore = h;
-            awayScore = a;
-          }
+          homeScore = h;
+          awayScore = a;
         }
 
+        // Bestimme Season basierend auf Match-Datum
+        const matchMonth = matchDateTime.getMonth();
+        let determinedSeason = 'summer';
+        if (matchMonth >= 8 || matchMonth <= 1) {
+          determinedSeason = 'winter';
+        } else {
+          determinedSeason = 'summer';
+        }
+        
         matchdaysToCreate.push({
           home_team_id: homeTeamId,
           away_team_id: awayTeamId,
           match_date: matchDateTime.toISOString(),
           start_time: startTime.substring(0, 5), // "15:00"
           venue: match.venue || null,
-          location: opponentTeamData ? (isHomeMatch ? 'Home' : 'Away') : 'Home',
-          season: parsedData.season?.toLowerCase().includes('winter') ? 'winter' : 'summer',
+          location: 'Home', // Default (könnte später verbessert werden)
+          season: determinedSeason,
           league: parsedData.league || ourTeamData.league || null,
           group_name: parsedData.group_name || ourTeamData.group_name || null,
           status: match.status === 'offen' ? 'scheduled' : 'completed',
@@ -436,13 +443,32 @@ const ImportTab = () => {
           throw new Error('Club-Matching abgebrochen oder fehlgeschlagen.');
         }
 
+        // 2b. Wenn CREATE_NEW → Erstelle neuen Verein
+        if (clubId === 'CREATE_NEW') {
+          console.log('➕ Creating new club:', teamInfo.club_name);
+          
+          const { data: newClub, error: clubError } = await supabase
+            .from('club_info')
+            .insert({
+              name: teamInfo.club_name,
+              city: null,
+              region: 'Mittelrhein',
+              website: teamInfo.website || null
+            })
+            .select('id')
+            .single();
+          
+          if (clubError) throw clubError;
+          clubId = newClub.id;
+          console.log('✅ New club created:', clubId);
+        }
+
         // 2c. Jetzt Team erstellen mit club_id
         console.log('📝 Creating team with club_id:', clubId);
         
         const { data: newTeam, error: insertError } = await supabase
           .from('team_info')
           .insert({
-            club_id: clubId,
             club_name: teamInfo.club_name,
             team_name: teamInfo.team_name || null,
             category: teamInfo.category || 'Herren',
@@ -760,33 +786,27 @@ const ImportTab = () => {
         return bestMatch.id;
       }
 
-      // 4. Mittlere Confidence (70-94%) → Nutzer fragen
-      if (confidence >= 70) {
-        console.log('⚠️ Medium confidence, asking user...');
-        
-        return new Promise((resolve) => {
-          setClubSuggestions({
-            searchTerm: clubName,
-            suggestions: matches.slice(0, 3),
-            onConfirm: (clubId) => {
-              setClubSuggestions(null);
-              resolve(clubId);
-            },
-            onCancel: () => {
-              setClubSuggestions(null);
-              resolve(null);
-            }
-          });
+      // 4. Zeige IMMER Modal für User-Bestätigung (egal ob Confidence hoch oder niedrig)
+      console.log('⚠️ Asking user to confirm club match...');
+      
+      return new Promise((resolve) => {
+        setClubSuggestions({
+          searchTerm: clubName,
+          suggestions: matches.slice(0, 3),
+          onConfirm: (clubId) => {
+            setClubSuggestions(null);
+            resolve(clubId);
+          },
+          onCreateNew: () => {
+            setClubSuggestions(null);
+            resolve('CREATE_NEW');
+          },
+          onCancel: () => {
+            setClubSuggestions(null);
+            resolve(null);
+          }
         });
-      }
-
-      // 5. Niedrige Confidence (<70%) → Verein fehlt
-      throw new Error(
-        `❌ Verein "${clubName}" nicht gefunden!\n\n` +
-        `Ähnlichste Vereine in der DB:\n` +
-        matches.slice(0, 3).map((m, i) => `${i + 1}. ${m.name} (${Math.round(m.similarity * 100)}%)`).join('\n') +
-        `\n\nBitte lege den Verein im "🏢 Vereine" Tab an.`
-      );
+      });
 
     } catch (err) {
       console.error('❌ Error in findOrSuggestClub:', err);
@@ -1017,17 +1037,80 @@ Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele
         <p>Kopiere TVM-Daten hier rein - die KI erkennt automatisch Matches, Spieler & Teams!</p>
       </div>
 
-      {/* Team-Info wird automatisch erkannt */}
+      {/* Team-Info wird automatisch erkannt (editierbar) */}
       {parsedData?.team_info && (
         <div className="import-section">
           <div className="team-info-banner">
-            <h3>🎾 Erkanntes Team:</h3>
-            <div className="team-details">
-              <strong>{parsedData.team_info.club_name}</strong>
-              {parsedData.team_info.team_name && ` - ${parsedData.team_info.team_name}`}
-              {parsedData.team_info.category && ` (${parsedData.team_info.category})`}
-              <br />
-              {parsedData.team_info.league && <span className="meta-badge">{parsedData.team_info.league}</span>}
+            <h3>🎾 Erkanntes Team: ✏️</h3>
+            <div className="team-details" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div>
+                <label style={{ fontSize: '0.8rem', color: '#6b7280' }}>Vereinsname:</label>
+                <input 
+                  type="text"
+                  value={parsedData.team_info.club_name || ''}
+                  onChange={(e) => {
+                    const newData = { ...parsedData };
+                    newData.team_info.club_name = e.target.value;
+                    setParsedData(newData);
+                  }}
+                  style={{ width: '100%', padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '6px' }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.8rem', color: '#6b7280' }}>Mannschaft:</label>
+                <input 
+                  type="text"
+                  value={parsedData.team_info.team_name || ''}
+                  onChange={(e) => {
+                    const newData = { ...parsedData };
+                    newData.team_info.team_name = e.target.value;
+                    setParsedData(newData);
+                  }}
+                  style={{ width: '100%', padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '6px' }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.8rem', color: '#6b7280' }}>Kategorie:</label>
+                <input 
+                  type="text"
+                  value={parsedData.team_info.category || ''}
+                  onChange={(e) => {
+                    const newData = { ...parsedData };
+                    newData.team_info.category = e.target.value;
+                    setParsedData(newData);
+                  }}
+                  style={{ width: '100%', padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '6px' }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.8rem', color: '#6b7280' }}>Saison:</label>
+                <input 
+                  type="text"
+                  value={parsedData.season || ''}
+                  onChange={(e) => {
+                    const newData = { ...parsedData };
+                    newData.season = e.target.value;
+                    setParsedData(newData);
+                  }}
+                  placeholder="z.B. Winter 2025/26"
+                  style={{ width: '100%', padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '6px' }}
+                />
+              </div>
+              {parsedData.team_info.league && (
+                <div>
+                  <label style={{ fontSize: '0.8rem', color: '#6b7280' }}>Liga:</label>
+                  <input 
+                    type="text"
+                    value={parsedData.team_info.league || ''}
+                    onChange={(e) => {
+                      const newData = { ...parsedData };
+                      newData.team_info.league = e.target.value;
+                      setParsedData(newData);
+                    }}
+                    style={{ width: '100%', padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '6px' }}
+                  />
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1156,7 +1239,11 @@ Die KI erkennt automatisch:
                     <span className={`home-away-badge ${match.is_home_match ? 'home' : 'away'}`}>
                       {match.is_home_match ? '🏠 Heim' : '✈️ Auswärts'}
                     </span>
-                    <strong className="opponent-name">{match.opponent}</strong>
+                    <strong className="opponent-name">
+                      {match.home_team && match.away_team 
+                        ? `${match.home_team} vs ${match.away_team}`
+                        : match.opponent}
+                    </strong>
                   </div>
                   
                   {match.venue && (
@@ -1450,13 +1537,20 @@ Die KI erkennt automatisch:
                 ))}
               </div>
               
-              <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
+              <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+                <button 
+                  onClick={() => clubSuggestions.onCreateNew && clubSuggestions.onCreateNew()}
+                  className="btn-primary"
+                  style={{ width: 'auto', padding: '0.75rem 2rem' }}
+                >
+                  ➕ Neuen Verein erstellen
+                </button>
                 <button 
                   onClick={clubSuggestions.onCancel}
                   className="btn-cancel"
                   style={{ width: 'auto', padding: '0.75rem 2rem' }}
                 >
-                  ❌ Keiner passt / Abbrechen
+                  ❌ Abbrechen
                 </button>
               </div>
             </div>

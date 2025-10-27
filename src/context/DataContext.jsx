@@ -362,10 +362,23 @@ export function DataProvider({ children }) {
           const ourTeam = isHomeTeam ? matchday.home_team : matchday.away_team;
           const opponentTeam = isHomeTeam ? matchday.away_team : matchday.home_team;
           
+          // WICHTIG: Zusammensetzen des Gegner-Namens mit korrektem Leerzeichen
+          let opponentName = 'Gegner';
+          if (opponentTeam) {
+            const clubName = opponentTeam.club_name || '';
+            const teamName = opponentTeam.team_name || '';
+            // Füge nur team_name hinzu wenn es existiert UND nicht leer ist
+            if (teamName && teamName.trim()) {
+              opponentName = `${clubName} ${teamName}`.trim();
+            } else {
+              opponentName = clubName || 'Gegner';
+            }
+          }
+          
           return {
             id: matchday.id,
             date: new Date(matchday.match_date),
-            opponent: opponentTeam ? `${opponentTeam.club_name} ${opponentTeam.team_name}` : 'Gegner',
+            opponent: opponentName,
             location: matchday.location,
             venue: matchday.venue,
             season: matchday.season,

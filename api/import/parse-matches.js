@@ -44,14 +44,18 @@ const MATCH_SCHEMA = {
         properties: {
           match_date: { type: "string", description: "Datum im Format YYYY-MM-DD" },
           start_time: { type: "string", description: "Uhrzeit im Format HH:MM" },
+          home_team: { type: "string", description: "Heimverein komplett (z.B. 'TG Leverkusen 2' oder 'VKC Köln 1')" },
+          away_team: { type: "string", description: "Gastverein komplett (z.B. 'SV RG Sürth 1' oder 'TC Colonius 3')" },
           opponent: { type: "string", description: "Name des Gegner-Vereins (inkl. Mannschaft, z.B. 'TG Leverkusen 2')" },
           is_home_match: { type: "boolean", description: "true = Heimspiel, false = Auswärtsspiel" },
           venue: { type: "string", description: "Spielort/Anlage (z.B. 'Cologne Sportspark')" },
           address: { type: "string", description: "Adresse des Spielorts (falls angegeben)" },
           matchday: { type: "integer", description: "Spieltag-Nummer (falls angegeben)" },
+          match_points: { type: "string", description: "Matchpunkte (z.B. '1:5' oder '0:0')" },
+          status: { type: "string", description: "Matchstatus (z.B. 'offen', 'completed')" },
           notes: { type: "string", description: "Zusätzliche Notizen (falls vorhanden)" }
         },
-        required: ["match_date", "start_time", "opponent", "is_home_match", "venue", "address", "matchday", "notes"]
+        required: ["match_date", "start_time", "home_team", "away_team"]
       }
     },
     
@@ -99,12 +103,15 @@ WICHTIGE REGELN:
    - Extrahiere ALLE Matches aus dem Text
    - Datumsformat: YYYY-MM-DD (z.B. "11.10.2025" → "2025-10-11")
    - Zeitformat: HH:MM (24-Stunden-Format, z.B. "18:00")
-   - Heimspiel-Erkennung:
-     * In TVM-Spielplänen: Das ERSTE Team in der Zeile ist IMMER Heim
-     * Beispiel: "VKC Köln 1	TG Leverkusen 2" → VKC Köln 1 ist Heim (is_home_match = true)
-     * Beispiel: "KölnerTHC 2	VKC Köln 1" → VKC Köln 1 ist Auswärts (is_home_match = false)
-   - Venue/Spielort extrahieren (erste Spalte im Spielplan)
-   - Gegner ist immer der ANDERE Verein (nicht der eigene!)
+   - **CRITICAL: Extrahiere BEIDE Teams separat!**
+     * Spalte "Heim Verein" → home_team
+     * Spalte "Gastverein" → away_team
+   - Heimspiel-Erkennung (is_home_match):
+     * Wenn unser Team in Spalte "Heim Verein" steht → is_home_match = true
+     * Wenn unser Team in Spalte "Gastverein" steht → is_home_match = false
+   - Venue/Spielort extrahieren
+   - Matchpunkte extrahieren (z.B. "1:5")
+   - Status extrahieren (z.B. "offen" oder "completed")
 
 **3. SPIELER-DATEN (falls Meldeliste vorhanden):**
    - Extrahiere ALLE Spieler mit Name, LK, ID-Nummer
@@ -149,16 +156,24 @@ BEISPIEL OUTPUT:
     {
       "match_date": "2025-10-11",
       "start_time": "18:00",
+      "home_team": "VKC Köln 1",
+      "away_team": "TG Leverkusen 2",
       "opponent": "TG Leverkusen 2",
       "is_home_match": true,
-      "venue": "Cologne Sportspark"
+      "venue": "Cologne Sportspark",
+      "match_points": "0:0",
+      "status": "offen"
     },
     {
       "match_date": "2025-11-29",
       "start_time": "18:00",
+      "home_team": "KölnerTHC Stadion RW 2",
+      "away_team": "VKC Köln 1",
       "opponent": "KölnerTHC Stadion RW 2",
       "is_home_match": false,
-      "venue": "KölnerTHC Stadion RW"
+      "venue": "KölnerTHC Stadion RW",
+      "match_points": "0:0",
+      "status": "offen"
     }
   ],
   "season": "2025/26"
