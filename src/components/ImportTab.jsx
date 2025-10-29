@@ -22,17 +22,54 @@ const ImportTab = () => {
   const [successMessage, setSuccessMessage] = useState(null);
   const [importStats, setImportStats] = useState(null);
   const [showReview, setShowReview] = useState(false); // NEU: Review-Panel anzeigen
+  const [editablePlayers, setEditablePlayers] = useState([]); // NEU: Editierbare Spieler-Daten
+  const [allClubs, setAllClubs] = useState([]); // NEU: Alle Vereine für Dropdown
+  const [allTeamsForPlayers, setAllTeamsForPlayers] = useState([]); // NEU: Alle Teams für Spieler-Dropdown
   
   // Team auswählen (später aus Context/Props)
   const [selectedTeamId, setSelectedTeamId] = useState(null);
   const [teams, setTeams] = useState([]);
-  const [allTeams, setAllTeams] = useState([]); // Alle Teams für manuelle Auswahl
+  const [allTeams, setAllTeams] = useState([]); // Alle Teams für manuelle Auswahl (für Matches)
   const [manualTeamId, setManualTeamId] = useState(null); // Manuell ausgewähltes Team für Spieler-Import
 
   // Lade Teams beim Mount
   useEffect(() => {
     loadUserTeams();
+    loadAllClubs(); // NEU: Lade alle Vereine für Spieler-Zuordnung
+    loadAllTeamsList(); // NEU: Lade alle Teams
   }, [player]);
+
+  // NEU: Lade alle Vereine für Spieler-Zuordnung
+  const loadAllClubs = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('club_info')
+        .select('id, name, city')
+        .order('name', { ascending: true });
+      
+      if (error) throw error;
+      setAllClubs(data || []);
+    } catch (err) {
+      console.error('Error loading clubs:', err);
+    }
+  };
+
+  // NEU: Lade alle Teams für Spieler-Zuordnung
+  const loadAllTeamsList = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('team_info')
+        .select('id, club_name, team_name, category')
+        .order('club_name', { ascending: true });
+      
+      if (error) throw error;
+      setAllTeamsForPlayers(data || []);
+      // Auch für allTeams setzen (wird noch verwendet)
+      setAllTeams(data || []);
+    } catch (err) {
+      console.error('Error loading teams:', err);
+    }
+  };
 
   const loadUserTeams = async () => {
     if (!player?.id) return;
@@ -183,9 +220,66 @@ const ImportTab = () => {
         const matchResults = await performPlayerMatching(parsed.players);
         setPlayerMatchResults(matchResults);
         
-        // Nur NEUE Spieler standardmäßig auswählen
+        // NEU: Initialisiere editierbare Spieler-Daten mit geparsten Werten
+        const editableData = parsed.players.map((player, idx) => {
+          // Versuche Verein-ID zu finden
+          let clubId = parsed.team_info?.matched_club_id || null;
+          let clubName = parsed.team_info?.club_name || parsed.team_info?.matched_club_name || '';
+          
+          // Wenn club_name vorhanden aber keine ID, suche Verein
+          if (!clubId && clubName) {
+            const foundClub = allClubs.find(c => 
+              c.name.toLowerCase() === clubName.toLowerCase()
+            );
+            if (foundClub) {
+              clubId = foundClub.id;
+              clubName = foundClub.name;
+            }
+          }
+          
+          // Versuche Team-ID zu finden
+          let teamId = parsed.team_info?.matched_team_id || null;
+          
+          // Wenn Verein gefunden, aber kein Team, suche passendes Team
+          if (clubId && !teamId && parsed.team_info?.category) {
+            const foundTeam = allTeamsForPlayers.find(t => 
+              (t.club_name.toLowerCase() === clubName.toLowerCase() || 
+               (t.club_name && clubName && t.club_name.includes(clubName.split(' ')[0]))) &&
+              t.category === parsed.team_info.category
+            );
+            if (foundTeam) {
+              teamId = foundTeam.id;
+            }
+          }
+          
+          return {
+            index: idx,
+            name: player.name || '',
+            lk: player.lk || '',
+            tvm_id_number: player.id_number || '',
+            club_id: clubId,
+            club_name: clubName,
+            team_id: teamId,
+            category: parsed.team_info?.category || '',
+            is_captain: player.is_captain || false,
+            isValid: false // Wird durch Validierung gesetzt
+          };
+        });
+        
+        setEditablePlayers(editableData);
+        
+        // Nur NEUE Spieler standardmäßig auswählen (aber nur wenn alle Daten vollständig sind)
         const newPlayerIndices = matchResults
-          .map((r, idx) => r.status === 'new' ? idx : null)
+          .map((r, idx) => {
+            if (r.status === 'new') {
+              const editable = editableData[idx];
+              // Prüfe ob alle Pflichtfelder vorhanden sind
+              if (editable.lk && editable.tvm_id_number && editable.club_name) {
+                return idx;
+              }
+            }
+            return null;
+          })
           .filter(idx => idx !== null);
         setSelectedPlayers(newPlayerIndices);
       }
@@ -727,27 +821,35 @@ const ImportTab = () => {
     setError(null);
 
     try {
-      // SCHRITT 1: Team ermitteln (automatisch oder manuell)
-      let teamId = null;
-
-      if (parsedData?.team_info) {
-        // Automatisch aus geparsten Daten
-        teamId = await findOrCreateTeam(parsedData.team_info, parsedData.season);
-        console.log('🎯 Team ID (automatisch ermittelt):', teamId);
-      } else if (manualTeamId) {
-        // Manuell ausgewählt
-        teamId = manualTeamId;
-        console.log('🎯 Team ID (manuell ausgewählt):', teamId);
-      } else {
-        // Kein Team → Import OHNE Team-Zuordnung (erlaubt!)
-        console.log('ℹ️ Spieler werden ohne Team-Zuordnung importiert');
+      // SCHRITT 1: Validierung - Prüfe ob alle ausgewählten Spieler vollständig sind
+      const incompletePlayers = selectedPlayers.filter(idx => {
+        const editable = editablePlayers[idx];
+        return !editable || !editable.name || !editable.lk || !editable.tvm_id_number || 
+               !editable.club_id || !editable.team_id;
+      });
+      
+      if (incompletePlayers.length > 0) {
+        setError(`❌ ${incompletePlayers.length} Spieler haben unvollständige Daten. Bitte fülle alle Pflichtfelder (Verein, Team, LK, TVM ID) aus.`);
+        setIsProcessing(false);
+        return;
       }
 
-      // SCHRITT 2: Für jeden ausgewählten Spieler
-      const playersToImport = selectedPlayers.map(idx => ({
-        ...parsedData.players[idx],
-        matchResult: playerMatchResults[idx]
-      }));
+      // SCHRITT 3: Für jeden ausgewählten Spieler
+      const playersToImport = selectedPlayers.map(idx => {
+        const editable = editablePlayers[idx];
+        const originalPlayer = parsedData.players[idx];
+        return {
+          ...originalPlayer,
+          name: editable.name,
+          lk: editable.lk,
+          id_number: editable.tvm_id_number,
+          club_id: editable.club_id,
+          team_id: editable.team_id,
+          club_name: editable.club_name,
+          category: editable.category,
+          matchResult: playerMatchResults[idx]
+        };
+      });
 
       let created = 0;
       let updated = 0;
@@ -755,45 +857,76 @@ const ImportTab = () => {
 
       for (const playerData of playersToImport) {
         const matchResult = playerData.matchResult;
+        
+        // VALIDIERUNG: Prüfe Pflichtfelder
+        if (!playerData.name || !playerData.lk || !playerData.id_number || !playerData.club_id || !playerData.team_id) {
+          console.warn('⚠️ Spieler übersprungen - unvollständige Daten:', playerData.name);
+          skipped++;
+          continue;
+        }
 
         // FALL 1: Existierender Spieler (exakte Übereinstimmung)
         if (matchResult?.status === 'exact' && matchResult.playerId) {
           console.log('✅ Updating existing player:', playerData.name);
           
-          // Update LK wenn sich geändert hat
-          const { error: updateError } = await supabase
-            .from('players_unified')
-            .update({
-              current_lk: playerData.lk || null,
-              last_lk_update: new Date().toISOString()
-            })
-            .eq('id', matchResult.playerId);
-
-          if (updateError) {
-            console.error('❌ Error updating player:', updateError);
-            skipped++;
-          } else {
-            updated++;
-            
-            // Verknüpfe mit Team (falls noch nicht)
-            await linkPlayerToTeam(matchResult.playerId, teamId, playerData.is_captain);
+          // Update LK und TVM ID (falls geändert oder fehlend)
+          const updateFields = {};
+          
+          if (playerData.lk) {
+            updateFields.current_lk = playerData.lk;
+            updateFields.last_lk_update = new Date().toISOString();
           }
+          
+          if (playerData.id_number) {
+            updateFields.tvm_id_number = playerData.id_number;
+          }
+          
+          if (Object.keys(updateFields).length > 0) {
+            const { error: updateError } = await supabase
+              .from('players_unified')
+              .update(updateFields)
+              .eq('id', matchResult.playerId);
+
+            if (updateError) {
+              console.error('❌ Error updating player:', updateError);
+              skipped++;
+              continue;
+            }
+          }
+          
+          updated++;
+          
+          // Verknüpfe mit Team (falls noch nicht) - verwende team_id aus editablePlayers
+          if (playerData.team_id) {
+            await linkPlayerToTeam(matchResult.playerId, playerData.team_id, playerData.is_captain);
+          }
+          
           continue;
         }
 
         // FALL 2: Neuer Spieler → players_unified mit status='pending'
         console.log('🆕 Creating imported player:', playerData.name);
         
+        // WICHTIG: Verwende team_id aus editablePlayers (nicht aus parsedData!)
+        const targetTeamId = playerData.team_id;
+        
+        if (!targetTeamId) {
+          console.error('❌ Spieler ohne Team-ID kann nicht importiert werden:', playerData.name);
+          skipped++;
+          continue;
+        }
+        
         const { data: newImportedPlayer, error: insertError } = await supabase
           .from('players_unified')
           .insert({
             name: playerData.name,
-            current_lk: playerData.lk || null,
-            tvm_id_number: playerData.id_number || null, // ⚠️ WICHTIG: Für eindeutige Zuordnung!
+            current_lk: playerData.lk, // ⚠️ PFLICHTFELD
+            tvm_id_number: playerData.id_number, // ⚠️ PFLICHTFELD
             is_captain: playerData.is_captain || false,
             player_type: 'app_user',
-            is_active: false, // ⚠️ WICHTIG: Noch kein Account!
-            user_id: null, // ⚠️ WICHTIG: Noch kein Login!
+            is_active: false,
+            user_id: null,
+            status: 'pending', // NEU: Explizit pending setzen
             import_source: 'tvm_import'
           })
           .select('id')
@@ -806,10 +939,8 @@ const ImportTab = () => {
           created++;
           console.log('✅ Imported player created:', playerData.name, 'ID:', newImportedPlayer.id);
           
-          // Verknüpfe Spieler mit Team
-          if (teamId) {
-            await linkPlayerToTeam(newImportedPlayer.id, teamId, playerData.is_captain);
-          }
+          // Verknüpfe Spieler mit Team (WICHTIG: Verwende targetTeamId!)
+          await linkPlayerToTeam(newImportedPlayer.id, targetTeamId, playerData.is_captain);
 
           // Log KI-Import Aktivität
           try {
@@ -846,6 +977,8 @@ const ImportTab = () => {
       setParsedData(null);
       setSelectedPlayers([]);
       setPlayerMatchResults([]);
+      setEditablePlayers([]);
+      setMatchingReview(null);
 
     } catch (err) {
       console.error('❌ Spieler-Import error:', err);
@@ -1679,125 +1812,363 @@ Die KI erkennt automatisch:
             </div>
           </div>
 
-          {/* Manuelle Team-Auswahl (falls keine Team-Info erkannt) */}
-          {!parsedData.team_info && (
-            <div style={{ 
-              padding: '1rem', 
-              background: '#fef3c7', 
-              border: '1px solid #f59e0b', 
-              borderRadius: '8px',
-              marginBottom: '1rem'
-            }}>
-              <div style={{ fontSize: '0.9rem', fontWeight: '600', marginBottom: '0.5rem', color: '#92400e' }}>
-                ⚠️ Keine Team-Informationen erkannt
-              </div>
-              <div style={{ fontSize: '0.85rem', color: '#78350f', marginBottom: '0.75rem' }}>
-                Wähle optional ein Team aus, dem die Spieler zugeordnet werden sollen. 
-                Du kannst Spieler auch ohne Team importieren.
-              </div>
-              <select
-                value={manualTeamId || ''}
-                onChange={(e) => setManualTeamId(e.target.value || null)}
-                style={{
-                  width: '100%',
-                  padding: '0.5rem',
-                  border: '1px solid #f59e0b',
-                  borderRadius: '6px',
-                  fontSize: '0.875rem',
-                  background: 'white'
-                }}
-              >
-                <option value="">🚫 Kein Team (Spieler ohne Zuordnung)</option>
-                {allTeams.map(team => (
-                  <option key={team.id} value={team.id}>
-                    {team.name}
-                  </option>
-                ))}
-              </select>
+          {/* Info-Box: Pflichtfelder */}
+          <div style={{ 
+            padding: '1rem', 
+            background: '#eff6ff', 
+            border: '1px solid #3b82f6', 
+            borderRadius: '8px',
+            marginBottom: '1rem'
+          }}>
+            <div style={{ fontSize: '0.9rem', fontWeight: '600', marginBottom: '0.5rem', color: '#1e40af' }}>
+              ℹ️ Wichtig: Pflichtfelder für jeden Spieler
             </div>
-          )}
+            <div style={{ fontSize: '0.85rem', color: '#1e3a8a' }}>
+              Jeder Spieler benötigt <strong>Verein, Team, LK und TVM ID</strong>. 
+              Spieler ohne vollständige Daten können nicht importiert werden.
+            </div>
+          </div>
 
-          <div className="players-preview">
+          <div className="players-preview" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {parsedData.players.map((player, idx) => {
               const matchResult = playerMatchResults[idx] || { status: 'new' };
+              const editable = editablePlayers[idx] || {
+                index: idx,
+                name: player.name || '',
+                lk: player.lk || '',
+                tvm_id_number: player.id_number || '',
+                club_id: null,
+                club_name: '',
+                team_id: null,
+                category: '',
+                is_captain: player.is_captain || false
+              };
+              
+              // Validierung: Alle Pflichtfelder müssen gefüllt sein
+              const isValid = editable.name.trim() !== '' &&
+                            editable.lk.trim() !== '' &&
+                            editable.tvm_id_number.trim() !== '' &&
+                            editable.club_id !== null &&
+                            editable.team_id !== null;
+              
+              // Filtere Teams nach ausgewähltem Verein
+              const availableTeams = editable.club_id
+                ? allTeamsForPlayers.filter(t => t.club_name === editable.club_name || t.id === editable.team_id)
+                : allTeamsForPlayers;
               
               return (
                 <div 
                   key={idx}
-                  className={`player-card ${selectedPlayers.includes(idx) ? 'selected' : ''} ${matchResult.status}`}
-                  onClick={() => {
-                    setSelectedPlayers(prev => 
-                      prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]
-                    );
+                  style={{
+                    padding: '1rem',
+                    border: `2px solid ${isValid ? (selectedPlayers.includes(idx) ? '#10b981' : '#e5e7eb') : '#ef4444'}`,
+                    borderRadius: '8px',
+                    background: selectedPlayers.includes(idx) ? '#f0fdf4' : 'white',
+                    opacity: isValid ? 1 : 0.7
                   }}
                 >
-                  <div className="match-checkbox">
-                    <input 
-                      type="checkbox"
-                      checked={selectedPlayers.includes(idx)}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        setSelectedPlayers(prev => 
-                          prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]
-                        );
-                      }}
-                    />
-                  </div>
-                  
-                  <div className="player-details">
-                    <div className="player-header">
-                      <strong className="player-name">{player.name}</strong>
-                      <span className={`player-status-badge ${matchResult.status}`}>
-                        {matchResult.status === 'exact' && `✅ Existiert (${matchResult.confidence}%)`}
-                        {matchResult.status === 'fuzzy' && `⚠️ Ähnlich (${matchResult.confidence}%)`}
-                        {matchResult.status === 'new' && '🆕 Neu'}
+                  {/* Header mit Checkbox */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <input 
+                        type="checkbox"
+                        checked={selectedPlayers.includes(idx)}
+                        disabled={!isValid}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          if (isValid) {
+                            setSelectedPlayers(prev => 
+                              prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]
+                            );
+                          }
+                        }}
+                        style={{ 
+                          width: '20px', 
+                          height: '20px', 
+                          cursor: isValid ? 'pointer' : 'not-allowed' 
+                        }}
+                      />
+                      <strong style={{ fontSize: '1rem' }}>{editable.name}</strong>
+                      {matchResult.status !== 'new' && (
+                        <span style={{
+                          padding: '0.25rem 0.5rem',
+                          background: '#dbeafe',
+                          color: '#1e40af',
+                          borderRadius: '4px',
+                          fontSize: '0.75rem',
+                          fontWeight: '600'
+                        }}>
+                          💾 Existiert ({matchResult.confidence}%)
+                        </span>
+                      )}
+                      {player.is_captain && (
+                        <span style={{
+                          padding: '0.25rem 0.5rem',
+                          background: '#fef3c7',
+                          color: '#92400e',
+                          borderRadius: '4px',
+                          fontSize: '0.75rem',
+                          fontWeight: '600'
+                        }}>
+                          👑 MF
+                        </span>
+                      )}
+                    </div>
+                    {!isValid && (
+                      <span style={{
+                        padding: '0.25rem 0.75rem',
+                        background: '#fee2e2',
+                        color: '#991b1b',
+                        borderRadius: '6px',
+                        fontSize: '0.8rem',
+                        fontWeight: '600'
+                      }}>
+                        ⚠️ Daten unvollständig
                       </span>
-                    </div>
-                    
-                    <div className="player-info">
-                      <span className="player-lk">🏆 LK {player.lk}</span>
-                      <span className="player-position">📍 Pos. {player.position}</span>
-                      {player.is_captain && <span className="captain-badge">👑 MF</span>}
-                      <span className="player-id">🆔 {player.id_number}</span>
-                    </div>
-                    
-                    {/* Existing Player Info */}
-                    {matchResult.status !== 'new' && matchResult.existingName && (
-                      <div className="existing-player-info">
-                        <div style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                          💾 <strong>Existierender Spieler:</strong> {matchResult.existingName}
-                          {matchResult.existingLk && ` (LK ${matchResult.existingLk})`}
-                        </div>
-                        {player.lk !== matchResult.existingLk && (
-                          <div style={{ fontSize: '0.8rem', color: '#f59e0b', marginTop: '0.25rem' }}>
-                            ⚡ LK-Update: {matchResult.existingLk} → {player.lk}
-                          </div>
-                        )}
-                      </div>
                     )}
                   </div>
+                  
+                  {/* Editierbare Felder */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                    {/* LK */}
+                    <div>
+                      <label style={{ fontSize: '0.8rem', color: '#6b7280', display: 'block', marginBottom: '0.25rem', fontWeight: '600' }}>
+                        🏆 LK <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={editable.lk}
+                        onChange={(e) => {
+                          const newEditable = [...editablePlayers];
+                          newEditable[idx].lk = e.target.value;
+                          setEditablePlayers(newEditable);
+                        }}
+                        placeholder="z.B. 6.8"
+                        style={{
+                          width: '100%',
+                          padding: '0.5rem',
+                          border: `1px solid ${editable.lk ? '#10b981' : '#e5e7eb'}`,
+                          borderRadius: '6px',
+                          fontSize: '0.875rem'
+                        }}
+                      />
+                    </div>
+                    
+                    {/* TVM ID */}
+                    <div>
+                      <label style={{ fontSize: '0.8rem', color: '#6b7280', display: 'block', marginBottom: '0.25rem', fontWeight: '600' }}>
+                        🆔 TVM ID <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={editable.tvm_id_number}
+                        onChange={(e) => {
+                          const newEditable = [...editablePlayers];
+                          newEditable[idx].tvm_id_number = e.target.value;
+                          setEditablePlayers(newEditable);
+                        }}
+                        placeholder="z.B. 17160158"
+                        style={{
+                          width: '100%',
+                          padding: '0.5rem',
+                          border: `1px solid ${editable.tvm_id_number ? '#10b981' : '#e5e7eb'}`,
+                          borderRadius: '6px',
+                          fontSize: '0.875rem'
+                        }}
+                      />
+                    </div>
+                  </div>
+                  
+                  {/* Verein & Team */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                    {/* Verein */}
+                    <div>
+                      <label style={{ fontSize: '0.8rem', color: '#6b7280', display: 'block', marginBottom: '0.25rem', fontWeight: '600' }}>
+                        🏢 Verein <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <select
+                        value={editable.club_id || ''}
+                        onChange={async (e) => {
+                          const clubId = e.target.value || null;
+                          const newEditable = [...editablePlayers];
+                          newEditable[idx].club_id = clubId;
+                          
+                          // Setze Verein-Name
+                          if (clubId) {
+                            const club = allClubs.find(c => c.id === clubId);
+                            if (club) {
+                              newEditable[idx].club_name = club.name;
+                              
+                              // Versuche automatisch Team zu finden (passend zur Category)
+                              const matchingTeam = allTeamsForPlayers.find(t => 
+                                t.club_name === club.name && 
+                                t.category === editable.category
+                              );
+                              if (matchingTeam) {
+                                newEditable[idx].team_id = matchingTeam.id;
+                              } else {
+                                newEditable[idx].team_id = null; // Reset Team wenn kein Match
+                              }
+                            }
+                          } else {
+                            newEditable[idx].club_name = '';
+                            newEditable[idx].team_id = null;
+                          }
+                          
+                          setEditablePlayers(newEditable);
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '0.5rem',
+                          border: `1px solid ${editable.club_id ? '#10b981' : '#e5e7eb'}`,
+                          borderRadius: '6px',
+                          fontSize: '0.875rem',
+                          background: 'white'
+                        }}
+                      >
+                        <option value="">-- Verein wählen --</option>
+                        {allClubs.map(club => (
+                          <option key={club.id} value={club.id}>
+                            {club.name} {club.city ? `(${club.city})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    {/* Team */}
+                    <div>
+                      <label style={{ fontSize: '0.8rem', color: '#6b7280', display: 'block', marginBottom: '0.25rem', fontWeight: '600' }}>
+                        🏆 Team <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <select
+                        value={editable.team_id || ''}
+                        disabled={!editable.club_id}
+                        onChange={(e) => {
+                          const teamId = e.target.value || null;
+                          const newEditable = [...editablePlayers];
+                          newEditable[idx].team_id = teamId;
+                          
+                          // Setze Category basierend auf Team
+                          if (teamId) {
+                            const team = allTeamsForPlayers.find(t => t.id === teamId);
+                            if (team) {
+                              newEditable[idx].category = team.category || '';
+                            }
+                          }
+                          
+                          setEditablePlayers(newEditable);
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '0.5rem',
+                          border: `1px solid ${editable.team_id ? '#10b981' : '#e5e7eb'}`,
+                          borderRadius: '6px',
+                          fontSize: '0.875rem',
+                          background: editable.club_id ? 'white' : '#f3f4f6',
+                          cursor: editable.club_id ? 'pointer' : 'not-allowed'
+                        }}
+                      >
+                        <option value="">-- Team wählen --</option>
+                        {availableTeams.map(team => (
+                          <option key={team.id} value={team.id}>
+                            {team.club_name} {team.team_name ? `- ${team.team_name}` : ''} ({team.category})
+                          </option>
+                        ))}
+                      </select>
+                      {!editable.club_id && (
+                        <div style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '0.25rem' }}>
+                          ⚠️ Wähle zuerst einen Verein
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {/* Validierungs-Hinweis */}
+                  {!isValid && (
+                    <div style={{
+                      padding: '0.5rem',
+                      background: '#fee2e2',
+                      borderRadius: '6px',
+                      fontSize: '0.8rem',
+                      color: '#991b1b',
+                      marginTop: '0.5rem'
+                    }}>
+                      ⚠️ Pflichtfelder: LK, TVM ID, Verein und Team müssen ausgefüllt sein
+                    </div>
+                  )}
+                  
+                  {/* Existing Player Info */}
+                  {matchResult.status !== 'new' && matchResult.existingName && (
+                    <div style={{
+                      padding: '0.5rem',
+                      background: '#eff6ff',
+                      borderRadius: '6px',
+                      fontSize: '0.8rem',
+                      color: '#1e40af',
+                      marginTop: '0.5rem'
+                    }}>
+                      💾 <strong>Existierender Spieler:</strong> {matchResult.existingName}
+                      {matchResult.existingLk && ` (LK ${matchResult.existingLk})`}
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
 
           <div className="import-actions">
-            <button
-              onClick={handleImportPlayers}
-              disabled={selectedPlayers.length === 0 || isProcessing}
-              className="btn-import"
-            >
-              {isProcessing 
-                ? '⏳ Importiere...' 
-                : `👥 ${selectedPlayers.length} Spieler importieren`
-              }
-            </button>
+            {/* Validierung: Prüfe ob alle ausgewählten Spieler vollständig sind */}
+            {(() => {
+              const incompletePlayers = selectedPlayers.filter(idx => {
+                const editable = editablePlayers[idx];
+                if (!editable) return true;
+                return !editable.name || !editable.lk || !editable.tvm_id_number || 
+                       !editable.club_id || !editable.team_id;
+              });
+              
+              const canImport = selectedPlayers.length > 0 && incompletePlayers.length === 0;
+              
+              return (
+                <>
+                  {incompletePlayers.length > 0 && (
+                    <div style={{
+                      padding: '0.75rem',
+                      background: '#fee2e2',
+                      border: '1px solid #ef4444',
+                      borderRadius: '8px',
+                      marginBottom: '1rem',
+                      fontSize: '0.875rem',
+                      color: '#991b1b'
+                    }}>
+                      ⚠️ <strong>{incompletePlayers.length} Spieler</strong> haben unvollständige Daten. 
+                      Bitte vervollständige alle Pflichtfelder (LK, TVM ID, Verein, Team) bevor du importierst.
+                    </div>
+                  )}
+                  <button
+                    onClick={handleImportPlayers}
+                    disabled={!canImport || isProcessing}
+                    className="btn-import"
+                    style={{
+                      opacity: canImport ? 1 : 0.5,
+                      cursor: canImport ? 'pointer' : 'not-allowed'
+                    }}
+                  >
+                    {isProcessing 
+                      ? '⏳ Importiere...' 
+                      : `👥 ${selectedPlayers.length} Spieler importieren`
+                    }
+                  </button>
+                </>
+              );
+            })()}
             
             <button
               onClick={() => {
                 setParsedData(null);
                 setSelectedPlayers([]);
                 setPlayerMatchResults([]);
+                setEditablePlayers([]);
+                setMatchingReview(null);
               }}
               className="btn-cancel"
               type="button"
