@@ -260,30 +260,38 @@ export const matchTeam = async (teamName, clubId, category, options = {}) => {
       .replace(/\s*\d+\s*$/, '') // Abschließende Nummern entfernen
       .trim();
     
-    // 2. Suche Teams - erst nach club_id, dann nach club_name (falls club_id null)
+    // 2. Suche Teams - erst nach club_name (club_id Spalte existiert möglicherweise nicht)
     let candidates = [];
     
+    // Versuche zuerst nach club_id zu suchen (falls Spalte existiert)
     if (clubId) {
-      // Suche nach club_id
-      const { data: clubTeams, error: teamsError } = await supabase
-        .from('team_info')
-        .select('id, team_name, club_name, category, league, group_name, club_id')
-        .eq('club_id', clubId);
-      
-      if (!teamsError && clubTeams) {
-        candidates = clubTeams;
+      try {
+        // Lade Club-Name aus club_info (falls club_id vorhanden)
+        const { data: clubInfo } = await supabase
+          .from('club_info')
+          .select('name')
+          .eq('id', clubId)
+          .maybeSingle();
+        
+        if (clubInfo && clubInfo.name) {
+          rawClubName = clubInfo.name;
+        }
+      } catch (e) {
+        console.warn('⚠️ Could not load club info:', e);
       }
     }
     
-    // Falls keine Teams gefunden, suche nach club_name (falls vorhanden)
-    if (candidates.length === 0 && rawClubName) {
+    // Suche nach club_name (Haupt-Strategie, da club_id möglicherweise nicht in team_info existiert)
+    if (rawClubName) {
       const { data: clubTeamsByName, error: nameError } = await supabase
         .from('team_info')
-        .select('id, team_name, club_name, category, league, group_name, club_id')
+        .select('id, team_name, club_name, category, league, group_name')
         .ilike('club_name', `%${rawClubName}%`);
       
       if (!nameError && clubTeamsByName) {
         candidates = clubTeamsByName;
+      } else if (nameError) {
+        console.warn('⚠️ Error loading teams by club_name:', nameError);
       }
     }
     
