@@ -272,6 +272,7 @@ export const matchTeam = async (teamName, clubId, category, options = {}) => {
     
     // 2. Suche Teams - erst nach club_name (club_id Spalte existiert möglicherweise nicht)
     let candidates = [];
+    let resolvedClubName = rawClubName; // Lokale Variable statt Parameter-Überschreibung
     
     // Versuche zuerst nach club_id zu suchen (falls Spalte existiert)
     if (clubId) {
@@ -284,7 +285,7 @@ export const matchTeam = async (teamName, clubId, category, options = {}) => {
           .maybeSingle();
         
         if (clubInfo && clubInfo.name) {
-          rawClubName = clubInfo.name;
+          resolvedClubName = clubInfo.name; // Nutze lokale Variable
         }
       } catch (e) {
         console.warn('⚠️ Could not load club info:', e);
@@ -292,11 +293,12 @@ export const matchTeam = async (teamName, clubId, category, options = {}) => {
     }
     
     // Suche nach club_name (Haupt-Strategie, da club_id möglicherweise nicht in team_info existiert)
-    if (rawClubName) {
+    // WICHTIG: league existiert NICHT in team_info, nur in team_seasons!
+    if (resolvedClubName) {
       const { data: clubTeamsByName, error: nameError } = await supabase
         .from('team_info')
-        .select('id, team_name, club_name, category, league, group_name')
-        .ilike('club_name', `%${rawClubName}%`);
+        .select('id, team_name, club_name, category, group_name')
+        .ilike('club_name', `%${resolvedClubName}%`);
       
       if (!nameError && clubTeamsByName) {
         candidates = clubTeamsByName;
@@ -348,8 +350,8 @@ export const matchTeam = async (teamName, clubId, category, options = {}) => {
                            normalizeString(team.category || '') === normalizeString(category) ? 0.15 : 0;
       
       // Bonus wenn Club-Name ähnlich ist
-      const clubBonus = rawClubName && team.club_name &&
-                       calculateSimilarity(normalizeString(rawClubName), normalizeString(team.club_name)) > 0.9 
+      const clubBonus = resolvedClubName && team.club_name &&
+                       calculateSimilarity(normalizeString(resolvedClubName), normalizeString(team.club_name)) > 0.9 
                        ? 0.05 : 0;
       
       return {

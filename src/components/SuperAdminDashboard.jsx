@@ -48,6 +48,23 @@ function SuperAdminDashboard() {
   const [matchSortField, setMatchSortField] = useState('date'); // 'date', 'team', 'status'
   const [matchSortDirection, setMatchSortDirection] = useState('desc'); // 'asc', 'desc'
 
+  // Commit-Info für Anzeige in der Überschrift (verschiedene Umgebungen unterstützt)
+  const getCommitSha = () => {
+    try {
+      const g = (typeof globalThis !== 'undefined') ? globalThis : undefined;
+      const p = g && g.process ? g.process : undefined;
+      const w = g && g.window ? g.window : undefined;
+      if (p && p.env && p.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA) return p.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA;
+      if (p && p.env && p.env.VERCEL_GIT_COMMIT_SHA) return p.env.VERCEL_GIT_COMMIT_SHA;
+      if (w && w.__COMMIT_SHA__) return w.__COMMIT_SHA__;
+      return '';
+    } catch (_) {
+      return '';
+    }
+  };
+  const commitSha = getCommitSha();
+  const shortCommit = commitSha ? String(commitSha).substring(0, 7) : 'local';
+
   // State für Match-Detail-Modal
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [matchDetails, setMatchDetails] = useState(null);
@@ -394,14 +411,14 @@ function SuperAdminDashboard() {
           } else {
             // user_id ist NULL - versuche aus entity_id abzuleiten
             // Nur in DEV-Mode loggen (zu viel Noise in Production)
-            if (process.env.NODE_ENV === 'development') {
+            if ((typeof globalThis !== 'undefined' && globalThis.process && globalThis.process.env && globalThis.process.env.NODE_ENV) === 'development') {
               console.warn('⚠️ Log has NULL user_id:', log.action, 'entity_type:', log.entity_type, 'entity_id:', log.entity_id);
             }
             
             // Wenn entity_type = 'player', ist entity_id wahrscheinlich die player_id
             if (log.entity_type === 'player' && log.entity_id) {
               player = minimalPlayersData.find(p => p.id === log.entity_id);
-              if (player && process.env.NODE_ENV === 'development') {
+              if (player && (typeof globalThis !== 'undefined' && globalThis.process && globalThis.process.env && globalThis.process.env.NODE_ENV) === 'development') {
                 console.log('✅ Inferred player from entity_id:', player.name);
               }
             }
@@ -1050,7 +1067,23 @@ function SuperAdminDashboard() {
       {/* Header */}
       <div className="lk-card-full">
         <div className="formkurve-header">
-          <div className="formkurve-title">👑 Super-Admin Dashboard</div>
+          <div className="formkurve-title">
+            👑 Super-Admin Dashboard
+            <span style={{
+              marginLeft: '0.5rem',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              background: '#eef2ff',
+              color: '#3730a3',
+              border: '1px solid #c7d2fe',
+              borderRadius: '6px',
+              padding: '0.15rem 0.4rem'
+            }}
+              title={`Commit: ${commitSha || 'local build'}`}
+            >
+              {shortCommit}
+            </span>
+          </div>
           <div className="formkurve-subtitle">
             System-Übersicht & Vereinsverwaltung
           </div>

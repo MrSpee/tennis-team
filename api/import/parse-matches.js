@@ -67,12 +67,12 @@ const MATCH_SCHEMA = {
         additionalProperties: false,
         properties: {
           name: { type: "string", description: "Spieler Name" },
-          lk: { type: "string", description: "Leistungsklasse (z.B. '9.8', '11.3', '13.5' oder '13') - IMMER als STRING, auch bei ganzen Zahlen!" },
-          id_number: { type: "string", description: "TVM ID-Nummer" },
+          lk: { type: ["string", "null"], description: "Leistungsklasse (z.B. '9.8', '11.3', '13.5' oder '13') - IMMER als STRING wenn vorhanden. Falls NICHT erkennbar oder leer, setze null oder \"\". NIEMALS erfundene Werte!" },
+          id_number: { type: ["string", "null"], description: "TVM ID-Nummer. Falls nicht erkennbar oder leer, setze \"\" oder null." },
           position: { type: "integer", description: "Position in der Meldeliste" },
           is_captain: { type: "boolean", description: "true wenn Mannschaftsführer (MF)" }
         },
-        required: ["name", "lk", "id_number", "position", "is_captain"]
+        required: ["name", "position", "is_captain"] // lk und id_number sind OPTIONAL - können später manuell ergänzt werden!
       }
     },
     
@@ -123,16 +123,26 @@ WICHTIGE REGELN:
    - Status extrahieren (z.B. "offen" oder "completed")
 
 **3. SPIELER-DATEN (falls Meldeliste vorhanden):**
-   - Extrahiere ALLE Spieler mit Name, LK, ID-Nummer
-   - **WICHTIG: LK Format ist "Zahl.Zahl" (z.B. "9.8", "11.3", "13.5")**
-     * LK steht in der Spalte "LK"
-     * LK kann auch ganzzahlig sein (z.B. "13" statt "13.0")
-     * Immer als STRING extrahieren, NICHT als Zahl!
+   - **KRITISCH: Extrahiere ALLE Spieler aus der Meldeliste - keine Spieler weglassen!**
+   - **LK-ERKENNUNG (Priorität 1):**
+     * Versuche IMMER die LK-Spalte zu extrahieren
+     * LK Format ist "Zahl.Zahl" (z.B. "9.8", "11.3", "13.5") ODER ganzzahlig (z.B. "13", "14", "15")
+     * **WICHTIG: Wenn LK NICHT erkennbar oder leer ist, setze lk auf null oder ""**
+     * **NIEMALS erfundene oder Fallback-Werte verwenden!**
+     * Der Benutzer kann fehlende LK-Werte später manuell ergänzen
+   - **TVM ID-Nummer (Priorität 2):**
+     * Wenn ID-Nummer erkennbar ist, extrahiere sie
+     * Wenn ID-Nummer fehlt oder leer, setze id_number auf "" (leeren String)
+     * ID-Nummer kann später manuell ergänzt werden
    - Position in der Meldeliste beachten
    - Mannschaftsführer markieren (Spalte "MF")
-   - **Beispiel:**
-     * Position 9, Mannschaft 3: Name="Meik Frauenrath", LK="9.8", ID-Nr="18253069"
-     * Position 15, Mannschaft 4: Name="Frank Tepferd", LK="12.7", ID-Nr="17656142", is_captain=true (wegen MF)
+   - **DETAILIERTES BEISPIEL:**
+     * Tabellenzeile: "9	3	Meik Frauenrath	9.8	18253069		GER"
+       → Position=9, Name="Meik Frauenrath", lk="9.8", id_number="18253069"
+     * Tabellenzeile: "15	4	Frank Tepferd	12.7	17656142		MF	GER"
+       → Position=15, Name="Frank Tepferd", lk="12.7", id_number="17656142", is_captain=true
+     * **FALLS LK SPALTE LEER/UNSICHTBAR: "10	3	Max Mustermann		12345678"**
+       → Position=10, Name="Max Mustermann", lk=null (oder ""), id_number="12345678"
 
 **4. SAISON & JAHR:**
    - Erkenne Saison basierend auf Monat:
@@ -173,36 +183,65 @@ BEISPIEL OUTPUT:
     "team_name": "3",
     "category": "Herren 40",
     "league": "Herren 40 1. Kreisliga Gr. 046",
-    "address": "Oberstr. 122, 51149 Köln",
-    "website": "http://www.tv-ensen-westhoven.de",
-    "captain": "Middendorf Jörg"
+    "address": "Subbelrather Str. 19, 50823 Köln",
+    "website": "http://www.tc-colonius.de",
+    "captain": "Tepferd Frank"
   },
-  "matches": [
+  "matches": [],
+  "players": [
     {
-      "match_date": "2025-10-11",
-      "start_time": "18:00",
-      "home_team": "VKC Köln 1",
-      "away_team": "TG Leverkusen 2",
-      "opponent": "TG Leverkusen 2",
-      "is_home_match": true,
-      "venue": "Cologne Sportspark",
-      "match_points": "0:0",
-      "status": "offen"
+      "name": "Meik Frauenrath",
+      "lk": "9.8",
+      "id_number": "18253069",
+      "position": 9,
+      "is_captain": false
     },
     {
-      "match_date": "2025-11-29",
-      "start_time": "18:00",
-      "home_team": "KölnerTHC Stadion RW 2",
-      "away_team": "VKC Köln 1",
-      "opponent": "KölnerTHC Stadion RW 2",
-      "is_home_match": false,
-      "venue": "KölnerTHC Stadion RW",
-      "match_points": "0:0",
-      "status": "offen"
+      "name": "Björn Kaiser",
+      "lk": "10.3",
+      "id_number": "17454607",
+      "position": 10,
+      "is_captain": false
+    },
+    {
+      "name": "Stefan Wessels",
+      "lk": "10.4",
+      "id_number": "18302571",
+      "position": 11,
+      "is_captain": false
+    },
+    {
+      "name": "Maurice Houboi",
+      "lk": "10.4",
+      "id_number": "18403153",
+      "position": 12,
+      "is_captain": false
+    },
+    {
+      "name": "Fabian Eisenbeiß",
+      "lk": "11.3",
+      "id_number": "18603107",
+      "position": 13,
+      "is_captain": false
+    },
+    {
+      "name": "Frank Tepferd",
+      "lk": "12.7",
+      "id_number": "17656142",
+      "position": 15,
+      "is_captain": true
     }
   ],
-  "season": "2025/26"
+  "season": "winter",
+  "year": "2025/26"
 }
+
+**WICHTIGE HINWEISE:**
+- JEDE Tabellenzeile aus der Meldeliste MUSS einen Spieler-Eintrag ergeben
+- Extrahiere LK-Werte wenn möglich, aber setze NICHT erfundene Werte
+- Wenn LK nicht erkennbar ist: lk = null oder "" (wird später manuell ergänzt)
+- Wenn ID-Nummer nicht erkennbar ist: id_number = "" (wird später manuell ergänzt)
+- Besser fehlende Werte lassen als falsche Werte erfinden!
 
 Wenn du dir bei etwas unsicher bist, lass das Feld weg (außer required fields).`;
 
