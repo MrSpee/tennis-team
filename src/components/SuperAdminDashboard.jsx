@@ -69,6 +69,7 @@ function SuperAdminDashboard() {
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [matchDetails, setMatchDetails] = useState(null);
   const [loadingMatchDetails, setLoadingMatchDetails] = useState(false);
+  const [processingClubId, setProcessingClubId] = useState(null); // Loading State für Club-Aktionen
 
   // Sortier-Helper-Funktionen
   const toggleTeamSort = (field) => {
@@ -323,12 +324,8 @@ function SuperAdminDashboard() {
         console.log('✅ Activity logs loaded:', logsData?.length || 0, 'entries');
       }
 
-      // Lade ausstehende Vereine
-      const { data: clubsData } = await supabase
-        .from('club_info')
-        .select('*')
-        .eq('is_verified', false)
-        .order('created_at', { ascending: false });
+      // Lade ausstehende Vereine (DEPRECATED - wird nicht mehr verwendet)
+      const { data: clubsData } = [];
 
       // Lade alle Vereine
       const { data: allClubsData } = await supabase
@@ -449,7 +446,7 @@ function SuperAdminDashboard() {
       }
 
       setActivityLogs(enrichedLogs);
-      setPendingClubs(clubsData || []);
+      setPendingClubs([]); // DEPRECATED - keine ausstehenden Vereine mehr
       setAllClubs(allClubsData || []);
       setClubPlayerCounts(playerCountMap);
       setMatches(matchesData || []);
@@ -902,33 +899,70 @@ function SuperAdminDashboard() {
     return filterDate.toISOString();
   };
 
-  const handleClubAction = async (clubId, action) => {
+  const handleClubAction = async (clubId, action, e) => {
+    // Verhindere Event-Bubbling
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    // Verhindere mehrfache Klicks
+    if (processingClubId === clubId) {
+      console.log('⏳ Action already processing for club:', clubId);
+      return;
+    }
+
     try {
-      const { error } = await supabase
+      setProcessingClubId(clubId); // Loading State setzen
+      console.log(`🔄 ${action === 'approve' ? 'Genehmige' : 'Lehne ab'} Verein:`, clubId);
+      
+      // Hole User-ID separat
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError) {
+        console.warn('⚠️ Could not get user:', userError);
+      }
+
+      // Update Club
+      const { error: updateError } = await supabase
         .from('club_info')
         .update({
           is_verified: action === 'approve',
           admin_reviewed_at: new Date().toISOString(),
-          admin_reviewed_by: (await supabase.auth.getUser()).data.user?.id
+          admin_reviewed_by: user?.id || null
         })
         .eq('id', clubId);
 
-      if (error) throw error;
+      if (updateError) {
+        console.error(`❌ Error updating club:`, updateError);
+        throw updateError;
+      }
 
-      // Log die Aktion
-      await supabase.rpc('log_activity', {
-        p_action: `club_${action}`,
-        p_entity_type: 'club',
-        p_entity_id: clubId,
-        p_details: { action }
-      });
+      console.log(`✅ Club ${action === 'approve' ? 'genehmigt' : 'abgelehnt'}`);
+
+      // Log die Aktion (non-blocking)
+      try {
+        await supabase.rpc('log_activity', {
+          p_action: `club_${action}`,
+          p_entity_type: 'club',
+          p_entity_id: clubId,
+          p_details: { action }
+        });
+      } catch (logError) {
+        console.warn('⚠️ Could not log activity:', logError);
+        // Nicht kritisch, weiter machen
+      }
 
       // Aktualisiere Daten
-      loadAdminData();
+      await loadAdminData();
+
+      // Erfolg
+      console.log('✅ Daten aktualisiert');
 
     } catch (error) {
-      console.error(`Error ${action}ing club:`, error);
-      alert(`Fehler beim ${action === 'approve' ? 'Genehmigen' : 'Ablehnen'} des Vereins`);
+      console.error(`❌ Error ${action}ing club:`, error);
+      alert(`Fehler beim ${action === 'approve' ? 'Genehmigen' : 'Ablehnen'} des Vereins: ${error.message || error}`);
+    } finally {
+      setProcessingClubId(null); // Loading State zurücksetzen
     }
   };
 
@@ -1434,71 +1468,12 @@ function SuperAdminDashboard() {
 
       {selectedTab === 'clubs' && (
         <div>
-          {/* Ausstehende Vereine */}
-          {pendingClubs.length > 0 && (
-            <div className="lk-card-full" style={{ marginBottom: '1.5rem' }}>
-              <div className="formkurve-header">
-                <div className="formkurve-title">⏳ Ausstehende Prüfungen</div>
-                <div className="formkurve-subtitle">
-                  {pendingClubs.length} Vereine warten auf Prüfung
-                </div>
-              </div>
-              <div className="season-content">
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  {pendingClubs.map(club => (
-                    <div key={club.id} style={{
-                      padding: '1rem',
-                      background: '#fef3c7',
-                      border: '2px solid #f59e0b',
-                      borderRadius: '12px',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center'
-                    }}>
-                      <div>
-                        <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '1rem', fontWeight: '700' }}>
-                          {club.name}
-                        </h4>
-                        <p style={{ margin: 0, fontSize: '0.875rem', color: '#6b7280' }}>
-                          {club.city} • Erstellt: {new Date(club.created_at).toLocaleDateString('de-DE')}
-                        </p>
-                        {club.admin_notes && (
-                          <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.8rem', color: '#92400e' }}>
-                            📝 {club.admin_notes}
-                          </p>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button
-                          onClick={() => handleClubAction(club.id, 'approve')}
-                          className="btn-modern btn-modern-active"
-                          style={{ background: '#10b981' }}
-                        >
-                          <CheckCircle size={16} />
-                          Genehmigen
-                        </button>
-                        <button
-                          onClick={() => handleClubAction(club.id, 'reject')}
-                          className="btn-modern btn-modern-inactive"
-                          style={{ background: '#ef4444', color: 'white' }}
-                        >
-                          <XCircle size={16} />
-                          Ablehnen
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Alle Vereine - Tabellen-Ansicht */}
           <div className="lk-card-full">
             <div className="formkurve-header">
               <div className="formkurve-title">🏢 Alle Vereine</div>
               <div className="formkurve-subtitle">
-                {allClubs.length} Vereine gesamt • {allClubs.filter(c => c.is_verified).length} verifiziert
+                {allClubs.length} Vereine im System
               </div>
             </div>
             <div className="season-content">
@@ -1568,14 +1543,12 @@ function SuperAdminDashboard() {
                         borderBottom: '2px solid #e2e8f0',
                         background: '#f8fafc'
                       }}>
-                        <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600' }}>Status</th>
                         <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600' }}>Verein</th>
                         <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600' }}>Stadt</th>
                         <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600' }}>Verband</th>
                         <th style={{ padding: '0.75rem', textAlign: 'center', fontWeight: '600' }}>Spieler</th>
                         <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600' }}>Homepage</th>
                         <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600' }}>Erstellt</th>
-                        <th style={{ padding: '0.75rem', textAlign: 'center', fontWeight: '600' }}>Aktionen</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1588,20 +1561,6 @@ function SuperAdminDashboard() {
                             borderBottom: '1px solid #e2e8f0',
                             background: index % 2 === 0 ? 'white' : '#f9fafb'
                           }}>
-                            <td style={{ padding: '0.75rem' }}>
-                              <div style={{ 
-                                padding: '0.25rem 0.5rem', 
-                                borderRadius: '6px',
-                                fontSize: '0.7rem',
-                                fontWeight: '600',
-                                background: club.is_verified ? '#dcfce7' : '#fef3c7',
-                                color: club.is_verified ? '#15803d' : '#92400e',
-                                display: 'inline-block',
-                                whiteSpace: 'nowrap'
-                              }}>
-                                {club.is_verified ? '✅ Verifiziert' : '⏳ Prüfung'}
-                              </div>
-                            </td>
                             <td style={{ padding: '0.75rem' }}>
                               <strong>{club.name}</strong>
                             </td>
@@ -1648,44 +1607,6 @@ function SuperAdminDashboard() {
                             </td>
                             <td style={{ padding: '0.75rem', color: '#6b7280', fontSize: '0.8rem' }}>
                               {new Date(club.created_at).toLocaleDateString('de-DE')}
-                            </td>
-                            <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                              {!club.is_verified && (
-                                <div style={{ display: 'flex', gap: '0.25rem', justifyContent: 'center' }}>
-                                  <button
-                                    onClick={() => handleClubAction(club.id, 'approve')}
-                                    title="Genehmigen"
-                                    style={{
-                                      padding: '0.25rem 0.5rem',
-                                      background: '#10b981',
-                                      color: 'white',
-                                      border: 'none',
-                                      borderRadius: '4px',
-                                      cursor: 'pointer',
-                                      fontSize: '0.75rem',
-                                      fontWeight: '600'
-                                    }}
-                                  >
-                                    <CheckCircle size={12} />
-                                  </button>
-                                  <button
-                                    onClick={() => handleClubAction(club.id, 'reject')}
-                                    title="Ablehnen"
-                                    style={{
-                                      padding: '0.25rem 0.5rem',
-                                      background: '#ef4444',
-                                      color: 'white',
-                                      border: 'none',
-                                      borderRadius: '4px',
-                                      cursor: 'pointer',
-                                      fontSize: '0.75rem',
-                                      fontWeight: '600'
-                                    }}
-                                  >
-                                    <XCircle size={12} />
-                                  </button>
-                                </div>
-                              )}
                             </td>
                           </tr>
                         );
