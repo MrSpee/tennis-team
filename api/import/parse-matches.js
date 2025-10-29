@@ -25,8 +25,8 @@ const MATCH_SCHEMA = {
       additionalProperties: false,
       properties: {
         club_name: { type: "string", description: "Name des Vereins (z.B. 'VKC Köln')" },
-        team_name: { type: "string", description: "Mannschaftsname (z.B. 'Herren 50 1')" },
-        category: { type: "string", description: "Kategorie (z.B. 'Herren 50')" },
+        team_name: { type: "string", description: "Mannschaftsnummer (z.B. '1' aus 'Herren 40 1 (4er)' - ohne Kategorie, ohne Klammern)" },
+        category: { type: "string", description: "Kategorie (z.B. 'Herren 40' oder 'Herren 50')" },
         league: { type: "string", description: "Liga-Name (z.B. 'Herren 50 2. Bezirksliga Gr. 054')" },
         address: { type: "string", description: "Vereinsadresse (falls im Text)" },
         website: { type: "string", description: "Website URL (falls im Text)" },
@@ -98,8 +98,12 @@ WICHTIGE REGELN:
 
 **1. TEAM-INFORMATIONEN:**
    - Erkenne automatisch den Vereinsnamen (z.B. "VKC Köln")
-   - Erkenne die Mannschaft (z.B. "Herren 50 1")
-   - Erkenne die Kategorie (z.B. "Herren 50")
+   - Erkenne die Mannschaft (z.B. "Herren 50 1" oder "Herren 40 1 (4er)")
+     * WICHTIG: "1 (4er)" bedeutet team_name = "1", category = "Herren 40"
+     * Ignoriere Klammern wie "(4er)", "(8er)" - diese sind nur Formatierung
+     * team_name ist meist die Nummer (1, 2, 3) oder der Name nach der Kategorie
+     * category ist die Altersklasse/Kategorie (z.B. "Herren 40", "Herren 50", "Damen")
+   - Erkenne die Kategorie (z.B. "Herren 50" aus "Herren 50 1 (4er)")
    - Erkenne die Liga (z.B. "Herren 50 2. Bezirksliga Gr. 054")
    - Adresse und Website extrahieren (falls vorhanden)
    - Mannschaftsführer erkennen (oft mit "MF" markiert)
@@ -133,34 +137,34 @@ WICHTIGE REGELN:
 
 BEISPIEL INPUT (TVM-Format):
 """
-VKC Köln
+TV Ensen Westhoven
 Stadt Köln
-Alfred Schütte Allee 51
-51105 Köln
-http://www.vkc-koeln.de
+Oberstr. 122
+51149 Köln
+http://www.tv-ensen-westhoven.de
 
 Mannschaftsführer
-Kliemt Mathias (-)
+Middendorf Jörg (1622326286)
 
-Herren 50 2. Bezirksliga Gr. 054
-Herren 50 1 (4er)
+Herren 40 1. Kreisliga Gr. 046
+Herren 40 1 (4er)
 
-Spieltage:
-Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele	
-11.10.2025, 18:00	Cologne Sportspark	VKC Köln 1	TG Leverkusen 2	0:0	0:0	0:0	offen
-29.11.2025, 18:00	KölnerTHC Stadion RW	KölnerTHC Stadion RW 2	VKC Köln 1	0:0	0:0	0:0	offen
+Meldeliste:
+Position	Mannschaft	Name	LK	ID-Nr.	Info	MF	Nation
+1	1	Jochen Becker-Grüll	11.1	17102247			GER
+2	1	Christoph Lindenschmidt	12.4	17810890			GER
 """
 
 BEISPIEL OUTPUT:
 {
   "team_info": {
-    "club_name": "VKC Köln",
-    "team_name": "Herren 50 1",
-    "category": "Herren 50",
-    "league": "Herren 50 2. Bezirksliga Gr. 054",
-    "address": "Alfred Schütte Allee 51, 51105 Köln",
-    "website": "http://www.vkc-koeln.de",
-    "captain": "Kliemt Mathias"
+    "club_name": "TV Ensen Westhoven",
+    "team_name": "1",
+    "category": "Herren 40",
+    "league": "Herren 40 1. Kreisliga Gr. 046",
+    "address": "Oberstr. 122, 51149 Köln",
+    "website": "http://www.tv-ensen-westhoven.de",
+    "captain": "Middendorf Jörg"
   },
   "matches": [
     {

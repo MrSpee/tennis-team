@@ -1185,10 +1185,10 @@ const ImportTab = () => {
     if (!players || players.length === 0) return [];
 
     try {
-      // Lade ALLE Spieler aus players_unified
+      // Lade ALLE Spieler aus players_unified (inkl. TVM ID)
       const { data: allPlayers, error: playersError } = await supabase
         .from('players_unified')
-        .select('id, name, current_lk, status, player_type')
+        .select('id, name, current_lk, tvm_id_number, status, player_type')
         .in('status', ['active', 'pending']);
 
       if (playersError) throw playersError;
@@ -1202,22 +1202,102 @@ const ImportTab = () => {
 
       // Für jeden importierten Spieler: Fuzzy-Match
       const matchResults = players.map(importPlayer => {
-        // Exakte Übereinstimmung (Name)
-        const exactMatch = existingPlayers.find(
+        // PRIORITÄT 1: Exakte Übereinstimmung Name + LK + TVM ID (100% Match)
+        if (importPlayer.lk && importPlayer.id_number) {
+          const tripleMatch = existingPlayers.find(p => {
+            const nameMatch = p.name.toLowerCase() === importPlayer.name.toLowerCase();
+            const lkMatch = p.current_lk === importPlayer.lk;
+            const tvmMatch = p.tvm_id_number === importPlayer.id_number;
+            return nameMatch && lkMatch && tvmMatch;
+          });
+
+          if (tripleMatch) {
+            return {
+              status: 'exact',
+              playerId: tripleMatch.id,
+              existingName: tripleMatch.name,
+              existingLk: tripleMatch.current_lk,
+              confidence: 100,
+              matchType: 'name_lk_tvm'
+            };
+          }
+        }
+
+        // PRIORITÄT 2: Name + TVM ID (ohne LK)
+        if (importPlayer.id_number) {
+          const nameTvmMatch = existingPlayers.find(p => {
+            const nameMatch = p.name.toLowerCase() === importPlayer.name.toLowerCase();
+            const tvmMatch = p.tvm_id_number === importPlayer.id_number;
+            return nameMatch && tvmMatch;
+          });
+
+          if (nameTvmMatch) {
+            return {
+              status: 'exact',
+              playerId: nameTvmMatch.id,
+              existingName: nameTvmMatch.name,
+              existingLk: nameTvmMatch.current_lk,
+              confidence: 95,
+              matchType: 'name_tvm'
+            };
+          }
+        }
+
+        // PRIORITÄT 3: Name + LK (ohne TVM ID)
+        if (importPlayer.lk) {
+          const nameLkMatch = existingPlayers.find(p => {
+            const nameMatch = p.name.toLowerCase() === importPlayer.name.toLowerCase();
+            const lkMatch = p.current_lk === importPlayer.lk;
+            return nameMatch && lkMatch;
+          });
+
+          if (nameLkMatch) {
+            return {
+              status: 'exact',
+              playerId: nameLkMatch.id,
+              existingName: nameLkMatch.name,
+              existingLk: nameLkMatch.current_lk,
+              confidence: 90,
+              matchType: 'name_lk'
+            };
+          }
+        }
+
+        // PRIORITÄT 4: Nur TVM ID (falls Name anders geschrieben)
+        if (importPlayer.id_number) {
+          const tvmMatch = existingPlayers.find(p => 
+            p.tvm_id_number === importPlayer.id_number
+          );
+
+          if (tvmMatch) {
+            return {
+              status: 'exact',
+              playerId: tvmMatch.id,
+              existingName: tvmMatch.name,
+              existingLk: tvmMatch.current_lk,
+              confidence: 85,
+              matchType: 'tvm_only'
+            };
+          }
+        }
+
+        // PRIORITÄT 5: Exakte Übereinstimmung (nur Name)
+        const exactNameMatch = existingPlayers.find(
           p => p.name.toLowerCase() === importPlayer.name.toLowerCase()
         );
 
-        if (exactMatch) {
+        if (exactNameMatch) {
           return {
             status: 'exact',
-            playerId: exactMatch.id,
-            existingName: exactMatch.name,
-            existingLk: exactMatch.current_lk,
-            confidence: 100
+            playerId: exactNameMatch.id,
+            existingName: exactNameMatch.name,
+            existingLk: exactNameMatch.current_lk,
+            confidence: 80,
+            matchType: 'name_only'
           };
         }
 
-        // Fuzzy Match (ähnliche Namen)
+        // PRIORITÄT 6: Fuzzy Match (ähnliche Namen)
         const fuzzyMatches = existingPlayers
           .map(p => ({
             player: p,
@@ -1233,7 +1313,8 @@ const ImportTab = () => {
             existingName: fuzzyMatches[0].player.name,
             existingLk: fuzzyMatches[0].player.current_lk,
             confidence: Math.round(fuzzyMatches[0].similarity * 100),
-            alternatives: fuzzyMatches.slice(1, 3)
+            alternatives: fuzzyMatches.slice(1, 3),
+            matchType: 'fuzzy_name'
           };
         }
 
@@ -1397,10 +1478,69 @@ Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele
                   {matchingReview.club.matched.city && ` (${matchingReview.club.matched.city})`}
                 </div>
               ) : (
-                <div style={{ fontSize: '0.85rem', color: '#92400e', marginBottom: '0.5rem' }}>
-                  ⚠️ Kein passender Verein gefunden. Bitte manuell zuordnen oder neu erstellen.
+                <div style={{ fontSize: '0.85rem', color: '#92400e', marginBottom: '0.75rem' }}>
+                  ⚠️ Kein passender Verein gefunden. Bitte manuell zuordnen.
                 </div>
               )}
+              
+              {/* Manuelles Verein-Dropdown */}
+              <div style={{ marginTop: '0.75rem' }}>
+                <label style={{ fontSize: '0.85rem', fontWeight: '600', display: 'block', marginBottom: '0.5rem', color: '#374151' }}>
+                  Verein manuell auswählen:
+                </label>
+                <select
+                  value={matchingReview.club.matched?.id || ''}
+                  onChange={async (e) => {
+                    const clubId = e.target.value;
+                    if (!clubId) return;
+                    
+                    const { data: club } = await supabase
+                      .from('club_info')
+                      .select('*')
+                      .eq('id', clubId)
+                      .single();
+                    
+                    if (club) {
+                      const updatedReview = { ...matchingReview };
+                      updatedReview.club.matched = club;
+                      updatedReview.club.confidence = 100;
+                      updatedReview.club.needsReview = false;
+                      setMatchingReview(updatedReview);
+                      
+                      // Update parsedData
+                      const newData = { ...parsedData };
+                      newData.team_info.matched_club_id = club.id;
+                      newData.team_info.matched_club_name = club.name;
+                      setParsedData(newData);
+                      
+                      // Update editablePlayers auch
+                      if (editablePlayers.length > 0) {
+                        setEditablePlayers(editablePlayers.map(editable => ({
+                          ...editable,
+                          club_id: club.id,
+                          club_name: club.name
+                        })));
+                      }
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '0.5rem',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    fontSize: '0.875rem',
+                    background: 'white'
+                  }}
+                >
+                  <option value="">-- Verein auswählen --</option>
+                  {allClubs.map(club => (
+                    <option key={club.id} value={club.id}>
+                      {club.name}{club.city ? ` (${club.city})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
               {matchingReview.club.alternatives && matchingReview.club.alternatives.length > 0 && (
                 <details style={{ marginTop: '0.5rem' }}>
                   <summary style={{ cursor: 'pointer', fontSize: '0.85rem', color: '#6b7280' }}>
@@ -1484,10 +1624,82 @@ Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele
                   {matchingReview.team.matched.club_name && ` - ${matchingReview.team.matched.club_name}`}
                 </div>
               ) : (
-                <div style={{ fontSize: '0.85rem', color: '#92400e', marginBottom: '0.5rem' }}>
-                  ⚠️ Kein passendes Team gefunden. Wird beim Import erstellt.
+                <div style={{ fontSize: '0.85rem', color: '#92400e', marginBottom: '0.75rem' }}>
+                  ⚠️ Kein passendes Team gefunden. Bitte manuell auswählen.
                 </div>
               )}
+              
+              {/* Manuelles Team-Dropdown (gefiltert nach Verein) */}
+              <div style={{ marginTop: '0.75rem' }}>
+                <label style={{ fontSize: '0.85rem', fontWeight: '600', display: 'block', marginBottom: '0.5rem', color: '#374151' }}>
+                  Team manuell auswählen:
+                </label>
+                <select
+                  value={matchingReview.team.matched?.id || ''}
+                  onChange={async (e) => {
+                    const teamId = e.target.value;
+                    if (!teamId) return;
+                    
+                    const { data: team } = await supabase
+                      .from('team_info')
+                      .select('*')
+                      .eq('id', teamId)
+                      .single();
+                    
+                    if (team) {
+                      const updatedReview = { ...matchingReview };
+                      updatedReview.team.matched = team;
+                      updatedReview.team.confidence = 100;
+                      updatedReview.team.needsReview = false;
+                      setMatchingReview(updatedReview);
+                      
+                      // Update parsedData
+                      const newData = { ...parsedData };
+                      newData.team_info.matched_team_id = team.id;
+                      newData.team_info.team_name = team.team_name;
+                      newData.team_info.category = team.category;
+                      setParsedData(newData);
+                      
+                      // Update editablePlayers auch
+                      if (editablePlayers.length > 0) {
+                        setEditablePlayers(editablePlayers.map(editable => ({
+                          ...editable,
+                          team_id: team.id,
+                          category: team.category
+                        })));
+                      }
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '0.5rem',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    fontSize: '0.875rem',
+                    background: 'white'
+                  }}
+                >
+                  <option value="">-- Team auswählen --</option>
+                  {/* Filtere Teams nach ausgewähltem Verein */}
+                  {(() => {
+                    const selectedClubId = matchingReview.club?.matched?.id || parsedData?.team_info?.matched_club_id;
+                    const filteredTeams = selectedClubId 
+                      ? allTeams.filter(t => t.club_id === selectedClubId || t.club_name === matchingReview.club?.matched?.name)
+                      : allTeams;
+                    
+                    return filteredTeams.map(team => (
+                      <option key={team.id} value={team.id}>
+                        {team.club_name} - {team.team_name} ({team.category})
+                      </option>
+                    ));
+                  })()}
+                </select>
+                {(!matchingReview.club?.matched && !parsedData?.team_info?.matched_club_id) && (
+                  <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                    💡 Bitte zuerst einen Verein auswählen, um Teams zu sehen.
+                  </div>
+                )}
+              </div>
             </div>
           )}
           
