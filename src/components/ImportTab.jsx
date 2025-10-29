@@ -1147,32 +1147,87 @@ const ImportTab = () => {
     }
 
     try {
-      // Prüfe ob Verknüpfung schon existiert
+      // Prüfe ob Verknüpfung schon existiert (auch inaktive!)
       const { data: existing } = await supabase
         .from('team_memberships')
-        .select('id')
+        .select('id, is_active')
         .eq('player_id', playerId)
         .eq('team_id', teamId)
         .maybeSingle();
 
       if (existing) {
-        console.log('ℹ️ Player already linked to team');
+        // Wenn Membership existiert aber inaktiv ist → aktiviere sie
+        if (!existing.is_active) {
+          console.log('🔄 Activating existing but inactive team membership');
+          await supabase
+            .from('team_memberships')
+            .update({
+              is_active: true,
+              role: isCaptain ? 'captain' : 'player',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', existing.id);
+          console.log('✅ Team membership activated');
+        } else {
+          console.log('ℹ️ Player already linked to team (active)');
+        }
         return;
       }
 
-      // Erstelle Verknüpfung
-      await supabase
+      // Prüfe ob Spieler bereits in einem anderen Team ist (für dieses Team)
+      // Wenn ja, deaktiviere alte Memberships für dieses Team
+      const { data: otherMemberships } = await supabase
+        .from('team_memberships')
+        .select('id')
+        .eq('player_id', playerId)
+        .eq('team_id', teamId)
+        .neq('is_active', false); // Alle außer false (true oder null)
+
+      if (otherMemberships && otherMemberships.length > 0) {
+        // Deaktiviere alte Memberships für dieses Team (falls mehrere existieren)
+        await supabase
+          .from('team_memberships')
+          .update({
+            is_active: false,
+            updated_at: new Date().toISOString()
+          })
+          .eq('player_id', playerId)
+          .eq('team_id', teamId)
+          .neq('is_active', false);
+      }
+
+      // Erstelle neue Verknüpfung
+      const { error: insertError } = await supabase
         .from('team_memberships')
         .insert({
           player_id: playerId,
           team_id: teamId,
           role: isCaptain ? 'captain' : 'player',
           is_primary: false,
-          season: 'winter_25_26',
+          season: 'Winter 2025/26',
           is_active: true
         });
 
-      console.log('✅ Player linked to team');
+      if (insertError) {
+        // Wenn Fehler wegen Duplikat (ON CONFLICT) → aktiviere einfach die existierende
+        if (insertError.code === '23505') {
+          console.log('🔄 Membership exists (conflict), activating...');
+          await supabase
+            .from('team_memberships')
+            .update({
+              is_active: true,
+              role: isCaptain ? 'captain' : 'player',
+              updated_at: new Date().toISOString()
+            })
+            .eq('player_id', playerId)
+            .eq('team_id', teamId);
+          console.log('✅ Team membership activated after conflict');
+        } else {
+          throw insertError;
+        }
+      } else {
+        console.log('✅ Player linked to team (new membership created)');
+      }
     } catch (err) {
       console.error('⚠️ Error linking player to team:', err);
     }
@@ -1264,20 +1319,51 @@ const ImportTab = () => {
         }
 
         // PRIORITÄT 4: Nur TVM ID (falls Name anders geschrieben)
+        // WICHTIG: Prüfe auf Duplikate - wenn mehrere Spieler mit gleicher TVM ID, nimm den mit passendem Namen
         if (importPlayer.id_number) {
-          const tvmMatch = existingPlayers.find(p => 
+          const tvmMatches = existingPlayers.filter(p => 
             p.tvm_id_number === importPlayer.id_number
           );
 
-          if (tvmMatch) {
+          if (tvmMatches.length === 1) {
+            // Exakt ein Match → verwende diesen
             return {
               status: 'exact',
-              playerId: tvmMatch.id,
-              existingName: tvmMatch.name,
-              existingLk: tvmMatch.current_lk,
+              playerId: tvmMatches[0].id,
+              existingName: tvmMatches[0].name,
+              existingLk: tvmMatches[0].current_lk,
               confidence: 85,
               matchType: 'tvm_only'
             };
+          } else if (tvmMatches.length > 1) {
+            // MEHRERE Matches mit gleicher TVM ID → versuche Name-Match
+            const nameMatch = tvmMatches.find(p => {
+              const similarity = calculateSimilarity(importPlayer.name, p.name);
+              return similarity > 0.7; // Mindestens 70% ähnlich
+            });
+
+            if (nameMatch) {
+              return {
+                status: 'exact',
+                playerId: nameMatch.id,
+                existingName: nameMatch.name,
+                existingLk: nameMatch.current_lk,
+                confidence: 85,
+                matchType: 'tvm_only',
+                warning: `⚠️ Mehrere Spieler mit TVM ID ${importPlayer.id_number} gefunden. Verwende: ${nameMatch.name}`
+              };
+            } else {
+              // Kein Name-Match → nimm den ersten (oder neuesten)
+              return {
+                status: 'exact',
+                playerId: tvmMatches[0].id,
+                existingName: tvmMatches[0].name,
+                existingLk: tvmMatches[0].current_lk,
+                confidence: 75,
+                matchType: 'tvm_only',
+                warning: `⚠️ Mehrere Spieler mit TVM ID ${importPlayer.id_number}. Möglicherweise Duplikat!`
+              };
+            }
           }
         }
 

@@ -100,11 +100,12 @@ const LiveResultsWithDB = () => {
       console.log('✅ Heim-Team:', matchData.home_team?.club_name, matchData.home_team?.team_name);
       console.log('✅ Auswärts-Team:', matchData.away_team?.club_name, matchData.away_team?.team_name);
 
-      // Lade Team-Mitglieder des Heim-Teams
+      // Lade Team-Mitglieder des Heim-Teams (NUR aktive Memberships)
       const { data: teamMembers, error: teamError } = await supabase
         .from('team_memberships')
         .select('player_id')
-        .eq('team_id', homeTeamId);
+        .eq('team_id', homeTeamId)
+        .eq('is_active', true);
 
       const teamMemberIds = (teamMembers || []).map(tm => tm.player_id);
 
@@ -125,7 +126,7 @@ const LiveResultsWithDB = () => {
       const { data: availabilityData, error: availabilityError } = await supabase
         .from('match_availability')
         .select('player_id, status')
-        .eq('match_id', matchId);
+        .eq('matchday_id', matchId);
 
       if (availabilityError) {
         console.error('Error loading availability:', availabilityError);
@@ -133,24 +134,32 @@ const LiveResultsWithDB = () => {
       }
 
       // Gruppiere Spieler: Zuerst angemeldete, dann alle anderen
+      // NEU: Sortiere nach LK (niedrigste zuerst)
+      const sortByLK = (a, b) => {
+        const lkA = a.current_lk || a.season_start_lk || a.ranking || 999;
+        const lkB = b.current_lk || b.season_start_lk || b.ranking || 999;
+        return parseFloat(lkA) - parseFloat(lkB);
+      };
+      
       const allTeamPlayers = teamPlayersData || [];
       const availablePlayerIds = (availabilityData || [])
         .filter(avail => avail.status === 'available')
         .map(avail => avail.player_id);
 
-      const availablePlayers = allTeamPlayers.filter(player => availablePlayerIds.includes(player.id));
-      const otherPlayers = allTeamPlayers.filter(player => !availablePlayerIds.includes(player.id));
+      const availablePlayers = allTeamPlayers.filter(player => availablePlayerIds.includes(player.id)).sort(sortByLK);
+      const otherPlayers = allTeamPlayers.filter(player => !availablePlayerIds.includes(player.id)).sort(sortByLK);
 
       setHomePlayers({
         available: availablePlayers,
         others: otherPlayers
       });
 
-      // Lade Gegner-Spieler: Nur Spieler des Auswärts-Teams
+      // Lade Gegner-Spieler: Nur Spieler des Auswärts-Teams (NUR aktive Memberships)
       const { data: opponentTeamMembers, error: opponentTeamError } = await supabase
         .from('team_memberships')
         .select('player_id')
-        .eq('team_id', awayTeamId);
+        .eq('team_id', awayTeamId)
+        .eq('is_active', true);
       
       const opponentTeamMemberIds = (opponentTeamMembers || []).map(tm => tm.player_id);
       
@@ -159,15 +168,21 @@ const LiveResultsWithDB = () => {
         const { data: opponentsData, error: opponentsError } = await supabase
           .from('players_unified')
           .select('id, name, current_lk, season_start_lk')
-          .in('id', opponentTeamMemberIds)
-          .order('name');
+          .in('id', opponentTeamMemberIds);
         
         if (opponentsError) {
           console.warn('⚠️ Konnte Gegner-Spieler nicht laden:', opponentsError);
           setOpponentPlayers([]);
         } else {
-          setOpponentPlayers(opponentsData || []);
-          console.log('✅ Gegner-Spieler geladen:', opponentsData?.length || 0);
+          // NEU: Sortiere nach LK (niedrigste zuerst)
+          const sortByLK = (a, b) => {
+            const lkA = a.current_lk || a.season_start_lk || 999;
+            const lkB = b.current_lk || b.season_start_lk || 999;
+            return parseFloat(lkA) - parseFloat(lkB);
+          };
+          const sortedOpponents = (opponentsData || []).sort(sortByLK);
+          setOpponentPlayers(sortedOpponents);
+          console.log('✅ Gegner-Spieler geladen:', sortedOpponents.length);
         }
       } else {
         console.warn('⚠️ Gegner-Mannschaft hat keine Spieler');
@@ -410,44 +425,131 @@ const LiveResultsWithDB = () => {
     }));
   };
   
-  const handleFreeTextSubmit = () => {
+  const handleFreeTextSubmit = async () => {
     if (!freeTextValue.trim()) {
       alert('Bitte gib einen Spieler-Namen ein!');
       return;
     }
     
-    // Schließe Modal und speichere Freitext-Wert
-    if (freeTextContext) {
-      const { matchId, playerType } = freeTextContext;
-      handlePlayerSelect(matchId, playerType, freeTextValue.trim());
+    if (!freeTextContext) {
+      console.error('❌ Kein freeTextContext gefunden');
+      return;
+    }
+    
+    const { matchId, playerType } = freeTextContext;
+    const playerName = freeTextValue.trim();
+    
+    console.log('🆕 Erstelle sofort Spieler in DB:', playerName);
+    
+    try {
+      // Erstelle Spieler SOFORT in der Datenbank
+      const newPlayerId = await createNewPlayer(playerName);
+      console.log('✅ Spieler erfolgreich erstellt:', newPlayerId);
+      
+      // Lade Spieler-Daten neu für Dropdown
+      await reloadOpponentPlayers();
+      
+      // Warte kurz, damit die Dropdown-Liste aktualisiert ist
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Verwende die neue ID für handlePlayerSelect
+      handlePlayerSelect(matchId, playerType, newPlayerId);
+      
+      // Schließe Modal
       setShowFreeTextModal(false);
       setFreeTextValue('');
       setFreeTextContext(null);
+      
+      console.log('✅ Spieler wurde ausgewählt und Dropdown aktualisiert');
+    } catch (error) {
+      console.error('❌ Fehler beim Erstellen des Spielers:', error);
+      alert('Fehler beim Erstellen des Spielers: ' + error.message);
+    }
+  };
+  
+  // Lade Gegner-Spieler neu
+  const reloadOpponentPlayers = async () => {
+    if (!match?.away_team_id) return;
+    
+    try {
+      const { data: opponentTeamMembers } = await supabase
+        .from('team_memberships')
+        .select('player_id')
+        .eq('team_id', match.away_team_id);
+      
+      const opponentTeamMemberIds = (opponentTeamMembers || []).map(tm => tm.player_id);
+      
+      if (opponentTeamMemberIds.length > 0) {
+        const { data: opponentsData } = await supabase
+          .from('players_unified')
+          .select('id, name, current_lk, season_start_lk')
+          .in('id', opponentTeamMemberIds);
+        
+        // NEU: Sortiere nach LK (niedrigste zuerst)
+        const sortByLK = (a, b) => {
+          const lkA = a.current_lk || a.season_start_lk || 999;
+          const lkB = b.current_lk || b.season_start_lk || 999;
+          return parseFloat(lkA) - parseFloat(lkB);
+        };
+        const sortedOpponents = (opponentsData || []).sort(sortByLK);
+        setOpponentPlayers(sortedOpponents);
+        console.log('✅ Gegner-Spieler neu geladen:', sortedOpponents.length);
+      }
+    } catch (err) {
+      console.error('⚠️ Fehler beim Neuladen der Gegner-Spieler:', err);
     }
   };
   
   // Helper-Funktion: Erstelle einen neuen Spieler in players_unified
   const createNewPlayer = async (playerName) => {
     try {
+      console.log('🔍 createNewPlayer aufgerufen mit Name:', playerName);
+      
       // Prüfe zuerst, ob Spieler bereits existiert
-      const { data: existingPlayer } = await supabase
+      console.log('🔍 Prüfe auf existierenden Spieler...');
+      const { data: existingPlayer, error: searchError } = await supabase
         .from('players_unified')
         .select('id')
         .ilike('name', playerName)
         .limit(1)
-        .single();
+        .maybeSingle();
+      
+      if (searchError) {
+        console.error('❌ Fehler bei Spieler-Suche:', searchError);
+      }
       
       if (existingPlayer) {
+        console.log('✅ Spieler bereits vorhanden, verwende existierende ID:', existingPlayer.id);
         return existingPlayer.id;
       }
       
-      // Erstelle neuen Spieler als inactive opponent
+      console.log('🆕 Spieler existiert nicht, erstelle neuen Spieler...');
+      
+      // Bestimme Team-Zuordnung basierend auf playerType
+      let clubName = null;
+      let teamId = null;
+      
+      if (freeTextContext?.playerType.includes('guest')) {
+        // Gast-Spieler → away_team
+        clubName = match?.away_team?.club_name || null;
+        teamId = match?.away_team_id || null;
+        console.log('🏢 Gast-Spieler wird zugewiesen an Verein:', clubName, 'Team:', teamId);
+      } else if (freeTextContext?.playerType.includes('home')) {
+        // Heim-Spieler → home_team
+        clubName = match?.home_team?.club_name || null;
+        teamId = match?.home_team_id || null;
+        console.log('🏢 Heim-Spieler wird zugewiesen an Verein:', clubName, 'Team:', teamId);
+      }
+      
+      // Jeder Spieler kann zu mehreren Teams/Vereinen gehören - keine club_id direkt auf dem Spieler
+      // Die Zuordnung erfolgt über team_memberships → team_info → club_name
+      
+      // Erstelle neuen Spieler (inactive ohne user_id)
       const { data: newPlayer, error: createError } = await supabase
         .from('players_unified')
         .insert({
           name: playerName,
           is_active: false,
-          player_type: 'opponent',
           current_lk: null,
           season_start_lk: null,
           ranking: null
@@ -456,14 +558,37 @@ const LiveResultsWithDB = () => {
         .single();
       
       if (createError) {
-        console.error('Error creating new player:', createError);
+        console.error('❌ Fehler beim Erstellen des Spielers:', createError);
         throw createError;
       }
       
-      console.log('✅ Neuer Spieler erstellt:', newPlayer.id);
+      console.log('✅ Neuer Spieler erfolgreich erstellt:', newPlayer.id);
+      
+      // Erstelle Team-Membership, falls Team-ID vorhanden
+      if (teamId) {
+        try {
+          const { error: membershipError } = await supabase
+            .from('team_memberships')
+            .insert({
+              player_id: newPlayer.id,
+              team_id: teamId
+            });
+          
+          if (membershipError) {
+            console.error('⚠️ Fehler beim Erstellen der Team-Membership:', membershipError);
+            // Nicht kritisch, fahre fort
+          } else {
+            console.log('✅ Spieler wurde Team zugewiesen:', teamId);
+          }
+        } catch (membershipErr) {
+          console.error('⚠️ Fehler bei Team-Zuordnung:', membershipErr);
+          // Nicht kritisch, fahre fort
+        }
+      }
+      
       return newPlayer.id;
     } catch (error) {
-      console.error('Error in createNewPlayer:', error);
+      console.error('❌ Error in createNewPlayer:', error);
       throw error;
     }
   };
@@ -522,17 +647,26 @@ const LiveResultsWithDB = () => {
         
         // Prüfe ob guestPlayer eine UUID ist oder ein Text
         const guestPlayer = matchData.guestPlayer && matchData.guestPlayer !== '' ? matchData.guestPlayer : null;
+        console.log('🔍 Guest Player Value:', guestPlayer);
         if (guestPlayer) {
           // Prüfe ob es eine UUID ist (enthält Bindestriche und ist 36 Zeichen lang)
           if (guestPlayer.includes('-') && guestPlayer.length === 36) {
+            console.log('✅ Guest Player ist UUID, verwende direkt:', guestPlayer);
             resultData.guest_player_id = guestPlayer;
           } else {
             // Es ist ein Text-Name - erstelle neuen Spieler in players_unified
-            console.log('🆕 Erstelle neuen Spieler:', guestPlayer);
-            const newPlayerId = await createNewPlayer(guestPlayer);
-            resultData.guest_player_id = newPlayerId;
+            console.log('🆕 Guest Player ist Text-Name, erstelle neuen Spieler:', guestPlayer);
+            try {
+              const newPlayerId = await createNewPlayer(guestPlayer);
+              resultData.guest_player_id = newPlayerId;
+              console.log('✅ Neuer Spieler erstellt und zugewiesen:', newPlayerId);
+            } catch (createError) {
+              console.error('❌ Fehler beim Erstellen des Guest Players:', createError);
+              throw createError;
+            }
           }
         } else {
+          console.log('⚠️ Kein Guest Player angegeben');
           resultData.guest_player_id = null;
         }
       } else {
@@ -546,12 +680,18 @@ const LiveResultsWithDB = () => {
         if (guestPlayer1) {
           // Prüfe ob es eine UUID ist
           if (guestPlayer1.includes('-') && guestPlayer1.length === 36) {
+            console.log('✅ Guest Player 1 ist UUID:', guestPlayer1);
             resultData.guest_player1_id = guestPlayer1;
           } else {
             // Erstelle neuen Spieler in players_unified
-            console.log('🆕 Erstelle neuen Spieler:', guestPlayer1);
-            const newPlayerId = await createNewPlayer(guestPlayer1);
-            resultData.guest_player1_id = newPlayerId;
+            console.log('🆕 Guest Player 1 ist Text-Name, erstelle neuen Spieler:', guestPlayer1);
+            try {
+              const newPlayerId = await createNewPlayer(guestPlayer1);
+              resultData.guest_player1_id = newPlayerId;
+            } catch (createError) {
+              console.error('❌ Fehler beim Erstellen von Guest Player 1:', createError);
+              throw createError;
+            }
           }
         } else {
           resultData.guest_player1_id = null;
@@ -560,12 +700,18 @@ const LiveResultsWithDB = () => {
         if (guestPlayer2) {
           // Prüfe ob es eine UUID ist
           if (guestPlayer2.includes('-') && guestPlayer2.length === 36) {
+            console.log('✅ Guest Player 2 ist UUID:', guestPlayer2);
             resultData.guest_player2_id = guestPlayer2;
           } else {
             // Erstelle neuen Spieler in players_unified
-            console.log('🆕 Erstelle neuen Spieler:', guestPlayer2);
-            const newPlayerId = await createNewPlayer(guestPlayer2);
-            resultData.guest_player2_id = newPlayerId;
+            console.log('🆕 Guest Player 2 ist Text-Name, erstelle neuen Spieler:', guestPlayer2);
+            try {
+              const newPlayerId = await createNewPlayer(guestPlayer2);
+              resultData.guest_player2_id = newPlayerId;
+            } catch (createError) {
+              console.error('❌ Fehler beim Erstellen von Guest Player 2:', createError);
+              throw createError;
+            }
           }
         } else {
           resultData.guest_player2_id = null;
@@ -696,13 +842,33 @@ const LiveResultsWithDB = () => {
       // Debug: Zeige was gesendet wird
       console.log('🔍 Sending data to Supabase:', resultData);
 
-      // Speichere in Supabase mit ON CONFLICT für flexible Eingaben
-      const { error } = await supabase
+      // Speichere in Supabase - erst versuche zu aktualisieren, sonst insert
+      // Prüfe ob Eintrag bereits existiert
+      const { data: existingResult, error: checkError } = await supabase
         .from('match_results')
-        .upsert(resultData, {
-          onConflict: 'matchday_id,match_number',  // Aktualisiert für matchday_id
-          ignoreDuplicates: false
-        });
+        .select('id')
+        .eq('matchday_id', resultData.matchday_id)
+        .eq('match_number', resultData.match_number)
+        .maybeSingle();
+
+      let error;
+      
+      if (existingResult) {
+        // Aktualisiere existierenden Eintrag
+        console.log('📝 Aktualisiere existierendes Ergebnis:', existingResult.id);
+        const { error: updateError } = await supabase
+          .from('match_results')
+          .update(resultData)
+          .eq('id', existingResult.id);
+        error = updateError;
+      } else {
+        // Erstelle neuen Eintrag
+        console.log('➕ Erstelle neues Ergebnis...');
+        const { error: insertError } = await supabase
+          .from('match_results')
+          .insert(resultData);
+        error = insertError;
+      }
 
       if (error) {
         console.error('❌ Supabase Error:', error);
@@ -754,43 +920,74 @@ const LiveResultsWithDB = () => {
     const isFreeText = playerId && !playerId.includes('-') && playerId.length !== 36 && playerId !== '';
     
     if (playerType.includes('home')) {
-      // Heim-Spieler: Kompaktes Dropdown
+      // Heim-Spieler: Dropdown oder Freitext-Anzeige analog Gegner
       return (
         <div style={{ position: 'relative' }}>
-          <select
-            value={playerId}
-            onChange={(e) => handlePlayerSelect(matchData.id, playerType, e.target.value)}
-            className="player-select"
-          >
-            <option value="">Spieler wählen...</option>
-            
-            {/* Angemeldete Spieler */}
-            {homePlayers.available && homePlayers.available.length > 0 && (
-              <optgroup label="✅ Angemeldete Spieler">
-                {homePlayers.available.map(player => (
-                  <option key={player.id} value={player.id}>
-                    {player.name} {(player.current_lk || player.season_start_lk || player.ranking) && `(${player.current_lk || player.season_start_lk || player.ranking})`}
-                  </option>
-                ))}
+          {isFreeText ? (
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <div 
+                style={{
+                  flex: 1,
+                  padding: '0.5rem',
+                  borderRadius: '6px',
+                  border: '1px solid #d1d5db',
+                  backgroundColor: '#f9fafb',
+                  fontSize: '0.875rem'
+                }}
+              >
+                ✏️ {playerId}
+              </div>
+              <button
+                onClick={() => {
+                  handlePlayerSelect(matchData.id, playerType, '');
+                }}
+                style={{
+                  padding: '0.5rem',
+                  borderRadius: '6px',
+                  border: '1px solid #d1d5db',
+                  backgroundColor: 'white',
+                  cursor: 'pointer'
+                }}
+              >
+                ✏️
+              </button>
+            </div>
+          ) : (
+            <select
+              value={playerId}
+              onChange={(e) => handlePlayerSelect(matchData.id, playerType, e.target.value)}
+              className="player-select"
+            >
+              <option value="">Spieler wählen...</option>
+              
+              {/* Angemeldete Spieler */}
+              {homePlayers.available && homePlayers.available.length > 0 && (
+                <optgroup label="✅ Angemeldete Spieler">
+                  {homePlayers.available.map(player => (
+                    <option key={player.id} value={player.id}>
+                      {player.name} {(player.current_lk || player.season_start_lk || player.ranking) && `(${player.current_lk || player.season_start_lk || player.ranking})`}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              
+              {/* Alle anderen Spieler */}
+              {homePlayers.others && homePlayers.others.length > 0 && (
+                <optgroup label="👥 Alle Spieler">
+                  {homePlayers.others.map(player => (
+                    <option key={player.id} value={player.id}>
+                      {player.name} {(player.current_lk || player.season_start_lk || player.ranking) && `(${player.current_lk || player.season_start_lk || player.ranking})`}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              
+              {/* Option für Freitext-Eingabe */}
+              <optgroup label="➕">
+                <option value="__freetext__">➕ Spieler hinzufügen...</option>
               </optgroup>
-            )}
-            
-            {/* Alle anderen Spieler */}
-            {homePlayers.others && homePlayers.others.length > 0 && (
-              <optgroup label="👥 Alle Spieler">
-                {homePlayers.others.map(player => (
-                  <option key={player.id} value={player.id}>
-                    {player.name} {(player.current_lk || player.season_start_lk || player.ranking) && `(${player.current_lk || player.season_start_lk || player.ranking})`}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            
-            {/* Option für Freitext-Eingabe */}
-            <optgroup label="➕">
-              <option value="__freetext__">➕ Spieler hinzufügen...</option>
-            </optgroup>
-          </select>
+            </select>
+          )}
         </div>
       );
     } else {
@@ -829,6 +1026,7 @@ const LiveResultsWithDB = () => {
             </div>
           ) : (
             <select
+              key={`opponent-select-${opponentPlayers.length}`} // Force re-render when list changes
               value={playerId}
               onChange={(e) => handlePlayerSelect(matchData.id, playerType, e.target.value)}
               className="player-select"
@@ -898,32 +1096,44 @@ const LiveResultsWithDB = () => {
         {matchData.type === 'Einzel' ? (
           <div className="player-selection-editable">
             <div className="player-row-editable">
-              <span className="player-label-editable">🏆 Heim-Spieler:</span>
+              <span className="player-label-editable">
+                Heim-Spieler von {match?.home_team?.club_name || 'Heim-Team'}:
+              </span>
               {renderPlayerSelect(matchData, 'homePlayer', matchData.homePlayer)}
             </div>
             <div className="vs-divider">vs</div>
             <div className="player-row-editable">
-              <span className="player-label-editable">🤡 Gegner:</span>
+              <span className="player-label-editable">
+                Gast-Spieler von {match?.away_team?.club_name || 'Gast-Team'}:
+              </span>
               {renderPlayerSelect(matchData, 'guestPlayer', matchData.guestPlayer)}
             </div>
           </div>
         ) : (
           <div className="player-selection-editable">
             <div className="player-row-editable">
-              <span className="player-label-editable">🏆 Heim-Spieler 1:</span>
+              <span className="player-label-editable">
+                Heim-Spieler von {match?.home_team?.club_name || 'Heim-Team'} 1:
+              </span>
               {renderPlayerSelect(matchData, 'homePlayer1', matchData.homePlayers[0])}
             </div>
             <div className="player-row-editable">
-              <span className="player-label-editable">🏆 Heim-Spieler 2:</span>
+              <span className="player-label-editable">
+                Heim-Spieler von {match?.home_team?.club_name || 'Heim-Team'} 2:
+              </span>
               {renderPlayerSelect(matchData, 'homePlayer2', matchData.homePlayers[1])}
             </div>
             <div className="vs-divider">vs</div>
             <div className="player-row-editable">
-              <span className="player-label-editable">🤡 Gegner 1:</span>
+              <span className="player-label-editable">
+                Gast-Spieler von {match?.away_team?.club_name || 'Gast-Team'} 1:
+              </span>
               {renderPlayerSelect(matchData, 'guestPlayer1', matchData.guestPlayers[0])}
             </div>
             <div className="player-row-editable">
-              <span className="player-label-editable">🤡 Gegner 2:</span>
+              <span className="player-label-editable">
+                Gast-Spieler von {match?.away_team?.club_name || 'Gast-Team'} 2:
+              </span>
               {renderPlayerSelect(matchData, 'guestPlayer2', matchData.guestPlayers[1])}
             </div>
           </div>
