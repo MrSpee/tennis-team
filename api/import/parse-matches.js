@@ -78,7 +78,12 @@ const MATCH_SCHEMA = {
     
     season: {
       type: "string",
-      description: "Saison (z.B. '2025/26' oder 'Winter 25/26')"
+      description: "Saison ('winter' oder 'summer')"
+    },
+    
+    year: {
+      type: "string",
+      description: "Jahreszahl oder Jahresbereich (z.B. '2025/26' für Winter oder '2026' für Sommer)"
     }
   },
   required: ["team_info", "matches"]
@@ -118,8 +123,13 @@ WICHTIGE REGELN:
    - Position in der Meldeliste beachten
    - Mannschaftsführer markieren (Spalte "MF")
 
-**4. SAISON:**
-   - Erkenne Saison-Format: "Winter 25/26" oder "2025/26"
+**4. SAISON & JAHR:**
+   - Erkenne Saison basierend auf Monat:
+     * Oktober - März: "winter"
+     * April - September: "summer"
+   - Erkenne Jahr basierend auf Datum:
+     * Winter-Saison: "2025/26" (Jahr/H+1)
+     * Sommer-Saison: "2026" (Jahr)
 
 BEISPIEL INPUT (TVM-Format):
 """

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import { LoggingService } from '../services/activityLogger';
+import MatchdayImportService from '../services/matchdayImportService';
 import './ImportTab.css';
 
 const ImportTab = () => {
@@ -11,6 +12,7 @@ const ImportTab = () => {
   const [inputText, setInputText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [parsedData, setParsedData] = useState(null);
+  const [matchingReview, setMatchingReview] = useState(null); // NEU: Review-Ergebnisse vom Fuzzy Matching
   const [selectedMatches, setSelectedMatches] = useState([]);
   const [selectedPlayers, setSelectedPlayers] = useState([]);
   const [playerMatchResults, setPlayerMatchResults] = useState([]); // Fuzzy matching results
@@ -19,6 +21,7 @@ const ImportTab = () => {
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
   const [importStats, setImportStats] = useState(null);
+  const [showReview, setShowReview] = useState(false); // NEU: Review-Panel anzeigen
   
   // Team auswählen (später aus Context/Props)
   const [selectedTeamId, setSelectedTeamId] = useState(null);
@@ -129,17 +132,55 @@ const ImportTab = () => {
       console.log('✅ Parsing successful:', result);
 
       // Setze geparste Daten
-      setParsedData(result.data);
+      const parsed = result.data || result;
+      setParsedData(parsed);
+      
+      // NEU: Führe Fuzzy Matching für Club, Team, League durch
+      console.log('🔍 Performing entity fuzzy-matching...');
+      try {
+        const review = await MatchdayImportService.analyzeParsedData(parsed);
+        setMatchingReview(review);
+        console.log('✅ Matching review:', review);
+        
+        // Merge Review-Ergebnisse zurück in parsedData (für späteren Import)
+        if (review.club?.matched) {
+          parsed.team_info = parsed.team_info || {};
+          parsed.team_info.matched_club_id = review.club.matched.id;
+          parsed.team_info.matched_club_name = review.club.matched.name;
+        }
+        
+        if (review.team?.matched) {
+          parsed.team_info.matched_team_id = review.team.matched.id;
+          parsed.team_info.matched_team_name = review.team.matched.team_name || review.team.matched.name;
+        }
+        
+        if (review.league) {
+          parsed.team_info.matched_league = review.league.normalized;
+          parsed.team_info.matched_group = review.league.group;
+        }
+        
+        // Zeige Review-Panel wenn etwas überprüft werden muss
+        const needsReview = review.club?.needsReview || review.team?.needsReview || 
+                           review.league?.needsReview ||
+                           review.matches?.some(m => m.needsReview);
+        
+        if (needsReview) {
+          setShowReview(true);
+        }
+      } catch (reviewError) {
+        console.warn('⚠️ Review-Matching fehlgeschlagen (weiterhin nutzbar):', reviewError);
+        // Fehler ist nicht kritisch - User kann trotzdem importieren
+      }
       
       // Auto-Select: Alle Matches
-      if (result.data.matches?.length > 0) {
-        setSelectedMatches(result.data.matches.map((_, idx) => idx));
+      if (parsed.matches?.length > 0) {
+        setSelectedMatches(parsed.matches.map((_, idx) => idx));
       }
       
       // Spieler: Fuzzy-Matching durchführen
-      if (result.data.players?.length > 0) {
+      if (parsed.players?.length > 0) {
         console.log('🔍 Performing player fuzzy-matching...');
-        const matchResults = await performPlayerMatching(result.data.players);
+        const matchResults = await performPlayerMatching(parsed.players);
         setPlayerMatchResults(matchResults);
         
         // Nur NEUE Spieler standardmäßig auswählen
@@ -190,8 +231,18 @@ const ImportTab = () => {
       console.log('💾 Importing matches to Supabase:', matchesToImport);
       
       // SCHRITT 1: Finde oder erstelle das Team (inkl. Season)
-      let teamId = await findOrCreateTeam(parsedData.team_info, parsedData.season);
-      console.log('🎯 Using team_id:', teamId);
+      // Nutze matched_club_id/matched_team_id aus Review falls vorhanden
+      let teamId = null;
+      
+      if (parsedData.team_info?.matched_team_id) {
+        // Review hat bereits ein Team gefunden
+        teamId = parsedData.team_info.matched_team_id;
+        console.log('✅ Using reviewed team_id:', teamId);
+      } else {
+        // Alte Logik: findOrCreateTeam
+        teamId = await findOrCreateTeam(parsedData.team_info, parsedData.season);
+        console.log('🎯 Using team_id (new/found):', teamId);
+      }
 
       // SCHRITT 2: Prüfe auf Duplikate
       const duplicateCheck = await checkForDuplicates(matchesToImport, teamId);
@@ -250,42 +301,106 @@ const ImportTab = () => {
       // SCHRITT 4: Finde oder erstelle Gegner-Teams und erstelle matchdays
       const matchdaysToCreate = [];
       
-      // Helper: Finde oder erstelle Team
+      // Helper: Finde oder erstelle Team (mit Fuzzy Matching)
       const findOrCreateTeamByName = async (teamName) => {
         // Parse Team-Name (z.B. "SV RG Sürth 1" → club: "SV RG Sürth", team: "1")
         const parts = teamName.split(' ');
         const clubName = parts.slice(0, -1).join(' ') || teamName;
         const tn = parts[parts.length - 1] || null;
         
-        // Suche zuerst in DB
-        let { data: teamData } = await supabase
-          .from('team_info')
-          .select('id')
-          .or(`team_name.ilike.%${tn}%,club_name.ilike.%${clubName}%`)
-          .limit(1)
-          .maybeSingle();
-        
-        if (teamData) return teamData.id;
-        
-        // Team nicht gefunden → erstelle automatisch
-        console.warn(`⚠️ Team "${teamName}" nicht gefunden. Erstelle automatisch...`);
-        
-        const { data: newTeam, error: createError } = await supabase
-          .from('team_info')
-          .insert({
-            club_name: clubName,
-            team_name: tn,
-            category: ourTeamData.category || null
-          })
-          .select('id')
-          .single();
-        
-        if (createError || !newTeam) {
-          throw new Error(`Team "${teamName}" konnte nicht erstellt werden: ${createError?.message}`);
+        // NEU: Versuche Fuzzy Matching für Club
+        try {
+          const clubMatch = await MatchdayImportService.matchClub(clubName);
+          let clubId = null;
+          
+          if (clubMatch.match) {
+            clubId = clubMatch.match.id;
+            console.log('✅ Club gefunden via Fuzzy Matching:', clubMatch.match.name);
+          } else {
+            // Club nicht gefunden → erstelle ihn
+            console.warn(`⚠️ Club "${clubName}" nicht gefunden. Erstelle automatisch...`);
+            const { data: newClub, error: clubError } = await supabase
+              .from('club_info')
+              .insert({
+                name: clubName,
+                city: null,
+                region: 'Mittelrhein'
+              })
+              .select('id')
+              .single();
+            
+            if (!clubError && newClub) {
+              clubId = newClub.id;
+              console.log(`✅ Club erstellt: ${clubName} (ID: ${clubId})`);
+            }
+          }
+          
+          // NEU: Versuche Fuzzy Matching für Team (wenn Club gefunden)
+          if (clubId && tn) {
+            const teamMatch = await MatchdayImportService.matchTeam(
+              tn,
+              clubId,
+              ourTeamData.category || null,
+              { rawClubName: clubName }
+            );
+            
+            if (teamMatch.match) {
+              console.log('✅ Team gefunden via Fuzzy Matching:', teamMatch.match.team_name);
+              return teamMatch.match.id;
+            }
+          }
+          
+          // Team nicht gefunden → erstelle automatisch
+          console.warn(`⚠️ Team "${teamName}" nicht gefunden. Erstelle automatisch...`);
+          
+          const { data: newTeam, error: createError } = await supabase
+            .from('team_info')
+            .insert({
+              club_name: clubName,
+              club_id: clubId, // NEU: Link zu Club falls vorhanden
+              team_name: tn,
+              category: ourTeamData.category || null
+            })
+            .select('id')
+            .single();
+          
+          if (createError || !newTeam) {
+            throw new Error(`Team "${teamName}" konnte nicht erstellt werden: ${createError?.message}`);
+          }
+          
+          console.log(`✅ Team erstellt: ${clubName} ${tn} (ID: ${newTeam.id})`);
+          return newTeam.id;
+          
+        } catch (matchError) {
+          console.warn('⚠️ Fuzzy Matching fehlgeschlagen, verwende einfache Suche:', matchError);
+          
+          // Fallback: Einfache Suche
+          let { data: teamData } = await supabase
+            .from('team_info')
+            .select('id')
+            .or(`team_name.ilike.%${tn}%,club_name.ilike.%${clubName}%`)
+            .limit(1)
+            .maybeSingle();
+          
+          if (teamData) return teamData.id;
+          
+          // Erstelle neu
+          const { data: newTeam, error: createError } = await supabase
+            .from('team_info')
+            .insert({
+              club_name: clubName,
+              team_name: tn,
+              category: ourTeamData.category || null
+            })
+            .select('id')
+            .single();
+          
+          if (createError || !newTeam) {
+            throw new Error(`Team "${teamName}" konnte nicht erstellt werden: ${createError?.message}`);
+          }
+          
+          return newTeam.id;
         }
-        
-        console.log(`✅ Team erstellt: ${clubName} ${tn} (ID: ${newTeam.id})`);
-        return newTeam.id;
       };
       
       for (const match of uniqueMatches) {
@@ -328,6 +443,10 @@ const ImportTab = () => {
           determinedSeason = 'summer';
         }
         
+        // NEU: Verwende manuell bearbeitete Season und Year aus UI
+        const finalSeason = parsedData.season || determinedSeason;
+        const finalYear = parsedData.year || null;
+        
         matchdaysToCreate.push({
           home_team_id: homeTeamId,
           away_team_id: awayTeamId,
@@ -335,7 +454,8 @@ const ImportTab = () => {
           start_time: startTime.substring(0, 5), // "15:00"
           venue: match.venue || null,
           location: 'Home', // Default (könnte später verbessert werden)
-          season: determinedSeason,
+          season: finalSeason, // Manuell bearbeitet oder automatisch
+          year: finalYear, // NEU: Jahr für die Saison
           league: parsedData.league || ourTeamData.league || null,
           group_name: parsedData.group_name || ourTeamData.group_name || null,
           status: match.status === 'offen' ? 'scheduled' : 'completed',
@@ -789,10 +909,21 @@ const ImportTab = () => {
       // 4. Zeige IMMER Modal für User-Bestätigung (egal ob Confidence hoch oder niedrig)
       console.log('⚠️ Asking user to confirm club match...');
       
+      // Lade ALLE Clubs für manuelle Auswahl
+      const { data: allClubsData, error: allClubsError } = await supabase
+        .from('club_info')
+        .select('id, name, city, region')
+        .order('name', { ascending: true });
+      
+      if (allClubsError) {
+        console.warn('⚠️ Could not load all clubs:', allClubsError);
+      }
+      
       return new Promise((resolve) => {
         setClubSuggestions({
           searchTerm: clubName,
           suggestions: matches.slice(0, 3),
+          allClubs: allClubsData || [], // NEU: Alle Vereine für Dropdown
           onConfirm: (clubId) => {
             setClubSuggestions(null);
             resolve(clubId);
@@ -827,11 +958,47 @@ const ImportTab = () => {
     // Substring-Match (z.B. "VKC Köln" in "VKC Köln e.V.")
     if (s2.includes(s1) || s1.includes(s2)) return 0.95;
     
+    // NEU: Expandiere häufige Abkürzungen
+    const expandAbbreviation = (str) => {
+      // "rg" → "rot-gelb"
+      str = str.replace(/rg\s+/g, 'rot-gelb ');
+      // "tc" → "tennis club"
+      str = str.replace(/\btc\b/g, 'tennis club');
+      // "sv" → "sportverein"
+      str = str.replace(/\bsv\b/g, 'sportverein');
+      return str;
+    };
+    
+    const expandedS1 = expandAbbreviation(s1);
+    const expandedS2 = expandAbbreviation(s2);
+    
+    // Prüfe ob expandierte Versionen matchen
+    if (expandedS2.includes(expandedS1) || expandedS1.includes(expandedS2)) {
+      return 0.92;
+    }
+    
     // Entferne häufige Suffixe
     const cleanS1 = s1.replace(/\s*(e\.?v\.?|tennis|tc|sv|tg|thc|gg)\s*/gi, ' ').trim();
     const cleanS2 = s2.replace(/\s*(e\.?v\.?|tennis|tc|sv|tg|thc|gg)\s*/gi, ' ').trim();
     
     if (cleanS1 === cleanS2) return 0.9;
+    
+    // NEU: Erkenne "nur Stadt" Übereinstimmungen (z.B. "Sürth" in "SV Rot-Gelb Sürth")
+    const cityS1 = s1.split(/\s+/).pop(); // Letztes Wort = vermutlich Stadt
+    const cityS2 = s2.split(/\s+/).pop();
+    
+    if (cityS1 === cityS2 && cityS1.length > 3) {
+      // Wenn nur Stadt sich unterscheidet, aber Rest ähnlich ist
+      const restS1 = s1.replace(new RegExp(cityS1 + '$', 'i'), '').trim();
+      const restS2 = s2.replace(new RegExp(cityS2 + '$', 'i'), '').trim();
+      
+      if (restS1.length > 0 && restS2.length > 0) {
+        const restSimilarity = calculateSimilarity(restS1, restS2);
+        if (restSimilarity > 0.7) {
+          return 0.85 + (restSimilarity * 0.1); // 0.85-0.95 Range
+        }
+      }
+    }
     
     // Levenshtein Distance
     return calculateSimilarity(s1, s2);
@@ -1037,6 +1204,196 @@ Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele
         <p>Kopiere TVM-Daten hier rein - die KI erkennt automatisch Matches, Spieler & Teams!</p>
       </div>
 
+      {/* NEU: Review-Panel für Fuzzy Matching */}
+      {showReview && matchingReview && (
+        <div className="import-section" style={{ 
+          background: '#fef3c7', 
+          border: '2px solid #f59e0b', 
+          borderRadius: '12px',
+          padding: '1.5rem'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '700' }}>
+              🔍 Review: Entity-Matching
+            </h3>
+            <button
+              onClick={() => setShowReview(false)}
+              style={{
+                padding: '0.5rem 1rem',
+                background: '#f59e0b',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '0.875rem',
+                fontWeight: '600'
+              }}
+            >
+              ✕ Schließen
+            </button>
+          </div>
+          
+          {/* Club Review */}
+          {matchingReview.club && (
+            <div style={{ 
+              marginBottom: '1rem', 
+              padding: '1rem', 
+              background: 'white', 
+              borderRadius: '8px',
+              border: `2px solid ${matchingReview.club.needsReview ? '#f59e0b' : '#10b981'}`
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                <strong>🏢 Verein:</strong>
+                <span style={{
+                  padding: '0.25rem 0.75rem',
+                  background: matchingReview.club.needsReview ? '#fef3c7' : '#dcfce7',
+                  color: matchingReview.club.needsReview ? '#92400e' : '#15803d',
+                  borderRadius: '6px',
+                  fontSize: '0.8rem',
+                  fontWeight: '600'
+                }}>
+                  {matchingReview.club.matched ? `${matchingReview.club.confidence}% Match` : 'Kein Match'}
+                </span>
+              </div>
+              <div style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+                <strong>Erkannt:</strong> {matchingReview.club.raw}
+              </div>
+              {matchingReview.club.matched ? (
+                <div style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+                  <strong>Gefunden:</strong> {matchingReview.club.matched.name}
+                  {matchingReview.club.matched.city && ` (${matchingReview.club.matched.city})`}
+                </div>
+              ) : (
+                <div style={{ fontSize: '0.85rem', color: '#92400e', marginBottom: '0.5rem' }}>
+                  ⚠️ Kein passender Verein gefunden. Bitte manuell zuordnen oder neu erstellen.
+                </div>
+              )}
+              {matchingReview.club.alternatives && matchingReview.club.alternatives.length > 0 && (
+                <details style={{ marginTop: '0.5rem' }}>
+                  <summary style={{ cursor: 'pointer', fontSize: '0.85rem', color: '#6b7280' }}>
+                    Alternativen anzeigen ({matchingReview.club.alternatives.length})
+                  </summary>
+                  <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {matchingReview.club.alternatives.map((alt, idx) => (
+                      <button
+                        key={idx}
+                        onClick={async () => {
+                          // Lade Club-Details
+                          const { data: club } = await supabase
+                            .from('club_info')
+                            .select('*')
+                            .eq('id', alt.id)
+                            .single();
+                          
+                          if (club) {
+                            const updatedReview = { ...matchingReview };
+                            updatedReview.club.matched = club;
+                            updatedReview.club.score = alt.score;
+                            updatedReview.club.confidence = Math.round(alt.score * 100);
+                            updatedReview.club.needsReview = false;
+                            setMatchingReview(updatedReview);
+                            
+                            // Update parsedData
+                            const newData = { ...parsedData };
+                            newData.team_info.matched_club_id = club.id;
+                            newData.team_info.matched_club_name = club.name;
+                            setParsedData(newData);
+                          }
+                        }}
+                        style={{
+                          padding: '0.5rem',
+                          background: '#f8fafc',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '6px',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          fontSize: '0.85rem'
+                        }}
+                      >
+                        {alt.name} {alt.city ? `(${alt.city})` : ''} - {Math.round(alt.score * 100)}%
+                      </button>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          )}
+          
+          {/* Team Review */}
+          {matchingReview.team && (
+            <div style={{ 
+              marginBottom: '1rem', 
+              padding: '1rem', 
+              background: 'white', 
+              borderRadius: '8px',
+              border: `2px solid ${matchingReview.team.needsReview ? '#f59e0b' : '#10b981'}`
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                <strong>🏆 Mannschaft:</strong>
+                <span style={{
+                  padding: '0.25rem 0.75rem',
+                  background: matchingReview.team.needsReview ? '#fef3c7' : '#dcfce7',
+                  color: matchingReview.team.needsReview ? '#92400e' : '#15803d',
+                  borderRadius: '6px',
+                  fontSize: '0.8rem',
+                  fontWeight: '600'
+                }}>
+                  {matchingReview.team.matched ? `${matchingReview.team.confidence}% Match` : 'Kein Match'}
+                </span>
+              </div>
+              <div style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+                <strong>Erkannt:</strong> {matchingReview.team.raw}
+                {matchingReview.team.category && ` (${matchingReview.team.category})`}
+              </div>
+              {matchingReview.team.matched ? (
+                <div style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+                  <strong>Gefunden:</strong> {matchingReview.team.matched.team_name || matchingReview.team.matched.name}
+                  {matchingReview.team.matched.club_name && ` - ${matchingReview.team.matched.club_name}`}
+                </div>
+              ) : (
+                <div style={{ fontSize: '0.85rem', color: '#92400e', marginBottom: '0.5rem' }}>
+                  ⚠️ Kein passendes Team gefunden. Wird beim Import erstellt.
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* League Review */}
+          {matchingReview.league && (
+            <div style={{ 
+              marginBottom: '1rem', 
+              padding: '1rem', 
+              background: 'white', 
+              borderRadius: '8px',
+              border: `2px solid ${matchingReview.league.needsReview ? '#f59e0b' : '#10b981'}`
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                <strong>🏅 Liga:</strong>
+                <span style={{
+                  padding: '0.25rem 0.75rem',
+                  background: matchingReview.league.needsReview ? '#fef3c7' : '#dcfce7',
+                  color: matchingReview.league.needsReview ? '#92400e' : '#15803d',
+                  borderRadius: '6px',
+                  fontSize: '0.8rem',
+                  fontWeight: '600'
+                }}>
+                  {matchingReview.league.confidence || 0}% Match
+                </span>
+              </div>
+              <div style={{ fontSize: '0.9rem' }}>
+                <strong>Erkannt:</strong> {matchingReview.league.raw}
+                {matchingReview.league.group && ` (${matchingReview.league.group})`}
+              </div>
+              {matchingReview.league.normalized && (
+                <div style={{ fontSize: '0.9rem', marginTop: '0.5rem' }}>
+                  <strong>Normalisiert:</strong> {matchingReview.league.normalized}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Team-Info wird automatisch erkannt (editierbar) */}
       {parsedData?.team_info && (
         <div className="import-section">
@@ -1084,15 +1441,31 @@ Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele
               </div>
               <div>
                 <label style={{ fontSize: '0.8rem', color: '#6b7280' }}>Saison:</label>
-                <input 
-                  type="text"
+                <select
                   value={parsedData.season || ''}
                   onChange={(e) => {
                     const newData = { ...parsedData };
                     newData.season = e.target.value;
                     setParsedData(newData);
                   }}
-                  placeholder="z.B. Winter 2025/26"
+                  style={{ width: '100%', padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '6px' }}
+                >
+                  <option value="">-- Saison wählen --</option>
+                  <option value="winter">Winter</option>
+                  <option value="summer">Sommer</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: '0.8rem', color: '#6b7280' }}>Jahr:</label>
+                <input 
+                  type="text"
+                  value={parsedData.year || ''}
+                  onChange={(e) => {
+                    const newData = { ...parsedData };
+                    newData.year = e.target.value;
+                    setParsedData(newData);
+                  }}
+                  placeholder="z.B. 2025/26 (Winter) oder 2026 (Sommer)"
                   style={{ width: '100%', padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '6px' }}
                 />
               </div>
@@ -1535,6 +1908,35 @@ Die KI erkennt automatisch:
                     </div>
                   </div>
                 ))}
+              </div>
+              
+              {/* NEU: Manuelle Auswahl aus aller Vereine */}
+              <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid #e5e7eb' }}>
+                <p style={{ marginBottom: '0.75rem', color: '#6b7280', fontSize: '0.9rem' }}>
+                  Oder wähle manuell aus allen Vereinen:
+                </p>
+                <select 
+                  className="modal-select"
+                  onChange={(e) => {
+                    if (e.target.value && e.target.value !== '') {
+                      clubSuggestions.onConfirm(e.target.value);
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    fontSize: '0.95rem'
+                  }}
+                >
+                  <option value="">-- Alle Vereine anzeigen --</option>
+                  {clubSuggestions.allClubs && clubSuggestions.allClubs.map(club => (
+                    <option key={club.id} value={club.id}>
+                      {club.name} {club.city ? `(${club.city})` : ''}
+                    </option>
+                  ))}
+                </select>
               </div>
               
               <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
