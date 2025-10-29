@@ -375,14 +375,25 @@ export function DataProvider({ children }) {
             }
           }
           
+          // Parse Datum und kombinieren mit start_time
+          let matchDateTime = new Date(matchday.match_date);
+          
+          // Wenn start_time vorhanden ist, setze die Zeit
+          if (matchday.start_time) {
+            const [hours, minutes] = matchday.start_time.split(':');
+            if (hours && minutes) {
+              matchDateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+            }
+          }
+          
           return {
             id: matchday.id,
-            date: new Date(matchday.match_date),
+            date: matchDateTime,
             opponent: opponentName,
             location: matchday.location,
             venue: matchday.venue,
             season: matchday.season,
-            playersNeeded: null,
+            playersNeeded: 4, // Standard für matchdays (kann später aus DB kommen)
             teamId: ourTeam?.id,
             teamInfo: ourTeam ? {
               id: ourTeam.id,

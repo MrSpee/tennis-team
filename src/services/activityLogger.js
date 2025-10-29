@@ -41,11 +41,12 @@ class LoggingService {
    */
   static async logActivity(action, entityType = null, entityId = null, details = {}) {
     try {
-      // Prüfe ob Logging möglich ist
-      if (!(await this.canLog())) {
-        console.log('⚠️ Logging skipped (Supabase not configured or user not authenticated):', action);
+      // Prüfe nur ob Supabase konfiguriert ist
+      if (!isSupabaseConfigured()) {
+        console.log('⚠️ Logging skipped (Supabase not configured):', action);
         return null;
       }
+      
       // Erweitere Details um Browser-Info
       const enhancedDetails = {
         ...details,
@@ -55,12 +56,21 @@ class LoggingService {
         referrer: document.referrer
       };
 
+      // Hole aktuellen User (falls verfügbar)
+      let userId = null;
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        userId = user?.id;
+      } catch (authError) {
+        console.warn('⚠️ Could not get user for logging (non-critical):', authError.message);
+      }
+
       // Verwende Supabase RPC-Funktion
       const { data, error } = await supabase.rpc('log_activity', {
         p_action: action,
         p_entity_type: entityType,
         p_entity_id: entityId,
-        p_details: enhancedDetails
+        p_details: { ...enhancedDetails, user_id: userId }
       });
 
       if (error) {
