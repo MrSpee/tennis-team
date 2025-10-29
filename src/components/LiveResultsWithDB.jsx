@@ -158,14 +158,14 @@ const LiveResultsWithDB = () => {
           // Verfügbarkeit ist optional, fahre ohne fort
         }
 
-        // Sortiere nach LK (HÖCHSTE zuerst = absteigend)
-        const sortByLKDesc = (a, b) => {
-          const lkA = parseFloat(a.current_lk || a.season_start_lk || a.ranking || 0);
-          const lkB = parseFloat(b.current_lk || b.season_start_lk || b.ranking || 0);
-          return lkB - lkA; // Umgekehrte Sortierung: höchste zuerst
+        // Sortiere nach LK (NIEDRIGSTE zuerst = aufsteigend - niedrige LK ist besser!)
+        const sortByLK = (a, b) => {
+          const lkA = parseFloat(a.current_lk || a.season_start_lk || a.ranking || 999);
+          const lkB = parseFloat(b.current_lk || b.season_start_lk || b.ranking || 999);
+          return lkA - lkB; // Aufsteigend: niedrigste LK zuerst
         };
         
-        const allClubPlayers = (clubPlayersData || []).sort(sortByLKDesc);
+        const allClubPlayers = (clubPlayersData || []).sort(sortByLK);
         const availablePlayerIds = (availabilityData || [])
           .filter(avail => avail.status === 'available')
           .map(avail => avail.player_id);
@@ -173,7 +173,7 @@ const LiveResultsWithDB = () => {
         const availablePlayers = allClubPlayers.filter(player => availablePlayerIds.includes(player.id));
         const otherPlayers = allClubPlayers.filter(player => !availablePlayerIds.includes(player.id));
         
-        // Beide Listen sind bereits nach LK sortiert (höchste zuerst)
+        // Beide Listen sind bereits nach LK sortiert (niedrigste zuerst - niedrige LK ist besser!)
         setHomePlayers({
           available: availablePlayers,
           others: otherPlayers
@@ -213,13 +213,13 @@ const LiveResultsWithDB = () => {
               console.warn('⚠️ Konnte Gegner-Spieler nicht laden:', opponentsError);
               setOpponentPlayers([]);
             } else {
-              // Sortiere nach LK (HÖCHSTE zuerst = absteigend)
-              const sortByLKDesc = (a, b) => {
-                const lkA = parseFloat(a.current_lk || a.season_start_lk || 0);
-                const lkB = parseFloat(b.current_lk || b.season_start_lk || 0);
-                return lkB - lkA; // Umgekehrte Sortierung: höchste zuerst
+              // Sortiere nach LK (NIEDRIGSTE zuerst = aufsteigend - niedrige LK ist besser!)
+              const sortByLK = (a, b) => {
+                const lkA = parseFloat(a.current_lk || a.season_start_lk || 999);
+                const lkB = parseFloat(b.current_lk || b.season_start_lk || 999);
+                return lkA - lkB; // Aufsteigend: niedrigste LK zuerst
               };
-              const sortedOpponents = (opponentsData || []).sort(sortByLKDesc);
+              const sortedOpponents = (opponentsData || []).sort(sortByLK);
               setOpponentPlayers(sortedOpponents);
               console.log('✅ Gegner-Spieler geladen:', sortedOpponents.length);
             }
