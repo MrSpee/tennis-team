@@ -100,92 +100,139 @@ const LiveResultsWithDB = () => {
       console.log('✅ Heim-Team:', matchData.home_team?.club_name, matchData.home_team?.team_name);
       console.log('✅ Auswärts-Team:', matchData.away_team?.club_name, matchData.away_team?.team_name);
 
-      // Lade Team-Mitglieder des Heim-Teams (NUR aktive Memberships)
-      const { data: teamMembers, error: teamError } = await supabase
-        .from('team_memberships')
-        .select('player_id')
-        .eq('team_id', homeTeamId)
-        .eq('is_active', true);
-
-      const teamMemberIds = (teamMembers || []).map(tm => tm.player_id);
-
-      // Lade unsere Spieler aus dem Team (Heim-Spieler) - ALLE (aktiv + inaktiv)
-      const { data: teamPlayersData, error: teamPlayersError } = await supabase
-        .from('players_unified')
-        .select('id, name, current_lk, season_start_lk, ranking')
-        .in('id', teamMemberIds)
-        .order('name');
-
-      if (teamPlayersError) {
-        console.error('Error loading team players:', teamPlayersError);
-        setError('Team-Spieler konnten nicht geladen werden');
+      // NEU: Lade ALLE Spieler des VEREINS (nicht nur des Teams)
+      const homeClubName = matchData.home_team?.club_name;
+      
+      if (!homeClubName) {
+        setError('Club-Name konnte nicht ermittelt werden');
         return;
       }
+      
+      // 1. Finde ALLE Teams des Vereins
+      const { data: clubTeams, error: clubTeamsError } = await supabase
+        .from('team_info')
+        .select('id')
+        .ilike('club_name', `%${homeClubName}%`);
+      
+      if (clubTeamsError) {
+        console.error('Error loading club teams:', clubTeamsError);
+        setError('Vereins-Teams konnten nicht geladen werden');
+        return;
+      }
+      
+      const clubTeamIds = (clubTeams || []).map(t => t.id);
+      
+      if (clubTeamIds.length === 0) {
+        console.warn('⚠️ Keine Teams für Verein gefunden:', homeClubName);
+        setHomePlayers({ available: [], others: [] });
+      } else {
+        // 2. Lade ALLE Spieler aus ALLEN Teams des Vereins (NUR aktive Memberships)
+        const { data: teamMembers, error: teamError } = await supabase
+          .from('team_memberships')
+          .select('player_id')
+          .in('team_id', clubTeamIds)
+          .eq('is_active', true);
 
-      // Lade Verfügbarkeits-Daten für das Match
-      const { data: availabilityData, error: availabilityError } = await supabase
-        .from('match_availability')
-        .select('player_id, status')
-        .eq('matchday_id', matchId);
+        const teamMemberIds = [...new Set((teamMembers || []).map(tm => tm.player_id))]; // Duplikate entfernen
 
-      if (availabilityError) {
-        console.error('Error loading availability:', availabilityError);
-        // Verfügbarkeit ist optional, fahre ohne fort
+        // 3. Lade Spieler-Daten
+        const { data: clubPlayersData, error: clubPlayersError } = await supabase
+          .from('players_unified')
+          .select('id, name, current_lk, season_start_lk, ranking')
+          .in('id', teamMemberIds);
+
+        if (clubPlayersError) {
+          console.error('Error loading club players:', clubPlayersError);
+          setError('Vereins-Spieler konnten nicht geladen werden');
+          return;
+        }
+
+        // Lade Verfügbarkeits-Daten für das Match
+        const { data: availabilityData, error: availabilityError } = await supabase
+          .from('match_availability')
+          .select('player_id, status')
+          .eq('matchday_id', matchId);
+
+        if (availabilityError) {
+          console.error('Error loading availability:', availabilityError);
+          // Verfügbarkeit ist optional, fahre ohne fort
+        }
+
+        // Sortiere nach LK (HÖCHSTE zuerst = absteigend)
+        const sortByLKDesc = (a, b) => {
+          const lkA = parseFloat(a.current_lk || a.season_start_lk || a.ranking || 0);
+          const lkB = parseFloat(b.current_lk || b.season_start_lk || b.ranking || 0);
+          return lkB - lkA; // Umgekehrte Sortierung: höchste zuerst
+        };
+        
+        const allClubPlayers = (clubPlayersData || []).sort(sortByLKDesc);
+        const availablePlayerIds = (availabilityData || [])
+          .filter(avail => avail.status === 'available')
+          .map(avail => avail.player_id);
+
+        const availablePlayers = allClubPlayers.filter(player => availablePlayerIds.includes(player.id));
+        const otherPlayers = allClubPlayers.filter(player => !availablePlayerIds.includes(player.id));
+        
+        // Beide Listen sind bereits nach LK sortiert (höchste zuerst)
+        setHomePlayers({
+          available: availablePlayers,
+          others: otherPlayers
+        });
       }
 
-      // Gruppiere Spieler: Zuerst angemeldete, dann alle anderen
-      // NEU: Sortiere nach LK (niedrigste zuerst)
-      const sortByLK = (a, b) => {
-        const lkA = a.current_lk || a.season_start_lk || a.ranking || 999;
-        const lkB = b.current_lk || b.season_start_lk || b.ranking || 999;
-        return parseFloat(lkA) - parseFloat(lkB);
-      };
+      // NEU: Lade ALLE Gegner-Spieler des GEGNER-VEREINS (nicht nur des Teams)
+      const awayClubName = matchData.away_team?.club_name;
       
-      const allTeamPlayers = teamPlayersData || [];
-      const availablePlayerIds = (availabilityData || [])
-        .filter(avail => avail.status === 'available')
-        .map(avail => avail.player_id);
-
-      const availablePlayers = allTeamPlayers.filter(player => availablePlayerIds.includes(player.id)).sort(sortByLK);
-      const otherPlayers = allTeamPlayers.filter(player => !availablePlayerIds.includes(player.id)).sort(sortByLK);
-
-      setHomePlayers({
-        available: availablePlayers,
-        others: otherPlayers
-      });
-
-      // Lade Gegner-Spieler: Nur Spieler des Auswärts-Teams (NUR aktive Memberships)
-      const { data: opponentTeamMembers, error: opponentTeamError } = await supabase
-        .from('team_memberships')
-        .select('player_id')
-        .eq('team_id', awayTeamId)
-        .eq('is_active', true);
-      
-      const opponentTeamMemberIds = (opponentTeamMembers || []).map(tm => tm.player_id);
-      
-      if (opponentTeamMemberIds.length > 0) {
-        // Lade Spieler der Gegner-Mannschaft - ALLE (aktiv + inaktiv)
-        const { data: opponentsData, error: opponentsError } = await supabase
-          .from('players_unified')
-          .select('id, name, current_lk, season_start_lk')
-          .in('id', opponentTeamMemberIds);
+      if (awayClubName) {
+        // 1. Finde ALLE Teams des Gegner-Vereins
+        const { data: opponentClubTeams, error: opponentClubTeamsError } = await supabase
+          .from('team_info')
+          .select('id')
+          .ilike('club_name', `%${awayClubName}%`);
         
-        if (opponentsError) {
-          console.warn('⚠️ Konnte Gegner-Spieler nicht laden:', opponentsError);
-          setOpponentPlayers([]);
+        if (!opponentClubTeamsError && opponentClubTeams && opponentClubTeams.length > 0) {
+          const opponentClubTeamIds = opponentClubTeams.map(t => t.id);
+          
+          // 2. Lade ALLE Spieler aus ALLEN Teams des Gegner-Vereins (NUR aktive Memberships)
+          const { data: opponentTeamMembers, error: opponentTeamError } = await supabase
+            .from('team_memberships')
+            .select('player_id')
+            .in('team_id', opponentClubTeamIds)
+            .eq('is_active', true);
+          
+          const opponentTeamMemberIds = [...new Set((opponentTeamMembers || []).map(tm => tm.player_id))]; // Duplikate entfernen
+          
+          if (opponentTeamMemberIds.length > 0) {
+            // 3. Lade Spieler-Daten
+            const { data: opponentsData, error: opponentsError } = await supabase
+              .from('players_unified')
+              .select('id, name, current_lk, season_start_lk')
+              .in('id', opponentTeamMemberIds);
+            
+            if (opponentsError) {
+              console.warn('⚠️ Konnte Gegner-Spieler nicht laden:', opponentsError);
+              setOpponentPlayers([]);
+            } else {
+              // Sortiere nach LK (HÖCHSTE zuerst = absteigend)
+              const sortByLKDesc = (a, b) => {
+                const lkA = parseFloat(a.current_lk || a.season_start_lk || 0);
+                const lkB = parseFloat(b.current_lk || b.season_start_lk || 0);
+                return lkB - lkA; // Umgekehrte Sortierung: höchste zuerst
+              };
+              const sortedOpponents = (opponentsData || []).sort(sortByLKDesc);
+              setOpponentPlayers(sortedOpponents);
+              console.log('✅ Gegner-Spieler geladen:', sortedOpponents.length);
+            }
+          } else {
+            console.warn('⚠️ Gegner-Verein hat keine Spieler in Teams');
+            setOpponentPlayers([]);
+          }
         } else {
-          // NEU: Sortiere nach LK (niedrigste zuerst)
-          const sortByLK = (a, b) => {
-            const lkA = a.current_lk || a.season_start_lk || 999;
-            const lkB = b.current_lk || b.season_start_lk || 999;
-            return parseFloat(lkA) - parseFloat(lkB);
-          };
-          const sortedOpponents = (opponentsData || []).sort(sortByLK);
-          setOpponentPlayers(sortedOpponents);
-          console.log('✅ Gegner-Spieler geladen:', sortedOpponents.length);
+          console.warn('⚠️ Konnte Gegner-Verein Teams nicht laden');
+          setOpponentPlayers([]);
         }
       } else {
-        console.warn('⚠️ Gegner-Mannschaft hat keine Spieler');
+        console.warn('⚠️ Gegner-Verein Name nicht gefunden');
         setOpponentPlayers([]);
       }
 
