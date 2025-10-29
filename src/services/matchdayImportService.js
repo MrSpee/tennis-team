@@ -254,11 +254,21 @@ export const matchTeam = async (teamName, clubId, category, options = {}) => {
   try {
     console.log('🔍 Matching Team:', teamName, 'Club:', clubId, 'Category:', category);
     
-    // 1. Normalisiere Team-Name (entferne Nummern, Format-Suffixe)
-    const normalizedTeam = teamName
-      .replace(/\s*\(.*?\)\s*/g, '') // (4er), (6er) entfernen
-      .replace(/\s*\d+\s*$/, '') // Abschließende Nummern entfernen
-      .trim();
+    // 1. Normalisiere Team-Name - WICHTIG: Team-Name ist meist nur die Nummer (1, 2, 3, etc.)
+    // "Herren 40 3" → team_name sollte "3" sein (nicht "Herren 40 3")
+    // Extrahiere die Team-Nummer aus dem Team-Name
+    let extractedTeamNumber = teamName.trim();
+    
+    // Wenn Team-Name "Herren 40 3" oder "Herren 40 1" ist, extrahiere nur die Nummer
+    const teamNumberMatch = teamName.match(/(\d+)(?:\s*\(.*?\))?\s*$/); // Finde letzte Zahl vor (4er)
+    if (teamNumberMatch) {
+      extractedTeamNumber = teamNumberMatch[1]; // Nur die Nummer: "3", "1", etc.
+    }
+    
+    // Entferne Klammern (4er), (6er)
+    extractedTeamNumber = extractedTeamNumber.replace(/\s*\(.*?\)\s*/g, '').trim();
+    
+    console.log('🔍 Extracted team number:', extractedTeamNumber, 'from:', teamName);
     
     // 2. Suche Teams - erst nach club_name (club_id Spalte existiert möglicherweise nicht)
     let candidates = [];
@@ -295,7 +305,7 @@ export const matchTeam = async (teamName, clubId, category, options = {}) => {
       }
     }
     
-    // Filtere nach Category (falls vorhanden)
+    // Filtere nach Category (falls vorhanden) - PRIORITÄT 1
     if (category && candidates.length > 0) {
       const categoryMatch = candidates.filter(t => 
         normalizeString(t.category || '').includes(normalizeString(category))
@@ -305,14 +315,37 @@ export const matchTeam = async (teamName, clubId, category, options = {}) => {
       }
     }
     
-    // 3. Fuzzy Match
+    // 3. Match-Logik: PRIORISIERE EXAKTE MATCHES
     const matches = candidates.map(team => {
       const teamNameNorm = normalizeString(team.team_name || '');
-      const score = calculateSimilarity(normalizedTeam, teamNameNorm);
+      const extractedNorm = normalizeString(extractedTeamNumber);
+      
+      // PRIORITÄT 1: Exakter Match von Team-Name UND Category
+      if (teamNameNorm === extractedNorm && 
+          category && 
+          normalizeString(team.category || '') === normalizeString(category)) {
+        return {
+          team,
+          score: 1.0, // Perfekter Match
+          matchType: 'exact'
+        };
+      }
+      
+      // PRIORITÄT 2: Exakter Team-Name Match (ohne Category-Prüfung)
+      if (teamNameNorm === extractedNorm) {
+        return {
+          team,
+          score: 0.95, // Sehr guter Match
+          matchType: 'exact_name'
+        };
+      }
+      
+      // PRIORITÄT 3: Fuzzy Match
+      const fuzzyScore = calculateSimilarity(extractedNorm, teamNameNorm);
       
       // Bonus wenn Category exakt matcht
       const categoryBonus = category && 
-                           normalizeString(team.category || '') === normalizeString(category) ? 0.1 : 0;
+                           normalizeString(team.category || '') === normalizeString(category) ? 0.15 : 0;
       
       // Bonus wenn Club-Name ähnlich ist
       const clubBonus = rawClubName && team.club_name &&
@@ -321,9 +354,17 @@ export const matchTeam = async (teamName, clubId, category, options = {}) => {
       
       return {
         team,
-        score: Math.min(1.0, score + categoryBonus + clubBonus)
+        score: Math.min(0.9, fuzzyScore + categoryBonus + clubBonus), // Max 0.9 für Fuzzy
+        matchType: 'fuzzy'
       };
-    }).sort((a, b) => b.score - a.score);
+    }).sort((a, b) => {
+      // Sortiere: Exakte Matches zuerst, dann nach Score
+      if (a.matchType === 'exact' && b.matchType !== 'exact') return -1;
+      if (a.matchType !== 'exact' && b.matchType === 'exact') return 1;
+      if (a.matchType === 'exact_name' && b.matchType !== 'exact_name') return -1;
+      if (a.matchType !== 'exact_name' && b.matchType === 'exact_name') return 1;
+      return b.score - a.score;
+    });
     
     const bestMatch = matches[0];
     

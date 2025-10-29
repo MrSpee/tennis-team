@@ -949,7 +949,7 @@ const ImportTab = () => {
               player_lk: playerData.lk,
               tvm_id_number: playerData.id_number,
               is_captain: playerData.is_captain,
-              team_id: teamId,
+              team_id: targetTeamId,
               import_source: 'tvm_import'
             });
           } catch (logError) {

@@ -67,7 +67,7 @@ const MATCH_SCHEMA = {
         additionalProperties: false,
         properties: {
           name: { type: "string", description: "Spieler Name" },
-          lk: { type: "string", description: "Leistungsklasse (z.B. '6.8', '13.7')" },
+          lk: { type: "string", description: "Leistungsklasse (z.B. '9.8', '11.3', '13.5' oder '13') - IMMER als STRING, auch bei ganzen Zahlen!" },
           id_number: { type: "string", description: "TVM ID-Nummer" },
           position: { type: "integer", description: "Position in der Meldeliste" },
           is_captain: { type: "boolean", description: "true wenn Mannschaftsführer (MF)" }
@@ -124,8 +124,15 @@ WICHTIGE REGELN:
 
 **3. SPIELER-DATEN (falls Meldeliste vorhanden):**
    - Extrahiere ALLE Spieler mit Name, LK, ID-Nummer
+   - **WICHTIG: LK Format ist "Zahl.Zahl" (z.B. "9.8", "11.3", "13.5")**
+     * LK steht in der Spalte "LK"
+     * LK kann auch ganzzahlig sein (z.B. "13" statt "13.0")
+     * Immer als STRING extrahieren, NICHT als Zahl!
    - Position in der Meldeliste beachten
    - Mannschaftsführer markieren (Spalte "MF")
+   - **Beispiel:**
+     * Position 9, Mannschaft 3: Name="Meik Frauenrath", LK="9.8", ID-Nr="18253069"
+     * Position 15, Mannschaft 4: Name="Frank Tepferd", LK="12.7", ID-Nr="17656142", is_captain=true (wegen MF)
 
 **4. SAISON & JAHR:**
    - Erkenne Saison basierend auf Monat:
@@ -137,29 +144,33 @@ WICHTIGE REGELN:
 
 BEISPIEL INPUT (TVM-Format):
 """
-TV Ensen Westhoven
+TC Colonius
 Stadt Köln
-Oberstr. 122
-51149 Köln
-http://www.tv-ensen-westhoven.de
+Subbelrather Str. 19
+50823 Köln
+http://www.tc-colonius.de
 
 Mannschaftsführer
-Middendorf Jörg (1622326286)
+Tepferd Frank (015206284418)
 
 Herren 40 1. Kreisliga Gr. 046
-Herren 40 1 (4er)
+Herren 40 3 (4er)
 
 Meldeliste:
 Position	Mannschaft	Name	LK	ID-Nr.	Info	MF	Nation
-1	1	Jochen Becker-Grüll	11.1	17102247			GER
-2	1	Christoph Lindenschmidt	12.4	17810890			GER
+9	3	Meik Frauenrath	9.8	18253069			GER
+10	3	Björn Kaiser	10.3	17454607			GER
+11	3	Stefan Wessels	10.4	18302571			GER
+12	3	Maurice Houboi	10.4	18403153			GER
+13	4	Fabian Eisenbeiß	11.3	18603107			GER
+15	4	Frank Tepferd	12.7	17656142		MF	GER
 """
 
 BEISPIEL OUTPUT:
 {
   "team_info": {
-    "club_name": "TV Ensen Westhoven",
-    "team_name": "1",
+    "club_name": "TC Colonius",
+    "team_name": "3",
     "category": "Herren 40",
     "league": "Herren 40 1. Kreisliga Gr. 046",
     "address": "Oberstr. 122, 51149 Köln",
