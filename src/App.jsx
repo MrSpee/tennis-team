@@ -19,6 +19,7 @@ import MatchdayResults from './components/MatchdayResults';
 import Results from './components/Results';
 import Training from './components/Training';
 import RoundRobinExplainer from './components/RoundRobinExplainer';
+import RoundRobinPlan from './components/RoundRobinPlan';
 import OnboardingFlow from './components/OnboardingFlow';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
 import EmailVerificationError from './components/EmailVerificationError';
@@ -211,6 +212,12 @@ function AppContent() {
           } />
           
           <Route path="/round-robin" element={
+            <ProtectedRoute>
+              <RoundRobinPlan />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/round-robin-old" element={
             <ProtectedRoute>
               <RoundRobinExplainer />
             </ProtectedRoute>

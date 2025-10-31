@@ -1,15 +1,13 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Calendar, Users, Clock, Sun, Home, AlertCircle, CheckCircle, XCircle, Plus, Download } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { supabase } from '../lib/supabaseClient';
 import { LoggingService } from '../services/activityLogger';
-import { RoundRobinService } from '../services/roundRobinService';
+import { calculateTrainingParticipants } from '../services/simpleRotationService';
 import './Dashboard.css';
 
 function Training() {
-  const navigate = useNavigate();
   const { player } = useAuth();
   const { players } = useData();
   const [trainings, setTrainings] = useState([]);
@@ -37,7 +35,26 @@ function Training() {
   const [whatsappInviteSent, setWhatsappInviteSent] = useState({}); // { playerId: true/false } - Tracking für gesendete Einladungen
   
   // Round-Robin States
-  const [playersWithStats, setPlayersWithStats] = useState([]); // Spieler mit training_stats für Prioritäts-Berechnung
+  const [rotationList, setRotationList] = useState([
+    { name: 'Alexander Elwert', id: null },
+    { name: 'Marc Stoppenbach', id: null },
+    { name: 'Markus Wilwerscheid', id: null },
+    { name: 'Chris Spee', id: null },
+    { name: 'Raoul van Herwijnen', id: null }
+  ]);
+  
+  // Lade Spieler-IDs für Rotation
+  useEffect(() => {
+    if (players && players.length > 0) {
+      setRotationList(prev => {
+        const updated = prev.map(rotPlayer => {
+          const found = players.find(p => p.name === rotPlayer.name);
+          return found ? { ...rotPlayer, id: found.id } : rotPlayer;
+        });
+        return updated;
+      });
+    }
+  }, [players]); // eslint-disable-next-line react-hooks/exhaustive-deps
   
   // Form State
   const [formData, setFormData] = useState({
@@ -58,10 +75,7 @@ function Training() {
     weekday: 3, // 3 = Mittwoch
     notes: '',
     invitedPlayers: [], // Player-IDs aus DB
-    externalPlayers: [], // { name, lk, club }
-    roundRobinEnabled: false, // Intelligente Platzvergabe aktivieren
-    isPriority: false, // Prio-Training (z.B. Medenspiel)
-    roundRobinSeed: null // Seed für reproduzierbare Zufälligkeit
+    externalPlayers: [] // { name, lk, club }
   });
 
   // Lade Teams des Users (VOR dem useEffect!)
@@ -209,61 +223,7 @@ function Training() {
     }
   };
 
-  // Lade Spieler mit Statistiken für Round-Robin
-  const loadPlayersWithStats = async () => {
-    try {
-      // Lade Spieler aus players_unified
-      const { data: playersData, error: playersError } = await supabase
-        .from('players_unified')
-        .select('id, name, email, current_lk, status')
-        .in('status', ['active', 'pending']);
-
-      if (playersError) throw playersError;
-
-      // Lade Attendance-Daten für die letzen 90 Tage + nächste 90 Tage
-      const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-      const ninetyDaysInFuture = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
-      
-      const { data: trainingsData, error: trainingsError } = await supabase
-        .from('training_sessions')
-        .select('id, date, type, invited_players')
-        .gte('date', ninetyDaysAgo.toISOString())
-        .lte('date', ninetyDaysInFuture.toISOString());
-
-      if (trainingsError) throw trainingsError;
-
-      const { data: attendanceData, error: attendanceError } = await supabase
-        .from('training_attendance')
-        .select('*')
-        .in('session_id', trainingsData.map(t => t.id));
-
-      if (attendanceError) throw attendanceError;
-
-      // Verknüpfe Attendance mit Training-Daten
-      const enrichedAttendance = (attendanceData || []).map(att => {
-        const training = trainingsData.find(t => t.id === att.session_id);
-        return {
-          ...att,
-          training_date: training?.date || null
-        };
-      });
-
-      // Berechne training_stats für jeden Spieler mit zentraler Funktion
-      const playersWithTrainingStats = (playersData || []).map(player => {
-        const training_stats = RoundRobinService.calculateTrainingStats(player, enrichedAttendance);
-        return {
-          ...player,
-          training_stats
-        };
-      });
-
-      console.log('✅ Loaded players with stats:', playersWithTrainingStats.length);
-      setPlayersWithStats(playersWithTrainingStats);
-    } catch (error) {
-      console.error('❌ Error loading players with stats:', error);
-      setPlayersWithStats([]);
-    }
-  };
+  // Lade Spieler mit Statistiken - ENTFERNT (vereinfacht)
 
   // Lade Trainings
   const loadTrainings = async () => {
@@ -373,7 +333,6 @@ function Training() {
   useEffect(() => {
     if (userTeams && userTeams.length > 0 && player?.id) {
       loadTrainings();
-      loadPlayersWithStats();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userTeams, player]);
@@ -640,10 +599,7 @@ function Training() {
             external_players: [...formData.externalPlayers, ...importedAsExternal].length > 0 
               ? [...formData.externalPlayers, ...importedAsExternal] 
               : null, // 🔧 FIX: Inkl. importierte mit Email
-            status: 'scheduled',
-            round_robin_enabled: formData.roundRobinEnabled || false,
-            is_priority: formData.isPriority || false,
-            round_robin_seed: formData.roundRobinEnabled ? Date.now() + i : null
+            status: 'scheduled'
           };
           
           trainingsToCreate.push(trainingData);
@@ -728,10 +684,7 @@ function Training() {
           external_players: [...formData.externalPlayers, ...importedAsExternal].length > 0 
             ? [...formData.externalPlayers, ...importedAsExternal] 
             : null, // 🔧 FIX: Inkl. importierte mit Email
-          status: 'scheduled',
-          round_robin_enabled: formData.roundRobinEnabled || false,
-          is_priority: formData.isPriority || false,
-          round_robin_seed: formData.roundRobinEnabled ? Date.now() : null
+          status: 'scheduled'
         };
 
         console.log('🔵 Inserting single training:', trainingData);
@@ -818,10 +771,7 @@ function Training() {
         weekday: 3,
         notes: '',
         invitedPlayers: [],
-        externalPlayers: [],
-        roundRobinEnabled: false,
-        isPriority: false,
-        roundRobinSeed: null
+        externalPlayers: []
       });
       setImportedPlayerSearch(''); // 🔧 FIX: Reset Suche
       setImportedPlayerEmails({}); // 🔧 FIX: Reset Emails
@@ -917,35 +867,11 @@ function Training() {
 
       console.log('✅ Training response saved successfully');
 
-      // 🔥 AUTOMATISCHES NACHRÜCKEN VON WARTELISTE
-      if (status === 'declined' && training?.round_robin_enabled) {
-        console.log('🔔 Player declined, checking waitlist for auto-promotion...');
-        try {
-          const promoted = await RoundRobinService.handleAutoPromotion(training, playersWithStats);
-          if (promoted) {
-            alert(`✅ ${promoted.playerName} ist von der Warteliste nachgerückt!`);
-          }
-        } catch (promotionError) {
-          console.warn('⚠️ Auto-promotion failed (non-critical):', promotionError);
-        }
-      }
-
-      // Update Spieler-Statistiken
-      try {
-        await RoundRobinService.updatePlayerStats(player.id, status);
-      } catch (statsError) {
-        console.warn('⚠️ Stats update failed (non-critical):', statsError);
-      }
-
       // Reset & Reload
       setComment('');
       setRespondingTo(null);
       
-      // 🔧 FIX: Scroll-Position beibehalten
-      // const trainingCardElement = document.querySelector(`[data-training-id="${sessionId}"]`); // Nicht verwendet
-      
       await loadTrainings();
-      await loadPlayersWithStats(); // Reload stats nach Update
       
       // 🔧 FIX: Nach Reload zurück zur Training-Card scrollen
       setTimeout(() => {
@@ -1152,19 +1078,18 @@ Wir sehen uns auf dem Platz! 🎾`;
   };
 
   // Status Badge - X/Y Format mit Farben
-  const getStatusBadge = (training) => {
-    const { confirmed } = training.stats;
-    const { max_players } = training;
-
-    const text = `${confirmed}/${max_players}`;
+  const getStatusBadge = (confirmedCount, maxPlayers, hasWaitlist = false) => {
+    const text = `${confirmedCount}/${maxPlayers}`;
     
     // Farbliche Indikation
     let color;
-    if (confirmed >= max_players) {
+    if (confirmedCount > maxPlayers || hasWaitlist) {
+      color = '#ef4444'; // Rot - ÜBERBUCHT! Achtung!
+    } else if (confirmedCount === maxPlayers) {
       color = '#10b981'; // Grün - Voll
-    } else if (confirmed >= max_players - 1) {
+    } else if (confirmedCount >= maxPlayers - 1) {
       color = '#3b82f6'; // Blau - Fast voll
-    } else if (confirmed >= max_players / 2) {
+    } else if (confirmedCount >= maxPlayers / 2) {
       color = '#f59e0b'; // Gelb - Mittel
     } else {
       color = '#ef4444'; // Rot - Wenig
@@ -1173,82 +1098,80 @@ Wir sehen uns auf dem Platz! 🎾`;
     return { text, color };
   };
 
-  // Render Training Card
-  const renderTrainingCard = (training) => {
-    // 🎲 ROUND-ROBIN: Verwende nur EINGELADENE Spieler für Round-Robin
-    let roundRobinPlayers = [];
+  // Berechne Rotation-Index für ein Training basierend auf allen Trainings vor ihm
+  const calculateRotationIndexForTraining = (targetTraining, allTrainings) => {
+    // Nur Trainings vor dem Ziel-Training
+    const beforeTrainings = allTrainings.filter(t => new Date(t.date) < new Date(targetTraining.date));
     
-    // WICHTIG: Füge Organizer automatisch zur Liste hinzu wenn nicht schon dabei
-    const allInvitedIds = [...new Set([...(training.invited_players || []), training.organizer_id])];
+    let currentIndex = 0;
     
-    if (training.round_robin_enabled && training.type === 'private' && training.invited_players) {
-      // Filtere nur eingeladene Spieler + Organizer
-      roundRobinPlayers = players.filter(p => allInvitedIds.includes(p.id));
-      // Logging ausgestellt wegen Spam
-    } else {
-      // Fallback: Alle Spieler (für Team-Trainings oder wenn keine invited_players)
-      roundRobinPlayers = players;
-    }
-    
-    // WICHTIG: Berechne training_stats für jeden Spieler mit der ZENTRALEN Funktion
-    // Verwende die Stats aus playersWithStats (die bereits geladen wurden in loadPlayersWithStats)
-    const roundRobinPlayersWithStats = roundRobinPlayers.map(player => {
-      // Versuche Stats aus playersWithStats zu holen
-      const existingStats = playersWithStats.find(p => p.id === player.id);
+    // Durchlaufe alle Trainings vor dem Ziel
+    beforeTrainings.forEach(prevTraining => {
+      const prevAttendance = prevTraining.attendance || [];
+      const prevConfirmed = prevAttendance.filter(a => a.status === 'confirmed').length;
       
-      // Fallback: Leere Stats wenn nicht gefunden
-      const training_stats = existingStats?.training_stats || {
-        total_attended: 0,
-        total_declined: 0,
-        last_attended: null,
-        last_response: null,
-        consecutive_declines: 0
-      };
-      
-      return {
-        ...player,
-        training_stats
-      };
+      // Bei ≥5 Anmeldungen: Rotation weiter
+      if (prevConfirmed >= 5) {
+        currentIndex = (currentIndex + 1) % 5;
+      }
+      // Bei <5: Index bleibt gleich
     });
     
-    // 🎲 ROUND-ROBIN: Berechne wer spielen kann und wer wartet
-    const { canPlay, waitlist, isOverbooked } = RoundRobinService.calculateTrainingParticipants(
-      training, 
-      roundRobinPlayersWithStats
+    return currentIndex;
+  };
+
+  // Render Training Card
+  const renderTrainingCard = (training) => {
+    const attendance = training.attendance || [];
+    
+    // Berechne Rotation-Index für dieses Training
+    const currentRotationIndex = calculateRotationIndexForTraining(training, trainings);
+    
+    // Verwende Simple-Rotation-Logik
+    const { canPlay, waitlist } = calculateTrainingParticipants(
+      training,
+      attendance,
+      currentRotationIndex,
+      rotationList
     );
     
-    const status = getStatusBadge(training);
+    // Bestätigte Anmeldungen zählen (inkl. Warteliste)
+    const confirmedCount = attendance.filter(a => a.status === 'confirmed').length;
+    
+    const status = getStatusBadge(confirmedCount, training.max_players, waitlist.length > 0);
     const myResponse = training.myAttendance?.status;
     const isOrganizer = training.organizer_id === player?.id;
-    const isPrivate = training.type === 'private';
     
-    // Mein Round-Robin Status
+    // Mein Status
     const amIPlaying = canPlay.some(p => p.player_id === player?.id);
     const amIOnWaitlist = waitlist.some(p => p.player_id === player?.id);
-    const myWaitlistPosition = waitlist.find(p => p.player_id === player?.id)?.position || waitlist.findIndex(p => p.player_id === player?.id) + 1;
 
     return (
       <div key={training.id} className="fade-in lk-card-full" data-training-id={training.id}>
         {/* Header */}
         <div className="formkurve-header">
           <div className="formkurve-title">
-            {training.is_priority && '⭐ '}
-            {training.round_robin_enabled && '🎲 '}
-            {isPrivate && !training.needs_substitute && !training.round_robin_enabled && '🔒 '}
             {training.needs_substitute && '🔔 '}
             {training.title || 'Training'}
           </div>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
             <div 
               className="match-count-badge"
               style={{ 
                 backgroundColor: status.color,
-                fontSize: '0.9rem',
-                fontWeight: '700'
+                color: 'white',
+                fontSize: '0.85rem',
+                fontWeight: '700',
+                padding: '0.5rem 1rem',
+                borderRadius: '8px',
+                whiteSpace: 'nowrap',
+                boxShadow: waitlist.length > 0 ? '0 0 0 3px rgba(239, 68, 68, 0.3)' : 'none',
+                border: waitlist.length > 0 ? '2px solid #dc2626' : 'none'
               }}
             >
-              {canPlay.length}/{training.max_players}
-              {isOverbooked && waitlist.length > 0 && ` (+${waitlist.length})`}
+              {waitlist.length > 0 && '⚠️ '}
+              {confirmedCount}/{training.max_players}
+              {waitlist.length > 0 && ` (+${waitlist.length} Warteliste)`}
             </div>
           </div>
         </div>
@@ -1347,17 +1270,9 @@ Wir sehen uns auf dem Platz! 🎾`;
                 <div style={{ 
                   padding: '1rem',
                   background: myResponse === 'confirmed' 
-                    ? (training.round_robin_enabled && amIPlaying 
-                        ? 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)'
-                        : training.round_robin_enabled && amIOnWaitlist
-                          ? 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)'
-                          : 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)')
+                    ? 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)'
                     : 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
-                  border: `2px solid ${
-                    myResponse === 'confirmed' 
-                      ? (training.round_robin_enabled && amIOnWaitlist ? '#f59e0b' : '#10b981')
-                      : '#ef4444'
-                  }`,
+                  border: `2px solid ${myResponse === 'confirmed' ? '#10b981' : '#ef4444'}`,
                   borderRadius: '12px',
                   marginBottom: '1rem'
                 }}>
@@ -1368,27 +1283,26 @@ Wir sehen uns auf dem Platz! 🎾`;
                       </div>
                       <div style={{ fontSize: '1rem', fontWeight: '700', color: myResponse === 'confirmed' ? '#065f46' : '#991b1b', marginTop: '0.25rem' }}>
                         {myResponse === 'confirmed' 
-                          ? (training.round_robin_enabled && amIPlaying 
+                          ? (amIPlaying 
                               ? '✅ Du bist dabei!'
-                              : training.round_robin_enabled && amIOnWaitlist
-                                ? `⏳ Warteliste - Position ${myWaitlistPosition}`
+                              : amIOnWaitlist
+                                ? '⏳ Du musst aussetzen'
                                 : '✅ Bin dabei!')
                           : '❌ Kann nicht'}
                       </div>
                       
-                      {/* Auto-Nachrücken Info nur bei Warteliste */}
-                      {training.round_robin_enabled && amIOnWaitlist && (
+                      {amIOnWaitlist && myResponse === 'confirmed' && (
                         <div style={{ 
                           marginTop: '0.75rem', 
                           padding: '0.75rem', 
-                          background: '#e0f2fe', 
+                          background: '#fef3c7', 
                           borderRadius: '6px',
                           fontSize: '0.85rem', 
-                          color: '#0c4a6e',
+                          color: '#78350f',
                           fontWeight: '600',
                           textAlign: 'center'
                         }}>
-                          🚀 Du rückst automatisch nach, wenn ein Platz frei wird!
+                          🎲 Du musst aussetzen (Rotation)
                         </div>
                       )}
                       
@@ -1626,7 +1540,6 @@ Wir sehen uns auf dem Platz! 🎾`;
                   letterSpacing: '0.05em'
                 }}>
                   ✅ Dabei ({canPlay.length}/{training.max_players})
-                  {training.round_robin_enabled && <span style={{ fontSize: '0.7rem', opacity: 0.7 }}> • Sortiert nach Priorität</span>}
                 </h4>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                   {canPlay.map(a => {
@@ -1648,22 +1561,8 @@ Wir sehen uns auf dem Platz! 🎾`;
                           alignItems: 'center',
                           gap: '0.25rem'
                         }}
-                        title={training.round_robin_enabled ? `Position ${a.position} in der Rangliste` : ''}
                       >
-                        {training.round_robin_enabled && (
-                          <span style={{ 
-                            fontSize: '0.7rem', 
-                            fontWeight: '700',
-                            color: '#059669',
-                            marginRight: '0.25rem'
-                          }}>
-                            #{a.position}
-                          </span>
-                        )}
                         {p.name} {p.current_lk && `(${p.current_lk})`}
-                        {a.player_id === training.organizer_id && (
-                          <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>👑</span>
-                        )}
                       </span>
                     );
                   })}
@@ -1683,7 +1582,6 @@ Wir sehen uns auf dem Platz! 🎾`;
                   letterSpacing: '0.05em'
                 }}>
                   ⏳ Warteliste ({waitlist.length})
-                  {training.round_robin_enabled && <span style={{ fontSize: '0.7rem', opacity: 0.7 }}> • Automatisches Nachrücken</span>}
                 </h4>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                   {waitlist.map(a => {
@@ -1705,18 +1603,7 @@ Wir sehen uns auf dem Platz! 🎾`;
                           alignItems: 'center',
                           gap: '0.25rem'
                         }}
-                        title={training.round_robin_enabled ? `Position ${a.position} in der Rangliste` : ''}
                       >
-                        {training.round_robin_enabled && (
-                          <span style={{ 
-                            fontSize: '0.7rem', 
-                            fontWeight: '700',
-                            color: '#d97706',
-                            marginRight: '0.25rem'
-                          }}>
-                            #{a.position}
-                          </span>
-                        )}
                         {p.name} {p.current_lk && `(${p.current_lk})`}
                       </span>
                     );
@@ -1762,9 +1649,6 @@ Wir sehen uns auf dem Platz! 🎾`;
                           }}
                         >
                           {player.name} {player.current_lk && `(${player.current_lk})`}
-                          {a.player_id === training.organizer_id && (
-                            <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>👑</span>
-                          )}
                         </span>
                       );
                     })}
@@ -1809,9 +1693,6 @@ Wir sehen uns auf dem Platz! 🎾`;
                           }}
                         >
                           {player.name} {player.current_lk && `(${player.current_lk})`}
-                          {a.player_id === training.organizer_id && (
-                            <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>👑</span>
-                          )}
                         </span>
                       );
                     })}
@@ -1821,22 +1702,21 @@ Wir sehen uns auf dem Platz! 🎾`;
 
           </div>
 
-          {/* TEILNAHME ERKLÄRT BUTTON - NUR BEI ÜBERBUCHUNG */}
+          {/* WARTELISTE-LINK zu Übersicht */}
           {waitlist.length > 0 && (
             <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid #e5e7eb' }}>
               <button
                 className="btn-modern btn-modern-inactive"
-                onClick={() => {
-                  navigate('/round-robin');
-                }}
+                onClick={() => window.open('/round-robin', '_blank')}
                 style={{ 
                   width: '100%',
                   background: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)',
-                  color: 'white'
+                  color: 'white',
+                  fontSize: '0.85rem'
                 }}
-                title="Teilnahme-System erklären"
+                title="Vollständigen Aussetzen-Plan anzeigen"
               >
-                📊 Teilnahme erklärt ({waitlist.length} auf Warteliste)
+                📊 Warteliste Übersicht ({waitlist.length} aussetzen)
               </button>
             </div>
           )}
@@ -1844,14 +1724,46 @@ Wir sehen uns auf dem Platz! 🎾`;
           {/* ORGANISATOR-BUTTONS (ganz unten) */}
           {isOrganizer && (
             <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid #e5e7eb' }}>
-              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+              {/* EINLADEN-Button mit Info oben */}
+              <div style={{ marginBottom: '1rem' }}>
+                <button
+                  className="btn-modern btn-modern-inactive"
+                  onClick={() => {
+                    setShowInviteForm(training.id);
+                    setInviteMessage(generateDefaultInviteMessage(training));
+                  }}
+                  style={{ 
+                    width: '100%',
+                    background: '#10b981',
+                    color: 'white',
+                    fontSize: '0.9rem',
+                    padding: '0.75rem'
+                  }}
+                  title="Spieler einladen & WhatsApp senden"
+                >
+                  📱 Einladen & Teilen
+                </button>
+                <p style={{ 
+                  margin: '0.5rem 0 0 0', 
+                  fontSize: '0.8rem', 
+                  color: '#6b7280',
+                  fontStyle: 'italic',
+                  textAlign: 'center'
+                }}>
+                  💰 Lade deine Tennisfreunde ein, wenn wir weniger als 4 Leute beim Training sind. Diese zahlen € 20 für die Teilnahme in unsere Team-Partykasse
+                </p>
+              </div>
+              
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
                 <button
                   className="btn-modern btn-modern-inactive"
                   onClick={() => handleEditTraining(training)}
                   style={{ 
-                    flex: '0 0 auto',
+                    flex: '1 1 auto',
                     background: '#f59e0b',
-                    color: 'white'
+                    color: 'white',
+                    fontSize: '0.85rem',
+                    padding: '0.5rem 0.75rem'
                   }}
                   title="Training bearbeiten"
                 >
@@ -1862,28 +1774,15 @@ Wir sehen uns auf dem Platz! 🎾`;
                   onClick={() => handleDeleteTraining(training.id)}
                   disabled={isDeleting === training.id}
                   style={{ 
-                    flex: '0 0 auto',
+                    flex: '1 1 auto',
                     background: '#ef4444',
-                    color: 'white'
+                    color: 'white',
+                    fontSize: '0.85rem',
+                    padding: '0.5rem 0.75rem'
                   }}
                   title="Training löschen"
                 >
                   🗑️ Löschen
-                </button>
-                <button
-                  className="btn-modern btn-modern-inactive"
-                  onClick={() => {
-                    setShowInviteForm(training.id);
-                    setInviteMessage(generateDefaultInviteMessage(training));
-                  }}
-                  style={{ 
-                    flex: '0 0 auto',
-                    background: '#10b981',
-                    color: 'white'
-                  }}
-                  title="Spieler einladen & WhatsApp senden"
-                >
-                  📱 Einladen & Teilen
                 </button>
               </div>
 
@@ -2958,74 +2857,6 @@ Wir sehen uns auf dem Platz! 🎾`;
                       🔔 Spieler gesucht (für alle sichtbar machen)
                     </span>
                   </label>
-                </div>
-              )}
-
-              {/* Round-Robin Aktivieren */}
-              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={formData.roundRobinEnabled}
-                    onChange={(e) => setFormData(prev => ({ 
-                      ...prev, 
-                      roundRobinEnabled: e.target.checked,
-                      roundRobinSeed: e.target.checked ? Date.now() : null
-                    }))}
-                    style={{ width: '20px', height: '20px', cursor: 'pointer' }}
-                  />
-                  <span style={{ fontSize: '0.9rem', fontWeight: '600' }}>
-                    🎲 Intelligente Platzvergabe aktivieren
-                  </span>
-                </label>
-                {formData.roundRobinEnabled && (
-                  <div style={{ 
-                    marginTop: '0.5rem', 
-                    padding: '0.75rem', 
-                    background: '#eff6ff', 
-                    borderRadius: '8px',
-                    border: '1px solid #3b82f6'
-                  }}>
-                    <div style={{ fontSize: '0.8rem', color: '#1e40af', marginBottom: '0.5rem' }}>
-                      💡 <strong>Intelligente Platzvergabe</strong>
-                    </div>
-                    <ul style={{ margin: 0, paddingLeft: '1.5rem', fontSize: '0.75rem', color: '#1e40af' }}>
-                      <li>Bei Überbuchung wird automatisch eine Warteliste erstellt</li>
-                      <li>Spieler mit besserer Teilnahme-Quote haben höhere Priorität</li>
-                      <li>Automatisches Nachrücken bei Absagen</li>
-                      <li>Faire Rotation durch Zufallsfaktor</li>
-                    </ul>
-                  </div>
-                )}
-              </div>
-
-              {/* Prio-Training */}
-              {formData.roundRobinEnabled && (
-                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={formData.isPriority}
-                      onChange={(e) => setFormData(prev => ({ ...prev, isPriority: e.target.checked }))}
-                      style={{ width: '20px', height: '20px', cursor: 'pointer' }}
-                    />
-                    <span style={{ fontSize: '0.9rem', fontWeight: '600' }}>
-                      ⭐ Prio-Training (z.B. Medenspiel-Vorbereitung)
-                    </span>
-                  </label>
-                  {formData.isPriority && (
-                    <div style={{ 
-                      marginTop: '0.5rem', 
-                      padding: '0.75rem', 
-                      background: '#fef3c7', 
-                      borderRadius: '8px',
-                      border: '1px solid #f59e0b',
-                      fontSize: '0.8rem',
-                      color: '#92400e'
-                    }}>
-                      🏆 Alle Spieler erhalten +30% Priorität bei diesem wichtigen Training
-                    </div>
-                  )}
                 </div>
               )}
 
