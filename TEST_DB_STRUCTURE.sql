@@ -22,3 +22,4 @@ WHERE club_name IS NOT NULL
 GROUP BY club_name
 ORDER BY club_name;
 
+

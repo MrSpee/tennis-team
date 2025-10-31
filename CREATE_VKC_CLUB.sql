@@ -29,3 +29,5 @@ FROM club_info
 WHERE name = 'VKC Köln';
 
 
+
+

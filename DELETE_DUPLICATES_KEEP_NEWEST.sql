@@ -74,3 +74,5 @@ WHERE is_active = true
   )
 RETURNING 'DELETED' as status, id, team_id, season;
 
+
+

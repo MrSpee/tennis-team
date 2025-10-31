@@ -27,6 +27,7 @@ function OnboardingFlow() {
     currentSeason: 'Winter 2025/26',
     newTeamClub: '',
     newTeamCategory: '',
+    newTeamName: '',
     newTeamLeague: '',
     newTeamGroup: '',
     newTeamSize: '',
@@ -36,8 +37,33 @@ function OnboardingFlow() {
     whatsappEnabled: false
   });
 
-  // Beim ersten Laden: Logge Onboarding-Start
+  // Berechne aktuelle Saison basierend auf aktuellem Datum
+  // WICHTIG: Format muss mit DataContext übereinstimmen ('Winter 2024/25')
+  const getCurrentSeason = () => {
+    const now = new Date();
+    const currentMonth = now.getMonth(); // 0=Jan, 11=Dez
+    const currentYear = now.getFullYear();
+    
+    if (currentMonth >= 4 && currentMonth <= 7) {
+      // Mai (4) bis August (7) = Sommer
+      return `Sommer ${currentYear}`;
+    } else {
+      // September bis April = Winter (überspannt Jahreswechsel)
+      if (currentMonth >= 8) {
+        const nextYear = currentYear + 1;
+        return `Winter ${currentYear}/${String(nextYear).slice(-2)}`;
+      } else {
+        const prevYear = currentYear - 1;
+        return `Winter ${prevYear}/${String(currentYear).slice(-2)}`;
+      }
+    }
+  };
+
+  // Beim ersten Laden: Logge Onboarding-Start und setze aktuelle Saison
   useEffect(() => {
+    const currentSeason = getCurrentSeason();
+    setFormData(prev => ({ ...prev, currentSeason }));
+    
     const logStart = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
@@ -116,7 +142,7 @@ function OnboardingFlow() {
   // Lade Teams für die gewählten Vereine (mit Saison-Informationen)
   const loadTeamsForSelectedClubs = useCallback(async () => {
     try {
-      console.log('🔍 Loading teams for clubs:', formData.selectedClubs);
+      console.log('🔍 STEP 2: Loading teams for clubs:', formData.selectedClubs);
       
       const { data, error } = await supabase
         .from('team_info')
@@ -136,6 +162,8 @@ function OnboardingFlow() {
 
       if (error) throw error;
       
+      console.log('📊 STEP 2: Raw teams data from DB:', data);
+      
       const teamsWithActiveSeason = data?.map(team => {
         const activeSeason = team.team_seasons?.find(s => s.is_active) || team.team_seasons?.[0];
         
@@ -150,9 +178,10 @@ function OnboardingFlow() {
         };
       }) || [];
       
+      console.log('✅ STEP 2: Processed teams:', teamsWithActiveSeason.length);
       setFormData(prev => ({ ...prev, availableTeams: teamsWithActiveSeason }));
     } catch (error) {
-      console.error('Error loading teams for clubs:', error);
+      console.error('❌ STEP 2: Error loading teams for clubs:', error);
       setFormData(prev => ({ ...prev, availableTeams: [] }));
     }
   }, [formData.selectedClubs, formData.currentSeason]);
@@ -212,6 +241,7 @@ function OnboardingFlow() {
         const { data: playerData, error: playerError } = await supabase
           .from('players_unified')
           .update({
+            user_id: user.id, // 🔧 FIX: Verknüpfe Spieler mit User-Account
             name: formData.name,
             email: user.email,
             phone: formData.phone || null,
@@ -239,14 +269,55 @@ function OnboardingFlow() {
         await LoggingService.logImportedPlayerSelection(selectedPlayer, true);
 
       } else {
-        // 3️⃣ Neuer Spieler: Erstelle in players_unified
-        console.log('🆕 Creating new player in players_unified');
+        // 3️⃣ Neuer Spieler: Prüfe ob bereits ein Eintrag existiert
+        console.log('🆕 Creating/updating player in players_unified');
         
         const normalizedLK = formData.current_lk ? normalizeLK(formData.current_lk) : null;
         
-        const { data: playerData, error: playerError } = await supabase
+        // 🔧 Prüfe zuerst, ob bereits ein Eintrag für diesen User existiert
+        const { data: existingPlayer } = await supabase
+          .from('players_unified')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('player_type', 'app_user')
+          .maybeSingle();
+
+        let playerData;
+        
+        if (existingPlayer) {
+          // Update existierenden Eintrag
+          console.log('🔧 Updating existing player:', existingPlayer.id);
+          const { data: updatedPlayer, error: updateError } = await supabase
+            .from('players_unified')
+            .update({
+              name: formData.name,
+              email: user.email,
+              phone: formData.phone || null,
+              current_lk: normalizedLK,
+              season_start_lk: normalizedLK,
+              ranking: normalizedLK,
+              status: 'active',
+              onboarding_status: 'completed',
+              onboarded_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', existingPlayer.id)
+            .select()
+            .single();
+
+          if (updateError) {
+            console.error('❌ Error updating player:', updateError);
+            throw new Error('Fehler beim Aktualisieren des Spieler-Profils');
+          }
+
+          playerData = updatedPlayer;
+          console.log('✅ Player updated:', playerData);
+        } else {
+          // Erstelle neuen Eintrag
+          const { data: newPlayer, error: insertError } = await supabase
           .from('players_unified')
           .insert({
+              user_id: user.id,
             name: formData.name,
             email: user.email,
             phone: formData.phone || null,
@@ -265,12 +336,15 @@ function OnboardingFlow() {
           .select()
           .single();
 
-        if (playerError) {
-          console.error('❌ Error creating player:', playerError);
+          if (insertError) {
+            console.error('❌ Error creating player:', insertError);
           throw new Error('Fehler beim Erstellen des Spieler-Profils');
         }
 
+          playerData = newPlayer;
         console.log('✅ New player created:', playerData);
+        }
+
         finalPlayerId = playerData.id;
 
         // 📊 Logge manuelle Dateneingabe
@@ -287,18 +361,65 @@ function OnboardingFlow() {
       
       for (let i = 0; i < formData.customTeams.length; i++) {
         const team = formData.customTeams[i];
+        let teamId = team.id;
         
         console.log(`🔗 Creating team_membership entry ${i + 1}/${formData.customTeams.length}:`, team);
 
+        // Wenn Team ein custom_ Team ist, erstelle es zuerst in team_info
+        if (team.id.startsWith('custom_')) {
+          console.log('🆕 Creating new custom team in team_info');
+          
+          const { data: newTeam, error: createTeamError } = await supabase
+            .from('team_info')
+            .insert({
+              club_name: team.club_name,
+              team_name: team.team_name || team.category,
+              category: team.category
+            })
+            .select()
+            .single();
+
+          if (createTeamError) {
+            console.error('❌ Error creating custom team:', createTeamError);
+            throw new Error(`Fehler beim Erstellen von Team ${team.category}`);
+          }
+          
+          teamId = newTeam.id;
+          console.log('✅ Custom team created with ID:', teamId);
+          teamsManual++;
+          await LoggingService.logManualTeamEntry(newTeam);
+          
+          // Erstelle auch team_seasons für custom Team
+          if (team.league && team.league !== 'Unbekannt') {
+            await supabase
+              .from('team_seasons')
+              .insert({
+                team_id: teamId,
+                season: formData.currentSeason,
+                league: team.league,
+                group_name: '',
+                team_size: 6,
+                is_active: true,
+                created_at: new Date().toISOString()
+              });
+            console.log('✅ team_seasons created for custom team');
+          }
+        } else {
+          teamsFromDB++;
+          await LoggingService.logTeamSelectionFromDB(team);
+        }
+        
+        // Jetzt erstelle team_membership mit echter team_id
         const { error: teamError } = await supabase
           .from('team_memberships')
           .insert({
             player_id: finalPlayerId,
-            team_id: team.id,
+            team_id: teamId,
             is_active: true,
             is_primary: i === 0, // Erstes Team ist primär
             role: 'player',
-            season: 'winter_25_26'
+            season: formData.currentSeason,
+            created_at: new Date().toISOString()
           });
 
         if (teamError) {
@@ -307,15 +428,6 @@ function OnboardingFlow() {
         }
 
         console.log(`✅ Player assigned to team: ${team.category}`);
-        
-        // 📊 Tracking
-        if (team.id.startsWith('custom_')) {
-          teamsManual++;
-          await LoggingService.logManualTeamEntry(team);
-        } else {
-          teamsFromDB++;
-          await LoggingService.logTeamSelectionFromDB(team);
-        }
       }
 
       console.log('✅ All teams assigned successfully');
@@ -467,8 +579,287 @@ function OnboardingFlow() {
           </div>
 
           <div className="season-content">
-            {/* Rest der Step 2 UI bleibt gleich... */}
-            {/* (Teams auswählen, manuelle Eingabe, etc.) */}
+            {/* Gewählte Teams anzeigen */}
+            {formData.selectedClubs.length === 0 && (
+              <div style={{
+                padding: '1.5rem',
+                background: '#fef3c7',
+                border: '2px solid #f59e0b',
+                borderRadius: '12px',
+                marginBottom: '2rem',
+                textAlign: 'center'
+              }}>
+                Bitte wähle zuerst einen Verein aus Schritt 1
+              </div>
+            )}
+
+            {formData.selectedClubs.length > 0 && (
+              <div>
+                <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.2rem' }}>
+                  Wähle deine Mannschaften:
+                </h3>
+
+                {/* Verfügbare Teams ausgewählter Vereine */}
+                {formData.availableTeams.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '2rem' }}>
+                    {formData.availableTeams.map((team) => {
+                      const isSelected = formData.customTeams.some(t => t.id === team.id);
+                      return (
+                        <div
+                          key={team.id}
+                          onClick={() => {
+                            if (isSelected) {
+                              // Remove team
+                              setFormData(prev => ({
+                                ...prev,
+                                customTeams: prev.customTeams.filter(t => t.id !== team.id)
+                              }));
+                            } else {
+                              // Add team
+                              setFormData(prev => ({
+                                ...prev,
+                                customTeams: [...prev.customTeams, {
+                                  id: team.id,
+                                  club_name: team.club_name,
+                                  category: team.category,
+                                  team_name: team.team_name,
+                                  league: team.league,
+                                  season: team.season
+                                }]
+                              }));
+                            }
+                          }}
+                          style={{
+                            padding: '1rem',
+                            border: `2px solid ${isSelected ? '#10b981' : '#e2e8f0'}`,
+                            borderRadius: '8px',
+                            backgroundColor: isSelected ? '#f0fdf4' : 'white',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between'
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: '600', fontSize: '1rem', color: isSelected ? '#065f46' : '#1f2937' }}>
+                              {team.category || team.team_name}
+                            </div>
+                            <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>
+                              {team.club_name} • {team.league || 'Unbekannt'}
+                            </div>
+                          </div>
+                          <div style={{
+                            width: '24px',
+                            height: '24px',
+                            borderRadius: '50%',
+                            border: `2px solid ${isSelected ? '#10b981' : '#9ca3af'}`,
+                            backgroundColor: isSelected ? '#10b981' : 'white',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: 'white',
+                            fontWeight: 'bold'
+                          }}>
+                            {isSelected ? '✓' : ''}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Separator */}
+                {formData.availableTeams.length > 0 && (
+                  <div style={{ 
+                    margin: '2rem 0',
+                    padding: '1rem',
+                    background: '#f0f9ff',
+                    border: '2px solid #0ea5e9',
+                    borderRadius: '12px',
+                    textAlign: 'center',
+                    fontSize: '0.9rem',
+                    fontWeight: '600',
+                    color: '#0c4a6e'
+                  }}>
+                    ➕ Oder erstelle eine neue Mannschaft
+                  </div>
+                )}
+
+                {/* Manuelle Team-Eingabe - immer anzeigen */}
+                {formData.availableTeams.length === 0 && (
+                  <div style={{
+                    padding: '1.5rem',
+                    background: '#fef3c7',
+                    border: '2px solid #f59e0b',
+                    borderRadius: '12px',
+                    marginBottom: '2rem',
+                    textAlign: 'center'
+                  }}>
+                    Keine Mannschaften für {formData.selectedClubs.join(', ')} gefunden
+                    <br />
+                    <strong>Erstelle deine Mannschaft:</strong>
+                  </div>
+                )}
+
+                <div style={{
+                  padding: '1.5rem',
+                  background: 'white',
+                  border: '2px solid #0ea5e9',
+                  borderRadius: '12px',
+                  marginBottom: '1rem'
+                }}>
+                  <h4 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: '600' }}>
+                    ➕ Neue Mannschaft erstellen
+                  </h4>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: '600' }}>
+                        Mannschaft (z.B. Herren 30, Herren 50, Damen):
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.newTeamCategory}
+                        onChange={(e) => {
+                          console.log('📝 STEP 2: Team category changed:', e.target.value);
+                          setFormData(prev => ({ ...prev, newTeamCategory: e.target.value }));
+                        }}
+                        placeholder="z.B. Herren 30"
+                        style={{
+                          width: '100%',
+                          padding: '0.75rem',
+                          border: '2px solid #e2e8f0',
+                          borderRadius: '8px',
+                          fontSize: '0.9rem'
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: '600' }}>
+                        Mannschaftsname (optional, z.B. &quot;1. Mannschaft&quot;):
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.newTeamName}
+                        onChange={(e) => setFormData(prev => ({ ...prev, newTeamName: e.target.value }))}
+                        placeholder="z.B. 1 oder 1. Mannschaft"
+                        style={{
+                          width: '100%',
+                          padding: '0.75rem',
+                          border: '2px solid #e2e8f0',
+                          borderRadius: '8px',
+                          fontSize: '0.9rem'
+                        }}
+                      />
+                      <p style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: '0.25rem', marginBottom: 0 }}>
+                        Wird standardmäßig auf die Mannschaft gesetzt
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: '600' }}>
+                        Liga (optional):
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.newTeamLeague}
+                        onChange={(e) => setFormData(prev => ({ ...prev, newTeamLeague: e.target.value }))}
+                        placeholder="z.B. Kreisliga, Bezirksliga"
+                        style={{
+                          width: '100%',
+                          padding: '0.75rem',
+                          border: '2px solid #e2e8f0',
+                          borderRadius: '8px',
+                          fontSize: '0.9rem'
+                        }}
+                      />
+                    </div>
+                    
+                    <button
+                      type="button"
+                      onClick={() => {
+                        console.log('🔵 STEP 2: Add team button clicked');
+                        console.log('📝 STEP 2: newTeamCategory:', formData.newTeamCategory);
+                        
+                        if (formData.newTeamCategory.trim()) {
+                          const newTeam = {
+                            id: `custom_${Date.now()}`,
+                            club_name: formData.selectedClubs[0],
+                            category: formData.newTeamCategory,
+                            team_name: formData.newTeamName.trim() || formData.newTeamCategory,
+                            league: formData.newTeamLeague || 'Unbekannt',
+                            season: formData.currentSeason,
+                            isCustom: true
+                          };
+                          
+                          console.log('➕ STEP 2: Adding new team:', newTeam);
+                          
+                          setFormData(prev => {
+                            const updated = {
+                              ...prev,
+                              customTeams: [...prev.customTeams, newTeam],
+                              newTeamCategory: '',
+                              newTeamName: '',
+                              newTeamLeague: ''
+                            };
+                            console.log('📊 STEP 2: Updated customTeams:', updated.customTeams);
+                            return updated;
+                          });
+                        } else {
+                          console.log('⚠️ STEP 2: Cannot add team - category is empty');
+                        }
+                      }}
+                      disabled={!formData.newTeamCategory.trim()}
+                      style={{
+                        padding: '0.75rem',
+                        background: formData.newTeamCategory.trim() ? '#0ea5e9' : '#cbd5e1',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        fontSize: '0.9rem',
+                        fontWeight: '600',
+                        cursor: formData.newTeamCategory.trim() ? 'pointer' : 'not-allowed',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseEnter={() => {
+                        console.log('🖱️ STEP 2: Button hover - newTeamCategory:', formData.newTeamCategory);
+                        console.log('🖱️ STEP 2: Button disabled?', !formData.newTeamCategory.trim());
+                      }}
+                    >
+                      ➕ Mannschaft hinzufügen
+                    </button>
+                  </div>
+                </div>
+
+                {/* Anzeige gewählter Teams */}
+                {formData.customTeams.length > 0 && (
+                  <div style={{ marginBottom: '2rem' }}>
+                    <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '1rem', fontWeight: '600' }}>
+                      Ausgewählte Mannschaften ({formData.customTeams.length}):
+                    </h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      {formData.customTeams.map((team, index) => (
+                        <div
+                          key={team.id}
+                          style={{
+                            padding: '0.75rem',
+                            background: index === 0 ? '#dcfce7' : '#f0f9ff',
+                            border: `2px solid ${index === 0 ? '#10b981' : '#0ea5e9'}`,
+                            borderRadius: '8px',
+                            fontSize: '0.9rem'
+                          }}
+                        >
+                          {index === 0 && '⭐ '}
+                          {team.club_name} - {team.category || team.team_name}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Navigation */}
             <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'space-between', gap: '1rem' }}>
@@ -484,12 +875,18 @@ function OnboardingFlow() {
               <button
                 className="btn-modern btn-modern-active"
                 onClick={async () => {
+                  console.log('🔵 STEP 2: Weiter button clicked');
+                  console.log('📊 STEP 2: formData.customTeams:', formData.customTeams);
+                  console.log('📊 STEP 2: customTeams.length:', formData.customTeams.length);
+                  
                   await LoggingService.logOnboardingStep(2, {
                     stepName: 'Mannschaftsauswahl',
                     teams_selected: formData.customTeams.length,
                     teams_from_db: formData.customTeams.filter(t => !t.id.startsWith('custom_')).length,
                     teams_manual: formData.customTeams.filter(t => t.id.startsWith('custom_')).length
                   });
+                  
+                  console.log('🔄 STEP 2: Moving to step 3');
                   setCurrentStep(3);
                 }}
                 disabled={formData.customTeams.length === 0}
@@ -701,8 +1098,72 @@ function OnboardingFlow() {
               </div>
             )}
 
-            {/* Rest der Step 3 UI bleibt gleich... */}
-            {/* (Name, Telefon, LK, WhatsApp, etc.) */}
+            {/* Persönliche Daten eingeben - immer anzeigen */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '2rem' }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: '600' }}>
+                  Name:
+                </label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => {
+                    console.log('📝 STEP 3: Name changed:', e.target.value);
+                    setFormData(prev => ({ ...prev, name: e.target.value }));
+                  }}
+                  placeholder="z.B. Max Mustermann"
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '2px solid #e2e8f0',
+                    borderRadius: '8px',
+                    fontSize: '0.9rem'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: '600' }}>
+                  Telefon (optional):
+                </label>
+                <input
+                  type="tel"
+                  value={formData.phone}
+                  onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+                  placeholder="+49 123 456789"
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '2px solid #e2e8f0',
+                    borderRadius: '8px',
+                    fontSize: '0.9rem'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: '600' }}>
+                  Leistungsklasse (optional):
+                </label>
+                <input
+                  type="text"
+                  value={formData.current_lk}
+                  onChange={(e) => setFormData(prev => ({ ...prev, current_lk: e.target.value }))}
+                  placeholder="z.B. LK 12.5"
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '2px solid #e2e8f0',
+                    borderRadius: '8px',
+                    fontSize: '0.9rem'
+                  }}
+                />
+                <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                  Wenn du deine LK nicht kennst, kannst du sie später ändern
+                </p>
+              </div>
+            </div>
 
             {/* Navigation */}
             <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'space-between', gap: '1rem' }}>
@@ -747,8 +1208,54 @@ function OnboardingFlow() {
           </div>
 
           <div className="season-content">
-            {/* Rest der Step 4 UI bleibt gleich... */}
-            {/* (Zusammenfassung, etc.) */}
+            <div style={{ marginBottom: '2rem' }}>
+              <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.2rem' }}>
+                Zusammenfassung deiner Angaben:
+              </h3>
+              
+              <div style={{ 
+                padding: '1.5rem',
+                background: '#f0f9ff',
+                border: '2px solid #0ea5e9',
+                borderRadius: '12px',
+                marginBottom: '1.5rem'
+              }}>
+                <div style={{ marginBottom: '1rem' }}>
+                  <strong>👤 Name:</strong> {formData.name || 'Nicht angegeben'}
+                </div>
+                {formData.phone && (
+                  <div style={{ marginBottom: '1rem' }}>
+                    <strong>📞 Telefon:</strong> {formData.phone}
+                  </div>
+                )}
+                {formData.current_lk && (
+                  <div style={{ marginBottom: '1rem' }}>
+                    <strong>🎾 Leistungsklasse:</strong> {formData.current_lk}
+                  </div>
+                )}
+                <div style={{ marginBottom: '0.5rem' }}>
+                  <strong>🏆 Teams ({formData.customTeams.length}):</strong>
+                </div>
+                <div style={{ marginLeft: '1rem' }}>
+                  {formData.customTeams.map((team, index) => (
+                    <div key={team.id} style={{ marginBottom: '0.5rem' }}>
+                      {index === 0 && '⭐ '}
+                      {team.club_name} - {team.category || team.team_name}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              <div style={{ 
+                padding: '1rem',
+                background: '#fef3c7',
+                border: '2px solid #f59e0b',
+                borderRadius: '12px',
+                fontSize: '0.9rem'
+              }}>
+                📝 Klicke auf &quot;Profil erstellen&quot; um deine Registrierung abzuschließen.
+              </div>
+            </div>
 
             {/* Navigation */}
             <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'space-between', gap: '1rem' }}>
@@ -764,7 +1271,12 @@ function OnboardingFlow() {
               </button>
               <button
                 className="btn-modern btn-modern-active"
-                onClick={handleComplete}
+                onClick={() => {
+                  console.log('🔵 STEP 4: Profil erstellen clicked');
+                  console.log('📊 STEP 4: formData.name:', formData.name);
+                  console.log('📊 STEP 4: customTeams.length:', formData.customTeams.length);
+                  handleComplete();
+                }}
                 disabled={loading || !formData.name || formData.customTeams.length === 0}
                 style={{ minWidth: '200px' }}
               >

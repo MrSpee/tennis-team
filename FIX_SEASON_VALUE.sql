@@ -38,3 +38,5 @@ WHERE ti.club_name = 'VKC Köln'
   AND ts.is_active = true
 ORDER BY ts.team_id;
 
+
+

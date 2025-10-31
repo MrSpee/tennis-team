@@ -1262,6 +1262,314 @@
   padding-bottom: 2rem;
 }
 
+/* ============================================
+   NEW MATCH RESULT CARD DESIGN
+   ============================================ */
+
+.match-result-card {
+  padding: 1.5rem;
+  border: 2px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+  margin-bottom: 1.5rem;
+}
+
+/* Kopf – Titel "Spiel #5" */
+.match-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.match-card-head h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+/* Einheitliches Grid für Einzel & Doppel */
+.match-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto 1fr; /* Home | Status | Sets | Away */
+  column-gap: 1.5rem; /* mehr Platz zwischen Namen und Scores */
+  align-items: start; /* verhindert vertikale Überlappung bei mehrzeiligen Namen */
+  padding: 0.5rem 0;
+  grid-auto-rows: minmax(0, auto);
+}
+
+/* Seiten (Spielerlisten) */
+.side {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem; /* etwas kompakter, aber mit mehr Zeilenhöhe */
+  min-width: 0; /* wichtig für korrektes Wrapping */
+}
+
+.player {
+  display: flex;
+  align-items: center; /* stabilisiert Zeilenhöhe neben Avatar */
+  gap: 1rem;
+  min-height: 52px; /* mindestens Avatar-Höhe, verhindert Überlappung */
+}
+
+.player .name {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #1f2937;
+  line-height: 1.25; /* bessere Lesbarkeit bei zwei Zeilen */
+  display: block;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere; /* aggressive Umbrüche bei langen Namen */
+}
+
+/* Avatare (blaue/rote Umrandung) */
+.avatar {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid transparent;
+  flex-shrink: 0;
+}
+
+.avatar--blue {
+  border-color: #3b82f6;
+}
+
+.avatar--red {
+  border-color: #ef4444;
+}
+
+/* Status mittig zwischen Seite und Sets */
+.status {
+  align-self: stretch;
+  justify-self: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.status-row {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: #059669;
+}
+
+/* Sets rechts: jede Zeile = ein Spieler/Team */
+.sets {
+  justify-self: end;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 88px; /* stabile Breite, damit Namen links mehr Platz haben */
+}
+
+.set-line {
+  display: flex;
+  gap: 1rem;
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.set-line span {
+  min-width: 1ch;
+  text-align: right;
+  color: #1f2937;
+}
+
+/* Doppel: Status mittig über beide Home-Zeilen */
+.is-doubles .status {
+  grid-row: 1 / span 2;
+}
+
+.is-doubles .side--home {
+  grid-row: 1 / span 2;
+}
+
+.is-doubles .side--away {
+  grid-row: 1 / span 2;
+}
+
+/* Responsive: Stacken */
+@media (max-width: 560px) {
+  .match-row {
+    grid-template-columns: minmax(0, 1fr) minmax(100px, 1fr); /* linke Spalte darf schrumpfen, rechte hat fixe Min-Breite */
+    grid-template-areas:
+      "home sets"
+      "status sets"
+      "away sets";
+    row-gap: 0.5rem;
+  }
+  
+  .side--home {
+    grid-area: home;
+  }
+  
+  .status {
+    grid-area: status;
+    justify-self: start;
+  }
+  
+  .sets {
+    grid-area: sets;
+    justify-self: end;
+    min-width: 100px; /* genug Raum für 2-3 Satzwerte */
+  }
+  
+  .side--away {
+    grid-area: away;
+  }
+}
+
+/* ============================================
+   NEW TENNIS LAYOUT (per Team Row)
+   ============================================ */
+
+.match-row-new {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.team-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 1rem;
+}
+
+.team-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.player-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 2px solid #3b82f6;
+}
+
+.avatar-group {
+  display: flex;
+  align-items: center;
+  gap: 0; /* Überlappen */
+}
+
+.avatar-group .player-avatar {
+  margin-left: -12px; /* Überlappung */
+}
+
+.avatar-group .player-avatar:first-child {
+  margin-left: 0; /* Erstes Bild nicht verschieben */
+}
+
+.team-names {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.name-line {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: #1f2937;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.player-name-part {
+  white-space: nowrap;
+}
+
+.player-lk-part {
+  font-size: 14px;
+  font-weight: 500;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.sub-name {
+  font-size: 14px;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tick {
+  margin-left: 8px;
+  color: #16a34a;
+  font-weight: 900;
+  font-size: 1.1rem;
+}
+
+.scores-row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(30px, 36px);
+  gap: 6px;
+}
+
+.score-cell {
+  display: grid;
+  place-items: center;
+  height: 32px;
+  border-radius: 8px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #6b7280;
+  border: 1px solid transparent;
+}
+
+.score-win {
+  background: #e7f7ec;
+  color: #0b7a36;
+  border-color: #b6ebc7;
+}
+
+.score-lose {
+  color: #6b7280;
+}
+
+.separator-row {
+  height: 8px;
+}
+
+/* Mobile tweaks */
+@media (max-width: 480px) {
+  .name-line {
+    font-size: 15px;
+  }
+  .sub-name {
+    font-size: 13px;
+  }
+  .player-avatar {
+    width: 30px;
+    height: 30px;
+  }
+  .scores-row {
+    grid-auto-columns: minmax(26px, 30px);
+  }
+}
+
 .matches-header {
   display: flex;
   justify-content: space-between;

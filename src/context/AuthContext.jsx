@@ -189,102 +189,70 @@ export function AuthProvider({ children }) {
     console.log('🔵 Loading player data for userId:', userId);
     
     try {
-      const { data, error } = await supabase
+      // Hole ALLE Spieler für diesen User (könnte mehrere geben bei Bug)
+      const { data: allPlayers, error: errorAll } = await supabase
         .from('players_unified')
         .select('*')
         .eq('user_id', userId)
-        .eq('player_type', 'app_user')
-        .maybeSingle();
+        .eq('player_type', 'app_user');
       
-      console.log('🔵 Player query result - data:', data ? 'Found' : 'Not found', 'error:', error);
+      if (errorAll) throw errorAll;
+      
+      console.log(`🔵 Found ${allPlayers?.length || 0} players for userId:`, userId);
 
-      if (data) {
-        console.log('✅ Player data loaded:', data.name, data.email);
-        setPlayer(data);
-        
-        // Prüfe ob Spieler einem Team zugeordnet ist
-        const { data: playerTeams, error: teamError } = await supabase
-          .from('team_memberships')
-          .select('team_id')
-          .eq('player_id', data.id)
-          .eq('is_active', true)
-          .limit(1);
-
-        if (!teamError && (!playerTeams || playerTeams.length === 0)) {
-          console.log('⚠️ Player hat kein Team → Onboarding nötig');
-          setNeedsOnboarding(true);
-        } else {
-          setNeedsOnboarding(false);
-        }
-        
-        // Trigger Team-Reload Event für DataContext
-        window.dispatchEvent(new CustomEvent('reloadTeams', { 
-          detail: { playerId: data.id } 
-        }));
-      } else {
-        console.warn('⚠️ No player data found - creating player entry');
-        
-        // Hole User-Daten aus Auth
-        const { data: { user } } = await supabase.auth.getUser();
-        
-        if (user) {
-          console.log('📝 Creating player entry for user:', user.email);
-          
-          // Bessere Namens-Generierung für neue Spieler
-          let playerName = user.user_metadata?.name;
-          console.log('🔵 Name from user_metadata:', playerName);
-          
-          if (!playerName) {
-            // Extrahiere Namen aus E-Mail (vor dem @)
-            const emailName = user.email?.split('@')[0];
-            console.log('🔵 Email name extracted:', emailName);
-            
-            // Ersetze Punkte und Unterstriche mit Leerzeichen und kapitalisiere
-            playerName = emailName?.replace(/[._]/g, ' ')
-              .split(' ')
-              .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-              .join(' ') || 'Neuer Spieler';
-            
-            console.log('🔵 Generated player name:', playerName);
-          }
-          
-          // Erstelle Player-Eintrag
-          const { data: newPlayer, error: insertError } = await supabase
-            .from('players_unified')
-            .insert({
-              user_id: user.id,
-              email: user.email,
-              name: playerName,
-              phone: user.user_metadata?.phone || null,
-              ranking: user.user_metadata?.ranking || null,
-              points: 0,
-              player_type: 'app_user',
-              is_active: true
-            })
-            .select()
-            .single();
-
-          if (insertError) {
-            console.error('❌ Error creating player:', insertError);
-            setPlayer(null);
-          } else {
-            console.log('✅ Player created successfully:', newPlayer);
-            setPlayer(newPlayer);
-            
-            // Neuer Spieler hat kein Team → Onboarding nötig
-            setNeedsOnboarding(true);
-            console.log('⚠️ Neuer Spieler → Onboarding nötig');
-            
-            // Trigger Team-Reload Event für DataContext
-            window.dispatchEvent(new CustomEvent('reloadTeams', { 
-              detail: { playerId: newPlayer.id } 
-            }));
-          }
-        }
+      if (!allPlayers || allPlayers.length === 0) {
+        console.warn('⚠️ No player data found - User sollte über Onboarding gehen');
+        setPlayer(null);
+        setNeedsOnboarding(true);
+        setLoading(false);
+        return;
       }
+
+      // Wenn mehrere Spieler: Wähle den mit 'completed' Onboarding, sonst den neuesten
+      let selectedPlayer = null;
+      
+      if (allPlayers.length > 1) {
+        console.warn(`⚠️ Multiple players found for userId ${userId}:`, allPlayers.map(p => ({ id: p.id, name: p.name, onboarding: p.onboarding_status })));
+        
+        // Priorität 1: Onboarding completed
+        selectedPlayer = allPlayers.find(p => p.onboarding_status === 'completed');
+        
+        // Priorität 2: Neuester Eintrag
+        if (!selectedPlayer) {
+          selectedPlayer = allPlayers.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+        }
+        
+        console.log('✅ Selected player (of multiple):', selectedPlayer.name, selectedPlayer.id);
+      } else {
+        selectedPlayer = allPlayers[0];
+        console.log('✅ Player data loaded:', selectedPlayer.name, selectedPlayer.email);
+      }
+
+      setPlayer(selectedPlayer);
+      
+      // Prüfe ob Spieler einem Team zugeordnet ist
+      const { data: playerTeams, error: teamError } = await supabase
+        .from('team_memberships')
+        .select('team_id')
+        .eq('player_id', selectedPlayer.id)
+        .eq('is_active', true)
+        .limit(1);
+
+      if (!teamError && (!playerTeams || playerTeams.length === 0)) {
+        console.log('⚠️ Player hat kein Team → Onboarding nötig');
+        setNeedsOnboarding(true);
+      } else {
+        setNeedsOnboarding(false);
+      }
+      
+      // Trigger Team-Reload Event für DataContext
+      window.dispatchEvent(new CustomEvent('reloadTeams', { 
+        detail: { playerId: selectedPlayer.id } 
+      }));
     } catch (error) {
       console.error('❌ Error in loadPlayerData:', error);
       setPlayer(null);
+      setNeedsOnboarding(true);
     }
     
     // IMMER loading auf false setzen!
@@ -488,10 +456,15 @@ export function AuthProvider({ children }) {
     
     // Dann Supabase Session beenden
     try {
-      await supabase.auth.signOut();
-      console.log('✅ Supabase logout complete');
+      const { error } = await supabase.auth.signOut({ scope: 'global' });
+      if (error) {
+        console.log('⚠️ Logout warning:', error.message, '(ignored - state already cleared)');
+      } else {
+        console.log('✅ Supabase logout complete');
+      }
     } catch (error) {
-      console.error('❌ Logout error:', error);
+      // 403-Fehler sind normal wenn keine Session existiert - ignorieren
+      console.log('⚠️ Logout warning:', error.message, '(ignored - state already cleared)');
     }
   };
 

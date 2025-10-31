@@ -64,3 +64,5 @@ JOIN team_info ti ON ts.team_id = ti.id
 WHERE ts.is_active = true
 ORDER BY ti.club_name, ts.team_id;
 
+
+

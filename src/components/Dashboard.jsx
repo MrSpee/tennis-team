@@ -1,11 +1,12 @@
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Edit, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { parseLK } from '../lib/lkUtils';
+import { supabase } from '../lib/supabaseClient';
 import './Dashboard.css';
 
 function Dashboard() {
@@ -29,6 +30,11 @@ function Dashboard() {
   
   // State für Live-Timer
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  // State für Team-Edit Modal
+  const [editingTeam, setEditingTeam] = useState(null);
+  const [editForm, setEditForm] = useState({ league: '', group_name: '' });
+  const [savingTeam, setSavingTeam] = useState(false);
 
   // Timer für Live-Updates (alle 30 Sekunden)
   useEffect(() => {
@@ -58,13 +64,13 @@ function Dashboard() {
     // September bis April = Winter (überspannt Jahreswechsel)
     currentSeason = 'winter';
     if (currentMonth >= 8) {
-      // Sep-Dez: Winter 24/25 (aktuelles Jahr / nächstes Jahr)
+      // Sep-Dez: Winter 2024/25 (aktuelles Jahr / nächstes Jahr)
       const nextYear = currentYear + 1;
-      seasonDisplay = `Winter ${String(currentYear).slice(-2)}/${String(nextYear).slice(-2)}`;
+      seasonDisplay = `Winter ${currentYear}/${String(nextYear).slice(-2)}`;
     } else {
-      // Jan-Apr: Winter 24/25 (vorheriges Jahr / aktuelles Jahr)
+      // Jan-Apr: Winter 2024/25 (vorheriges Jahr / aktuelles Jahr)
       const prevYear = currentYear - 1;
-      seasonDisplay = `Winter ${String(prevYear).slice(-2)}/${String(currentYear).slice(-2)}`;
+      seasonDisplay = `Winter ${prevYear}/${String(currentYear).slice(-2)}`;
     }
   }
   
@@ -192,6 +198,94 @@ function Dashboard() {
     return `📆 In ${diffDays} Tagen`;
   };
   
+  // Team-Edit Funktionen
+  const openEditTeam = (team) => {
+    setEditingTeam(team);
+    setEditForm({
+      league: team.league || '',
+      group_name: team.group_name || ''
+    });
+  };
+
+  const closeEditTeam = () => {
+    setEditingTeam(null);
+    setEditForm({ league: '', group_name: '' });
+  };
+
+  const saveTeamChanges = async () => {
+    if (!editingTeam) return;
+    
+    setSavingTeam(true);
+    try {
+      // Finde team_seasons entry für dieses Team
+      // WICHTIG: Verwende gleiches Format wie DataContext ('Winter 2024/25')
+      const currentMonth = new Date().getMonth();
+      const currentYear = new Date().getFullYear();
+      
+      let currentSeason;
+      if (currentMonth >= 4 && currentMonth <= 7) {
+        currentSeason = `Sommer ${currentYear}`;
+      } else {
+        if (currentMonth >= 8) {
+          const nextYear = currentYear + 1;
+          currentSeason = `Winter ${currentYear}/${String(nextYear).slice(-2)}`;
+        } else {
+          const prevYear = currentYear - 1;
+          currentSeason = `Winter ${prevYear}/${String(currentYear).slice(-2)}`;
+        }
+      }
+
+      // Prüfe ob team_seasons Eintrag existiert
+      const { data: existingSeason } = await supabase
+        .from('team_seasons')
+        .select('id')
+        .eq('team_id', editingTeam.id)
+        .eq('season', currentSeason)
+        .maybeSingle();
+
+      if (existingSeason) {
+        // Update existierende Season
+        await supabase
+          .from('team_seasons')
+          .update({
+            league: editForm.league || null,
+            group_name: editForm.group_name || null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existingSeason.id);
+        
+        console.log('✅ Team season updated');
+      } else {
+        // Erstelle neuen Season Eintrag
+        await supabase
+          .from('team_seasons')
+          .insert({
+            team_id: editingTeam.id,
+            season: currentSeason,
+            league: editForm.league || null,
+            group_name: editForm.group_name || null,
+            team_size: 6,
+            is_active: true
+          });
+        
+        console.log('✅ Team season created');
+      }
+
+      // Trigger reload
+      window.dispatchEvent(new CustomEvent('reloadTeams', { 
+        detail: { playerId: player?.id } 
+      }));
+
+      alert('✅ Team-Daten erfolgreich gespeichert!');
+      closeEditTeam();
+    } catch (error) {
+      console.error('Error saving team changes:', error);
+      alert('❌ Fehler beim Speichern: ' + error.message);
+    } finally {
+      setSavingTeam(false);
+    }
+  };
+
   // Motivationsspruch basierend auf Countdown (nur für ZUKÜNFTIGE Spiele)
   const getMotivationQuote = () => {
     if (!nextMatchAnySeason) return '';
@@ -458,7 +552,7 @@ function Dashboard() {
           <div className="season-display">
             <div className="season-icon">❄️</div>
             <div className="season-name">{seasonDisplay}</div>
-          {teamInfo?.tvmLink && (
+          {teamInfo?.tvmLink && !teamInfo.tvmLink.includes('rotgelbsuerth') && (
             <a
               href={teamInfo.tvmLink}
               target="_blank"
@@ -750,7 +844,14 @@ function Dashboard() {
                       gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))'
                     }}
                   >
-                    {clubTeams.map((team) => (
+                    {clubTeams.map((team) => {
+                      console.log('🔍 Rendering team:', team.team_name || team.category, {
+                        league: team.league,
+                        group_name: team.group_name,
+                        team_size: team.team_size,
+                        season: team.season
+                      });
+                      return (
                       <div 
                         key={team.id} 
                         className="team-card" 
@@ -833,7 +934,7 @@ function Dashboard() {
                               marginBottom: '0.25rem'
                             }}>Liga</div>
                             <div style={{ fontSize: '0.95rem', fontWeight: '700', color: 'rgb(31, 41, 55)' }}>
-                              🏆 {team.league || '2. Bezirksliga'}
+                              🏆 {team.league || 'N/A'}
                             </div>
                           </div>
                           
@@ -875,12 +976,40 @@ function Dashboard() {
                               marginBottom: '0.25rem'
                             }}>Team</div>
                             <div style={{ fontSize: '0.95rem', fontWeight: '700', color: 'rgb(31, 41, 55)' }}>
-                              👥 {team.player_count || 'N/A'} Spieler
+                              👥 {team.team_size || 'N/A'} Spieler
                             </div>
                           </div>
                         </div>
+
+                        {/* Edit Button */}
+                        <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
+                          <button
+                            onClick={() => openEditTeam(team)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.5rem',
+                              padding: '0.5rem 1rem',
+                              background: 'linear-gradient(135deg, rgb(59, 130, 246) 0%, rgb(37, 99, 235) 100%)',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '0.875rem',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              boxShadow: 'rgba(59, 130, 246, 0.3) 0px 2px 4px'
+                            }}
+                            onMouseEnter={(e) => e.target.style.transform = 'scale(1.05)'}
+                            onMouseLeave={(e) => e.target.style.transform = 'scale(1)'}
+                          >
+                            <Edit size={16} />
+                            Daten ändern
+                          </button>
+                        </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ));
@@ -943,6 +1072,154 @@ function Dashboard() {
           ) : null}
         </div>
       </div>
+
+      {/* Team Edit Modal */}
+      {editingTeam && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          animation: 'fadeIn 0.2s ease'
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '16px',
+            padding: '2rem',
+            maxWidth: '500px',
+            width: '90%',
+            maxHeight: '90vh',
+            overflow: 'auto',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1.5rem', fontWeight: '700' }}>
+                Team-Daten bearbeiten
+              </h3>
+              <button
+                onClick={closeEditTeam}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '0.5rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div style={{ marginBottom: '1rem' }}>
+              <div style={{ 
+                padding: '0.75rem', 
+                background: '#f3f4f6', 
+                borderRadius: '8px',
+                marginBottom: '1rem'
+              }}>
+                <div style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.25rem' }}>Team</div>
+                <div style={{ fontSize: '1.125rem', fontWeight: '600' }}>
+                  {editingTeam.club_name} - {editingTeam.category || editingTeam.team_name}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '0.875rem',
+                fontWeight: '600',
+                marginBottom: '0.5rem'
+              }}>
+                Liga
+              </label>
+              <input
+                type="text"
+                value={editForm.league}
+                onChange={(e) => setEditForm({ ...editForm, league: e.target.value })}
+                placeholder="z.B. 2. Bezirksliga"
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  border: '2px solid #e5e7eb',
+                  borderRadius: '8px',
+                  fontSize: '1rem'
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '0.875rem',
+                fontWeight: '600',
+                marginBottom: '0.5rem'
+              }}>
+                Gruppe
+              </label>
+              <input
+                type="text"
+                value={editForm.group_name}
+                onChange={(e) => setEditForm({ ...editForm, group_name: e.target.value })}
+                placeholder="z.B. Gruppe A"
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  border: '2px solid #e5e7eb',
+                  borderRadius: '8px',
+                  fontSize: '1rem'
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+              <button
+                onClick={closeEditTeam}
+                disabled={savingTeam}
+                style={{
+                  padding: '0.75rem 1.5rem',
+                  background: '#f3f4f6',
+                  color: '#374151',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '0.875rem',
+                  fontWeight: '600',
+                  cursor: savingTeam ? 'not-allowed' : 'pointer'
+                }}
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={saveTeamChanges}
+                disabled={savingTeam}
+                style={{
+                  padding: '0.75rem 1.5rem',
+                  background: savingTeam ? '#9ca3af' : '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '0.875rem',
+                  fontWeight: '600',
+                  cursor: savingTeam ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}
+              >
+                {savingTeam ? '⏳ Speichere...' : '✅ Speichern'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

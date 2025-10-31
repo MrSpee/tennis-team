@@ -173,30 +173,35 @@ export function DataProvider({ children }) {
         data.map(async (pt) => {
           console.log(`📊 Loading data for team: ${pt.team_info.team_name || pt.team_info.category} (ID: ${pt.team_info.id})`);
           
-          // Lade team_seasons - versuche beide Season-Formate
-          // WICHTIG: Die DB verwendet 'Winter 2025/26' als Standard
+          // Lade team_seasons - Berechne aktuelle Saison dynamisch
+          const now = new Date();
+          const currentMonth = now.getMonth(); // 0=Jan, 11=Dez
+          const currentYear = now.getFullYear();
+          
+          let currentSeason;
+          if (currentMonth >= 4 && currentMonth <= 7) {
+            currentSeason = `Sommer ${currentYear}`;
+          } else {
+            if (currentMonth >= 8) {
+              const nextYear = currentYear + 1;
+              currentSeason = `Winter ${currentYear}/${String(nextYear).slice(-2)}`;
+            } else {
+              const prevYear = currentYear - 1;
+              currentSeason = `Winter ${prevYear}/${String(currentYear).slice(-2)}`;
+            }
+          }
+          
+          console.log(`🔍 Querying '${currentSeason}' for ${pt.team_info.team_name || pt.team_info.category}`);
+          
           let { data: seasonData } = await supabase
             .from('team_seasons')
             .select('*')
             .eq('team_id', pt.team_info.id)
-            .eq('season', 'Winter 2025/26')
+            .eq('season', currentSeason)
             .eq('is_active', true)
             .maybeSingle();
           
-          console.log(`🔍 Querying 'Winter 2025/26' for ${pt.team_info.team_name || pt.team_info.category}:`, seasonData);
-          
-          // Fallback auf 'winter_25_26' (für alte Einträge)
-          if (!seasonData) {
-            const { data: fallbackData } = await supabase
-              .from('team_seasons')
-              .select('*')
-              .eq('team_id', pt.team_info.id)
-              .eq('season', 'winter_25_26')
-              .eq('is_active', true)
-              .maybeSingle();
-            seasonData = fallbackData;
-            console.log(`🔍 Fallback 'winter_25_26' for ${pt.team_info.team_name || pt.team_info.category}:`, fallbackData);
-          }
+          console.log(`✅ Found season data for '${currentSeason}':`, seasonData);
           
           // Lade Anzahl aktiver Spieler für dieses Team
           const { count: playerCount } = await supabase
@@ -350,6 +355,16 @@ export function DataProvider({ children }) {
       }
 
       console.log('✅ Matches loaded from DB (filtered by player teams):', data?.length || 0, 'matches');
+      console.log('🔍 Player Team IDs used for filter:', playerTeamIds);
+      console.log('📋 Matchdays details:', data?.map(m => ({
+        id: m.id,
+        home_team_id: m.home_team_id,
+        away_team_id: m.away_team_id,
+        home_team: m.home_team?.club_name,
+        away_team: m.away_team?.club_name,
+        match_date: m.match_date,
+        matchMatchesFilter: playerTeamIds.includes(m.home_team_id) || playerTeamIds.includes(m.away_team_id)
+      })));
 
       // Transformiere Daten - handle sowohl matchdays als auch matches
       let transformedMatches = data.map(matchday => {
@@ -358,9 +373,13 @@ export function DataProvider({ children }) {
         
         if (isNewStructure) {
           // Neue Struktur: matchdays mit home_team_id und away_team_id
-          const isHomeTeam = matchday.home_team && matchday.home_team.id && playerTeamIds.includes(matchday.home_team.id);
-          const ourTeam = isHomeTeam ? matchday.home_team : matchday.away_team;
-          const opponentTeam = isHomeTeam ? matchday.away_team : matchday.home_team;
+          // BESTIMME: Ist unser Team das Home-Team oder Away-Team?
+          const isOurTeamHome = matchday.home_team && matchday.home_team.id && playerTeamIds.includes(matchday.home_team.id);
+          const isOurTeamAway = matchday.away_team && matchday.away_team.id && playerTeamIds.includes(matchday.away_team.id);
+          
+          // Unser Team und Gegner (BEREINIGT)
+          const ourTeam = isOurTeamHome ? matchday.home_team : (isOurTeamAway ? matchday.away_team : null);
+          const opponentTeam = isOurTeamHome ? matchday.away_team : (isOurTeamAway ? matchday.home_team : null);
           
           // WICHTIG: Zusammensetzen des Gegner-Namens mit korrektem Leerzeichen
           let opponentName = 'Gegner';

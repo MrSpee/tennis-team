@@ -43,3 +43,4 @@ KERN-ENTITÄTEN (vereinfacht):
 
 SELECT 'Datenbank aufgeräumt - bereit für Clean-Setup' as status;
 
+

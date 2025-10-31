@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Edit, Clock, CheckCircle, PlayCircle } from 'lucide-react';
+import { ArrowLeft, Edit } from 'lucide-react';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { supabase } from '../lib/supabaseClient';
@@ -14,140 +14,79 @@ const MatchdayResults = () => {
   const { playerTeams } = useData();
 
   // State für Daten
-  const [match, setMatch] = useState(null);
-  const [matchResults, setMatchResults] = useState([]);
-  const [homePlayers, setHomePlayers] = useState({});
-  const [opponentPlayers, setOpponentPlayers] = useState({});
+  const [matchday, setMatchday] = useState(null);
+  const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [totalScore, setTotalScore] = useState({ home: 0, guest: 0 });
   const [currentTime, setCurrentTime] = useState(new Date());
 
+
+  // Timer für Live-Updates
   useEffect(() => {
-    // ProtectedRoute garantiert bereits, dass User eingeloggt ist
-    console.log('🔵 MatchdayResults mounted, loading data for matchId:', matchId);
-    if (matchId) {
-      loadData();
-    }
+    const interval = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (matchId) loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchId]);
 
-  // Timer für Live-Updates und Countdown (nur wenn Spiel nicht abgeschlossen)
-  useEffect(() => {
-    // Prüfe ob Spiel abgeschlossen ist
-    const hasAnyInProgress = matchResults.some(result => {
-      const matchWinner = calculateMatchWinnerFromSets(result);
-      const hasStarted = result.set1_home > 0 || result.set1_guest > 0;
-      return hasStarted && matchWinner === null;
+  // State für Spieler-Daten
+  const [playerData, setPlayerData] = useState({});
+  
+  // Lade Spieler-Daten für alle results (ohne FK-Joins, weil keine Spalte existiert)
+  const loadPlayerDataForResults = async (resultsData) => {
+    const allPlayerIds = new Set();
+    
+    resultsData.forEach(r => {
+      // Singles
+      if (r.home_player_id) allPlayerIds.add(r.home_player_id);
+      if (r.guest_player_id) allPlayerIds.add(r.guest_player_id);
+      // Doubles  
+      if (r.home_player1_id) allPlayerIds.add(r.home_player1_id);
+      if (r.home_player2_id) allPlayerIds.add(r.home_player2_id);
+      if (r.guest_player1_id) allPlayerIds.add(r.guest_player1_id);
+      if (r.guest_player2_id) allPlayerIds.add(r.guest_player2_id);
     });
     
-    const completed = totalScore.completed;
-    const isMedenspielCompleted = completed >= 6 && !hasAnyInProgress;
+    if (allPlayerIds.size === 0) return;
     
-    // Timer nur starten, wenn Spiel NICHT abgeschlossen ist
-    if (isMedenspielCompleted) {
-      console.log('✅ Medenspiel abgeschlossen - Timer gestoppt');
-      return; // Kein Timer!
-    }
+    console.log('🔍 Loading player data for IDs:', Array.from(allPlayerIds));
     
-    const interval = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000); // Aktualisiert jede Sekunde
-
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matchResults, totalScore]);
-
-  // Countdown-Funktion für Match-Start
-  const getMatchCountdown = (isCompleted) => {
-    if (!match || !match.match_date) {
-      return 'Kein Datum verfügbar';
-    }
+    const playerDataMap = {};
+    await Promise.all(
+      Array.from(allPlayerIds).map(async (id) => {
+        try {
+          const { data, error } = await supabase
+            .from('players_unified')
+            .select('name, current_lk, season_start_lk')
+            .eq('id', id)
+            .single();
+          
+          if (error) {
+            console.error(`❌ Error loading player ${id}:`, error);
+          } else if (data) {
+            console.log(`✅ Loaded player data for ${id}:`, data.name);
+            playerDataMap[id] = data;
+          }
+        } catch (err) {
+          console.error('Error loading player data:', err);
+        }
+      })
+    );
     
-    const matchStartTime = new Date(match.match_date);
-    const now = currentTime;
-    const diffTime = matchStartTime - now;
-    const diffSeconds = Math.floor(diffTime / 1000);
-    
-    // Spiel ist abgeschlossen - zeige finale Zeit
-    if (isCompleted) {
-      return `✅ Medenspiel beendet`;
-    }
-    
-    // Spiel hat bereits begonnen (negative Zeit)
-    if (diffSeconds < 0) {
-      const elapsedTime = Math.abs(diffTime);
-      const elapsedHours = Math.floor(elapsedTime / (1000 * 60 * 60));
-      const elapsedMinutes = Math.floor((elapsedTime % (1000 * 60 * 60)) / (1000 * 60));
-      
-      if (elapsedHours === 0) {
-        return `🔴 Läuft seit ${elapsedMinutes} Min`;
-      }
-      return `🔴 Läuft seit ${elapsedHours}h ${elapsedMinutes}m`;
-    }
-    
-    // Mehr als 3 Tage (72 Stunden) entfernt
-    const diffHours = diffSeconds / 3600;
-    if (diffHours > 72) {
-      const diffDays = Math.ceil(diffHours / 24);
-      return `📅 In ${diffDays} Tagen`;
-    }
-    
-    // Zwischen 3 Tagen und 2 Stunden: Zeige nur Stunden
-    if (diffHours > 2) {
-      const hours = Math.floor(diffHours);
-      const minutes = Math.floor((diffHours - hours) * 60);
-      return `⏰ In ${hours}h ${minutes}m`;
-    }
-    
-    // Weniger als 2 Stunden: Zeige HH:MM:SS Countdown
-    const hours = Math.floor(diffSeconds / 3600);
-    const minutes = Math.floor((diffSeconds % 3600) / 60);
-    const seconds = diffSeconds % 60;
-    
-    const hoursStr = String(hours).padStart(2, '0');
-    const minutesStr = String(minutes).padStart(2, '0');
-    const secondsStr = String(seconds).padStart(2, '0');
-    
-    return `🔥 ${hoursStr}:${minutesStr}:${secondsStr}`;
-  };
-
-  // Prüfe ob Live-Button angezeigt werden soll (ab Match-Startzeit + 6 Stunden, oder bis Match beendet)
-  const shouldShowLiveButton = () => {
-    if (!match || !match.match_date) {
-      return false;
-    }
-    
-    const matchStartTime = new Date(match.match_date);
-    const now = new Date();
-    
-    // Prüfe ob heute der Spieltag ist
-    const isMatchDay = matchStartTime.toDateString() === now.toDateString();
-    if (!isMatchDay) {
-      return false;
-    }
-    
-    // Berechne Endzeit (6 Stunden nach Match-Start)
-    const matchEndTime = new Date(matchStartTime.getTime() + (6 * 60 * 60 * 1000)); // +6 Stunden
-    
-    // Prüfe ob aktuelle Zeit zwischen Match-Start und Match-Start + 6 Stunden liegt
-    const isWithinMatchTime = now >= matchStartTime && now <= matchEndTime;
-    
-    // Prüfe ob 6 Spiele bereits beendet sind (Match ist komplett)
-    const isMatchFullyCompleted = totalScore.completed >= 6;
-    
-    return isWithinMatchTime && !isMatchFullyCompleted;
+    console.log('✅ Player data loaded:', playerDataMap);
+    setPlayerData(playerDataMap);
   };
 
   const loadData = async () => {
-    console.log('🔄 loadData() called for matchId:', matchId);
     try {
       setLoading(true);
       setError(null);
 
-      // Lade Matchday-Daten
-      console.log('📡 Fetching matchday data...');
-      const { data: matchData, error: matchError } = await supabase
+      // Lade Matchday mit allen Relations
+      const { data: matchdayData, error: matchdayError } = await supabase
         .from('matchdays')
         .select(`
           *,
@@ -167,677 +106,361 @@ const MatchdayResults = () => {
         .eq('id', matchId)
         .single();
 
-      if (matchError) {
-        console.error('Error loading matchday:', matchError);
-        setError('Matchday nicht gefunden');
-        return;
-      }
-
-      // Berechne opponent Name aus Teams
-      const opponent = matchData.away_team 
-        ? (matchData.away_team.team_name 
-            ? `${matchData.away_team.club_name} ${matchData.away_team.team_name}` 
-            : matchData.away_team.club_name)
-        : 'Gegner';
+      if (matchdayError) throw matchdayError;
       
-      // Erstelle team_info Objekt für Kompatibilität
-      const teamInfo = matchData.home_team ? {
-        club_name: matchData.home_team.club_name,
-        team_name: matchData.home_team.team_name,
-        category: matchData.home_team.category
-      } : null;
-      
-      // WICHTIG: Nutze die GLEICHE Logik wie DataContext!
-      // playerTeams kommt aus DataContext und enthält die Teams des Users
-      const playerTeamIds = playerTeams.map(t => t.id);
-      console.log('✅ User teams from DataContext:', playerTeamIds);
-      
-      // Prüfe, ob unser Team Home oder Away ist
-      const isHomeTeam = playerTeamIds.includes(matchData.home_team_id);
-      const isAwayTeam = playerTeamIds.includes(matchData.away_team_id);
-      
-      const ourTeam = isHomeTeam ? matchData.home_team : matchData.away_team;
-      const opponentTeam = isHomeTeam ? matchData.away_team : matchData.home_team;
-      
-      console.log('✅ Match perspective:', {
-        userInHome: isHomeTeam,
-        userInAway: isAwayTeam,
-        ourTeam: ourTeam?.club_name,
-        opponentTeam: opponentTeam?.club_name
-      });
-      
-      // Füge Felder für Kompatibilität hinzu
-      matchData.opponent = opponent;
-      matchData.team_info = teamInfo;
-      matchData.our_team = ourTeam; // Unser Team (vom User)
-      matchData.opponent_team = opponentTeam; // Gegner-Team
-      // matchData.location sollte bereits im DB-Schema sein
-      
-      setMatch(matchData);
-
-      // Lade Match-Ergebnisse (nutze matchday_id)
+      // Lade alle results für diesen matchday (OHNE FK-Join, Spieler laden wir separat)
       const { data: resultsData, error: resultsError } = await supabase
         .from('match_results')
         .select('*')
         .eq('matchday_id', matchId)
         .order('match_number', { ascending: true });
 
-      if (resultsError) {
-        console.error('Error loading results:', resultsError);
-        setError('Ergebnisse konnten nicht geladen werden');
-        return;
-      }
-
-      setMatchResults(resultsData || []);
-      console.log('🎾 Match results loaded:', resultsData);
+      if (resultsError) throw resultsError;
       
-      // Debug: Zeige alle home_player_ids aus den Match-Results
+      // Lade Spieler-Daten separiert (da FK-Joins nicht funktionieren)
       if (resultsData && resultsData.length > 0) {
-        console.log('🔍 Match Results Player IDs:');
-        resultsData.forEach((result) => {
-          console.log(`  Match ${result.match_number}:`, {
-            home_player_id: result.home_player_id,
-            home_player1_id: result.home_player1_id,
-            home_player2_id: result.home_player2_id,
-            match_type: result.match_type
-          });
-        });
+        await loadPlayerDataForResults(resultsData);
       }
 
-      // WICHTIG: Lade Spieler über team_memberships!
-      const homeTeamId = matchData.home_team_id;
-      const awayTeamId = matchData.away_team_id;
-
-      console.log('📡 Fetching home team players for team:', homeTeamId);
-      // Lade Team-Mitglieder für Home-Team
-      const { data: homeTeamMembers, error: homeTeamError } = await supabase
-        .from('team_memberships')
-        .select(`
-          player_id,
-          player:player_id (
-            id,
-            name,
-            profile_image,
-            current_lk,
-            ranking
-          )
-        `)
-        .eq('team_id', homeTeamId)
-        .eq('is_active', true);
-
-      if (homeTeamError) {
-        console.error('❌ Error loading home team members:', homeTeamError);
-      } else {
-        const playersMap = {};
-        homeTeamMembers?.forEach(({ player }) => {
-          if (player) {
-            playersMap[player.id] = player;
-            console.log(`  ✅ Home player: ${player.name}`);
-          }
-        });
-        setHomePlayers(playersMap);
-        console.log('📦 Home players map created:', Object.keys(playersMap).length, 'players');
-      }
-
-      console.log('📡 Fetching away team players for team:', awayTeamId);
-      // Lade Team-Mitglieder für Away-Team
-      const { data: awayTeamMembers, error: awayTeamError } = await supabase
-        .from('team_memberships')
-        .select(`
-          player_id,
-          player:player_id (
-            id,
-            name,
-            current_lk
-          )
-        `)
-        .eq('team_id', awayTeamId)
-        .eq('is_active', true);
-
-      if (awayTeamError) {
-        console.error('❌ Error loading away team members:', awayTeamError);
-      } else {
-        const playersMap = {};
-        awayTeamMembers?.forEach(({ player }) => {
-          if (player) {
-            playersMap[player.id] = {
-              ...player,
-              lk: player.current_lk // Altes Feld 'lk' für Kompatibilität
-            };
-            console.log(`  ✅ Away player: ${player.name}`);
-          }
-        });
-        setOpponentPlayers(playersMap);
-        console.log('📦 Away players map created:', Object.keys(playersMap).length, 'players');
-      }
-
-
-      // Berechne Gesamtpunktzahl
-      calculateTotalScore(resultsData || []);
+      setMatchday(matchdayData);
+      setResults(resultsData || []);
 
     } catch (err) {
-      console.error('❌ Error in loadData:', err);
-      setError('Fehler beim Laden der Daten');
+      console.error('Error loading matchday:', err);
+      setError(err.message);
     } finally {
-      console.log('✅ loadData() completed, setting loading=false');
       setLoading(false);
     }
   };
 
-  // Tennis Match Logic - Gleiche Logik wie in LiveResults.jsx
+  // Hilfsfunktionen zur Winner-Bestimmung (analog Results.jsx)
   const calculateSetWinner = (home, guest, isChampionsTiebreak = false) => {
     if (isChampionsTiebreak) {
-      // Champions Tiebreak: Bis 10 Punkte, mindestens 2 Punkte Vorsprung
       if (home >= 10 && home >= guest + 2) return 'home';
       if (guest >= 10 && guest >= home + 2) return 'guest';
       return null;
     } else {
-      // Normaler Satz: Bis 6 Spiele, mindestens 2 Spiele Vorsprung
-      // Tiebreak bei 6-6: Einer muss 7 erreichen
-      
-      // Tiebreak-Sieg: 7:6 oder 6:7
       if ((home === 7 && guest === 6) || (guest === 7 && home === 6)) {
         return home > guest ? 'home' : 'guest';
       }
-      
-      // Normaler Satzgewinn ohne Tiebreak: 7:5 oder besser
       if ((home === 7 && guest <= 5) || (guest === 7 && home <= 5)) {
         return home > guest ? 'home' : 'guest';
       }
-      
-      // Normaler Satz gewonnen (6:0, 6:1, 6:2, 6:3, 6:4)
       if (home >= 6 && home >= guest + 2) return 'home';
       if (guest >= 6 && guest >= home + 2) return 'guest';
-      
-      // Tiebreak wird gerade gespielt (6:6)
-      if (home === 6 && guest === 6) {
+      if (home === 6 && guest === 6) return null;
         return null;
-      }
-      
-      return null; // Satz noch nicht beendet
     }
   };
 
-  const calculateMatchWinnerFromSets = (result) => {
+  const calculateMatchWinner = (result) => {
     let homeSetsWon = 0;
     let guestSetsWon = 0;
-    
-    // Prüfe die drei Sätze
     const sets = [
       { home: result.set1_home, guest: result.set1_guest },
       { home: result.set2_home, guest: result.set2_guest },
       { home: result.set3_home, guest: result.set3_guest }
     ];
-    
     for (let i = 0; i < sets.length; i++) {
       const set = sets[i];
       const home = parseInt(set.home) || 0;
       const guest = parseInt(set.guest) || 0;
-      
-      if (home === 0 && guest === 0) continue; // Leerer Satz
-      
-      const setWinner = calculateSetWinner(home, guest, i === 2); // 3. Satz ist Champions Tiebreak
-      
+      if (home === 0 && guest === 0) continue;
+      const setWinner = calculateSetWinner(home, guest, i === 2);
       if (setWinner === 'home') homeSetsWon++;
       else if (setWinner === 'guest') guestSetsWon++;
     }
-    
-    // Best of 3: Wer 2 Sätze gewinnt, gewinnt das Match
     if (homeSetsWon >= 2) return 'home';
     if (guestSetsWon >= 2) return 'guest';
-    return null; // Match noch nicht beendet
+    return null;
   };
 
-  const calculateTotalScore = (results) => {
-    let homeScore = 0;
-    let guestScore = 0;
-    let completedMatches = 0;
-
-    // KORRIGIERTE MULTI-TEAM LOGIK:
-    // Berücksichtige die Team-Perspektive basierend auf match.location
-    const isPlayerHome = match?.location === 'Home';
+  // Berechne Gesamt-Score (aus User-Perspektive für Statistiken)
+  const calculateScore = useCallback(() => {
+    if (!matchday || !playerTeams || playerTeams.length === 0) return { our: 0, opponent: 0, completed: 0 };
+    const playerTeamIds = playerTeams.map(t => t.id);
+    const isHome = playerTeamIds.includes(matchday.home_team_id);
+    const isAway = playerTeamIds.includes(matchday.away_team_id);
+    const userSide = isHome ? 'home' : (isAway ? 'away' : null);
+    if (!userSide) return { our: 0, opponent: 0, completed: 0 };
+    
+    let ourScore = 0;
+    let opponentScore = 0;
+    let completed = 0;
 
     results.forEach(result => {
-      // Prüfe zuerst, ob bereits ein winner in der DB gesetzt ist
-      if (result.status === 'completed' && result.winner) {
-        completedMatches++;
-        // Multi-Team-Logik: winner bezieht sich auf Heim-Team vs Gast-Team
-        if (isPlayerHome) {
-          // Wir spielen Heim: home = unser Team, guest = Gegner
-          if (result.winner === 'home') {
-            homeScore++;
-          } else if (result.winner === 'guest') {
-            guestScore++;
-          }
-        } else {
-          // Wir spielen Auswärts: guest = unser Team, home = Gegner
-          if (result.winner === 'guest') {
-            homeScore++; // guest = unser Team
-          } else if (result.winner === 'home') {
-            guestScore++; // home = Gegner
-          }
-        }
+      if (!result.winner) return;
+      
+      completed++;
+      
+      if (userSide === 'home') {
+        // Wir sind Home-Team
+        if (result.winner === 'home') ourScore++;
+        else if (result.winner === 'guest') opponentScore++;
       } else {
-        // Fallback: Berechne den Gewinner aus den Sätzen
-        const matchWinner = calculateMatchWinnerFromSets(result);
-        if (matchWinner) {
-          completedMatches++;
-          if (isPlayerHome) {
-            if (matchWinner === 'home') {
-              homeScore++;
-            } else if (matchWinner === 'guest') {
-              guestScore++;
-            }
-          } else {
-            if (matchWinner === 'guest') {
-              homeScore++; // guest = unser Team
-            } else if (matchWinner === 'home') {
-              guestScore++; // home = Gegner
-            }
-          }
-        }
+        // Wir sind Away-Team
+        if (result.winner === 'guest') ourScore++;
+        else if (result.winner === 'home') opponentScore++;
       }
     });
 
-    setTotalScore({ home: homeScore, guest: guestScore, completed: completedMatches });
-  };
+    return { our: ourScore, opponent: opponentScore, completed };
+  }, [matchday, playerTeams, results]);
 
-  const getMatchStatusIcon = (status) => {
-    switch (status) {
-      case 'completed':
-        return <CheckCircle className="status-icon completed" />;
-      case 'in_progress':
-        return <PlayCircle className="status-icon in-progress" />;
-      case 'pending':
-        return <Clock className="status-icon pending" />;
-      default:
-        return <Clock className="status-icon pending" />;
+  // Berechne Home/Away-Score (DB-Perspektive, links=Home, rechts=Away)
+  const calculateHomeAwayScore = useCallback(() => {
+    let home = 0;
+    let away = 0;
+    let completed = 0;
+    results.forEach(r => {
+      if (!r.winner) return;
+      completed++;
+      if (r.winner === 'home') home++;
+      else if (r.winner === 'guest') away++;
+    });
+    return { home, away, completed };
+  }, [results]);
+
+  // Countdown-Funktion
+  const getCountdown = useCallback(() => {
+    if (!matchday || !matchday.match_date) return '⏰ Wird geladen...';
+    
+    const matchTime = new Date(matchday.match_date);
+    const now = currentTime;
+    const diff = matchTime - now;
+    
+    if (diff < 0) {
+      const elapsed = Math.abs(diff);
+      const hours = Math.floor(elapsed / 3600000);
+      const minutes = Math.floor((elapsed % 3600000) / 60000);
+      return `🔴 Läuft seit ${hours}h ${minutes}m`;
     }
-  };
+    
+    const hours = Math.floor(diff / 3600000);
+    const minutes = Math.floor((diff % 3600000) / 60000);
+    const seconds = Math.floor((diff % 60000) / 1000);
+    
+    if (hours > 24) return `📅 In ${Math.floor(hours / 24)} Tagen`;
+    if (hours > 2) return `⏰ In ${hours}h ${minutes}m`;
+    return `🔥 ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }, [matchday, currentTime]);
 
-  const getMatchStatusText = (status) => {
-    switch (status) {
-      case 'completed':
-        return 'Abgeschlossen';
-      case 'in_progress':
-        return 'Läuft';
-      case 'pending':
-        return 'Ausstehend';
-      default:
-        return 'Ausstehend';
+  // Prüfe ob Live-Button angezeigt werden soll
+  const shouldShowLiveBadge = useCallback(() => {
+    if (!matchday) return false;
+    
+    const matchTime = new Date(matchday.match_date);
+    const now = new Date();
+    const isToday = matchTime.toDateString() === now.toDateString();
+    const within6Hours = now >= matchTime && now <= new Date(matchTime.getTime() + 6 * 3600000);
+    
+    return isToday && within6Hours;
+  }, [matchday]);
+
+  // Render einzelnes Match mit echten Spielerdaten
+  const renderMatchCard = (result) => {
+    const isSingles = result.match_type === 'Einzel';
+    
+    // Bestimme User-Team-Seite für richtige Win/Loss-Anzeige
+    let isOurTeamHome = false;
+    if (matchday && playerTeams && playerTeams.length > 0) {
+      const playerTeamIds = playerTeams.map(t => t.id);
+      isOurTeamHome = playerTeamIds.includes(matchday.home_team_id);
     }
-  };
-
-  // formatScore function removed as it's not used
-
-  const renderMatchCard = (result, index) => {
-    const matchNumber = result.match_number;
-    const matchType = result.match_type;
     
-    // Berechne Match-Status und Gewinner
-    const matchWinner = calculateMatchWinnerFromSets(result);
-    const isCompleted = matchWinner !== null;
-    const hasStarted = result.set1_home > 0 || result.set1_guest > 0;
-    const matchStatus = isCompleted ? 'completed' : (hasStarted ? 'in_progress' : (result.status || 'pending'));
-
-    // Spielernamen aus den geladenen Maps extrahieren
-    const homePlayerName = result.match_type === 'Einzel' 
-      ? (homePlayers[result.home_player_id]?.name || 'Spieler wählen')
-      : `${homePlayers[result.home_player1_id]?.name || 'Spieler 1'} & ${homePlayers[result.home_player2_id]?.name || 'Spieler 2'}`;
+    // Gewinner (DB-Perspektive) für Zeilen-Häkchen
+    const matchWinnerRaw = result.winner || calculateMatchWinner(result);
+    // Zusätzlich: Badge im Header weiterhin aus User-Perspektive
+    let winnerDisplay = null;
+    if (matchWinnerRaw) {
+      const userWon = (isOurTeamHome && matchWinnerRaw === 'home') || (!isOurTeamHome && matchWinnerRaw === 'guest');
+      winnerDisplay = { won: userWon, text: userWon ? 'Sieg' : 'Niederlage' };
+    }
     
-    const guestPlayerName = result.match_type === 'Einzel' 
-      ? (opponentPlayers[result.guest_player_id]?.name || 'Gegner wählen')
-      : `${opponentPlayers[result.guest_player1_id]?.name || 'Gegner 1'} & ${opponentPlayers[result.guest_player2_id]?.name || 'Gegner 2'}`;
+    // Hole Spieler-Daten aus playerData State (separat geladen)
+    const player1 = playerData[result.home_player_id] || playerData[result.home_player1_id] || {};
+    const player2 = playerData[result.home_player2_id] || {};
+    const player3 = playerData[result.guest_player_id] || playerData[result.guest_player1_id] || {};
+    const player4 = playerData[result.guest_player2_id] || {};
     
-    // LK für Heimspieler extrahieren
-    const getHomePlayerLK = () => {
-      if (result.match_type === 'Einzel' && result.home_player_id) {
-        const player = homePlayers[result.home_player_id];
-        return player?.current_lk || player?.ranking || '';
-      } else if (result.match_type === 'Doppel') {
-        const player1 = homePlayers[result.home_player1_id];
-        const player2 = homePlayers[result.home_player2_id];
-        const lk1 = player1?.current_lk || player1?.ranking || '';
-        const lk2 = player2?.current_lk || player2?.ranking || '';
-        if (lk1 && lk2) return `${lk1} / ${lk2}`;
-        return lk1 || lk2 || '';
-      }
-      return '';
+    const getProfileImageSrc = (index) => {
+      const images = ['/face1.jpg', '/face2.jpg', '/face3.jpg', '/face4.jpg', '/face5.jpg'];
+      return images[index % images.length];
     };
-    
-    const homePlayerLK = getHomePlayerLK();
-    
-    // LK für Gegner extrahieren
-    const guestPlayerLK = result.match_type === 'Einzel' 
-      ? (opponentPlayers[result.guest_player_id]?.lk || '')
-      : `${opponentPlayers[result.guest_player1_id]?.lk || ''} / ${opponentPlayers[result.guest_player2_id]?.lk || ''}`;
-    
-    // Bestimme Bilder für unsere Spieler (Heimteam)
-    const getHomePlayerImage = () => {
-      // Für Einzel: Prüfe ob Spieler ein Profilbild hat
-      if (result.match_type === 'Einzel' && result.home_player_id) {
-        const homePlayer = homePlayers[result.home_player_id];
-        if (homePlayer && homePlayer.profile_image) {
-          return homePlayer.profile_image;
-        }
-      }
-      // Für Doppel: Prüfe beide Spieler
-      if (result.match_type === 'Doppel') {
-        const player1 = homePlayers[result.home_player1_id];
-        const player2 = homePlayers[result.home_player2_id];
-        if (player1 && player1.profile_image) return player1.profile_image;
-        if (player2 && player2.profile_image) return player2.profile_image;
-      }
-      // Standard: home-face.jpg
-      return '/home-face.jpg';
-    };
-    
-    // Bestimme konsistentes Face-Bild für Gegner (basierend auf Spieler-ID)
-    const getGuestPlayerImage = () => {
-      const faceImages = ['/face1.jpg', '/face1.png', '/face2.jpg', '/face3.jpg', '/face4.jpg', '/face5.jpg'];
-      
-      // Für Einzel: Nutze guest_player_id
-      let playerId = result.guest_player_id;
-      
-      // Für Doppel: Nutze guest_player1_id
-      if (result.match_type === 'Doppel' && result.guest_player1_id) {
-        playerId = result.guest_player1_id;
-      }
-      
-      // Generiere konsistenten Index aus der Spieler-ID (Hash)
-      if (playerId) {
-        let hash = 0;
-        for (let i = 0; i < playerId.length; i++) {
-          hash = ((hash << 5) - hash) + playerId.charCodeAt(i);
-          hash = hash & hash; // Convert to 32bit integer
-        }
-        const index = Math.abs(hash) % faceImages.length;
-        return faceImages[index];
-      }
-      
-      // Fallback: face1.jpg
-      return '/face1.jpg';
-    };
-    
-    const homeImageSrc = getHomePlayerImage();
-    const guestImageSrc = getGuestPlayerImage();
     
     return (
-      <div key={result.id || index} className="match-result-card">
-        <div className="match-header">
-          <div className="match-info">
-            <span className="match-number">Match {matchNumber}</span>
-            <span className="match-type">
-              {matchType === 'Einzel' ? '👤' : '👥'} {matchType}
-            </span>
-          </div>
-          <div className="match-status">
-            {matchStatus === 'in_progress' && (
-              <div className="live-indicator-small">
-                <div className="live-dot-small"></div>
-                <span>Spiel läuft</span>
+      <div key={result.id || result.match_number} className="match-result-card">
+        {/* Header */}
+        <div className="match-card-head">
+          <h3>
+            Spiel #{result.match_number}
+          </h3>
+          {winnerDisplay && (
+            <div className={`improvement-badge-top ${winnerDisplay.won ? 'positive' : 'negative'}`} style={{ fontSize: '0.8rem' }}>
+              <span className="badge-icon">{winnerDisplay.won ? '✓' : '✗'}</span>
+              <span className="badge-value">{winnerDisplay.text}</span>
               </div>
             )}
-            {matchStatus !== 'in_progress' && (
-              <>
-                {getMatchStatusIcon(matchStatus)}
-                <span>{getMatchStatusText(matchStatus)}</span>
-              </>
-            )}
-          </div>
         </div>
 
-        <div className="match-players-compact">
-          {/* Home Player */}
-          <div className={`player-row home ${
-            matchStatus === 'completed' && matchWinner === 'home' ? 'winner' : 
-            matchStatus === 'completed' && matchWinner === 'guest' ? 'loser' : ''
-          } ${matchType === 'Doppel' ? 'doppel-row' : ''}`}>
-            <div className="player-avatar">
-              <img 
-                src={homeImageSrc}
-                alt="Home Player"
-                onError={(e) => {
-                  e.target.style.display = 'none';
-                  e.target.nextSibling.style.display = 'flex';
-                }}
-              />
-              <div className="avatar-placeholder">
-                <span>🏠</span>
-              </div>
-            </div>
-            <div className="player-info">
-              {matchType === 'Doppel' ? (
-                // Doppel: Namen untereinander
-                <div className="player-name-doppel">
-                  <div className="doppel-player-line">
-                    <span>{homePlayers[result.home_player1_id]?.name || 'Spieler 1'}</span>
-                    {homePlayers[result.home_player1_id]?.current_lk && (
-                      <span className="player-lk" style={{ marginLeft: '8px', fontSize: '11px', color: '#666', fontWeight: '500' }}>
-                        {homePlayers[result.home_player1_id].current_lk}
-                      </span>
-                    )}
-                  </div>
-                  <div className="doppel-player-line">
-                    <span>{homePlayers[result.home_player2_id]?.name || 'Spieler 2'}</span>
-                    {homePlayers[result.home_player2_id]?.current_lk && (
-                      <span className="player-lk" style={{ marginLeft: '8px', fontSize: '11px', color: '#666', fontWeight: '500' }}>
-                        {homePlayers[result.home_player2_id].current_lk}
-                      </span>
-                    )}
-                  </div>
-                </div>
+        {/* Match Row - New Layout */}
+        <div className={`match-row-new ${!isSingles ? 'is-doubles' : 'is-singles'}`}>
+          {/* Home Team Row */}
+          <div className="team-row">
+            <div className="team-left">
+              {isSingles ? (
+                <img 
+                  src={player1?.profile_image || getProfileImageSrc(0)} 
+                  alt={player1?.name || 'Player 1'}
+                  className="player-avatar"
+                  onError={(e) => { e.target.src = getProfileImageSrc(0); }}
+                />
               ) : (
-                // Einzel: Name in einer Zeile
-                <div className="player-name">
-                  {homePlayerName}
-                  {/* LK anzeigen */}
-                  {homePlayerLK && (
-                    <span className="player-lk" style={{ marginLeft: '8px', fontSize: '12px', color: '#666', fontWeight: '500' }}>
-                      {homePlayerLK}
-                    </span>
-                  )}
+                <div className="avatar-group">
+                  <img 
+                    src={player1?.profile_image || getProfileImageSrc(0)} 
+                    alt={player1?.name || 'Player 1'}
+                    className="player-avatar"
+                    onError={(e) => { e.target.src = getProfileImageSrc(0); }}
+                  />
+                  <img 
+                    src={player2?.profile_image || getProfileImageSrc(1)} 
+                    alt={player2?.name || 'Player 2'}
+                    className="player-avatar"
+                    onError={(e) => { e.target.src = getProfileImageSrc(1); }}
+                  />
                 </div>
               )}
-              <div className="player-status">
-                {/* Grüner Haken entfernt */}
+              <div className="team-names">
+                <div className="name-line">
+                  <span className="player-name-part">{player1?.name || 'Spieler 1'}</span>
+                  {player1?.current_lk && <span className="player-lk-part">(LK {player1.current_lk})</span>}
+                </div>
+                {!isSingles && player2 && (
+                  <div className="name-line">
+                    <span className="player-name-part">{player2?.name || 'Spieler 2'}</span>
+                    {player2?.current_lk && <span className="player-lk-part">(LK {player2.current_lk})</span>}
+                  </div>
+                )}
               </div>
+              {matchWinnerRaw === 'home' && <span className="tick">✓</span>}
             </div>
-            <div className="player-scores">
-              <span className="score-number">{result.set1_home || '0'}</span>
-              <span className="score-number">{result.set2_home || '0'}</span>
-              {/* Zeige dritten Satz nur, wenn er gespielt wurde */}
-              {(result.set3_home > 0 || result.set3_guest > 0) && (
-                <span className="score-number">{result.set3_home || '0'}</span>
-              )}
+            <div className="scores-row">
+              {result.set1_home != null && <div className={`score-cell ${result.set1_home > result.set1_guest ? 'score-win' : 'score-lose'}`}>{result.set1_home}</div>}
+              {result.set2_home != null && <div className={`score-cell ${result.set2_home > result.set2_guest ? 'score-win' : 'score-lose'}`}>{result.set2_home}</div>}
+              {result.set3_home != null && <div className={`score-cell ${result.set3_home > result.set3_guest ? 'score-win' : 'score-lose'}`}>{result.set3_home}</div>}
             </div>
           </div>
 
-          {/* Guest Player */}
-          <div className={`player-row guest ${
-            matchStatus === 'completed' && matchWinner === 'guest' ? 'winner' : 
-            matchStatus === 'completed' && matchWinner === 'home' ? 'loser' : ''
-          } ${matchType === 'Doppel' ? 'doppel-row' : ''}`}>
-            <div className="player-avatar">
-              <img 
-                src={guestImageSrc}
-                alt="Guest Player"
-                onError={(e) => {
-                  e.target.style.display = 'none';
-                  e.target.nextSibling.style.display = 'flex';
-                }}
-              />
-              <div className="avatar-placeholder">
-                <span>🤡</span>
-              </div>
-            </div>
-            <div className="player-info">
-              {matchType === 'Doppel' ? (
-                // Doppel: Namen untereinander
-                <div className="player-name-doppel">
-                  <div className="doppel-player-line">
-                    <span>{opponentPlayers[result.guest_player1_id]?.name || 'Gegner 1'}</span>
-                    {opponentPlayers[result.guest_player1_id]?.lk && (
-                      <span className="player-lk" style={{ marginLeft: '8px', fontSize: '11px', color: '#666', fontWeight: '500' }}>
-                        LK{opponentPlayers[result.guest_player1_id].lk}
-                      </span>
-                    )}
-                  </div>
-                  <div className="doppel-player-line">
-                    <span>{opponentPlayers[result.guest_player2_id]?.name || 'Gegner 2'}</span>
-                    {opponentPlayers[result.guest_player2_id]?.lk && (
-                      <span className="player-lk" style={{ marginLeft: '8px', fontSize: '11px', color: '#666', fontWeight: '500' }}>
-                        LK{opponentPlayers[result.guest_player2_id].lk}
-                      </span>
-                    )}
-                  </div>
-                </div>
+          <div className="separator-row"></div>
+
+          {/* Away Team Row */}
+          <div className="team-row">
+            <div className="team-left">
+              {isSingles ? (
+                <img 
+                  src={player3?.profile_image || getProfileImageSrc(2)} 
+                  alt={player3?.name || 'Gegner 1'}
+                  className="player-avatar"
+                  onError={(e) => { e.target.src = getProfileImageSrc(2); }}
+                />
               ) : (
-                // Einzel: Name in einer Zeile
-                <div className="player-name">
-                  {guestPlayerName}
-                  {guestPlayerLK && (
-                    <span className="player-lk" style={{ marginLeft: '8px', fontSize: '12px', color: '#666', fontWeight: '500' }}>
-                      LK{guestPlayerLK}
-                    </span>
-                  )}
+                <div className="avatar-group">
+                  <img 
+                    src={player3?.profile_image || getProfileImageSrc(2)} 
+                    alt={player3?.name || 'Gegner 1'}
+                    className="player-avatar"
+                    onError={(e) => { e.target.src = getProfileImageSrc(2); }}
+                  />
+                  <img 
+                    src={player4?.profile_image || getProfileImageSrc(3)} 
+                    alt={player4?.name || 'Gegner 2'}
+                    className="player-avatar"
+                    onError={(e) => { e.target.src = getProfileImageSrc(3); }}
+                  />
                 </div>
               )}
-              <div className="player-status">
-                {/* Grüner Haken entfernt */}
+              <div className="team-names">
+                <div className="name-line">
+                  <span className="player-name-part">{player3?.name || 'Gegner 1'}</span>
+                  {player3?.current_lk && <span className="player-lk-part">(LK {player3.current_lk})</span>}
+                </div>
+                {!isSingles && player4 && (
+                  <div className="name-line">
+                    <span className="player-name-part">{player4?.name || 'Gegner 2'}</span>
+                    {player4?.current_lk && <span className="player-lk-part">(LK {player4.current_lk})</span>}
+                  </div>
+                )}
               </div>
+              {matchWinnerRaw === 'guest' && <span className="tick">✓</span>}
             </div>
-            <div className="player-scores">
-              <span className="score-number">{result.set1_guest || '0'}</span>
-              <span className="score-number">{result.set2_guest || '0'}</span>
-              {/* Zeige dritten Satz nur, wenn er gespielt wurde */}
-              {(result.set3_home > 0 || result.set3_guest > 0) && (
-                <span className="score-number">{result.set3_guest || '0'}</span>
-              )}
+            <div className="scores-row">
+              {result.set1_guest != null && <div className={`score-cell ${result.set1_guest > result.set1_home ? 'score-win' : 'score-lose'}`}>{result.set1_guest}</div>}
+              {result.set2_guest != null && <div className={`score-cell ${result.set2_guest > result.set2_home ? 'score-win' : 'score-lose'}`}>{result.set2_guest}</div>}
+              {result.set3_guest != null && <div className={`score-cell ${result.set3_guest > result.set3_home ? 'score-win' : 'score-lose'}`}>{result.set3_guest}</div>}
             </div>
           </div>
         </div>
 
+        {/* Notizen */}
         {result.notes && (
-          <div className="match-comment">
-            <span className="comment-label">💬</span>
-            <span>{result.notes}</span>
+          <div style={{ marginTop: '1rem', padding: '0.75rem', background: '#f9fafb', borderRadius: '6px', fontSize: '0.875rem', color: '#6b7280' }}>
+            💬 {result.notes}
           </div>
         )}
-
-        <div className="match-actions">
-          <button 
-            className="btn-primary"
-            onClick={() => navigate(`/live-results/${matchId}/edit`)}
-          >
-            <Edit size={16} />
-            {result.status === 'pending' ? 'Ergebnisse eintragen' : 'Bearbeiten'}
-          </button>
-        </div>
       </div>
     );
   };
+
+  // Berechne Werte nur wenn Daten verfügbar sind
+  const score = useMemo(() => {
+    if (!matchday || !playerTeams || playerTeams.length === 0) {
+      return { our: 0, opponent: 0, completed: 0 };
+    }
+    return calculateScore();
+  }, [matchday, playerTeams, calculateScore]);
+
+  const countdown = useMemo(() => {
+    if (!matchday) return '⏰ Wird geladen...';
+    return getCountdown();
+  }, [matchday, getCountdown]);
+
+  const showLiveBadge = useMemo(() => shouldShowLiveBadge(), [shouldShowLiveBadge]);
+  const isCompleted = score.completed >= 6;
 
   if (loading) {
     return (
-      <div className="live-results-page">
+      <div className="dashboard container">
         <div className="loading-container">
           <div className="loading-spinner"></div>
-          <p>Lade Live-Ergebnisse...</p>
+          <p>Lade Matchday...</p>
         </div>
       </div>
     );
   }
 
-  if (error) {
+  if (error || !matchday) {
     return (
-      <div className="live-results-page">
+      <div className="dashboard container">
         <div className="error-container">
           <h2>❌ Fehler</h2>
-          <p>{error}</p>
+          <p>{error || 'Matchday nicht gefunden'}</p>
           <button onClick={() => navigate('/')} className="btn-back">
             <ArrowLeft size={16} />
-            Zurück zur Übersicht
+            Zurück
           </button>
         </div>
       </div>
     );
   }
 
-  // Prüfe ob Medenspiel beendet ist (6 Spiele UND kein Spiel läuft mehr)
-  const hasAnyInProgressMatch = matchResults.some(result => {
-    const matchWinner = calculateMatchWinnerFromSets(result);
-    const hasStarted = result.set1_home > 0 || result.set1_guest > 0;
-    return hasStarted && matchWinner === null; // Spiel hat begonnen aber noch keinen Gewinner
-  });
-  
-  const isMatchCompleted = totalScore.completed >= 6 && !hasAnyInProgressMatch;
-  const matchWinner = totalScore.home > totalScore.guest ? 'home' : 
-                     totalScore.guest > totalScore.home ? 'guest' : 'tie';
-  
-  // Humorvoller Status-Text basierend auf Gesamtergebnis
-  const getOverallMatchStatus = () => {
-    if (!isMatchCompleted) {
-      // Prüfe ob Spiel noch gar nicht begonnen hat (alle 0:0)
-      const hasAnyScore = matchResults.some(result => 
-        result.set1_home > 0 || result.set1_guest > 0 || 
-        result.set2_home > 0 || result.set2_guest > 0 || 
-        result.set3_home > 0 || result.set3_guest > 0
-      );
-      
-      if (!hasAnyScore) {
-        // Spiel hat noch nicht begonnen - lustige Texte
-        const funnyTexts = [
-          '🎾 Gleich geht\'s los!',
-          '🔥 Die Schläger sind schon warm!',
-          '⚡ Bereit für Action!',
-          '🎯 Spannung liegt in der Luft!',
-          '💪 Let\'s go!',
-          '🌟 Das Match kann beginnen!',
-          '🚀 Countdown läuft!',
-          '⏰ Die Uhren sind gestellt!'
-        ];
-        // Wähle einen Text basierend auf matchId für Konsistenz
-        const index = matchId ? matchId.length % funnyTexts.length : 0;
-        return funnyTexts[index];
-      }
-      
-      // Spiel läuft schon
-      if (totalScore.home === totalScore.guest) {
-        return 'Ausgeglichen';
-      }
-      return totalScore.home > totalScore.guest ? 'Heim führt' : 'Auswärts führt';
-    }
-    
-    // Spiel ist abgeschlossen
-    const diff = Math.abs(totalScore.home - totalScore.guest);
-    
-    if (matchWinner === 'tie') {
-      return '3:3 - Unentschieden! Spannend bis zum Ende!';
-    }
-    
-    if (matchWinner === 'home') {
-      // Wir haben gewonnen
-      if (diff >= 5) return `${totalScore.home}:${totalScore.guest} - Dominanter Sieg! 💪`;
-      if (diff >= 3) return `${totalScore.home}:${totalScore.guest} - Deutlicher Sieg! 🎉`;
-      if (diff === 2) return `${totalScore.home}:${totalScore.guest} - Verdienter Sieg! 🏆`;
-      return `${totalScore.home}:${totalScore.guest} - Knapper Sieg! 😅`;
-    }
-    
-    // Wir haben verloren
-    if (diff >= 5) return `${totalScore.home}:${totalScore.guest} - Herbe Niederlage... 😢`;
-    if (diff >= 3) return `${totalScore.home}:${totalScore.guest} - Deutliche Niederlage 😔`;
-    if (diff === 2) return `${totalScore.home}:${totalScore.guest} - Verloren, aber nicht chancenlos 💪`;
-    return `${totalScore.home}:${totalScore.guest} - Knapp verloren 😬`;
-  };
-
   return (
     <div className="dashboard container">
-      {/* Zurück Button */}
+      {/* Back Button */}
       <div className="fade-in" style={{ paddingTop: '0.5rem', marginBottom: '1rem' }}>
             <button 
               className="back-button"
-              onClick={() => navigate('/')}
+          onClick={() => navigate('/results')}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -859,10 +482,10 @@ const MatchdayResults = () => {
       </div>
 
       {/* CARD 1: Match Info */}
-      <div className="fade-in lk-card-full match-info-card">
+      <div className="fade-in lk-card-full">
         <div className="formkurve-header">
           <div className="formkurve-title">Match Info</div>
-          {shouldShowLiveButton() && !isMatchCompleted && (
+          {showLiveBadge && (
             <div className="improvement-badge-top negative" style={{ background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)', animation: 'pulse 2s infinite' }}>
               <span className="badge-icon">🔴</span>
               <span className="badge-value">LIVE</span>
@@ -871,27 +494,46 @@ const MatchdayResults = () => {
         </div>
         
         <div className="season-content">
-          {/* Timer / Countdown */}
-          {!isMatchCompleted && (
-            <div className="next-match-card">
-              <div className="next-match-countdown">{getMatchCountdown(isMatchCompleted)}</div>
-            </div>
-          )}
-          
-          {/* Match Details - VEREINFACHT */}
           <div className="match-info-grid">
-            <div className="match-info-row">
-              <span className="info-label">🎾 Gegner:</span>
-              <span className="info-value-large">{match?.opponent || 'Unbekannt'}</span>
-            </div>
-            
             <div className="match-info-row">
               <span className="info-label">📅 Datum:</span>
               <span className="info-value">
-                {match?.match_date && format(new Date(match.match_date), 'EEEE, dd. MMMM yyyy', { locale: de })}
+                {matchday.match_date && format(new Date(matchday.match_date), 'EEEE, dd. MMMM yyyy', { locale: de })}
+              </span>
+            </div>
+            
+            <div className="match-info-row">
+              <span className="info-label">⏰ Uhrzeit:</span>
+              <span className="info-value">
+                {matchday.start_time || 'TBA'}
               </span>
                 </div>
+            
+            {matchday.location && (
+              <div className="match-info-row">
+                <span className="info-label">
+                  {matchday.location === 'Home' ? '🏠' : '✈️'}
+                </span>
+                <span className="info-value">
+                  {matchday.location === 'Home' ? 'Heimspiel' : 'Auswärtsspiel'}
+                </span>
                 </div>
+            )}
+            
+            {matchday.venue && (
+              <div className="match-info-row">
+                <span className="info-label">📍 Ort:</span>
+                <span className="info-value">{matchday.venue}</span>
+              </div>
+            )}
+          </div>
+          
+          {/* Countdown */}
+          {!isCompleted && (
+            <div className="next-match-card" style={{ marginTop: '1rem' }}>
+              <div className="next-match-countdown">{countdown}</div>
+            </div>
+          )}
               </div>
             </div>
             
@@ -899,62 +541,57 @@ const MatchdayResults = () => {
       <div className="fade-in lk-card-full scoreboard-card">
         <div className="formkurve-header">
           <div className="formkurve-title">
-            {isMatchCompleted ? 'Endergebnis' : 'Aktueller Stand'}
+            {isCompleted ? 'Endergebnis' : 'Aktueller Stand'}
           </div>
-          {isMatchCompleted && (
-            <div className={`improvement-badge-top ${matchWinner === 'home' ? 'positive' : matchWinner === 'guest' ? 'negative' : 'neutral'}`}>
+          {isCompleted && (
+            <div className={`improvement-badge-top ${score.our > score.opponent ? 'positive' : score.opponent > score.our ? 'negative' : 'neutral'}`}>
               <span className="badge-icon">
-                {matchWinner === 'home' ? '🏆' : matchWinner === 'guest' ? '😢' : '🤝'}
+                {score.our > score.opponent ? '🏆' : score.opponent > score.our ? '😢' : '🤝'}
               </span>
               <span className="badge-value">
-                {matchWinner === 'home' ? 'Sieg' : matchWinner === 'guest' ? 'Niederlage' : 'Draw'}
+                {score.our > score.opponent ? 'Sieg' : score.opponent > score.our ? 'Niederlage' : 'Draw'}
               </span>
             </div>
           )}
         </div>
         
         <div className="scoreboard-content-new">
-          {/* Team Namen über Score: UNSER TEAM vs GEGNER */}
+          {/* Team Namen: HOME : AWAY (immer DB-Perspektive) */}
           <div className="score-teams">
             <span className="team-name-score home">
-              {match?.our_team?.team_name 
-                ? `${match.our_team.club_name} ${match.our_team.team_name}` 
-                : match?.our_team?.club_name || 'Heim-Team'}
+              {matchday.home_team?.team_name 
+                ? `${matchday.home_team.club_name} ${matchday.home_team.team_name}` 
+                : matchday.home_team?.club_name || 'Heim-Team'}
             </span>
-            <span className="team-separator">:</span>
+                <span className="team-separator">:</span>
             <span className="team-name-score guest">
-              {match?.opponent_team?.team_name 
-                ? `${match.opponent_team.club_name} ${match.opponent_team.team_name}` 
-                : match?.opponent_team?.club_name || 'Gast-Team'}
+              {matchday.away_team?.team_name 
+                ? `${matchday.away_team.club_name} ${matchday.away_team.team_name}` 
+                : matchday.away_team?.club_name || 'Gast-Team'}
             </span>
           </div>
           
-          {/* Großer Score - Reihenfolge basierend auf Home/Away */}
+          {/* Großer Score: HOME : AWAY (berechnet) */}
+          {(() => { const s = calculateHomeAwayScore(); return (
           <div className="score-display-large">
-            {match?.location === 'Home' ? (
-              <>
-                <div className="score-number-huge">{totalScore.home}</div>
+              <div className="score-number-huge">{s.home}</div>
                 <div className="score-separator-huge">:</div>
-                <div className="score-number-huge">{totalScore.guest}</div>
-              </>
-            ) : (
-              <>
-                <div className="score-number-huge">{totalScore.guest}</div>
-                <div className="score-separator-huge">:</div>
-                <div className="score-number-huge">{totalScore.home}</div>
-              </>
-            )}
+              <div className="score-number-huge">{s.away}</div>
           </div>
+          ); })()}
           
-          {/* Status-Text */}
+          {/* Status */}
           <div className="score-status-text">
-            {getOverallMatchStatus()}
+            {isCompleted 
+              ? `✅ Alle ${score.completed} Spiele beendet`
+              : `🎾 ${score.completed} von 6 Spielen beendet`
+            }
           </div>
           
           {/* Edit Button */}
             <button
             className="btn-participation"
-              onClick={() => navigate(`/ergebnisse/${matchId}/edit`)}
+            onClick={() => navigate(`/live-results/${matchId}/edit`)}
             >
             <Edit size={16} style={{ marginRight: '6px' }} />
             Ergebnisse bearbeiten
@@ -962,49 +599,45 @@ const MatchdayResults = () => {
           </div>
       </div>
 
-      {/* CARD 3: Einzelmatches */}
-      {matchResults.filter(r => r.match_type === 'Einzel').length > 0 && (
-        <div className="fade-in lk-card-full einzel-matches-card">
+      {/* CARD 3: Match Results */}
+      {results.length > 0 ? (
+        <>
+          {/* Einzel */}
+          {results.filter(r => r.match_type === 'Einzel').length > 0 && (
+            <div className="fade-in lk-card-full">
           <div className="formkurve-header">
-            <div className="formkurve-title">Einzel</div>
+                <div className="formkurve-title">🎾 Einzel</div>
             <div className="match-count-badge">
-              {matchResults.filter(r => r.match_type === 'Einzel').length} Spiele
+                  {results.filter(r => r.match_type === 'Einzel').length} Spiele
         </div>
           </div>
-
           <div className="season-matches">
-            {matchResults
-              .filter(result => result.match_type === 'Einzel')
-              .map((result, index) => renderMatchCard(result, index))}
+                {results.filter(r => r.match_type === 'Einzel').map(renderMatchCard)}
               </div>
               </div>
       )}
       
-      {/* CARD 4: Doppelmatches */}
-      {matchResults.filter(r => r.match_type === 'Doppel').length > 0 && (
-        <div className="fade-in lk-card-full doppel-matches-card">
+          {/* Doppel */}
+          {results.filter(r => r.match_type === 'Doppel').length > 0 && (
+            <div className="fade-in lk-card-full">
           <div className="formkurve-header">
-            <div className="formkurve-title">Doppel</div>
+                <div className="formkurve-title">🎾🎾 Doppel</div>
             <div className="match-count-badge">
-              {matchResults.filter(r => r.match_type === 'Doppel').length} Spiele
+                  {results.filter(r => r.match_type === 'Doppel').length} Spiele
             </div>
           </div>
-
           <div className="season-matches">
-            {matchResults
-              .filter(result => result.match_type === 'Doppel')
-              .map((result, index) => renderMatchCard(result, index))}
+                {results.filter(r => r.match_type === 'Doppel').map(renderMatchCard)}
           </div>
         </div>
       )}
-      
-      {/* Keine Ergebnisse */}
-      {matchResults.length === 0 && (
-        <div className="fade-in lk-card-full no-results-card">
+        </>
+      ) : (
+        <div className="fade-in lk-card-full">
             <div className="no-results">
             <div style={{ fontSize: '3rem' }}>🎾</div>
               <h3>Noch keine Ergebnisse</h3>
-            <p>Klicke auf &quot;Ergebnisse bearbeiten&quot; um zu beginnen!</p>
+            <p>Klicke auf &ldquo;Ergebnisse bearbeiten&rdquo; um zu beginnen!</p>
             </div>
         </div>
       )}

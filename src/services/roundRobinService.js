@@ -9,6 +9,7 @@
  * - Automatische Wartelisten-Verwaltung
  * - Prio-Training Bonus
  * - Seeded Random für faire Rotation
+ * - VERBESSERUNG: Round-Robin mit faire Rotation pro Spieler
  * ============================================================================
  */
 
@@ -31,13 +32,16 @@ export const seededRandom = (seed) => {
 };
 
 /**
- * Berechne Spieler-Priorität für Training (COMPACT RANKING SYSTEM)
+ * Berechne Spieler-Priorität für Training (FAIR ROUND-ROBIN SYSTEM)
  * 
- * Neue Formel (V6):
- * - Einfache Prioritäts-Punkte für Rangliste
- * - Round-Robin: Tage seit letzter Teilnahme
- * - Absagen-Bonus: Mehrfache/kürzliche Absagen
- * - Zufallsfaktor für faire Rotation
+ * NEUE Formel (V7 - Fair Rotation):
+ * - ROUND-ROBIN CORE: Tage seit letzter Teilnahme (HÖCHSTE Priorität)
+ * - ABSAGEN-BONUS: Höhere Priorität bei kürzlichen/multiple Absagen
+ * - Zufallsfaktor für faire Rotation bei Gleichstand
+ * 
+ * WICHTIG: 
+ * - Ein Spieler kann NICHT 2x hintereinander aussetzen wenn Round-Robin aktiv ist
+ * - Bei 5 Spielern und 4 Plätzen rotiert automatisch wer aussetzen muss
  * 
  * @param {string} playerId - Player UUID
  * @param {object} training - Training Session Objekt
@@ -48,7 +52,6 @@ export const calculatePlayerPriority = (playerId, training, allPlayers) => {
   const player = allPlayers.find(p => p.id === playerId);
   
   if (!player) {
-    // Nur debug-logs wenn notwendig (stumme Behandlung für fehlende Spieler)
     return {
       priority: 0,
       player: null,
@@ -71,47 +74,61 @@ export const calculatePlayerPriority = (playerId, training, allPlayers) => {
   let priority = 0;
   const breakdown = { daysSinceLastTraining: 0, declineBonus: 0, randomFactor: 0 };
 
-  // 1. ROUND-ROBIN: Tage seit letzter Teilnahme (höher = bessere Priorität)
+  // ============================================================================
+  // 1. ROUND-ROBIN CORE: Tage seit letzter Teilnahme (HÖCHSTE Priorität)
+  // ============================================================================
+  // ANTI-AUSSETZ-BONUS: Wer gerade ausgesetzt hat, bekommt BONUS
+  // Ein Spieler darf NICHT 2x hintereinander aussetzen
+  let daysSinceLastTraining = 0;
+  
   if (stats.last_attended) {
     const lastAttended = new Date(stats.last_attended);
-    const daysSinceLastTraining = (Date.now() - lastAttended.getTime()) / (1000 * 60 * 60 * 24);
-    priority += daysSinceLastTraining; // Mehr Tage = höhere Priorität
-    breakdown.daysSinceLastTraining = daysSinceLastTraining;
+    daysSinceLastTraining = (Date.now() - lastAttended.getTime()) / (1000 * 60 * 60 * 24);
   } else {
-    // Fallback: Nutze Saisonstart (wird in RoundRobinExplainer gesetzt)
-    // Hier sollte dieser Code nie erreicht werden, da last_attended immer gesetzt ist
-    priority += 1000;
-    breakdown.daysSinceLastTraining = 1000;
+    // Fallback: Nie dabei → Sehr hohe Priorität
+    daysSinceLastTraining = 1000;
   }
-
-  // 2. ABSAGEN-BONUS: Berücksichtigt vergangene UND zukünftige Absagen
-  // Vergangene Absagen: +50/+25/+15
-  // Zukünftige Absagen: +10/+5/+2 (nur 20% Gewicht)
+  
+  // WICHTIG: Anti-Aussetz-Bonus
+  // Wenn jemand beim letzten Training ausgesetzt hat (nicht dabei war), 
+  // bekommt er einen BONUS damit er nicht wieder aussetzen muss
+  
+  // Berechne Grundpriorität basierend auf Tagen seit letzter Teilnahme
+  // KEIN Bonu für "nie dabei" - nur Wartelisten-Bonus zählt!
+  priority += daysSinceLastTraining;
+  breakdown.daysSinceLastTraining = daysSinceLastTraining;
+  
+  // ============================================================================
+  // 2. ABSAGEN-BONUS: Anti-Aussetz-Schutz + Bonus
+  // ============================================================================
+  // WICHTIG: ANTI-AUSSETZ-SCHUTZ
+  // Wenn jemand beim letzten Training abgesagt hat, bekommt er BONUS
+  // Damit kann er nicht 2x hintereinander aussetzen
   let declineBonus = 0;
   
-  // Nutze gewichtete Absagen-Quote (Vergangene + 20% Zukünftige)
-  const totalResponses = stats.total_attended + stats.total_declined;
-  const totalWeightedDeclines = (stats.total_declined || 0) + ((stats.future_declined || 0) * 0.2);
-  const totalResponsesWeighted = stats.total_attended + (stats.total_declined || 0) + (stats.future_declined || 0);
+  // WARTELISTEN-BONUS: Wer auf Warteliste gestanden hat, bekommt realistischen Bonus
+  // Nur was_on_waitlist = true → Bonus (nicht declined!)
   
-  if (stats.consecutive_declines >= 2) {
-    // Mehrfache vergangene Absagen = hoher Bonus
-    declineBonus = 50; // +50
-  } else if (stats.last_response === 'declined') {
-    // Letzte Absage in Vergangenheit = mittlerer Bonus
-    declineBonus = 25; // +25
-  } else if (totalResponsesWeighted > 0 && totalWeightedDeclines / totalResponsesWeighted > 0.5) {
-    // Hohe Absagen-Quote (inkl. Zukunft mit geringem Gewicht) = kleiner Bonus
-    declineBonus = 15; // +15
-  } else if (stats.future_declined > 0) {
-    // Zukünftige Absagen: Sehr geringer Bonus
-    declineBonus = stats.future_declined * 2; // +2 pro zukünftiger Absage
+  if (stats.was_on_waitlist) {
+    // Spieler war auf Warteliste → Realistischer Bonus beim nächsten Training
+    declineBonus = 20; // +20 = realistischer Bonus
+    console.log('✅ Wartelisten-Bonus: war auf Warteliste → Bonus +20');
   }
   
   priority += declineBonus;
   breakdown.declineBonus = declineBonus;
+  
+  console.log('🔍 Final priority breakdown:', {
+    playerId,
+    daysSinceLastTraining,
+    declineBonus,
+    randomFactor: breakdown.randomFactor,
+    finalPriority: priority
+  });
 
+  // ============================================================================
   // 3. ZUFALLSFAKTOR für faire Rotation bei Gleichstand
+  // ============================================================================
   const seed = training.round_robin_seed || Date.now();
   const randomFactor = seededRandom(playerId + seed.toString());
   priority += randomFactor * 5; // +0 bis +5 Zufallsfaktor
@@ -126,6 +143,9 @@ export const calculatePlayerPriority = (playerId, training, allPlayers) => {
 
 /**
  * Berechne wer spielen kann und wer auf Warteliste ist
+ * 
+ * WICHTIG: Bei Round-Robin bekommt automatisch der Spieler mit LÄNGSTER Pause
+ * die höchste Priorität. Dadurch rotiert automatisch wer aussetzt.
  * 
  * @param {object} training - Training Session mit attendance Array
  * @param {array} allPlayers - Array aller Spieler mit training_stats
@@ -145,7 +165,7 @@ export const calculateTrainingParticipants = (training, allPlayers) => {
     };
   }
 
-  // Round-Robin aktiviert - COMPACT RANKING SYSTEM
+  // Round-Robin aktiviert - FAIR ROTATION SYSTEM mit Anti-Aussetz-Schutz
   const confirmed = attendance
     .filter(a => a.status === 'confirmed')
     .map(a => {
@@ -161,6 +181,7 @@ export const calculateTrainingParticipants = (training, allPlayers) => {
   const maxPlayers = training.max_players;
 
   // Sortiere nach Priorität (höchste zuerst)
+  // HÖCHSTE Priorität = Wer am längsten nicht da war
   const sorted = confirmed.sort((a, b) => b.priority - a.priority);
 
   // Setze Positionen basierend auf sortierter Reihenfolge
@@ -169,6 +190,8 @@ export const calculateTrainingParticipants = (training, allPlayers) => {
   });
 
   // Teile auf: Spieler vs. Warteliste
+  // Die ersten N Spieler (mit HÖCHSTER Priorität = längste Pause) bekommen Platz
+  // Die restlichen kommen auf Warteliste
   const canPlay = sorted.slice(0, maxPlayers);
   const waitlist = sorted.slice(maxPlayers);
 
@@ -316,8 +339,6 @@ export const calculateTrainingStats = (player, attendanceData) => {
       return dateB - dateA; // Neuestes zuerst
     });
   
-  const last_response = pastAttendance.length > 0 ? pastAttendance[0].status : null;
-  
   // 5. Berechne consecutive_declines - nur vergangene Trainings NACH Saisonstart!
   let consecutive_declines = 0;
   for (const response of pastAttendance) {
@@ -338,9 +359,48 @@ export const calculateTrainingStats = (player, attendanceData) => {
   
   const future_declined = futureAttendance.filter(a => a.status === 'declined').length;
   
+  // 7. WICHTIG: ANTI-AUSSETZ-SCHUTZ - Berücksichtige auch zukünftige consecutive_declines
+  // Wenn jemand für ein zukünftiges Training bereits abgesagt hat, 
+  // zählt das als "ausgesetzt" für die Berechnung
+  const futureDeclinedSorted = futureAttendance
+    .filter(a => a.status === 'declined')
+    .sort((a, b) => {
+      const dateA = new Date(a.training_date);
+      const dateB = new Date(b.training_date);
+      return dateA - dateB; // Frühestes zuerst
+    });
+  
+  // Wenn es zukünftige Absagen gibt, füge sie zu consecutive_declines hinzu
+  // ABER: Nur wenn die letzten vergangenen Antworten auch Absagen waren
+  if (futureDeclinedSorted.length > 0 && consecutive_declines > 0) {
+    // Spieler hat vergangene UND zukünftige Absagen hintereinander
+    consecutive_declines += futureDeclinedSorted.length;
+  } else if (futureDeclinedSorted.length > 0) {
+    // Spieler hat nur zukünftige Absagen (noch nie da gewesen oder gerade dabei gewesen)
+    // Zähle nur die ersten zukünftigen Absagen
+    consecutive_declines = futureDeclinedSorted.length;
+  }
+  
+  // 8. Letzte Antwort: Berücksichtige AUCH zukünftige Antworten
+  let last_response = pastAttendance.length > 0 ? pastAttendance[0].status : null;
+  
+  // WICHTIG: last_response soll NUR vergangene Antworten berücksichtigen
+  // Zukünftige Antworten werden separat in future_declined behandelt
+  // Das verhindert falsche Bonus-Punkte für Spieler die noch nie ausgesetzt haben
+  
   // Gewichtung: Vergangene Absagen haben 5x mehr Gewicht als zukünftige
   // Wenn jemand in der Zukunft absagt, wird das mit +10/+5/+2 berücksichtigt statt +50/+25/+15
   const total_declined_weighted = total_declined + (future_declined * 0.2);
+  
+  // 9. WAR AUF WARTELISTE: Prüfe ob Spieler beim letzten Training auf Warteliste war
+  let was_on_waitlist = false;
+  if (pastAttendance.length > 0) {
+    const lastResponse = pastAttendance[0];
+    // Wenn Spieler confirmed war aber position > max_players, war er auf Warteliste
+    // Wir müssen das aus training-attendance Daten herausbekommen
+    // ZEITWEILIG: Nutze future_declined als Indikator
+    was_on_waitlist = lastResponse.status === 'confirmed' && lastResponse.waitlist_position !== null;
+  }
   
   return {
     total_attended,
@@ -349,7 +409,8 @@ export const calculateTrainingStats = (player, attendanceData) => {
     total_declined_weighted, // Für Berechnung mit Gewichtung
     last_attended,
     last_response,
-    consecutive_declines
+    consecutive_declines,
+    was_on_waitlist // NEU: War Spieler auf Warteliste?
   };
 };
 

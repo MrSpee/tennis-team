@@ -24,6 +24,7 @@ const Results = () => {
   const [loading, setLoading] = useState(true);
   const [currentTime] = useState(new Date());
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [loadingPlayerResults, setLoadingPlayerResults] = useState(false);
   
   // Nutze Matches aus DataContext
   const matches = dataContextMatches;
@@ -60,6 +61,15 @@ const Results = () => {
       setViewMode('spieler');
     }
   }, [searchParams]);
+  
+  // Lade Spieler-Ergebnisse beim Wechsel zur Spieler-Ansicht
+  useEffect(() => {
+    if (viewMode === 'spieler' && !loading && matches.length > 0 && players.length > 0 && Object.keys(playerResults).length === 0) {
+      console.log('🔄 Loading player results for Spieler view...');
+      loadPlayerResults(matches);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, loading]);
 
   // Scrolle zum Spieler wenn player-Parameter vorhanden ist
   useEffect(() => {
@@ -134,7 +144,7 @@ const Results = () => {
         const { data: resultsData, error: resultsError } = await supabase
           .from('match_results')
           .select('*')
-          .eq('match_id', match.id);
+          .eq('matchday_id', match.id);
 
         console.log(`  ✅ Results for match ${index + 1}:`, {
           count: resultsData?.length || 0,
@@ -167,21 +177,20 @@ const Results = () => {
       
       console.log('✅ State set successfully!');
       
-      // Lade Spieler-Ergebnisse
-      if (players && players.length > 0) {
-        await loadPlayerResults(processedMatches);
-      }
-      
     } catch (error) {
       console.error('❌ FATAL ERROR in loadMatchesAndResults:', error);
     } finally {
       setLoading(false);
       console.log('✅ Loading set to FALSE - DONE!');
+      
+      // Lade Spieler-Ergebnisse IM HINTERGRUND (nicht blockierend)
+      // Wird später durch useEffect geladen wenn zu Spieler-Ansicht gewechselt wird
     }
   };
 
   const loadPlayerResults = async (seasonMatches) => {
     try {
+      setLoadingPlayerResults(true);
       if (!players || players.length === 0) return;
 
       // 🔧 SIMPLE APPROACH: Lade alle Spieler aus den eigenen Mannschaften
@@ -242,64 +251,88 @@ const Results = () => {
           const { data: resultsData } = await supabase
             .from('match_results')
             .select('*')
-            .eq('match_id', match.id)
-            .or(`home_player_id.eq.${player.id},home_player1_id.eq.${player.id},home_player2_id.eq.${player.id}`);
+            .eq('matchday_id', match.id)
+            .or(`home_player_id.eq.${player.id},home_player1_id.eq.${player.id},home_player2_id.eq.${player.id},guest_player_id.eq.${player.id},guest_player1_id.eq.${player.id},guest_player2_id.eq.${player.id}`);
 
           if (resultsData && resultsData.length > 0) {
             console.log(`  📊 Found ${resultsData.length} matches for ${player.name} in ${match.opponent}`);
             
             for (const result of resultsData) {
+              // BESTIMME: Ist unser Spieler im Home- oder Guest-Team?
+              const isPlayerInHomeTeam = result.home_player_id === player.id || 
+                                         result.home_player1_id === player.id || 
+                                         result.home_player2_id === player.id;
+              
               // Lade Gegner-Daten
               let opponentName = 'Unbekannt';
               let opponentLK = null;
               let partnerName = null;
               let partnerLK = null;
+              let opponent1Name = 'Unbekannt';
+              let opponent1LK = null;
+              let opponent2Name = 'Unbekannt';
+              let opponent2LK = null;
 
-                        if (result.match_type === 'Einzel' && result.guest_player_id) {
-                          const { data: oppData } = await supabase
-                            .from('players_unified')
-                            .select('name, current_lk')
-                            .eq('id', result.guest_player_id)
-                            .eq('player_type', 'opponent')
-                            .single();
-                          
-                          if (oppData) {
-                            opponentName = oppData.name;
-                            opponentLK = oppData.current_lk;
-                          } else {
-                            // Fallback: Verwende generische Namen
-                            opponentName = 'Gegner';
-                            opponentLK = 'LK ?';
-                          }
-                        } else if (result.match_type === 'Doppel') {
-                          // Lade beide Gegner
-                          const { data: opp1Data } = await supabase
-                            .from('players_unified')
-                            .select('name, current_lk')
-                            .eq('id', result.guest_player1_id)
-                            .eq('player_type', 'opponent')
-                            .single();
-                          
-                          const { data: opp2Data } = await supabase
-                            .from('players_unified')
-                            .select('name, current_lk')
-                            .eq('id', result.guest_player2_id)
-                            .eq('player_type', 'opponent')
-                            .single();
-                          
-                          opponentName = `${opp1Data?.name || 'Gegner 1'} / ${opp2Data?.name || 'Gegner 2'}`;
+              if (result.match_type === 'Einzel') {
+                // Lade Gegner (ist im jeweils anderen Team)
+                const opponentId = isPlayerInHomeTeam ? result.guest_player_id : result.home_player_id;
                 
-                // Lade Partner-Daten
-                const partnerId = result.home_player1_id === player.id 
-                  ? result.home_player2_id 
-                  : result.home_player1_id;
+                if (opponentId) {
+                  const { data: oppData } = await supabase
+                    .from('players_unified')
+                    .select('name, current_lk, player_type')
+                    .eq('id', opponentId)
+                    .single();
+                  
+                  if (oppData) {
+                    opponentName = oppData.name;
+                    opponentLK = oppData.current_lk;
+                  } else {
+                    opponentName = 'Unbekannt';
+                    opponentLK = 'LK ?';
+                  }
+                }
+              } else if (result.match_type === 'Doppel') {
+                // Lade beide Gegner
+                const opp1Id = isPlayerInHomeTeam ? result.guest_player1_id : result.home_player1_id;
+                const opp2Id = isPlayerInHomeTeam ? result.guest_player2_id : result.home_player2_id;
+                
+                if (opp1Id) {
+                  const { data: opp1Data } = await supabase
+                    .from('players_unified')
+                    .select('name, current_lk')
+                    .eq('id', opp1Id)
+                    .single();
+                  
+                  if (opp1Data) {
+                    opponent1Name = opp1Data.name || 'Unbekannt';
+                    opponent1LK = opp1Data.current_lk;
+                  }
+                }
+                
+                if (opp2Id) {
+                  const { data: opp2Data } = await supabase
+                    .from('players_unified')
+                    .select('name, current_lk')
+                    .eq('id', opp2Id)
+                    .single();
+                  
+                  if (opp2Data) {
+                    opponent2Name = opp2Data.name || 'Unbekannt';
+                    opponent2LK = opp2Data.current_lk;
+                  }
+                }
+                
+                // Lade Partner (ist im gleichen Team)
+                const partnerId = isPlayerInHomeTeam
+                  ? (result.home_player1_id === player.id ? result.home_player2_id : result.home_player1_id)
+                  : (result.guest_player1_id === player.id ? result.guest_player2_id : result.guest_player1_id);
                 
                 if (partnerId) {
                   const { data: partnerData } = await supabase
                     .from('players_unified')
                     .select('name, current_lk, season_start_lk, ranking')
                     .eq('id', partnerId)
-                    .eq('player_type', 'app_user')
                     .single();
                   
                   if (partnerData) {
@@ -307,15 +340,23 @@ const Results = () => {
                     partnerLK = partnerData.current_lk || partnerData.season_start_lk || partnerData.ranking;
                   }
                 }
+                
+                // Nutze opponent1Name für Anzeige
+                opponentName = opponent1Name;
+                opponentLK = opponent1LK;
               }
 
                         playerMatches.push({
                           ...result,
                           opponent: match.opponent,
                           matchDate: match.date,
-                          matchLocation: match.location, // WICHTIG: Füge location hinzu
+                          matchLocation: match.location,
                           opponentPlayerName: opponentName,
                           opponentPlayerLK: opponentLK,
+                          opponent1Name,
+                          opponent1LK,
+                          opponent2Name,
+                          opponent2LK,
                           partnerName,
                           partnerLK
                         });
@@ -342,6 +383,8 @@ const Results = () => {
       setPlayerResults(playerResultsMap);
     } catch (error) {
       console.error('❌ Error loading player results:', error);
+    } finally {
+      setLoadingPlayerResults(false);
     }
   };
 
@@ -464,7 +507,7 @@ const Results = () => {
   };
 
   // Neue Funktion: Berechne Score aus Spieler-Perspektive
-  const calculatePlayerPerspectiveScore = (rawScore, matchLocation) => {
+  const calculatePlayerPerspectiveScore = (rawScore) => {
     if (!rawScore) {
       return {
         playerScore: 0,
@@ -667,7 +710,7 @@ const Results = () => {
               const status = getMatchStatus(match);
               
               // Berechne Score aus Spieler-Perspektive
-              const playerScore = calculatePlayerPerspectiveScore(rawScore, match.location);
+              const playerScore = calculatePlayerPerspectiveScore(rawScore);
               
               // Prüfe ob das Medenspiel komplett abgeschlossen ist (alle 6 bzw. 9 Spiele)
               const expectedTotal = match.season === 'summer' ? 9 : 6;
@@ -822,12 +865,17 @@ const Results = () => {
           <div className="formkurve-header">
             <div className="formkurve-title">Spieler-Ergebnisse</div>
             <div className="match-count-badge">
-              {Object.values(playerResults).length} {Object.values(playerResults).length === 1 ? 'Spieler' : 'Spieler'}
+              {loadingPlayerResults ? '...' : Object.values(playerResults).length} {Object.values(playerResults).length === 1 ? 'Spieler' : 'Spieler'}
             </div>
           </div>
           
           <div className="season-content">
-          {Object.values(playerResults).length === 0 ? (
+          {loadingPlayerResults ? (
+            <div className="no-results" style={{ padding: '2rem' }}>
+              <div className="loading-spinner" style={{ margin: '0 auto' }}></div>
+              <p style={{ marginTop: '1rem' }}>Lade Spieler-Ergebnisse...</p>
+            </div>
+          ) : Object.values(playerResults).length === 0 ? (
             <div className="no-results">
               <div style={{ fontSize: '3rem' }}>🎾</div>
               <h3>Keine Spieler-Ergebnisse</h3>
@@ -846,21 +894,31 @@ const Results = () => {
                   })
                   .map(({ player, matches: playerMatches }) => {
                     const wins = playerMatches.filter(m => {
+                      // Bestimme ob unser Spieler im Home- oder Guest-Team ist
+                      const isPlayerInHomeTeam = m.home_player_id === player.id || 
+                                                 m.home_player1_id === player.id || 
+                                                 m.home_player2_id === player.id;
+                      
                       const winner = m.winner || calculateMatchWinner(m);
                       
-                      // REALITÄT: In der Datenbank ist die Struktur anders!
-                      // Bei Auswärtsspielen sind unsere Spieler in home_player* Feldern
-                      // Das bedeutet: winner = "guest" = unser Team gewinnt
-                      return winner === 'guest';
+                      // Unser Spieler gewinnt wenn:
+                      // - Er ist im Home-Team UND winner === 'home' ODER
+                      // - Er ist im Guest-Team UND winner === 'guest'
+                      return isPlayerInHomeTeam ? winner === 'home' : winner === 'guest';
                     }).length;
                     
                     const losses = playerMatches.filter(m => {
+                      // Bestimme ob unser Spieler im Home- oder Guest-Team ist
+                      const isPlayerInHomeTeam = m.home_player_id === player.id || 
+                                                 m.home_player1_id === player.id || 
+                                                 m.home_player2_id === player.id;
+                      
                       const winner = m.winner || calculateMatchWinner(m);
                       
-                      // REALITÄT: In der Datenbank ist die Struktur anders!
-                      // Bei Auswärtsspielen sind unsere Spieler in home_player* Feldern  
-                      // Das bedeutet: winner = "home" = Gegner gewinnt
-                      return winner === 'home';
+                      // Unser Spieler verliert wenn:
+                      // - Er ist im Home-Team UND winner === 'guest' ODER
+                      // - Er ist im Guest-Team UND winner === 'home'
+                      return isPlayerInHomeTeam ? winner === 'guest' : winner === 'home';
                     }).length;
 
                     return (
@@ -884,7 +942,17 @@ const Results = () => {
                         <div className="player-matches">
                           {playerMatches.map((result, idx) => {
                             const matchWinner = result.winner || calculateMatchWinner(result);
-                            const isWinner = matchWinner === 'home';
+                            
+                            // BESTIMME: Ist unser Spieler im Home- oder Guest-Team?
+                            const isPlayerInHomeTeam = result.home_player_id === player.id || 
+                                                       result.home_player1_id === player.id || 
+                                                       result.home_player2_id === player.id;
+                            
+                            // Bestimme ob Spieler gewonnen hat
+                            const isWinner = isPlayerInHomeTeam 
+                              ? matchWinner === 'home' 
+                              : matchWinner === 'guest';
+                            
                             const setsCount = (result.set3_home > 0 || result.set3_guest > 0) ? 3 : 2;
                             const opponentFaces = ['/face1.jpg', '/face1.png', '/face2.jpg', '/face3.jpg', '/face4.jpg', '/face5.jpg'];
 
@@ -898,6 +966,7 @@ const Results = () => {
                                 <hr className="ms-divider" />
                                 <section className="ms-rows">
                                   {/* Home Team - EINE BOX */}
+                                  {/* Home Team - unser Spieler (immer erste Box) */}
                                   <div className={`ms-team-group ${isWinner ? 'winner-row' : 'loser-row'}`}>
                                     {/* Spieler 1 mit Sätzen */}
                                     <div className="ms-row" style={{ gridTemplateColumns: `auto minmax(0, 1fr) repeat(${setsCount}, 38px)` }}>
@@ -911,10 +980,22 @@ const Results = () => {
                                         </span>
                                         {isWinner && <span className="ms-check">✓</span>}
                                       </div>
-                                      {result.set1_home !== null && <span className="ms-set">{result.set1_home}</span>}
-                                      {result.set2_home !== null && <span className="ms-set">{result.set2_home}</span>}
-                                      {(result.set3_home > 0 || result.set3_guest > 0) && (
-                                        <span className="ms-set tb">{result.set3_home}</span>
+                                      {isPlayerInHomeTeam ? (
+                                        <>
+                                          {result.set1_home !== null && <span className="ms-set">{result.set1_home}</span>}
+                                          {result.set2_home !== null && <span className="ms-set">{result.set2_home}</span>}
+                                          {(result.set3_home > 0 || result.set3_guest > 0) && (
+                                            <span className="ms-set tb">{result.set3_home}</span>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <>
+                                          {result.set1_guest !== null && <span className="ms-set">{result.set1_guest}</span>}
+                                          {result.set2_guest !== null && <span className="ms-set">{result.set2_guest}</span>}
+                                          {(result.set3_home > 0 || result.set3_guest > 0) && (
+                                            <span className="ms-set tb">{result.set3_guest}</span>
+                                          )}
+                                        </>
                                       )}
                                     </div>
                                     {/* Spieler 2 (Partner) ohne Sätze - nur bei Doppel */}
@@ -939,7 +1020,7 @@ const Results = () => {
                                   </div>
 
                                   {/* Guest Team - EINE BOX */}
-                                  <div className={`ms-team-group opponent ${!isWinner && matchWinner === 'guest' ? 'winner-row' : 'loser-row'}`}>
+                                  <div className={`ms-team-group opponent ${!isWinner ? 'winner-row' : 'loser-row'}`}>
                                     {result.match_type === 'Einzel' ? (
                                       <div className="ms-row" style={{ gridTemplateColumns: `auto minmax(0, 1fr) repeat(${setsCount}, 38px)` }}>
                                         <div className="ms-avatar opponent">
@@ -950,12 +1031,24 @@ const Results = () => {
                                           {result.opponentPlayerLK && (
                                             <span className="ms-meta">LK {result.opponentPlayerLK}</span>
                                           )}
-                                          {!isWinner && matchWinner === 'guest' && <span className="ms-check">✓</span>}
+                                          {((!isPlayerInHomeTeam && isWinner) || (isPlayerInHomeTeam && !isWinner)) && <span className="ms-check">✓</span>}
                                         </div>
-                                        {result.set1_guest !== null && <span className="ms-set">{result.set1_guest}</span>}
-                                        {result.set2_guest !== null && <span className="ms-set">{result.set2_guest}</span>}
-                                        {(result.set3_home > 0 || result.set3_guest > 0) && (
-                                          <span className="ms-set tb">{result.set3_guest}</span>
+                                        {!isPlayerInHomeTeam ? (
+                                          <>
+                                            {result.set1_home !== null && <span className="ms-set">{result.set1_home}</span>}
+                                            {result.set2_home !== null && <span className="ms-set">{result.set2_home}</span>}
+                                            {(result.set3_home > 0 || result.set3_guest > 0) && (
+                                              <span className="ms-set tb">{result.set3_home}</span>
+                                            )}
+                                          </>
+                                        ) : (
+                                          <>
+                                            {result.set1_guest !== null && <span className="ms-set">{result.set1_guest}</span>}
+                                            {result.set2_guest !== null && <span className="ms-set">{result.set2_guest}</span>}
+                                            {(result.set3_home > 0 || result.set3_guest > 0) && (
+                                              <span className="ms-set tb">{result.set3_guest}</span>
+                                            )}
+                                          </>
                                         )}
                                       </div>
                                     ) : (
@@ -970,12 +1063,24 @@ const Results = () => {
                                             {result.opponent1LK && (
                                               <span className="ms-meta">LK {result.opponent1LK}</span>
                                             )}
-                                            {!isWinner && matchWinner === 'guest' && <span className="ms-check">✓</span>}
+                                            {((!isPlayerInHomeTeam && isWinner) || (isPlayerInHomeTeam && !isWinner)) && <span className="ms-check">✓</span>}
                                           </div>
-                                          {result.set1_guest !== null && <span className="ms-set">{result.set1_guest}</span>}
-                                          {result.set2_guest !== null && <span className="ms-set">{result.set2_guest}</span>}
-                                          {(result.set3_home > 0 || result.set3_guest > 0) && (
-                                            <span className="ms-set tb">{result.set3_guest}</span>
+                                          {!isPlayerInHomeTeam ? (
+                                            <>
+                                              {result.set1_home !== null && <span className="ms-set">{result.set1_home}</span>}
+                                              {result.set2_home !== null && <span className="ms-set">{result.set2_home}</span>}
+                                              {(result.set3_home > 0 || result.set3_guest > 0) && (
+                                                <span className="ms-set tb">{result.set3_home}</span>
+                                              )}
+                                            </>
+                                          ) : (
+                                            <>
+                                              {result.set1_guest !== null && <span className="ms-set">{result.set1_guest}</span>}
+                                              {result.set2_guest !== null && <span className="ms-set">{result.set2_guest}</span>}
+                                              {(result.set3_home > 0 || result.set3_guest > 0) && (
+                                                <span className="ms-set tb">{result.set3_guest}</span>
+                                              )}
+                                            </>
                                           )}
                                         </div>
                                         {/* Gegner 2 ohne Sätze */}
@@ -989,8 +1094,8 @@ const Results = () => {
                                               <span className="ms-meta">LK {result.opponent2LK}</span>
                                             )}
                                           </div>
-                                          {result.set1_guest !== null && <span className="ms-set empty"></span>}
-                                          {result.set2_guest !== null && <span className="ms-set empty"></span>}
+                                          <span className="ms-set empty"></span>
+                                          <span className="ms-set empty"></span>
                                           {(result.set3_home > 0 || result.set3_guest > 0) && (
                                             <span className="ms-set empty"></span>
                                           )}

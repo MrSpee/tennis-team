@@ -103,3 +103,4 @@ created_at, updated_at
 4. Spieler gibt Verfügbarkeit → match_availability mit matchday_id
 5. Einzelergebnisse werden eingetragen → match_results mit player_away_1_id usw.
 
+

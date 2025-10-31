@@ -88,3 +88,5 @@ WHERE tm.player_id = 'faaf92cf-e050-421f-8d2b-5880d5f11a62'
   AND tm.is_active = true
 ORDER BY tm.is_primary DESC, ti.team_name;
 
+
+

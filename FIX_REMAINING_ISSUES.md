@@ -48,3 +48,5 @@ Für sofortiges Testing können wir auch diese SQL-Scripts erstellen:
 - 💡 Workaround: Manueller Import via SQL oder Parse-Logic ohne API
 
 
+
+

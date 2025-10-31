@@ -30,3 +30,4 @@ Viele Komponenten verwenden noch `match_id` statt `matchday_id`.
 ✅ Alle match_results queries brauchen `matchday_id`
 ✅ Alle matchday_id FK constraints müssen korrekt sein
 
+
