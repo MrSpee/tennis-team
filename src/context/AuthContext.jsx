@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
+import { LoggingService } from '../services/activityLogger';
 
 const AuthContext = createContext();
 
@@ -279,6 +280,13 @@ export function AuthProvider({ children }) {
       setCurrentUser(data.user);
       setIsAuthenticated(true);
       
+      // Log Login-Event
+      try {
+        await LoggingService.logLogin(data.user.email, 'email');
+      } catch (logError) {
+        console.warn('⚠️ Could not log login:', logError);
+      }
+      
       // Lade Player-Daten
       await loadPlayerData(data.user.id);
 
@@ -447,6 +455,15 @@ export function AuthProvider({ children }) {
    */
   const logout = async () => {
     console.log('🔵 Logout started');
+    
+    // Log Logout-Event (vor State-Clear)
+    try {
+      if (currentUser?.email) {
+        await LoggingService.logLogout(currentUser.email);
+      }
+    } catch (logError) {
+      console.warn('⚠️ Could not log logout:', logError);
+    }
     
     // State SOFORT zurücksetzen (für sofortige UI-Reaktion)
     setIsAuthenticated(false);
