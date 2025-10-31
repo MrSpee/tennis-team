@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Calendar, Users, Clock, Sun, Home, AlertCircle, CheckCircle, XCircle, Plus, Download } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
@@ -8,6 +9,7 @@ import { calculateTrainingParticipants } from '../services/simpleRotationService
 import './Dashboard.css';
 
 function Training() {
+  const navigate = useNavigate();
   const { player } = useAuth();
   const { players } = useData();
   const [trainings, setTrainings] = useState([]);
@@ -1707,7 +1709,7 @@ Wir sehen uns auf dem Platz! 🎾`;
             <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid #e5e7eb' }}>
               <button
                 className="btn-modern btn-modern-inactive"
-                onClick={() => window.open('/round-robin', '_blank')}
+                onClick={() => navigate('/round-robin')}
                 style={{ 
                   width: '100%',
                   background: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)',
