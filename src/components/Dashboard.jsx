@@ -174,21 +174,41 @@ function Dashboard() {
 
     const now = new Date();
     const diffTime = nextMatchAnySeason.date - now;
-      const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
-      const diffMinutes = Math.floor((diffTime % (1000 * 60 * 60)) / (1000 * 60));
-      const diffSeconds = Math.floor((diffTime % (1000 * 60)) / 1000);
+    const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
+    const diffMinutes = Math.floor((diffTime % (1000 * 60 * 60)) / (1000 * 60));
+    const diffSeconds = Math.floor((diffTime % (1000 * 60)) / 1000);
 
-    // Heute: Weniger als 24 Stunden
-    if (diffHours < 24) {
-        if (diffHours === 0) {
-          return `🔥 In ${diffMinutes}m ${diffSeconds}s - HEUTE!`;
-        }
-        return `🔥 In ${diffHours}h ${diffMinutes}m - HEUTE!`;
+    // 🔧 Bestimme "HEUTE" basierend auf 06:00 Uhr als Tag-Start
+    const getTodayAt6AM = () => {
+      const today = new Date();
+      today.setHours(6, 0, 0, 0);
+      return today;
+    };
+
+    const getTomorrowAt6AM = () => {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(6, 0, 0, 0);
+      return tomorrow;
+    };
+
+    const todayStart = getTodayAt6AM();
+    const tomorrowStart = getTomorrowAt6AM();
+
+    // Heute: Match ist zwischen jetzt und morgen 06:00 Uhr
+    if (nextMatchAnySeason.date >= now && nextMatchAnySeason.date < tomorrowStart) {
+      if (diffHours === 0) {
+        return `🔥 In ${diffMinutes}m ${diffSeconds}s - HEUTE!`;
+      }
+      return `🔥 In ${diffHours}h ${diffMinutes}m - HEUTE!`;
     }
 
-    // Morgen: Zwischen 24 und 48 Stunden
-    if (diffHours < 48) {
-        return `⚡ In ${diffHours}h ${diffMinutes}m - MORGEN!`;
+    // Morgen: Match ist zwischen morgen 06:00 Uhr und übermorgen 06:00 Uhr
+    const dayAfterTomorrowStart = new Date(tomorrowStart);
+    dayAfterTomorrowStart.setDate(dayAfterTomorrowStart.getDate() + 1);
+    
+    if (nextMatchAnySeason.date >= tomorrowStart && nextMatchAnySeason.date < dayAfterTomorrowStart) {
+      return `⚡ In ${diffHours}h ${diffMinutes}m - MORGEN!`;
     }
 
     // Für mehr als 2 Tage: Zeige Tage
