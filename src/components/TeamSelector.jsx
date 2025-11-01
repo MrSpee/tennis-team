@@ -59,20 +59,55 @@ export default function TeamSelector({ onTeamsUpdated }) {
     if (!selectedTeamId || !player) return;
 
     try {
-      const { error } = await supabase
+      // SCHRITT 1: Prüfe ob Membership bereits existiert (auch inactive)
+      const { data: existing, error: checkError } = await supabase
         .from('team_memberships')
-        .insert({
-          player_id: player.id,
-          team_id: selectedTeamId,
-          is_active: true,
-          is_primary: myTeams.length === 0, // Erstes Team = Primary
-          role: 'player',
-          season: 'Winter 2025/26'
-        });
+        .select('id, is_active')
+        .eq('player_id', player.id)
+        .eq('team_id', selectedTeamId)
+        .eq('season', 'Winter 2025/26')
+        .maybeSingle();
 
-      if (error) throw error;
+      if (checkError && checkError.code !== 'PGRST116') {
+        throw checkError;
+      }
 
-      alert('✅ Du wurdest erfolgreich zum Team hinzugefügt!');
+      if (existing) {
+        // SCHRITT 2A: Membership existiert → UPDATE statt INSERT
+        console.log('📝 Membership exists, updating to active:', existing.id);
+        
+        const { error } = await supabase
+          .from('team_memberships')
+          .update({
+            is_active: true,
+            is_primary: myTeams.length === 0,
+            role: 'player'
+          })
+          .eq('id', existing.id);
+
+        if (error) throw error;
+        
+        alert('✅ Du wurdest wieder zum Team hinzugefügt!');
+      } else {
+        // SCHRITT 2B: Membership existiert nicht → INSERT
+        console.log('➕ Creating new membership');
+        
+        const { error } = await supabase
+          .from('team_memberships')
+          .insert({
+            player_id: player.id,
+            team_id: selectedTeamId,
+            is_active: true,
+            is_primary: myTeams.length === 0,
+            role: 'player',
+            season: 'Winter 2025/26'
+          });
+
+        if (error) throw error;
+        
+        alert('✅ Du wurdest erfolgreich zum Team hinzugefügt!');
+      }
+
       setShowAddModal(false);
       setSelectedTeamId('');
       loadTeams();

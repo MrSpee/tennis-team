@@ -842,7 +842,11 @@ function SupabaseProfile() {
           <TeamSelector onTeamsUpdated={() => {
             // Reload wenn sich Teams ändern
             if (player) {
-              loadPlayerProfile();
+              loadPlayerTeamsAndClubs(player.id);
+              // Trigger auch DataContext reload
+              window.dispatchEvent(new CustomEvent('reloadTeams', { 
+                detail: { playerId: player.id } 
+              }));
             }
           }} />
         </div>
