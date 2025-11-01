@@ -307,22 +307,51 @@ function Dashboard() {
   };
 
   // Motivationsspruch basierend auf Countdown (nur für ZUKÜNFTIGE Spiele)
+  // 🔧 Nutzt gleiche 06:00 Uhr Logik wie getNextMatchCountdown
   const getMotivationQuote = () => {
     if (!nextMatchAnySeason) return '';
     
     const diffTime = nextMatchAnySeason.date - now;
     const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
     
-    // Spiel steht bevor
+    // 🔧 Bestimme "HEUTE" und "MORGEN" basierend auf 06:00 Uhr als Tag-Start
+    const getTodayAt6AM = () => {
+      const today = new Date();
+      today.setHours(6, 0, 0, 0);
+      return today;
+    };
+
+    const getTomorrowAt6AM = () => {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(6, 0, 0, 0);
+      return tomorrow;
+    };
+
+    const tomorrowStart = getTomorrowAt6AM();
+    const dayAfterTomorrowStart = new Date(tomorrowStart);
+    dayAfterTomorrowStart.setDate(dayAfterTomorrowStart.getDate() + 1);
+
+    // Spiel steht bevor (< 2h)
     if (diffHours < 2) {
       return '💪 Gleich geht\'s los! Gebt alles!';
-    } else if (diffHours < 12) {
-      return '🎯 Heute zeigen wir, was wir drauf haben!';
-    } else if (diffHours < 24) {
+    }
+    
+    // Spiel ist HEUTE (vor morgen 06:00 Uhr)
+    if (nextMatchAnySeason.date < tomorrowStart) {
+      if (diffHours < 12) {
+        return '🎯 Heute zeigen wir, was wir drauf haben!';
+      }
       return '🔥 Noch heute ist der große Tag!';
-    } else if (diffHours < 48) {
+    }
+    
+    // Spiel ist MORGEN (zwischen morgen 06:00 und übermorgen 06:00)
+    if (nextMatchAnySeason.date >= tomorrowStart && nextMatchAnySeason.date < dayAfterTomorrowStart) {
       return '⚡ Morgen wird es ernst - bereitet euch vor!';
-    } else if (diffHours < 72) {
+    }
+    
+    // Übermorgen oder später
+    if (diffHours < 72) {
       return '🎾 Bald ist Spieltag - mentale Vorbereitung läuft!';
     } else if (diffHours < 168) { // < 1 Woche
       return '📅 Das nächste Match rückt näher!';
