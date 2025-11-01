@@ -160,8 +160,14 @@ const LiveResultsWithDB = () => {
 
         // Sortiere nach LK (NIEDRIGSTE zuerst = aufsteigend - niedrige LK ist besser!)
         const sortByLK = (a, b) => {
-          const lkA = parseFloat(a.current_lk || a.season_start_lk || a.ranking || 999);
-          const lkB = parseFloat(b.current_lk || b.season_start_lk || b.ranking || 999);
+          // 🔧 Extrahiere LK-Wert aus String (z.B. "LK 12.7" -> 12.7)
+          const getLKValue = (lkString) => {
+            if (!lkString) return 999;
+            const match = String(lkString).match(/(\d+(?:\.\d+)?)/);
+            return match ? parseFloat(match[1]) : 999;
+          };
+          const lkA = getLKValue(a.current_lk || a.season_start_lk || a.ranking);
+          const lkB = getLKValue(b.current_lk || b.season_start_lk || b.ranking);
           return lkA - lkB; // Aufsteigend: niedrigste LK zuerst
         };
         
@@ -215,8 +221,14 @@ const LiveResultsWithDB = () => {
             } else {
               // Sortiere nach LK (NIEDRIGSTE zuerst = aufsteigend - niedrige LK ist besser!)
               const sortByLK = (a, b) => {
-                const lkA = parseFloat(a.current_lk || a.season_start_lk || 999);
-                const lkB = parseFloat(b.current_lk || b.season_start_lk || 999);
+                // 🔧 Extrahiere LK-Wert aus String (z.B. "LK 12.7" -> 12.7)
+                const getLKValue = (lkString) => {
+                  if (!lkString) return 999;
+                  const match = String(lkString).match(/(\d+(?:\.\d+)?)/);
+                  return match ? parseFloat(match[1]) : 999;
+                };
+                const lkA = getLKValue(a.current_lk || a.season_start_lk);
+                const lkB = getLKValue(b.current_lk || b.season_start_lk);
                 return lkA - lkB; // Aufsteigend: niedrigste LK zuerst
               };
               const sortedOpponents = (opponentsData || []).sort(sortByLK);
@@ -534,9 +546,15 @@ const LiveResultsWithDB = () => {
         
         // NEU: Sortiere nach LK (niedrigste zuerst)
         const sortByLK = (a, b) => {
-          const lkA = a.current_lk || a.season_start_lk || 999;
-          const lkB = b.current_lk || b.season_start_lk || 999;
-          return parseFloat(lkA) - parseFloat(lkB);
+          // 🔧 Extrahiere LK-Wert aus String (z.B. "LK 12.7" -> 12.7)
+          const getLKValue = (lkString) => {
+            if (!lkString) return 999;
+            const match = String(lkString).match(/(\d+(?:\.\d+)?)/);
+            return match ? parseFloat(match[1]) : 999;
+          };
+          const lkA = getLKValue(a.current_lk || a.season_start_lk);
+          const lkB = getLKValue(b.current_lk || b.season_start_lk);
+          return lkA - lkB; // Aufsteigend: niedrigste LK zuerst
         };
         const sortedOpponents = (opponentsData || []).sort(sortByLK);
         setOpponentPlayers(sortedOpponents);
