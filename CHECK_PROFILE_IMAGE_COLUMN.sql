@@ -17,12 +17,17 @@ WHERE table_schema = 'public'
 
 -- SCHRITT 2: Zeige alle Spieler MIT profile_image
 -- ==========================================
+-- HINWEIS: Falls Spalte noch nicht existiert, erst ADD_PROFILE_IMAGE_COLUMN.sql ausführen!
 SELECT 
   '✅ Spieler MIT Profilbild' as info,
   id,
   name,
   email,
-  profile_image,
+  CASE 
+    WHEN profile_image IS NOT NULL AND profile_image != '' 
+    THEN LEFT(profile_image, 50) || '...' 
+    ELSE 'KEIN BILD'
+  END as profile_image_preview,
   LENGTH(profile_image) as url_length
 FROM players_unified
 WHERE profile_image IS NOT NULL
