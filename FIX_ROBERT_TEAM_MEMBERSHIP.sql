@@ -26,8 +26,7 @@ ORDER BY tm.is_active DESC, tm.created_at DESC;
 UPDATE team_memberships
 SET 
   is_active = true,
-  is_primary = true,
-  updated_at = NOW()
+  is_primary = true
 WHERE player_id = (
     SELECT id FROM players_unified WHERE email = 'robert.ellrich@icloud.com'
   )
