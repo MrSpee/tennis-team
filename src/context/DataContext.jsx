@@ -409,7 +409,7 @@ export function DataProvider({ children }) {
             id: matchday.id,
             date: matchDateTime,
             opponent: opponentName,
-            location: matchday.location,
+            location: isOurTeamHome ? 'Home' : (isOurTeamAway ? 'Away' : matchday.location), // ✅ AUS SPIELER-PERSPEKTIVE!
             venue: matchday.venue,
             season: matchday.season,
             playersNeeded: 4, // Standard für matchdays (kann später aus DB kommen)
