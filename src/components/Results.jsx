@@ -154,7 +154,7 @@ const Results = () => {
 
         return {
           matchId: match.id,
-          score: (!resultsError && resultsData) ? calculateMatchScore(resultsData, match.season, match.location) : null
+          score: (!resultsError && resultsData) ? calculateMatchScore(resultsData, match.season, match.home_team_id, match.away_team_id) : null
         };
       });
 
@@ -460,7 +460,18 @@ const Results = () => {
     return null;
   };
 
-  const calculateMatchScore = (results, matchSeason, matchLocation) => {
+  const calculateMatchScore = (results, matchSeason, homeTeamId, awayTeamId) => {
+    // NEUE LOGIK: Wie in MatchdayResults.jsx - bestimme userSide dynamisch!
+    const playerTeamIds = playerTeams.map(t => t.id);
+    const isHome = playerTeamIds.includes(homeTeamId);
+    const isAway = playerTeamIds.includes(awayTeamId);
+    const userSide = isHome ? 'home' : (isAway ? 'away' : null);
+    
+    if (!userSide) {
+      console.warn('⚠️ User is neither home nor away team!', { homeTeamId, awayTeamId, playerTeamIds });
+      return { home: 0, guest: 0, completed: 0, total: 6 };
+    }
+
     let ourTeamScore = 0;      // Unser Team (Chris Spee's Team)
     let opponentScore = 0;     // Gegner-Team
     let completedMatches = 0;
@@ -481,23 +492,22 @@ const Results = () => {
 
       if (result.status === 'completed' && result.winner) {
         completedMatches++;
-        // KORREKTE PERSPEKTIVE: Aus Sicht des eingeloggten Spielers
-        // result.winner bezieht sich IMMER auf home vs guest in der DB
-        if (matchLocation === 'Home') {
-          // Wir spielen HEIM: home = unser Team, guest = Gegner
+        // KORREKTE PERSPEKTIVE: Basierend auf userSide (wie MatchdayResults)
+        if (userSide === 'home') {
+          // Wir sind Home-Team
           if (result.winner === 'home') ourTeamScore++;
           else if (result.winner === 'guest') opponentScore++;
         } else {
-          // Wir spielen AUSWÄRTS: guest = unser Team, home = Gegner
-          if (result.winner === 'guest') ourTeamScore++;    // guest gewinnt = WIR gewinnen
-          else if (result.winner === 'home') opponentScore++; // home gewinnt = GEGNER gewinnt
+          // Wir sind Away-Team
+          if (result.winner === 'guest') ourTeamScore++;    // guest = unser Team
+          else if (result.winner === 'home') opponentScore++; // home = Gegner
         }
       } else {
         const matchWinner = calculateMatchWinner(result);
         if (matchWinner) {
           completedMatches++;
           // Gleiche Logik für berechnete Winner
-          if (matchLocation === 'Home') {
+          if (userSide === 'home') {
             if (matchWinner === 'home') ourTeamScore++;
             else if (matchWinner === 'guest') opponentScore++;
           } else {
@@ -508,14 +518,17 @@ const Results = () => {
       }
     });
 
-    console.log('📊 Score Calculation:', { 
+    console.log('📊 Score Calculation (wie MatchdayResults):', { 
       ourTeamScore, 
       opponentScore, 
       completedMatches, 
       expectedTotal,
       actualEntriesInDB: results.length,
       season: matchSeason,
-      location: matchLocation
+      userSide,
+      homeTeamId,
+      awayTeamId,
+      playerTeamIds
     });
 
     // WICHTIG: Rückgabe mit klareren Namen

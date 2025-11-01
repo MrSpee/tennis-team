@@ -414,6 +414,9 @@ export function DataProvider({ children }) {
             season: matchday.season,
             playersNeeded: 4, // Standard für matchdays (kann später aus DB kommen)
             teamId: ourTeam?.id,
+            // WICHTIG: Behalte Original-IDs für score-Berechnung in Results.jsx
+            home_team_id: matchday.home_team_id,
+            away_team_id: matchday.away_team_id,
             teamInfo: ourTeam ? {
               id: ourTeam.id,
               clubName: ourTeam.club_name,
