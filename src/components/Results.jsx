@@ -21,7 +21,6 @@ const Results = () => {
   } = useData();
   
   const [matchScores, setMatchScores] = useState({});
-  const [matchResults, setMatchResults] = useState({}); // Speichert die rohen results für Zusammenfassungen
   const [loading, setLoading] = useState(true);
   const [currentTime] = useState(new Date());
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -155,21 +154,18 @@ const Results = () => {
 
         return {
           matchId: match.id,
-          score: (!resultsError && resultsData) ? calculateMatchScore(resultsData, match.season, match.home_team_id, match.away_team_id) : null,
-          results: resultsData || [] // Speichere auch die rohen Ergebnisse für die Zusammenfassung
+          score: (!resultsError && resultsData) ? calculateMatchScore(resultsData, match.season, match.home_team_id, match.away_team_id) : null
         };
       });
 
       const scoresResults = await Promise.all(scoresPromises);
       console.log('✅ All scores fetched:', scoresResults.length);
       
-      // Baue scores-Objekt und results-Objekt
+      // Baue scores-Objekt
       const scores = {};
-      const results = {};
       scoresResults.forEach((result, index) => {
         if (result.score) {
           scores[result.matchId] = result.score;
-          results[result.matchId] = result.results; // Speichere die rohen Ergebnisse
           console.log(`  💯 Score ${index + 1}:`, result.score);
         }
       });
@@ -178,7 +174,6 @@ const Results = () => {
       console.log('🎯 Setting state with', processedMatches.length, 'matches and', Object.keys(scores).length, 'scores');
 
       setMatchScores(scores);
-      setMatchResults(results);
       
       console.log('✅ State set successfully!');
       
@@ -593,69 +588,6 @@ const Results = () => {
     return 'completed';
   };
 
-  // Funktion zur Generierung einer lustigen Match-Zusammenfassung
-  const generateMatchSummary = (matchId, homeTeamId, awayTeamId) => {
-    const results = matchResults[matchId];
-    if (!results || results.length === 0) return null;
-
-    const playerTeamIds = playerTeams.map(t => t.id);
-    const isHome = playerTeamIds.includes(homeTeamId);
-    const userSide = isHome ? 'home' : 'away';
-
-    // Analysiere die Einzelergebnisse
-    let highlights = [];
-    
-    results.forEach((result, idx) => {
-      if (!result.winner) return;
-      
-      // Bestimme ob WIR gewonnen haben
-      const weWon = (userSide === 'home' && result.winner === 'home') || 
-                    (userSide === 'away' && result.winner === 'guest');
-      
-      // Prüfe ob es ein Champion Tiebreak war (dritter Satz 10+ Punkte)
-      const isChampionsTiebreak = result.set3_home >= 10 || result.set3_guest >= 10;
-      const wasClose = isChampionsTiebreak || 
-                       Math.abs(result.set1_home - result.set1_guest) <= 2 ||
-                       Math.abs(result.set2_home - result.set2_guest) <= 2;
-      
-      // Hole Spielernamen (wenn verfügbar aus player state)
-      const matchType = result.match_type;
-      
-      if (wasClose && weWon) {
-        if (isChampionsTiebreak) {
-          highlights.push(`🔥 Nervenkrimi im ${matchType}! Champions-Tiebreak gewonnen!`);
-        } else {
-          highlights.push(`💪 Knapper ${matchType}-Sieg nach hartem Kampf!`);
-        }
-      } else if (wasClose && !weWon) {
-        if (isChampionsTiebreak) {
-          highlights.push(`😤 Hauchdünne Niederlage im ${matchType}-Champions-Tiebreak!`);
-        } else {
-          highlights.push(`😣 Schade! Knappe ${matchType}-Niederlage!`);
-        }
-      } else if (weWon) {
-        const scoreDiff = Math.abs(result.set1_home - result.set1_guest) + 
-                         Math.abs(result.set2_home - result.set2_guest);
-        if (scoreDiff >= 10) {
-          highlights.push(`🎾 Dominanter ${matchType}-Sieg!`);
-        }
-      }
-    });
-
-    // Generiere Zusammenfassung basierend auf Highlights
-    if (highlights.length === 0) {
-      const score = matchScores[matchId];
-      if (score.home > score.guest) {
-        return "Solider Auswärtssieg! 💪";
-      } else if (score.home < score.guest) {
-        return "Nicht unser Tag, aber wir kommen zurück! 🔥";
-      }
-    }
-
-    // Zeige die besten 2 Highlights
-    return highlights.slice(0, 2).join(' ');
-  };
-
   const { display } = getCurrentSeason();
 
   console.log('🎨 Rendering Results, loading:', loading, 'matches:', matches.length);
@@ -947,29 +879,6 @@ const Results = () => {
                       </div>
                     )}
 
-                    {/* Match Summary - Nur bei abgeschlossenen Spielen */}
-                    {isMedenspieleCompleted && (() => {
-                      const summary = generateMatchSummary(match.id, match.home_team_id, match.away_team_id);
-                      return summary ? (
-                        <div style={{
-                          marginTop: '0.75rem',
-                          padding: '0.5rem 0.75rem',
-                          background: outcome === 'win' ? 'rgba(16, 185, 129, 0.1)' : 
-                                     outcome === 'loss' ? 'rgba(239, 68, 68, 0.1)' : 
-                                     'rgba(107, 114, 128, 0.1)',
-                          border: `1px solid ${outcome === 'win' ? 'rgba(16, 185, 129, 0.3)' : 
-                                              outcome === 'loss' ? 'rgba(239, 68, 68, 0.3)' : 
-                                              'rgba(107, 114, 128, 0.3)'}`,
-                          borderRadius: '6px',
-                          fontSize: '0.8rem',
-                          color: '#374151',
-                          fontStyle: 'italic',
-                          lineHeight: '1.4'
-                        }}>
-                          {summary}
-                        </div>
-                      ) : null;
-                    })()}
                   </div>
 
                   {/* Details Link */}
