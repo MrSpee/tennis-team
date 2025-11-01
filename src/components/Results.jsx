@@ -778,15 +778,20 @@ const Results = () => {
                       <span className="match-opponent-name">{match.opponent}</span>
                     </div>
                     <div className="match-status">
-                      {/* Status Badge */}
+                      {/* Status Badge - basierend auf outcome */}
                       <div className={`improvement-badge-top ${
-                        status === 'completed' ? 'positive' : 
-                        status === 'in-progress' || status === 'live' ? 'neutral' : 
-                        'negative'
+                        outcome === 'win' ? 'positive' : 
+                        outcome === 'loss' ? 'negative' : 
+                        outcome === 'leading' ? 'positive' :
+                        outcome === 'trailing' ? 'negative' :
+                        'neutral'
                       }`} style={{ fontSize: '0.75rem', padding: '0.35rem 0.6rem' }}>
                         <span className="badge-value">
-                          {status === 'completed' ? '✅' : 
-                           status === 'in-progress' || status === 'live' ? '⏳' : 
+                          {outcome === 'win' ? '✅' : 
+                           outcome === 'loss' ? '❌' : 
+                           outcome === 'leading' ? '📈' :
+                           outcome === 'trailing' ? '📉' :
+                           status === 'live' || status === 'in-progress' ? '⏳' : 
                            status === 'upcoming' ? '📅' : 
                            '❓'}
                         </span>
