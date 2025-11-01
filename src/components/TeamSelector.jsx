@@ -65,7 +65,7 @@ export default function TeamSelector({ onTeamsUpdated }) {
         .select('id, is_active')
         .eq('player_id', player.id)
         .eq('team_id', selectedTeamId)
-        .eq('season', 'Winter 2025/26')
+        .eq('season', 'winter_25_26')  // ✅ Korrektes Format!
         .maybeSingle();
 
       if (checkError && checkError.code !== 'PGRST116') {
@@ -100,7 +100,7 @@ export default function TeamSelector({ onTeamsUpdated }) {
             is_active: true,
             is_primary: myTeams.length === 0,
             role: 'player',
-            season: 'Winter 2025/26'
+            season: 'winter_25_26'  // ✅ Korrektes Format!
           });
 
         if (error) throw error;
