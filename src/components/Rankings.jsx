@@ -16,7 +16,7 @@ import './Dashboard.css';
  * - ✅ Modulare Struktur für Wartbarkeit
  */
 function Rankings() {
-  const { players, matches, playerTeams } = useData();
+  const { players, playerTeams } = useData();
   
   // State Management
   const [sortBy, setSortBy] = useState('registered');
@@ -28,6 +28,7 @@ function Rankings() {
   const [playerStats, setPlayerStats] = useState({});
   const [expandedPlayers, setExpandedPlayers] = useState(new Set());
   const [lkCalculations, setLkCalculations] = useState({});
+  const [allMatches, setAllMatches] = useState([]);
   
   // LK-Berechnung Konstanten
   const SEASON_START = new Date('2025-09-29');
@@ -36,6 +37,50 @@ function Rankings() {
   // ==========================================
   // 1. CLUB & TEAM LOADING
   // ==========================================
+  
+  // Lade ALLE Matches (nicht gefiltert) für LK-Berechnung
+  useEffect(() => {
+    const loadAllMatches = async () => {
+      try {
+        console.log('🔵 Rankings: Loading ALL matchdays for LK calculation...');
+        const { data, error } = await supabase
+          .from('matchdays')
+          .select(`
+            id,
+            match_date,
+            opponent,
+            location,
+            venue,
+            season,
+            home_team_id,
+            away_team_id
+          `)
+          .order('match_date', { ascending: false });
+        
+        if (error) {
+          console.error('Error loading matchdays:', error);
+          return;
+        }
+        
+        // Konvertiere zu Format das calculatePlayerLK erwartet
+        const formattedMatches = (data || []).map(m => ({
+          id: m.id,
+          date: new Date(m.match_date),
+          opponent: m.opponent || 'Unbekannt',
+          location: m.location,
+          venue: m.venue,
+          season: m.season
+        }));
+        
+        setAllMatches(formattedMatches);
+        console.log('✅ Rankings: Loaded', formattedMatches.length, 'matches');
+      } catch (error) {
+        console.error('Error loading all matches:', error);
+      }
+    };
+    
+    loadAllMatches();
+  }, []);
   
   const loadPlayerStats = useCallback(async (playersToProcess) => {
     if (!playersToProcess || playersToProcess.length === 0) {
@@ -46,9 +91,9 @@ function Rankings() {
     console.log('📊 Loading stats for', playersToProcess.length, 'players');
     
     try {
-      const { data: allResults, error } = await supabase
+        const { data: allResults, error } = await supabase
         .from('match_results')
-        .select('*');
+        .select('*, matchday:matchday_id(match_date)');
       
       if (error) {
         console.error('Error loading match results:', error);
@@ -257,13 +302,10 @@ function Rankings() {
       let begleitLK = startLK;
       
       console.log('📊 Start-LK:', startLK);
-      console.log('📊 Available matches:', matches.length);
-      
-      // ✅ KRITISCH: ALLE Matches, NICHT nur aktuelle Season!
-      const allMatches = matches;
+      console.log('📊 Available matches:', allMatches.length);
       
       if (allMatches.length === 0) {
-        console.log('⚠️ No matches available in DataContext');
+        console.log('⚠️ No matches available');
         alert('Keine Matches verfügbar. Bitte warten bis die Daten geladen sind.');
         return;
       }
@@ -280,7 +322,7 @@ function Rankings() {
         const { data: resultsData, error } = await supabase
           .from('match_results')
           .select('*')
-          .eq('match_id', match.id);
+          .eq('matchday_id', match.id);
         
         if (error) {
           console.log('⚠️ Error loading match results:', error);

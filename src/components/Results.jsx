@@ -239,20 +239,67 @@ const Results = () => {
         return;
       }
 
+      // 🚀 PERFORMANCE: Lade ALLE match_results für ALLE Matches auf einmal
+      const matchIds = seasonMatches.map(m => m.id);
+      console.log('🔍 Batch-loading match_results for', matchIds.length, 'matchdays...');
+      
+      const { data: allResultsData, error: allResultsError } = await supabase
+        .from('match_results')
+        .select('*')
+        .in('matchday_id', matchIds);
+      
+      if (allResultsError) {
+        console.error('Error loading all match results:', allResultsError);
+        setPlayerResults({});
+        return;
+      }
+      
+      console.log('✅ Loaded', allResultsData?.length || 0, 'total match_results');
+      
+      // 🚀 PERFORMANCE: Sammle alle Player-IDs und lade in einem Batch
+      const allPlayerIds = new Set();
+      (allResultsData || []).forEach(r => {
+        if (r.home_player_id) allPlayerIds.add(r.home_player_id);
+        if (r.home_player1_id) allPlayerIds.add(r.home_player1_id);
+        if (r.home_player2_id) allPlayerIds.add(r.home_player2_id);
+        if (r.guest_player_id) allPlayerIds.add(r.guest_player_id);
+        if (r.guest_player1_id) allPlayerIds.add(r.guest_player1_id);
+        if (r.guest_player2_id) allPlayerIds.add(r.guest_player2_id);
+      });
+      
+      console.log('🔍 Batch-loading player data for', allPlayerIds.size, 'unique players...');
+      
+      const { data: allPlayersData, error: playersError } = await supabase
+        .from('players_unified')
+        .select('id, name, current_lk, season_start_lk, ranking, player_type, profile_image')
+        .in('id', Array.from(allPlayerIds));
+      
+      if (playersError) {
+        console.error('Error loading players:', playersError);
+      }
+      
+      // Erstelle schnelle Lookup-Map
+      const playerDataMap = {};
+      (allPlayersData || []).forEach(p => {
+        playerDataMap[p.id] = p;
+      });
+      
+      console.log('✅ Loaded player data for', Object.keys(playerDataMap).length, 'players');
+      
       // Erstelle Player-Results mit Match-Ergebnissen
       const playerResultsMap = {};
       
       for (const player of uniquePlayers) {
-        console.log(`🔍 Loading matches for player: ${player.name}`);
+        console.log(`🔍 Processing matches for player: ${player.name}`);
         const playerMatches = [];
 
-        // Lade Match-Ergebnisse für diesen Spieler
+        // Filtere Match-Ergebnisse für diesen Spieler (KEIN AWAIT mehr!)
         for (const match of seasonMatches) {
-          const { data: resultsData } = await supabase
-            .from('match_results')
-            .select('*')
-            .eq('matchday_id', match.id)
-            .or(`home_player_id.eq.${player.id},home_player1_id.eq.${player.id},home_player2_id.eq.${player.id},guest_player_id.eq.${player.id},guest_player1_id.eq.${player.id},guest_player2_id.eq.${player.id}`);
+          const resultsData = (allResultsData || []).filter(r => 
+            r.matchday_id === match.id &&
+            (r.home_player_id === player.id || r.home_player1_id === player.id || r.home_player2_id === player.id ||
+             r.guest_player_id === player.id || r.guest_player1_id === player.id || r.guest_player2_id === player.id)
+          );
 
           if (resultsData && resultsData.length > 0) {
             console.log(`  📊 Found ${resultsData.length} matches for ${player.name} in ${match.opponent}`);
@@ -274,71 +321,40 @@ const Results = () => {
               let opponent2LK = null;
 
               if (result.match_type === 'Einzel') {
-                // Lade Gegner (ist im jeweils anderen Team)
+                // Lookup Gegner aus Map (KEIN AWAIT!)
                 const opponentId = isPlayerInHomeTeam ? result.guest_player_id : result.home_player_id;
+                const oppData = opponentId ? playerDataMap[opponentId] : null;
                 
-                if (opponentId) {
-                  const { data: oppData } = await supabase
-                    .from('players_unified')
-                    .select('name, current_lk, player_type')
-                    .eq('id', opponentId)
-                    .single();
-                  
-                  if (oppData) {
-                    opponentName = oppData.name;
-                    opponentLK = oppData.current_lk;
-                  } else {
-                    opponentName = 'Unbekannt';
-                    opponentLK = 'LK ?';
-                  }
+                if (oppData) {
+                  opponentName = oppData.name;
+                  opponentLK = oppData.current_lk;
+                } else {
+                  opponentName = 'Unbekannt';
+                  opponentLK = 'LK ?';
                 }
               } else if (result.match_type === 'Doppel') {
-                // Lade beide Gegner
+                // Lookup Gegner aus Map (KEIN AWAIT!)
                 const opp1Id = isPlayerInHomeTeam ? result.guest_player1_id : result.home_player1_id;
                 const opp2Id = isPlayerInHomeTeam ? result.guest_player2_id : result.home_player2_id;
                 
-                if (opp1Id) {
-                  const { data: opp1Data } = await supabase
-                    .from('players_unified')
-                    .select('name, current_lk')
-                    .eq('id', opp1Id)
-                    .single();
-                  
-                  if (opp1Data) {
-                    opponent1Name = opp1Data.name || 'Unbekannt';
-                    opponent1LK = opp1Data.current_lk;
-                  }
-                }
+                const opp1Data = opp1Id ? playerDataMap[opp1Id] : null;
+                const opp2Data = opp2Id ? playerDataMap[opp2Id] : null;
                 
-                if (opp2Id) {
-                  const { data: opp2Data } = await supabase
-                    .from('players_unified')
-                    .select('name, current_lk')
-                    .eq('id', opp2Id)
-                    .single();
-                  
-                  if (opp2Data) {
-                    opponent2Name = opp2Data.name || 'Unbekannt';
-                    opponent2LK = opp2Data.current_lk;
-                  }
-                }
+                opponent1Name = opp1Data?.name || 'Unbekannt';
+                opponent1LK = opp1Data?.current_lk;
+                opponent2Name = opp2Data?.name || 'Unbekannt';
+                opponent2LK = opp2Data?.current_lk;
                 
-                // Lade Partner (ist im gleichen Team)
+                // Lookup Partner aus Map (KEIN AWAIT!)
                 const partnerId = isPlayerInHomeTeam
                   ? (result.home_player1_id === player.id ? result.home_player2_id : result.home_player1_id)
                   : (result.guest_player1_id === player.id ? result.guest_player2_id : result.guest_player1_id);
                 
-                if (partnerId) {
-                  const { data: partnerData } = await supabase
-                    .from('players_unified')
-                    .select('name, current_lk, season_start_lk, ranking')
-                    .eq('id', partnerId)
-                    .single();
-                  
-                  if (partnerData) {
-                    partnerName = partnerData.name;
-                    partnerLK = partnerData.current_lk || partnerData.season_start_lk || partnerData.ranking;
-                  }
+                const partnerData = partnerId ? playerDataMap[partnerId] : null;
+                
+                if (partnerData) {
+                  partnerName = partnerData.name;
+                  partnerLK = partnerData.current_lk || partnerData.season_start_lk || partnerData.ranking;
                 }
                 
                 // Nutze opponent1Name für Anzeige
@@ -863,7 +879,7 @@ const Results = () => {
         // SPIELER-ANSICHT
         <div className="fade-in lk-card-full">
           <div className="formkurve-header">
-            <div className="formkurve-title">Spieler-Ergebnisse</div>
+            <div className="formkurve-title">Spieler-Ergebnisse in der aktuellen Saison ({getCurrentSeason().display})</div>
             <div className="match-count-badge">
               {loadingPlayerResults ? '...' : Object.values(playerResults).length} {Object.values(playerResults).length === 1 ? 'Spieler' : 'Spieler'}
             </div>
@@ -894,32 +910,22 @@ const Results = () => {
                   })
                   .map(({ player, matches: playerMatches }) => {
                     const wins = playerMatches.filter(m => {
-                      // Bestimme ob unser Spieler im Home- oder Guest-Team ist
                       const isPlayerInHomeTeam = m.home_player_id === player.id || 
                                                  m.home_player1_id === player.id || 
                                                  m.home_player2_id === player.id;
-                      
                       const winner = m.winner || calculateMatchWinner(m);
-                      
-                      // Unser Spieler gewinnt wenn:
-                      // - Er ist im Home-Team UND winner === 'home' ODER
-                      // - Er ist im Guest-Team UND winner === 'guest'
                       return isPlayerInHomeTeam ? winner === 'home' : winner === 'guest';
                     }).length;
                     
                     const losses = playerMatches.filter(m => {
-                      // Bestimme ob unser Spieler im Home- oder Guest-Team ist
                       const isPlayerInHomeTeam = m.home_player_id === player.id || 
                                                  m.home_player1_id === player.id || 
                                                  m.home_player2_id === player.id;
-                      
                       const winner = m.winner || calculateMatchWinner(m);
-                      
-                      // Unser Spieler verliert wenn:
-                      // - Er ist im Home-Team UND winner === 'guest' ODER
-                      // - Er ist im Guest-Team UND winner === 'home'
                       return isPlayerInHomeTeam ? winner === 'guest' : winner === 'home';
                     }).length;
+                    
+                    const totalMatches = playerMatches.length;
 
                     return (
                       <div key={player.id} id={`player-${player.id}`} className="player-section">
@@ -933,8 +939,39 @@ const Results = () => {
                               {player.current_lk || player.season_start_lk || player.ranking || 'LK ?'}
                             </span>
                             <div className="player-stats-compact">
-                              <span className="stat-badge wins">✅ {wins} {wins === 1 ? 'Sieg' : 'Siege'}</span>
-                              <span className="stat-badge losses">❌ {losses} {losses === 1 ? 'Niederlage' : 'Niederlagen'}</span>
+                              <span className="stat-badge total" style={{
+                                background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                                color: 'white',
+                                padding: '0.375rem 0.75rem',
+                                borderRadius: '6px',
+                                fontSize: '0.8rem',
+                                fontWeight: '700',
+                                boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)'
+                              }}>
+                                🎾 {totalMatches} {totalMatches === 1 ? 'Einsatz' : 'Einsätze'}
+                              </span>
+                              <span className="stat-badge wins" style={{
+                                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                color: 'white',
+                                padding: '0.375rem 0.75rem',
+                                borderRadius: '6px',
+                                fontSize: '0.8rem',
+                                fontWeight: '700',
+                                boxShadow: '0 2px 4px rgba(16, 185, 129, 0.3)'
+                              }}>
+                                ✅ {wins} {wins === 1 ? 'Sieg' : 'Siege'}
+                              </span>
+                              <span className="stat-badge losses" style={{
+                                background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                                color: 'white',
+                                padding: '0.375rem 0.75rem',
+                                borderRadius: '6px',
+                                fontSize: '0.8rem',
+                                fontWeight: '700',
+                                boxShadow: '0 2px 4px rgba(239, 68, 68, 0.3)'
+                              }}>
+                                ❌ {losses} {losses === 1 ? 'Niederlage' : 'Niederlagen'}
+                              </span>
                             </div>
                           </div>
                         </div>
