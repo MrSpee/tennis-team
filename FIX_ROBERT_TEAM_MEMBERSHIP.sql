@@ -26,11 +26,13 @@ ORDER BY tm.is_active DESC, tm.created_at DESC;
 UPDATE team_memberships
 SET 
   is_active = true,
-  is_primary = true,  -- Als Hauptmannschaft setzen
+  is_primary = true,
   updated_at = NOW()
-WHERE player_id = (SELECT id FROM players_unified WHERE email = 'robert.ellrich@icloud.com')
-  AND team_id = 'ff090c47-ff26-4df1-82fd-3e4358320d7f'  -- Rot-Gelb Sürth Herren 40
-  AND (is_active = false OR is_primary = false);  -- Nur updaten wenn nötig
+WHERE player_id = (
+    SELECT id FROM players_unified WHERE email = 'robert.ellrich@icloud.com'
+  )
+  AND team_id = 'ff090c47-ff26-4df1-82fd-3e4358320d7f'::uuid
+  AND (is_active = false OR is_primary = false);
 
 -- SCHRITT 3: Zeige Ergebnis (NACHHER)
 -- ==========================================
