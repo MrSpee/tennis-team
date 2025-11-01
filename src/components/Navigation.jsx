@@ -10,7 +10,7 @@ function Navigation() {
     <nav className="bottom-nav">
       <NavLink to="/" className="nav-item">
         <Home size={24} />
-        <span>Start</span>
+        <span>Übersicht</span>
       </NavLink>
       
       <NavLink to="/matches" className="nav-item">
