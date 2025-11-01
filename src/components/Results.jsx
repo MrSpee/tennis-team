@@ -787,6 +787,40 @@ const Results = () => {
                   onClick={() => navigate(`/ergebnisse/${match.id}`)}
                   style={{ cursor: 'pointer' }}
                 >
+                  {/* Match Description - Ganz oben - Nur bei abgeschlossenen Spielen */}
+                  {isMedenspieleCompleted && match.teamInfo && (
+                    <div style={{
+                      padding: '0.75rem 1rem',
+                      background: outcome === 'win' 
+                        ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(5, 150, 105, 0.1) 100%)'
+                        : outcome === 'loss'
+                        ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(220, 38, 38, 0.1) 100%)'
+                        : 'linear-gradient(135deg, rgba(107, 114, 128, 0.15) 0%, rgba(75, 85, 99, 0.1) 100%)',
+                      borderBottom: '1px solid rgba(0, 0, 0, 0.05)',
+                      fontSize: '0.85rem',
+                      color: '#1f2937',
+                      lineHeight: '1.5',
+                      textAlign: 'center',
+                      fontWeight: '500'
+                    }}>
+                      {outcome === 'win' && (
+                        <span>
+                          <strong style={{ color: '#059669' }}>{match.teamInfo.clubName}</strong> gewinnt <strong style={{ color: '#059669' }}>{playerScore.playerScore}:{playerScore.opponentScore}</strong> gegen {match.opponent}
+                        </span>
+                      )}
+                      {outcome === 'loss' && (
+                        <span>
+                          <strong style={{ color: '#dc2626' }}>{match.teamInfo.clubName}</strong> verliert <strong style={{ color: '#dc2626' }}>{playerScore.playerScore}:{playerScore.opponentScore}</strong> gegen {match.opponent}
+                        </span>
+                      )}
+                      {outcome === 'draw' && (
+                        <span>
+                          <strong style={{ color: '#6b7280' }}>{match.teamInfo.clubName}</strong> spielt <strong style={{ color: '#6b7280' }}>{playerScore.playerScore}:{playerScore.opponentScore}</strong> remis gegen {match.opponent}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   {/* Match Header */}
                   <div className="match-header">
                     <div className="match-info">
@@ -876,36 +910,6 @@ const Results = () => {
                     {!isMedenspieleCompleted && rawScore && rawScore.completed > 0 && (
                       <div className="outcome-badge in-progress">
                         {outcomeLabel}
-                      </div>
-                    )}
-
-                    {/* Match Description - Aus Spieler-Sicht */}
-                    {isMedenspieleCompleted && match.teamInfo && (
-                      <div style={{
-                        marginTop: '0.75rem',
-                        padding: '0.5rem 0.75rem',
-                        background: 'rgba(243, 244, 246, 0.8)',
-                        borderRadius: '6px',
-                        fontSize: '0.8rem',
-                        color: '#4b5563',
-                        lineHeight: '1.4',
-                        textAlign: 'center'
-                      }}>
-                        {outcome === 'win' && (
-                          <span>
-                            <strong>{match.teamInfo.clubName}</strong> gewinnt <strong>{playerScore.playerScore}:{playerScore.opponentScore}</strong> gegen {match.opponent}
-                          </span>
-                        )}
-                        {outcome === 'loss' && (
-                          <span>
-                            <strong>{match.teamInfo.clubName}</strong> verliert <strong>{playerScore.playerScore}:{playerScore.opponentScore}</strong> gegen {match.opponent}
-                          </span>
-                        )}
-                        {outcome === 'draw' && (
-                          <span>
-                            <strong>{match.teamInfo.clubName}</strong> spielt <strong>{playerScore.playerScore}:{playerScore.opponentScore}</strong> remis gegen {match.opponent}
-                          </span>
-                        )}
                       </div>
                     )}
 
