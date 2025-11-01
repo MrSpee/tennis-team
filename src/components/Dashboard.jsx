@@ -877,7 +877,9 @@ function Dashboard() {
                         }}>
                           <div style={{ flex: '1 1 0%', minWidth: '200px' }}>
                             <h4 style={{ margin: '0 0 0.25rem', fontSize: '1.25rem', fontWeight: '700', color: 'rgb(31, 41, 55)' }}>
-                              {team.team_name || team.category}
+                              {team.category && team.team_name && team.team_name.trim() !== '' 
+                                ? `${team.category} - ${team.team_name}. Mannschaft`
+                                : team.category || team.team_name}
                             </h4>
                           </div>
                           
