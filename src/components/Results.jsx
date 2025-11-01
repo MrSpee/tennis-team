@@ -461,8 +461,8 @@ const Results = () => {
   };
 
   const calculateMatchScore = (results, matchSeason, matchLocation) => {
-    let homeScore = 0;
-    let guestScore = 0;
+    let ourTeamScore = 0;      // Unser Team (Chris Spee's Team)
+    let opponentScore = 0;     // Gegner-Team
     let completedMatches = 0;
 
     // Erwartete Anzahl Spiele je nach Saison
@@ -481,17 +481,16 @@ const Results = () => {
 
       if (result.status === 'completed' && result.winner) {
         completedMatches++;
-        // KORRIGIERTE MULTI-TEAM LOGIK:
-        // winner bezieht sich auf das Heim-Team vs Gast-Team
-        // Wir müssen das in "unser Team" vs "Gegner-Team" umwandeln
+        // KORREKTE PERSPEKTIVE: Aus Sicht des eingeloggten Spielers
+        // result.winner bezieht sich IMMER auf home vs guest in der DB
         if (matchLocation === 'Home') {
-          // Wir spielen Heim: home = unser Team, guest = Gegner
-          if (result.winner === 'home') homeScore++;
-          else if (result.winner === 'guest') guestScore++;
+          // Wir spielen HEIM: home = unser Team, guest = Gegner
+          if (result.winner === 'home') ourTeamScore++;
+          else if (result.winner === 'guest') opponentScore++;
         } else {
-          // Wir spielen Auswärts: guest = unser Team, home = Gegner
-          if (result.winner === 'guest') homeScore++; // guest = unser Team gewinnt
-          else if (result.winner === 'home') guestScore++; // home = Gegner gewinnt
+          // Wir spielen AUSWÄRTS: guest = unser Team, home = Gegner
+          if (result.winner === 'guest') ourTeamScore++;    // guest gewinnt = WIR gewinnen
+          else if (result.winner === 'home') opponentScore++; // home gewinnt = GEGNER gewinnt
         }
       } else {
         const matchWinner = calculateMatchWinner(result);
@@ -499,19 +498,19 @@ const Results = () => {
           completedMatches++;
           // Gleiche Logik für berechnete Winner
           if (matchLocation === 'Home') {
-            if (matchWinner === 'home') homeScore++;
-            else if (matchWinner === 'guest') guestScore++;
+            if (matchWinner === 'home') ourTeamScore++;
+            else if (matchWinner === 'guest') opponentScore++;
           } else {
-            if (matchWinner === 'guest') homeScore++; // guest = unser Team gewinnt
-            else if (matchWinner === 'home') guestScore++; // home = Gegner gewinnt
+            if (matchWinner === 'guest') ourTeamScore++;    // guest = unser Team
+            else if (matchWinner === 'home') opponentScore++; // home = Gegner
           }
         }
       }
     });
 
     console.log('📊 Score Calculation:', { 
-      homeScore, 
-      guestScore, 
+      ourTeamScore, 
+      opponentScore, 
       completedMatches, 
       expectedTotal,
       actualEntriesInDB: results.length,
@@ -519,7 +518,9 @@ const Results = () => {
       location: matchLocation
     });
 
-    return { home: homeScore, guest: guestScore, completed: completedMatches, total: expectedTotal };
+    // WICHTIG: Rückgabe mit klareren Namen
+    // 'home' = unser Team, 'guest' = Gegner (aus Spieler-Perspektive)
+    return { home: ourTeamScore, guest: opponentScore, completed: completedMatches, total: expectedTotal };
   };
 
   // Neue Funktion: Berechne Score aus Spieler-Perspektive
@@ -533,8 +534,9 @@ const Results = () => {
       };
     }
     
-    // VEREINFACHT: calculateMatchScore hat bereits die richtige Perspektive berechnet
-    // rawScore.home = unser Team, rawScore.guest = Gegner
+    // ✅ calculateMatchScore hat bereits die korrekte Perspektive berechnet!
+    // rawScore.home = ourTeamScore (unser Team, egal ob Heim oder Auswärts)
+    // rawScore.guest = opponentScore (Gegner-Team)
     return {
       playerScore: rawScore.home,
       opponentScore: rawScore.guest,
