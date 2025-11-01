@@ -198,7 +198,7 @@ const Results = () => {
       
       console.log('🔍 Loading team players for teams:', playerTeamIds);
 
-      // Lade alle Spieler aus den eigenen Teams
+      // Lade alle Spieler aus den eigenen Teams (MIT profile_image!)
       const { data: teamPlayers, error: playerTeamsError } = await supabase
         .from('team_memberships')
         .select(`
@@ -209,7 +209,8 @@ const Results = () => {
             current_lk, 
             season_start_lk, 
             ranking,
-            player_type
+            player_type,
+            profile_image
           )
         `)
         .in('team_id', playerTeamIds)
@@ -278,13 +279,20 @@ const Results = () => {
         console.error('Error loading players:', playersError);
       }
       
-      // Erstelle schnelle Lookup-Map
+      // Erstelle schnelle Lookup-Map (Gegner aus match_results)
       const playerDataMap = {};
       (allPlayersData || []).forEach(p => {
         playerDataMap[p.id] = p;
       });
       
-      console.log('✅ Loaded player data for', Object.keys(playerDataMap).length, 'players');
+      // 🔧 FIX: Füge auch eigene Team-Spieler zur Map hinzu (für profile_image!)
+      uniquePlayers.forEach(p => {
+        if (p && p.id && !playerDataMap[p.id]) {
+          playerDataMap[p.id] = p;
+        }
+      });
+      
+      console.log('✅ Loaded player data for', Object.keys(playerDataMap).length, 'players (incl. team players)');
       
       // Erstelle Player-Results mit Match-Ergebnissen
       const playerResultsMap = {};
