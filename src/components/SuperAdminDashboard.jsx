@@ -48,22 +48,42 @@ function SuperAdminDashboard() {
   const [matchSortField, setMatchSortField] = useState('date'); // 'date', 'team', 'status'
   const [matchSortDirection, setMatchSortDirection] = useState('desc'); // 'asc', 'desc'
 
-  // Commit-Info für Anzeige in der Überschrift (verschiedene Umgebungen unterstützt)
-  const getCommitSha = () => {
+  // Build-Info für Anzeige (Commit SHA + Build-Zeit)
+  const getBuildInfo = () => {
     try {
       const g = (typeof globalThis !== 'undefined') ? globalThis : undefined;
       const p = g && g.process ? g.process : undefined;
       const w = g && g.window ? g.window : undefined;
-      if (p && p.env && p.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA) return p.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA;
-      if (p && p.env && p.env.VERCEL_GIT_COMMIT_SHA) return p.env.VERCEL_GIT_COMMIT_SHA;
-      if (w && w.__COMMIT_SHA__) return w.__COMMIT_SHA__;
-      return '';
+      
+      // Versuche Commit SHA zu holen
+      let commitSha = '';
+      if (p && p.env && p.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA) commitSha = p.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA;
+      else if (p && p.env && p.env.VERCEL_GIT_COMMIT_SHA) commitSha = p.env.VERCEL_GIT_COMMIT_SHA;
+      else if (w && w.__COMMIT_SHA__) commitSha = w.__COMMIT_SHA__;
+      
+      // Build-Timestamp (aus import.meta oder statisch)
+      const buildTime = import.meta.env?.VITE_BUILD_TIME || new Date().toISOString();
+      
+      return {
+        commitSha,
+        buildTime,
+        shortCommit: commitSha ? String(commitSha).substring(0, 7) : null,
+        buildDate: new Date(buildTime).toLocaleDateString('de-DE', { 
+          day: '2-digit', 
+          month: '2-digit', 
+          year: 'numeric' 
+        })
+      };
     } catch (_) {
-      return '';
+      return {
+        commitSha: '',
+        buildTime: new Date().toISOString(),
+        shortCommit: null,
+        buildDate: new Date().toLocaleDateString('de-DE')
+      };
     }
   };
-  const commitSha = getCommitSha();
-  const shortCommit = commitSha ? String(commitSha).substring(0, 7) : 'local';
+  const buildInfo = getBuildInfo();
 
   // State für Match-Detail-Modal
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -1103,19 +1123,41 @@ function SuperAdminDashboard() {
         <div className="formkurve-header">
           <div className="formkurve-title">
             👑 Super-Admin Dashboard
+            {/* Build-Info Badge */}
             <span style={{
-              marginLeft: '0.5rem',
-              fontSize: '0.75rem',
+              marginLeft: '0.75rem',
+              fontSize: '0.7rem',
               fontWeight: 700,
-              background: '#eef2ff',
-              color: '#3730a3',
-              border: '1px solid #c7d2fe',
+              background: buildInfo.shortCommit ? '#dcfce7' : '#fef3c7',
+              color: buildInfo.shortCommit ? '#15803d' : '#92400e',
+              border: buildInfo.shortCommit ? '1px solid #86efac' : '1px solid #fcd34d',
               borderRadius: '6px',
-              padding: '0.15rem 0.4rem'
+              padding: '0.25rem 0.6rem',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem'
             }}
-              title={`Commit: ${commitSha || 'local build'}`}
+              title={`Build: ${buildInfo.buildDate}${buildInfo.commitSha ? `\nCommit: ${buildInfo.commitSha}` : ''}`}
             >
-              {shortCommit}
+              {buildInfo.shortCommit ? (
+                <>
+                  <span>🚀</span>
+                  <span>{buildInfo.shortCommit}</span>
+                </>
+              ) : (
+                <>
+                  <span>🏠</span>
+                  <span>LOCAL</span>
+                </>
+              )}
+              <span style={{ 
+                opacity: 0.7, 
+                fontSize: '0.65rem',
+                borderLeft: buildInfo.shortCommit ? '1px solid #86efac' : '1px solid #fcd34d',
+                paddingLeft: '0.5rem'
+              }}>
+                {buildInfo.buildDate}
+              </span>
             </span>
           </div>
           <div className="formkurve-subtitle">
