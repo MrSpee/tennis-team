@@ -635,7 +635,12 @@ function Matches() {
           <div className="season-content">
             <div className="season-matches">
             {pastMatches.map(match => (
-                <div key={match.id} className="match-preview-card finished">
+                <div 
+                  key={match.id} 
+                  className="match-preview-card finished"
+                  onClick={() => navigate(`/ergebnisse/${match.id}`)}
+                  style={{ cursor: 'pointer' }}
+                >
                   <div className="match-preview-header">
                     <div className="match-preview-date">
                       {format(match.date, 'EEE, dd. MMM', { locale: de })}

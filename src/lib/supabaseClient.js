@@ -50,6 +50,7 @@ export const getCurrentUser = async () => {
 
 /**
  * Erstellt einen neuen User und Player-Eintrag
+ * @deprecated - Use AuthContext.register() instead
  */
 export const createPlayer = async (email, password, playerData) => {
   try {
@@ -66,17 +67,22 @@ export const createPlayer = async (email, password, playerData) => {
 
     if (authError) throw authError;
 
-    // 2. Player-Eintrag erstellen
+    // 2. Player-Eintrag erstellen in players_unified
     const { data: player, error: playerError } = await supabase
-      .from('players')
+      .from('players_unified')
       .insert({
         user_id: authData.user.id,
         name: playerData.name,
         email: email,
         phone: playerData.phone || null,
+        current_lk: playerData.ranking || null,
+        season_start_lk: playerData.ranking || null,
         ranking: playerData.ranking || null,
         points: playerData.points || 0,
-        role: 'player'
+        player_type: 'app_user',
+        is_active: true,
+        status: 'active',
+        onboarding_status: 'not_started'
       })
       .select()
       .single();
@@ -92,6 +98,7 @@ export const createPlayer = async (email, password, playerData) => {
 
 /**
  * Login mit Email/Passwort
+ * @deprecated - Use AuthContext.login() instead
  */
 export const signIn = async (email, password) => {
   const { data, error } = await supabase.auth.signInWithPassword({
@@ -104,12 +111,13 @@ export const signIn = async (email, password) => {
     return { user: null, error };
   }
 
-  // Player-Daten laden
+  // Player-Daten laden aus players_unified
   const { data: player } = await supabase
-    .from('players')
+    .from('players_unified')
     .select('*')
     .eq('user_id', data.user.id)
-    .single();
+    .eq('player_type', 'app_user')
+    .maybeSingle();
 
   return { user: data.user, player, error: null };
 };
@@ -127,16 +135,29 @@ export const signOut = async () => {
 
 /**
  * Prüft ob User Captain ist
+ * @deprecated - Check player.role from AuthContext instead
  */
 export const isCaptain = async (userId) => {
   const { data, error } = await supabase
-    .from('players')
-    .select('role')
+    .from('players_unified')
+    .select('id')
     .eq('user_id', userId)
-    .single();
+    .eq('player_type', 'app_user')
+    .maybeSingle();
 
-  if (error) return false;
-  return data?.role === 'captain';
+  if (error || !data) return false;
+  
+  // Prüfe ob Spieler Captain-Rolle in einem Team hat
+  const { data: membership } = await supabase
+    .from('team_memberships')
+    .select('role')
+    .eq('player_id', data.id)
+    .eq('role', 'captain')
+    .eq('is_active', true)
+    .limit(1)
+    .maybeSingle();
+  
+  return !!membership;
 };
 
 export default supabase;

@@ -667,9 +667,16 @@
   align-items: center;
   gap: 1rem;
   padding: 1rem;
-  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+  border: 2px solid #e5e7eb;
   border-radius: 12px;
   margin-bottom: 1.5rem;
+  transition: all 0.2s;
+}
+
+.player-summary-card:hover {
+  border-color: #3b82f6;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .player-avatar-compact {
@@ -677,11 +684,12 @@
   height: 56px;
   border-radius: 50%;
   overflow: hidden;
-  background: linear-gradient(135deg, #10b981, #059669);
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  border: 2px solid #e5e7eb;
 }
 
 .player-avatar-compact img {
@@ -705,7 +713,7 @@
 
 .player-lk-badge {
   font-size: 0.875rem;
-  color: #059669;
+  color: #3b82f6;
   font-weight: 600;
 }
 

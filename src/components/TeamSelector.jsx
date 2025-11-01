@@ -31,17 +31,18 @@ export default function TeamSelector({ onTeamsUpdated }) {
 
       // Lade meine Team-Zuordnungen
       const { data: myTeamData, error: myTeamsError } = await supabase
-        .from('player_teams')
+        .from('team_memberships')
         .select(`
           *,
-          team:team_id (
+          team_info!inner (
             id,
             team_name,
             club_name,
             category
           )
         `)
-        .eq('player_id', player.id);
+        .eq('player_id', player.id)
+        .eq('is_active', true);
 
       if (myTeamsError) throw myTeamsError;
 
@@ -59,13 +60,14 @@ export default function TeamSelector({ onTeamsUpdated }) {
 
     try {
       const { error } = await supabase
-        .from('player_teams')
+        .from('team_memberships')
         .insert({
           player_id: player.id,
           team_id: selectedTeamId,
-          status: 'active', // Direkt aktiv (keine Bestätigung nötig)
+          is_active: true,
           is_primary: myTeams.length === 0, // Erstes Team = Primary
-          role: 'player'
+          role: 'player',
+          season: 'Winter 2025/26'
         });
 
       if (error) throw error;
@@ -88,13 +90,13 @@ export default function TeamSelector({ onTeamsUpdated }) {
     try {
       // Setze alle auf false
       await supabase
-        .from('player_teams')
+        .from('team_memberships')
         .update({ is_primary: false })
         .eq('player_id', player.id);
 
       // Setze ausgewähltes Team auf true
       await supabase
-        .from('player_teams')
+        .from('team_memberships')
         .update({ is_primary: true })
         .eq('player_id', player.id)
         .eq('team_id', teamId);
@@ -114,8 +116,8 @@ export default function TeamSelector({ onTeamsUpdated }) {
 
     try {
       const { error } = await supabase
-        .from('player_teams')
-        .delete()
+        .from('team_memberships')
+        .update({ is_active: false })
         .eq('player_id', player.id)
         .eq('team_id', teamId);
 
@@ -150,7 +152,7 @@ export default function TeamSelector({ onTeamsUpdated }) {
     return <div>Lade Teams...</div>;
   }
 
-  const myTeamIds = myTeams.map(t => t.team_id);
+  const myTeamIds = myTeams.map(t => t.team_info?.id).filter(Boolean);
   const teamsToJoin = availableTeams.filter(t => !myTeamIds.includes(t.id));
 
   return (
@@ -177,7 +179,7 @@ export default function TeamSelector({ onTeamsUpdated }) {
       {/* Meine Teams */}
       {myTeams.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {myTeams.map(({ id, team, is_primary, status, role }) => (
+          {myTeams.map(({ id, team_info: team, is_primary, role }) => (
             <div
               key={id}
               style={{
@@ -209,16 +211,14 @@ export default function TeamSelector({ onTeamsUpdated }) {
                   )}
                 </div>
                 <div style={{ fontSize: '0.9rem', color: '#6b7280' }}>
-                  {team.category} • {role}
-                  {' • '}
-                  {getTeamStatusBadge(status)}
+                  {team?.category} • {role}
                 </div>
               </div>
               
               <div style={{ display: 'flex', gap: '0.5rem' }}>
-                {!is_primary && status === 'active' && (
+                {!is_primary && (
                   <button
-                    onClick={() => handleSetPrimary(team.id)}
+                    onClick={() => handleSetPrimary(team?.id)}
                     className="btn-secondary"
                     style={{ fontSize: '0.85rem', padding: '0.5rem 0.75rem' }}
                   >
@@ -226,7 +226,7 @@ export default function TeamSelector({ onTeamsUpdated }) {
                   </button>
                 )}
                 <button
-                  onClick={() => handleLeaveTeam(team.id)}
+                  onClick={() => handleLeaveTeam(team?.id)}
                   className="btn-danger"
                   style={{ fontSize: '0.85rem', padding: '0.5rem 0.75rem' }}
                 >

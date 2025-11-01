@@ -157,10 +157,11 @@ function SupabaseProfile() {
     
     try {
       const { data, error } = await supabase
-        .from('players')
+        .from('players_unified')
         .select('*')
         .eq('name', playerName)
-        .single();
+        .eq('player_type', 'app_user')
+        .maybeSingle();
       
       if (error) {
         console.error('Error loading player profile:', error);
@@ -271,7 +272,7 @@ function SupabaseProfile() {
       
       // Schritt 1: Lade Player-Teams mit Team-Info
       const { data: teamsData, error: teamsError } = await supabase
-        .from('player_teams')
+        .from('team_memberships')
         .select(`
           *,
           team_info (
@@ -284,6 +285,7 @@ function SupabaseProfile() {
           )
         `)
         .eq('player_id', playerId)
+        .eq('is_active', true)
         .order('is_primary', { ascending: false });
 
       if (teamsError) {
@@ -374,9 +376,9 @@ function SupabaseProfile() {
     try {
       console.log('💾 Saving team changes:', { teamId, changes });
       
-      // Aktualisiere player_teams Tabelle
+      // Aktualisiere team_memberships Tabelle
       const { error } = await supabase
-        .from('player_teams')
+        .from('team_memberships')
         .update({
           role: changes.role,
           is_primary: changes.is_primary
@@ -406,8 +408,8 @@ function SupabaseProfile() {
       console.log('🗑️ Removing team:', playerTeamId);
       
       const { error } = await supabase
-        .from('player_teams')
-        .delete()
+        .from('team_memberships')
+        .update({ is_active: false })
         .eq('id', playerTeamId);
 
       if (error) throw error;
