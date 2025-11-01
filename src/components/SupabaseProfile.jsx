@@ -107,7 +107,7 @@ function SupabaseProfile() {
           ) : hasUnsavedChanges ? (
             <>
               <span style={{ fontSize: '1.25rem' }}>⏳</span>
-              <span style={{ fontWeight: '600' }}>Automatisches Speichern in 2 Sek...</span>
+              <span style={{ fontWeight: '600' }}>Automatisches Speichern in 5 Sek...</span>
             </>
           ) : (
             <>
@@ -447,7 +447,7 @@ function SupabaseProfile() {
       console.log('⏱️ Cleared previous timer');
     }
     
-    console.log('⏱️ Setting new auto-save timer (2 seconds)');
+    console.log('⏱️ Setting new auto-save timer (5 seconds - increased for better UX)');
     const timer = setTimeout(() => {
       console.log('⏰ Timer fired! isViewingOtherPlayer:', isViewingOtherPlayer, 'isSetup:', isSetup);
       if (!isViewingOtherPlayer && !isSetup) {
@@ -456,7 +456,7 @@ function SupabaseProfile() {
       } else {
         console.log('❌ Conditions NOT met, skipping auto-save');
       }
-    }, 2000);
+    }, 5000); // Erhöht von 2000ms auf 5000ms - verhindert Buchstaben-Verlust
     
     setAutoSaveTimer(timer);
   };
@@ -503,26 +503,30 @@ function SupabaseProfile() {
       console.log('🔢 Normalized LK:', normalizedLK);
       
       console.log('📤 Calling updateProfile...');
+      
+      // Helper: Trim strings, aber nur wenn sie nicht null/undefined sind
+      const trimIfString = (val) => typeof val === 'string' ? val.trim() : val;
+      
       const result = await updateProfile({
-        name: profile.name,
-        phone: profile.phone,
-        email: profile.email,
-        profileImage: profile.profileImage,
+        name: trimIfString(profile.name),
+        phone: trimIfString(profile.phone),
+        email: trimIfString(profile.email),
+        profileImage: profile.profileImage, // URLs nicht trimmen
         birth_date: profile.birth_date,
         current_lk: normalizedLK,
-        tennis_motto: profile.tennis_motto,
-        favorite_shot: profile.favorite_shot,
-        best_tennis_memory: profile.best_tennis_memory,
-        worst_tennis_memory: profile.worst_tennis_memory,
-        favorite_opponent: profile.favorite_opponent,
-        dream_match: profile.dream_match,
-        fun_fact: profile.fun_fact,
-        superstition: profile.superstition,
-        pre_match_routine: profile.pre_match_routine,
-        address: profile.address,
-        emergency_contact: profile.emergency_contact,
-        emergency_phone: profile.emergency_phone,
-        notes: profile.notes
+        tennis_motto: trimIfString(profile.tennis_motto),
+        favorite_shot: trimIfString(profile.favorite_shot),
+        best_tennis_memory: trimIfString(profile.best_tennis_memory),
+        worst_tennis_memory: trimIfString(profile.worst_tennis_memory),
+        favorite_opponent: trimIfString(profile.favorite_opponent),
+        dream_match: trimIfString(profile.dream_match),
+        fun_fact: trimIfString(profile.fun_fact),
+        superstition: trimIfString(profile.superstition),
+        pre_match_routine: trimIfString(profile.pre_match_routine),
+        address: trimIfString(profile.address),
+        emergency_contact: trimIfString(profile.emergency_contact),
+        emergency_phone: trimIfString(profile.emergency_phone),
+        notes: trimIfString(profile.notes)
       });
       
       console.log('📥 updateProfile result:', result);
@@ -533,12 +537,13 @@ function SupabaseProfile() {
         setHasUnsavedChanges(false);
         setSuccessMessage('✅ Gespeichert!');
         
-        // WICHTIG: Editing-Flag erst NACH einem Tick zurücksetzen
+        // WICHTIG: Editing-Flag erst NACH längerem Tick zurücksetzen
         // So kann der Player-State Update durchlaufen ohne dass useEffect triggert
+        // ERHÖHT auf 500ms um sicherzustellen dass AuthContext.player zuerst updated wird
         setTimeout(() => {
           console.log('🔓 Releasing editing lock');
           isEditingRef.current = false;
-        }, 100);
+        }, 500); // Erhöht von 100ms auf 500ms
         
         // Feld-Indikator nach 2 Sekunden ausblenden
         setTimeout(() => {
