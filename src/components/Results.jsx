@@ -879,6 +879,36 @@ const Results = () => {
                       </div>
                     )}
 
+                    {/* Match Description - Aus Spieler-Sicht */}
+                    {isMedenspieleCompleted && match.teamInfo && (
+                      <div style={{
+                        marginTop: '0.75rem',
+                        padding: '0.5rem 0.75rem',
+                        background: 'rgba(243, 244, 246, 0.8)',
+                        borderRadius: '6px',
+                        fontSize: '0.8rem',
+                        color: '#4b5563',
+                        lineHeight: '1.4',
+                        textAlign: 'center'
+                      }}>
+                        {outcome === 'win' && (
+                          <span>
+                            <strong>{match.teamInfo.clubName}</strong> gewinnt <strong>{playerScore.playerScore}:{playerScore.opponentScore}</strong> gegen {match.opponent}
+                          </span>
+                        )}
+                        {outcome === 'loss' && (
+                          <span>
+                            <strong>{match.teamInfo.clubName}</strong> verliert <strong>{playerScore.playerScore}:{playerScore.opponentScore}</strong> gegen {match.opponent}
+                          </span>
+                        )}
+                        {outcome === 'draw' && (
+                          <span>
+                            <strong>{match.teamInfo.clubName}</strong> spielt <strong>{playerScore.playerScore}:{playerScore.opponentScore}</strong> remis gegen {match.opponent}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
                   </div>
 
                   {/* Details Link */}
