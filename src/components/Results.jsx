@@ -383,12 +383,15 @@ const Results = () => {
         // Sortiere Matches nach Datum
         const sortedMatches = playerMatches.sort((a, b) => new Date(a.matchDate) - new Date(b.matchDate));
 
+        // 🔧 FIX: Nutze vollständige Player-Daten aus playerDataMap (inkl. profile_image!)
+        const fullPlayerData = playerDataMap[player.id] || player;
+
         playerResultsMap[player.id] = {
-          player: player,
+          player: fullPlayerData,  // ✅ Jetzt mit profile_image!
           matches: sortedMatches
         };
         
-        console.log(`  ✅ ${player.name}: ${sortedMatches.length} matches`);
+        console.log(`  ✅ ${player.name}: ${sortedMatches.length} matches, profile_image: ${fullPlayerData.profile_image ? '✅' : '❌'}`);
       }
 
       console.log('🎯 Final playerResultsMap:', {
