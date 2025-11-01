@@ -1,18 +1,29 @@
-# 🖼️ Profile Image Fix - Anleitung
+# 🖼️ Profile Columns Fix - Anleitung
 
 ## Problem
-Die Spalte `profile_image` existiert nicht in der `players_unified` Tabelle, was zu Fehlern beim Laden von Profilbildern führt.
+Mehrere Profil-Spalten fehlen in der `players_unified` Tabelle:
+- ❌ `profile_image` - Profilbilder
+- ❌ `address` - Adresse
+- ❌ `birth_date` - Geburtsdatum
+- ❌ `emergency_contact` / `emergency_phone` - Notfallkontakt
+- ❌ `notes` - Notizen
+- ❌ Tennis-Persönlichkeit Felder (favorite_shot, tennis_motto, etc.)
+
+**Fehler beim Speichern:**
+```
+❌ Could not find the 'address' column of 'players_unified' in the schema cache
+```
 
 ## Lösung
 
-### Schritt 1: Spalte hinzufügen
+### Schritt 1: ALLE fehlenden Spalten hinzufügen
 1. Öffne **Supabase Dashboard** → **SQL Editor**
-2. Kopiere den Inhalt von `ADD_PROFILE_IMAGE_COLUMN.sql`
+2. Kopiere den Inhalt von `ADD_MISSING_PROFILE_COLUMNS.sql` (⚠️ NICHT ADD_PROFILE_IMAGE_COLUMN.sql!)
 3. Führe das Script aus
-4. Prüfe die Ausgabe: Du solltest eine Bestätigung sehen
+4. Prüfe die Ausgabe: Du solltest sehen:
 
 ```sql
-✅ Spalte erfolgreich hinzugefügt | profile_image | text | YES
+✅ Spalten erfolgreich hinzugefügt | spalten_count: 15
 ```
 
 ### Schritt 2: Verifizierung
