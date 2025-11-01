@@ -122,6 +122,25 @@ const MatchdayResults = () => {
         await loadPlayerDataForResults(resultsData);
       }
 
+      // WICHTIG: Berechne location aus SPIELER-PERSPEKTIVE (wie in DataContext)
+      if (matchdayData && playerTeams && playerTeams.length > 0) {
+        const playerTeamIds = playerTeams.map(t => t.id);
+        const isOurTeamHome = playerTeamIds.includes(matchdayData.home_team_id);
+        const isOurTeamAway = playerTeamIds.includes(matchdayData.away_team_id);
+        
+        // Überschreibe location mit korrekter Perspektive
+        matchdayData.location = isOurTeamHome ? 'Home' : (isOurTeamAway ? 'Away' : matchdayData.location);
+        
+        console.log('📍 Location corrected:', {
+          home_team_id: matchdayData.home_team_id,
+          away_team_id: matchdayData.away_team_id,
+          playerTeamIds,
+          isOurTeamHome,
+          isOurTeamAway,
+          correctedLocation: matchdayData.location
+        });
+      }
+
       setMatchday(matchdayData);
       setResults(resultsData || []);
 
