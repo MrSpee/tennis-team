@@ -39,6 +39,7 @@ const ImportTab = () => {
     name: '',
     city: '',
     federation: 'TVM',
+    bundesland: '',
     website: ''
   });
   
@@ -95,8 +96,8 @@ const ImportTab = () => {
    */
   const handleCreateNewClub = async () => {
     try {
-      if (!newClubData.name || !newClubData.city) {
-        alert('Bitte Name und Stadt eingeben!');
+      if (!newClubData.name || !newClubData.city || !newClubData.federation) {
+        alert('Bitte Name, Stadt und Verband eingeben!');
         return;
       }
 
@@ -109,6 +110,7 @@ const ImportTab = () => {
           name: newClubData.name,
           city: newClubData.city,
           federation: newClubData.federation || 'TVM',
+          bundesland: newClubData.bundesland || null,
           website: newClubData.website || null,
           is_verified: true // Auto-approve vom Admin
         })
@@ -153,6 +155,7 @@ const ImportTab = () => {
         name: '',
         city: '',
         federation: 'TVM',
+        bundesland: '',
         website: ''
       });
 
@@ -1855,6 +1858,7 @@ Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele
                     name: matchingReview.club.raw || '',
                     city: '',
                     federation: 'TVM',
+                    bundesland: 'Nordrhein-Westfalen',
                     website: ''
                   });
                   setShowCreateClubModal(true);
@@ -3069,11 +3073,38 @@ Die KI erkennt automatisch:
               {/* Verband */}
               <div>
                 <label style={{ fontSize: '0.875rem', fontWeight: '600', display: 'block', marginBottom: '0.5rem', color: '#374151' }}>
-                  Tennisverband
+                  Tennisverband <span style={{ color: '#ef4444' }}>*</span>
                 </label>
                 <select
                   value={newClubData.federation}
-                  onChange={(e) => setNewClubData({ ...newClubData, federation: e.target.value })}
+                  onChange={(e) => {
+                    const selectedVerband = e.target.value;
+                    // Mapping: Verband → Bundesland
+                    const verbandToBundesland = {
+                      'BTV-Baden': 'Baden-Württemberg',
+                      'WTB': 'Baden-Württemberg',
+                      'BTV': 'Bayern',
+                      'TVBB': 'Berlin/Brandenburg',
+                      'HTV-Hamburg': 'Hamburg',
+                      'HTV-Hessen': 'Hessen',
+                      'TMV': 'Mecklenburg-Vorpommern',
+                      'TVM': 'Nordrhein-Westfalen',
+                      'TVN': 'Nordrhein-Westfalen',
+                      'WTV': 'Nordrhein-Westfalen',
+                      'TNB': 'Niedersachsen/Bremen',
+                      'TRP': 'Rheinland-Pfalz',
+                      'STB': 'Saarland',
+                      'STV': 'Sachsen',
+                      'TSA': 'Sachsen-Anhalt',
+                      'TSH': 'Schleswig-Holstein',
+                      'TTV': 'Thüringen'
+                    };
+                    setNewClubData({ 
+                      ...newClubData, 
+                      federation: selectedVerband,
+                      bundesland: verbandToBundesland[selectedVerband] || ''
+                    });
+                  }}
                   style={{
                     width: '100%',
                     padding: '0.75rem',
@@ -3084,13 +3115,81 @@ Die KI erkennt automatisch:
                     background: 'white'
                   }}
                 >
-                  <option value="TVM">TVM (Bayerischer Tennis-Verband München)</option>
-                  <option value="BTV">BTV (Bayerischer Tennis-Verband)</option>
-                  <option value="DTB">DTB (Deutscher Tennis Bund)</option>
-                  <option value="WTV">WTV (Württembergischer Tennis-Bund)</option>
-                  <option value="TNB">TNB (Tennis-Verband Niedersachsen-Bremen)</option>
-                  <option value="Sonstige">Sonstige</option>
+                  <option value="">-- Verband auswählen --</option>
+                  <optgroup label="🏆 Baden-Württemberg">
+                    <option value="BTV-Baden">BTV - Badischer Tennisverband</option>
+                    <option value="WTB">WTB - Württembergischer Tennis-Bund</option>
+                  </optgroup>
+                  <optgroup label="🏆 Bayern">
+                    <option value="BTV">BTV - Bayerischer Tennis-Verband</option>
+                  </optgroup>
+                  <optgroup label="🏆 Berlin / Brandenburg">
+                    <option value="TVBB">TVBB - Tennis-Verband Berlin-Brandenburg</option>
+                  </optgroup>
+                  <optgroup label="🏆 Hamburg">
+                    <option value="HTV-Hamburg">HTV - Hamburger Tennis-Verband</option>
+                  </optgroup>
+                  <optgroup label="🏆 Hessen">
+                    <option value="HTV-Hessen">HTV - Hessischer Tennis-Verband</option>
+                  </optgroup>
+                  <optgroup label="🏆 Mecklenburg-Vorpommern">
+                    <option value="TMV">TMV - Tennisverband Mecklenburg-Vorpommern</option>
+                  </optgroup>
+                  <optgroup label="🏆 Niedersachsen / Bremen">
+                    <option value="TNB">TNB - Tennisverband Niedersachsen-Bremen</option>
+                  </optgroup>
+                  <optgroup label="🏆 Nordrhein-Westfalen">
+                    <option value="TVM">TVM - Tennisverband Mittelrhein</option>
+                    <option value="TVN">TVN - Tennis-Verband Niederrhein</option>
+                    <option value="WTV">WTV - Westfälischer Tennis-Verband</option>
+                  </optgroup>
+                  <optgroup label="🏆 Rheinland-Pfalz">
+                    <option value="TRP">TRP - Tennisverband Rheinland-Pfalz</option>
+                  </optgroup>
+                  <optgroup label="🏆 Saarland">
+                    <option value="STB">STB - Saarländischer Tennisbund</option>
+                  </optgroup>
+                  <optgroup label="🏆 Sachsen">
+                    <option value="STV">STV - Sächsischer Tennis Verband</option>
+                  </optgroup>
+                  <optgroup label="🏆 Sachsen-Anhalt">
+                    <option value="TSA">TSA - Tennisverband Sachsen-Anhalt</option>
+                  </optgroup>
+                  <optgroup label="🏆 Schleswig-Holstein">
+                    <option value="TSH">TSH - Tennisverband Schleswig-Holstein</option>
+                  </optgroup>
+                  <optgroup label="🏆 Thüringen">
+                    <option value="TTV">TTV - Thüringer Tennis-Verband</option>
+                  </optgroup>
                 </select>
+              </div>
+
+              {/* Bundesland (Auto-gefüllt, aber editierbar) */}
+              <div>
+                <label style={{ fontSize: '0.875rem', fontWeight: '600', display: 'block', marginBottom: '0.5rem', color: '#374151' }}>
+                  Bundesland
+                </label>
+                <input
+                  type="text"
+                  value={newClubData.bundesland}
+                  onChange={(e) => setNewClubData({ ...newClubData, bundesland: e.target.value })}
+                  placeholder="Wird automatisch gesetzt"
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '2px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    outline: 'none',
+                    background: '#f9fafb',
+                    color: '#6b7280',
+                    transition: 'border-color 0.2s'
+                  }}
+                  readOnly
+                />
+                <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.25rem' }}>
+                  💡 Wird automatisch basierend auf dem Verband gesetzt
+                </div>
               </div>
 
               {/* Website (optional) */}
@@ -3134,23 +3233,23 @@ Die KI erkennt automatisch:
             <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '2px solid #e5e7eb' }}>
               <button
                 onClick={handleCreateNewClub}
-                disabled={!newClubData.name || !newClubData.city}
+                disabled={!newClubData.name || !newClubData.city || !newClubData.federation}
                 style={{
                   flex: 1,
                   padding: '0.875rem',
-                  background: (!newClubData.name || !newClubData.city) 
+                  background: (!newClubData.name || !newClubData.city || !newClubData.federation) 
                     ? '#d1d5db' 
                     : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                   color: 'white',
                   border: 'none',
                   borderRadius: '8px',
-                  cursor: (!newClubData.name || !newClubData.city) ? 'not-allowed' : 'pointer',
+                  cursor: (!newClubData.name || !newClubData.city || !newClubData.federation) ? 'not-allowed' : 'pointer',
                   fontSize: '0.875rem',
                   fontWeight: '700',
                   transition: 'transform 0.2s, box-shadow 0.2s'
                 }}
                 onMouseEnter={(e) => {
-                  if (newClubData.name && newClubData.city) {
+                  if (newClubData.name && newClubData.city && newClubData.federation) {
                     e.currentTarget.style.transform = 'translateY(-2px)';
                     e.currentTarget.style.boxShadow = '0 8px 20px rgba(102, 126, 234, 0.4)';
                   }
@@ -3169,6 +3268,7 @@ Die KI erkennt automatisch:
                     name: '',
                     city: '',
                     federation: 'TVM',
+                    bundesland: '',
                     website: ''
                   });
                 }}
