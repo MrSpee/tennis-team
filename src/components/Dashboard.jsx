@@ -426,8 +426,8 @@ function Dashboard() {
         </h1>
       </div>
       
-      {/* 2. LK-Card mit Formkurve - DIREKT NACH BEGRÜSSUNG */}
-      {(player?.current_lk || player?.ranking) && (
+      {/* 2. LK-Card mit Formkurve - IMMER ANZEIGEN */}
+      {player && (
         <div className="fade-in" style={{ marginBottom: '1.5rem' }}>
           <div className="lk-card-full">
             <div className="formkurve-header">
@@ -446,10 +446,12 @@ function Dashboard() {
             </div>
             
             {/* Große Sparkline mit Monatslabels */}
-                {player.current_lk && (() => {
+                {(() => {
+                  // 🔧 Nutze current_lk, season_start_lk ODER Fallback zu LK 12.0
+                  const currentLkString = player.current_lk || player.season_start_lk || player.ranking || 'LK 12.0';
                   // Nutze gemeinsame parseLK Funktion aus lkUtils
-                  const startLK = parseLK(player.start_lk || player.season_start_lk || player.current_lk || 'LK 12.3');
-                  const currentLKValue = parseLK(player.current_lk);
+                  const startLK = parseLK(player.start_lk || player.season_start_lk || currentLkString);
+                  const currentLKValue = parseLK(currentLkString);
                   
                   // Dynamische Monate basierend auf heutigem Datum
                   const now = new Date();
