@@ -181,6 +181,72 @@ const ImportTab = () => {
       }
 
       console.log('🔵 Creating new team:', newTeamData);
+      
+      // ✅ VORHER: Prüfe ob Team bereits existiert!
+      const clubInfo = allClubs.find(c => c.id === newTeamData.club_id);
+      const clubName = clubInfo?.name || '';
+      
+      console.log('🔍 Checking for existing team:', {
+        club_name: clubName,
+        category: newTeamData.category
+      });
+      
+      const { data: existingTeams, error: checkError } = await supabase
+        .from('team_info')
+        .select('id, team_name, club_name, category')
+        .eq('club_id', newTeamData.club_id)
+        .eq('category', newTeamData.category);
+      
+      if (checkError) {
+        console.warn('⚠️ Error checking for existing teams:', checkError);
+      }
+      
+      if (existingTeams && existingTeams.length > 0) {
+        const existing = existingTeams[0];
+        console.log('⚠️ Team existiert bereits:', existing);
+        
+        const useExisting = window.confirm(
+          `⚠️ Ein Team "${existing.club_name} ${existing.team_name} (${existing.category})" existiert bereits!\n\n` +
+          `Möchtest du das existierende Team verwenden statt ein neues zu erstellen?`
+        );
+        
+        if (useExisting) {
+          // Nutze existierendes Team
+          console.log('✅ Using existing team:', existing);
+          
+          // Aktualisiere matchingReview
+          const updatedReview = { ...matchingReview };
+          updatedReview.team.matched = existing;
+          updatedReview.team.confidence = 100;
+          updatedReview.team.needsReview = false;
+          setMatchingReview(updatedReview);
+          
+          // Update parsedData
+          const newData = { ...parsedData };
+          newData.team_info = newData.team_info || {};
+          newData.team_info.matched_team_id = existing.id;
+          newData.team_info.team_name = existing.team_name;
+          newData.team_info.category = existing.category;
+          setParsedData(newData);
+          
+          // Update editablePlayers
+          if (editablePlayers.length > 0) {
+            setEditablePlayers(editablePlayers.map(editable => ({
+              ...editable,
+              team_id: existing.id,
+              category: existing.category
+            })));
+          }
+          
+          setShowCreateTeamModal(false);
+          setSuccessMessage(`✅ Existierendes Team "${existing.club_name} ${existing.team_name} (${existing.category})" wird verwendet!`);
+          setTimeout(() => setSuccessMessage(null), 5000);
+          return;
+        }
+        
+        // User will trotzdem neues Team erstellen
+        console.log('⚠️ User will trotzdem neues Team erstellen');
+      }
 
       // ✅ Erstelle Team via RPC (umgeht RLS-Policies)
       const { data: teamData, error } = await supabase

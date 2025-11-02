@@ -26,6 +26,16 @@ const Results = () => {
   const [hasLoaded, setHasLoaded] = useState(false);
   const [loadingPlayerResults, setLoadingPlayerResults] = useState(false);
   
+  // ✅ NEU: Vereins-Übersicht State
+  const [clubOverview, setClubOverview] = useState(null);
+  const [allClubTeams, setAllClubTeams] = useState([]);
+  const [selectedClubTeamId, setSelectedClubTeamId] = useState(null);
+  const [showClubOverview, setShowClubOverview] = useState(true);
+  
+  // ✅ NEU: Globale Suche (Phase 2)
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState(null);
+  
   // Nutze Matches aus DataContext
   const matches = dataContextMatches;
   
@@ -61,6 +71,14 @@ const Results = () => {
       setViewMode('spieler');
     }
   }, [searchParams]);
+  
+  // ✅ NEU: Lade Matches wenn externes Team ausgewählt wird
+  useEffect(() => {
+    if (selectedClubTeamId && !playerTeams.some(pt => pt.id === selectedClubTeamId)) {
+      // Team ist nicht in meinen Teams → lade separat
+      loadMatchesForTeam(selectedClubTeamId);
+    }
+  }, [selectedClubTeamId, playerTeams]);
   
   // Lade Spieler-Ergebnisse beim Wechsel zur Spieler-Ansicht
   useEffect(() => {
@@ -108,6 +126,329 @@ const Results = () => {
     }
   };
 
+  // ✅ NEU: Lade Matches für ein beliebiges Team (auch ohne Membership)
+  const [externalTeamMatches, setExternalTeamMatches] = useState({});
+  
+  // ✅ NEU: Globale Suche
+  const performGlobalSearch = async (term) => {
+    if (!term || term.length < 2) {
+      setSearchResults(null);
+      return;
+    }
+    
+    try {
+      console.log('🔍 Global search for:', term);
+      
+      // Suche nach Vereinen
+      const { data: clubs, error: clubError } = await supabase
+        .from('club_info')
+        .select('id, name, city')
+        .ilike('name', `%${term}%`)
+        .limit(5);
+      
+      if (clubError) throw clubError;
+      
+      // Suche nach Teams
+      const { data: teams, error: teamError } = await supabase
+        .from('team_info')
+        .select('id, team_name, club_name, category')
+        .or(`team_name.ilike.%${term}%,club_name.ilike.%${term}%,category.ilike.%${term}%`)
+        .limit(10);
+      
+      if (teamError) throw teamError;
+      
+      // Suche nach Spielern
+      const { data: playersList, error: playersError } = await supabase
+        .from('players_unified')
+        .select('id, name, current_lk')
+        .ilike('name', `%${term}%`)
+        .eq('status', 'active')
+        .limit(10);
+      
+      if (playersError) throw playersError;
+      
+      setSearchResults({
+        clubs: clubs || [],
+        teams: teams || [],
+        players: playersList || []
+      });
+      
+      console.log('✅ Search results:', {
+        clubs: clubs?.length || 0,
+        teams: teams?.length || 0,
+        players: playersList?.length || 0
+      });
+      
+    } catch (error) {
+      console.error('❌ Error performing global search:', error);
+      setSearchResults(null);
+    }
+  };
+  
+  // ✅ Debounce für Suche
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchTerm) {
+        performGlobalSearch(searchTerm);
+      } else {
+        setSearchResults(null);
+      }
+    }, 300);
+    
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+  
+  const loadMatchesForTeam = async (teamId) => {
+    try {
+      console.log('📥 Loading matches for external team:', teamId);
+      
+      // ✅ OHNE Season-Filter (alle Matches laden)
+      const { data, error } = await supabase
+        .from('matchdays')
+        .select(`
+          id,
+          match_date,
+          start_time,
+          home_team_id,
+          away_team_id,
+          venue,
+          season,
+          status,
+          home_score,
+          away_score
+        `)
+        .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
+        .order('match_date', { ascending: false });
+      
+      if (error) {
+        console.error('❌ Error loading external team matches:', error);
+        throw error;
+      }
+      
+      console.log('✅ Raw external matches loaded:', data?.length || 0, data);
+      
+      // Transformiere wie DataContext
+      const transformedMatches = (data || []).map(m => {
+        const isHome = m.home_team_id === teamId;
+        return {
+          id: m.id,
+          date: new Date(m.match_date),
+          opponent: isHome ? 'Away Team' : 'Home Team', // Wird später aufgelöst
+          location: isHome ? 'Home' : 'Away',
+          venue: m.venue,
+          season: m.season,
+          home_score: m.home_score,
+          away_score: m.away_score,
+          teamId: teamId,
+          teamInfo: { id: teamId } // Für Filterung
+        };
+      });
+      
+      setExternalTeamMatches(prev => ({
+        ...prev,
+        [teamId]: transformedMatches
+      }));
+      
+      console.log('✅ External team matches transformed:', transformedMatches.length);
+      
+    } catch (error) {
+      console.error('❌ Error loading external team matches:', error);
+    }
+  };
+  
+  // ✅ NEU: Lade Vereins-Übersicht
+  const loadClubOverview = async () => {
+    if (!playerTeams || playerTeams.length === 0) {
+      console.log('⚠️ No playerTeams available for club overview');
+      return;
+    }
+    
+    try {
+      // Hole Primary Team (Haupt-Verein)
+      const primaryTeam = playerTeams.find(t => t.is_primary) || playerTeams[0];
+      const clubName = primaryTeam.club_name;
+      
+      console.log('🏢 Loading club overview for:', clubName);
+      console.log('🏢 Primary team:', primaryTeam);
+      
+      // Lade ALLE Teams dieses Vereins
+      const { data: clubTeams, error: teamsError } = await supabase
+        .from('team_info')
+        .select('id, team_name, club_name, category')
+        .eq('club_name', clubName)
+        .order('category', { ascending: true });
+      
+      if (teamsError) {
+        console.error('❌ Error loading club teams:', teamsError);
+        throw teamsError;
+      }
+      
+      console.log('✅ Club teams loaded:', clubTeams?.length || 0, clubTeams);
+      setAllClubTeams(clubTeams || []);
+      
+      // Lade Matches für ALLE Teams dieses Vereins
+      const teamIds = (clubTeams || []).map(t => t.id);
+      
+      if (teamIds.length === 0) {
+        console.warn('⚠️ No team IDs found for club');
+        setClubOverview({
+          clubName,
+          totalTeams: 0,
+          totalMatches: 0,
+          totalPlayed: 0,
+          totalWins: 0,
+          totalLosses: 0,
+          totalDraws: 0
+        });
+        return;
+      }
+      
+      console.log('🔍 Loading matches for team IDs:', teamIds);
+      
+      // ✅ OHNE Season-Filter (alle Matches laden)
+      const { data: clubMatches, error: matchesError } = await supabase
+        .from('matchdays')
+        .select(`
+          id,
+          match_date,
+          home_team_id,
+          away_team_id,
+          home_score,
+          away_score,
+          season,
+          status
+        `)
+        .or(`home_team_id.in.(${teamIds.join(',')}),away_team_id.in.(${teamIds.join(',')})`);
+      
+      if (matchesError) {
+        console.error('❌ Error loading club matches:', matchesError);
+        throw matchesError;
+      }
+      
+      console.log('✅ Club matches loaded:', clubMatches?.length || 0, clubMatches);
+      
+      // ✅ NEU: Lade match_results für alle Matches und aggregiere Scores
+      const matchIds = (clubMatches || []).map(m => m.id);
+      
+      const { data: allMatchResults, error: resultsError } = await supabase
+        .from('match_results')
+        .select('*')
+        .in('matchday_id', matchIds);
+      
+      if (resultsError) {
+        console.error('❌ Error loading match results:', resultsError);
+      }
+      
+      console.log('✅ Match results loaded:', allMatchResults?.length || 0, allMatchResults);
+      
+      // Aggregiere Scores pro Match
+      const matchScoresMap = {};
+      (allMatchResults || []).forEach(result => {
+        if (!matchScoresMap[result.matchday_id]) {
+          matchScoresMap[result.matchday_id] = { home: 0, away: 0, completed: 0 };
+        }
+        
+        // Zähle Winner
+        if (result.winner === 'home') {
+          matchScoresMap[result.matchday_id].home++;
+          console.log(`  ✅ Home win for match ${result.matchday_id}`);
+        } else if (result.winner === 'away') {
+          matchScoresMap[result.matchday_id].away++;
+          console.log(`  ✅ Away win for match ${result.matchday_id}`);
+        }
+        
+        // ✅ Zähle ALLE Ergebnisse mit winner (nicht nur is_completed)
+        if (result.winner) {
+          matchScoresMap[result.matchday_id].completed++;
+        } else {
+          console.log(`  ⚠️ Result without winner:`, result);
+        }
+      });
+      
+      console.log('📊 Aggregated scores:', matchScoresMap);
+      
+      // Berechne Gesamt-Bilanz für Verein
+      let totalWins = 0;
+      let totalLosses = 0;
+      let totalDraws = 0;
+      let totalPlayed = 0;
+      
+      (clubMatches || []).forEach(match => {
+        const scores = matchScoresMap[match.id];
+        
+        console.log(`🔍 Match ${match.id}:`, {
+          hasScores: !!scores,
+          scores,
+          home_team_id: match.home_team_id,
+          away_team_id: match.away_team_id,
+          isVKCHome: teamIds.includes(match.home_team_id),
+          isVKCAway: teamIds.includes(match.away_team_id)
+        });
+        
+        // Prüfe ob Match echte Ergebnisse hat
+        if (scores && scores.completed > 0) {
+          const isHomeTeam = teamIds.includes(match.home_team_id);
+          const ourScore = isHomeTeam ? scores.home : scores.away;
+          const oppScore = isHomeTeam ? scores.away : scores.home;
+          
+          console.log(`  ✅ Match hat Ergebnisse:`, {
+            isHomeTeam,
+            ourScore,
+            oppScore,
+            completed: scores.completed
+          });
+          
+          // Nur zählen wenn mindestens ein Punkt erzielt wurde
+          if (ourScore > 0 || oppScore > 0) {
+            totalPlayed++;
+            
+            if (ourScore > oppScore) {
+              totalWins++;
+              console.log(`    🎉 SIEG! ${ourScore}:${oppScore}`);
+            } else if (ourScore < oppScore) {
+              totalLosses++;
+              console.log(`    😞 NIEDERLAGE ${ourScore}:${oppScore}`);
+            } else {
+              totalDraws++;
+              console.log(`    🤝 REMIS ${ourScore}:${oppScore}`);
+            }
+          } else {
+            console.log(`    ⚠️ Beide Scores sind 0, wird nicht gezählt`);
+          }
+        } else {
+          console.log(`  ⚠️ Keine Ergebnisse für dieses Match`);
+        }
+      });
+      
+      console.log('📊 Club stats calculated:', {
+        totalPlayed,
+        totalWins,
+        totalLosses,
+        totalDraws
+      });
+      
+      setClubOverview({
+        clubName,
+        totalTeams: clubTeams.length,
+        totalMatches: (clubMatches || []).length,
+        totalPlayed,
+        totalWins,
+        totalLosses,
+        totalDraws
+      });
+      
+      console.log('✅ Club overview loaded:', {
+        clubName,
+        teams: clubTeams.length,
+        matches: clubMatches?.length || 0,
+        record: `${totalWins}/${totalLosses}/${totalDraws}`
+      });
+      
+    } catch (error) {
+      console.error('❌ Error loading club overview:', error);
+    }
+  };
+
   const loadMatchesAndResults = async () => {
     console.log('🟢 loadMatchesAndResults STARTED');
     console.log('🟢 Using matches from DataContext:', dataContextMatches.length);
@@ -115,6 +456,17 @@ const Results = () => {
     try {
       setLoading(true);
       console.log('⏳ Loading set to TRUE');
+      
+      // ✅ Lade Vereins-Übersicht
+      await loadClubOverview();
+      
+      // ✅ Setze Primary Team als initial ausgewählt (falls nicht bereits gesetzt)
+      if (!selectedClubTeamId && !selectedTeamId && playerTeams.length > 0) {
+        const primaryTeam = playerTeams.find(t => t.is_primary) || playerTeams[0];
+        setSelectedClubTeamId(primaryTeam.id);
+        setSelectedTeamId(primaryTeam.id);
+        console.log('✅ Primary team set as selected:', primaryTeam);
+      }
       
       // Nutze Matches aus DataContext (schon mit team_info geladen!)
       const processedMatches = dataContextMatches;
@@ -632,23 +984,397 @@ const Results = () => {
         }}>
           Saison: {display}
         </div>
-        
-        {/* View-Mode Toggle - Moderne Tab-Buttons */}
-        <div className="view-mode-toggle">
-          <button
-            className={`view-toggle-btn ${viewMode === 'mannschaft' ? 'active' : ''}`}
-            onClick={() => setViewMode('mannschaft')}
-          >
-            <span style={{ fontSize: '1.2rem' }}>👥</span>
-            <span>Mannschaft</span>
-          </button>
-          <button
-            className={`view-toggle-btn ${viewMode === 'spieler' ? 'active' : ''}`}
-            onClick={() => setViewMode('spieler')}
-          >
-            <span style={{ fontSize: '1.2rem' }}>🎾</span>
-            <span>Spieler</span>
-          </button>
+      </div>
+
+      {/* ✅ NEU: Vereins-Performance-Übersicht */}
+      {clubOverview && showClubOverview && (
+        <div className="fade-in" style={{ marginBottom: '1.5rem' }}>
+          <div className="lk-card-full">
+            <div style={{
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              padding: '1.5rem',
+              borderRadius: '12px 12px 0 0',
+              color: 'white'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: '700', color: 'white' }}>
+                    🏢 {clubOverview.clubName}
+                  </h2>
+                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.875rem', opacity: 0.9 }}>
+                    {clubOverview.totalTeams} Mannschaften • {clubOverview.totalMatches} Spiele
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowClubOverview(false)}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    background: 'rgba(255, 255, 255, 0.2)',
+                    border: '1px solid rgba(255, 255, 255, 0.3)',
+                    borderRadius: '6px',
+                    color: 'white',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '600'
+                  }}
+                >
+                  Ausblenden
+                </button>
+              </div>
+            </div>
+            
+            <div style={{ padding: '1.5rem', background: 'white', borderRadius: '0 0 12px 12px' }}>
+              {/* Gesamt-Bilanz */}
+              <div style={{ marginBottom: '1.5rem' }}>
+                <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: '700', color: '#1f2937' }}>
+                  📊 Gesamt-Bilanz Saison {display}
+                </h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '1rem' }}>
+                  <div style={{
+                    padding: '1rem',
+                    background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+                    border: '2px solid #10b981',
+                    borderRadius: '12px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '2rem', fontWeight: '700', color: '#059669' }}>
+                      {clubOverview.totalWins}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#047857', marginTop: '0.25rem' }}>
+                      SIEGE
+                    </div>
+                  </div>
+                  
+                  <div style={{
+                    padding: '1rem',
+                    background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+                    border: '2px solid #f59e0b',
+                    borderRadius: '12px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '2rem', fontWeight: '700', color: '#d97706' }}>
+                      {clubOverview.totalDraws}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#92400e', marginTop: '0.25rem' }}>
+                      REMIS
+                    </div>
+                  </div>
+                  
+                  <div style={{
+                    padding: '1rem',
+                    background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
+                    border: '2px solid #ef4444',
+                    borderRadius: '12px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '2rem', fontWeight: '700', color: '#dc2626' }}>
+                      {clubOverview.totalLosses}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#991b1b', marginTop: '0.25rem' }}>
+                      NIEDERLAGEN
+                    </div>
+                  </div>
+                  
+                  <div style={{
+                    padding: '1rem',
+                    background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+                    border: '2px solid #3b82f6',
+                    borderRadius: '12px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '2rem', fontWeight: '700', color: '#2563eb' }}>
+                      {clubOverview.totalPlayed > 0 ? Math.round((clubOverview.totalWins / clubOverview.totalPlayed) * 100) : 0}%
+                    </div>
+                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#1e40af', marginTop: '0.25rem' }}>
+                      SIEGQUOTE
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* ✅ NEU: Separate Mannschaften-Auswahl Card */}
+      {allClubTeams.length > 0 && (
+        <div className="fade-in" style={{ marginBottom: '1.5rem' }}>
+          <div className="lk-card-full">
+            <div style={{ padding: '1.5rem', background: 'white', borderRadius: '12px' }}>
+              <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: '700', color: '#1f2937' }}>
+                🏆 Mannschaften wählen
+              </h3>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                {allClubTeams.map(team => {
+                  const isPrimary = playerTeams.find(pt => pt.id === team.id && pt.is_primary);
+                  const isMember = playerTeams.some(pt => pt.id === team.id);
+                  const isSelected = selectedClubTeamId === team.id || (!selectedClubTeamId && isPrimary);
+                  
+                  return (
+                    <button
+                      key={team.id}
+                      onClick={() => {
+                        setSelectedClubTeamId(team.id === selectedClubTeamId ? null : team.id);
+                        setSelectedTeamId(team.id === selectedClubTeamId ? '' : team.id);
+                      }}
+                      style={{
+                        padding: '0.5rem 1rem',
+                        background: isSelected 
+                          ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' 
+                          : 'white',
+                        color: isSelected ? 'white' : '#1f2937',
+                        border: isSelected ? '2px solid #1e40af' : '2px solid #e5e7eb',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        fontSize: '0.875rem',
+                        fontWeight: '600',
+                        transition: 'all 0.2s'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isSelected) {
+                          e.currentTarget.style.background = '#f3f4f6';
+                          e.currentTarget.style.borderColor = '#9ca3af';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isSelected) {
+                          e.currentTarget.style.background = 'white';
+                          e.currentTarget.style.borderColor = '#e5e7eb';
+                        }
+                      }}
+                    >
+                      {team.category}
+                      {isMember && ' ⭐'}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {!showClubOverview && clubOverview && (
+        <button
+          onClick={() => setShowClubOverview(true)}
+          style={{
+            marginBottom: '1rem',
+            padding: '0.75rem 1.5rem',
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontSize: '0.875rem',
+            fontWeight: '600',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem'
+          }}
+        >
+          🏢 Vereins-Übersicht anzeigen
+        </button>
+      )}
+
+      <div className="fade-in" style={{ marginBottom: '1rem' }}>
+        {/* ✅ NEU: Globale Suche */}
+        <div style={{ marginBottom: '1.5rem' }}>
+          <div style={{
+            position: 'relative',
+            maxWidth: '600px',
+            margin: '0 auto'
+          }}>
+            <input
+              type="text"
+              placeholder="🔍 Suche nach Verein, Mannschaft oder Spieler..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '0.875rem 1.25rem',
+                fontSize: '0.95rem',
+                border: '2px solid #e5e7eb',
+                borderRadius: '12px',
+                outline: 'none',
+                transition: 'all 0.2s',
+                boxShadow: searchTerm ? '0 4px 12px rgba(59, 130, 246, 0.15)' : 'none'
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = '#3b82f6';
+                e.target.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.15)';
+              }}
+              onBlur={(e) => {
+                if (!searchTerm) {
+                  e.target.style.borderColor = '#e5e7eb';
+                  e.target.style.boxShadow = 'none';
+                }
+              }}
+            />
+            {searchTerm && (
+              <button
+                onClick={() => {
+                  setSearchTerm('');
+                  setSearchResults(null);
+                }}
+                style={{
+                  position: 'absolute',
+                  right: '0.75rem',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  padding: '0.25rem 0.5rem',
+                  background: '#f3f4f6',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  color: '#6b7280'
+                }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          
+          {/* ✅ Suchergebnisse Dropdown */}
+          {searchResults && (searchResults.clubs.length > 0 || searchResults.teams.length > 0 || searchResults.players.length > 0) && (
+            <div style={{
+              maxWidth: '600px',
+              margin: '0.5rem auto 0 auto',
+              background: 'white',
+              border: '2px solid #e5e7eb',
+              borderRadius: '12px',
+              boxShadow: '0 10px 25px rgba(0, 0, 0, 0.1)',
+              maxHeight: '400px',
+              overflowY: 'auto',
+              zIndex: 1000
+            }}>
+              {/* Vereine */}
+              {searchResults.clubs.length > 0 && (
+                <div style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: '700', color: '#6b7280', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
+                    🏢 Vereine ({searchResults.clubs.length})
+                  </div>
+                  {searchResults.clubs.map(club => (
+                    <button
+                      key={club.id}
+                      onClick={() => {
+                        // Zeige alle Teams dieses Vereins
+                        console.log('🏢 Selected club:', club);
+                        setSearchTerm('');
+                        setSearchResults(null);
+                        // TODO: Filter nach Verein implementieren
+                      }}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '0.75rem',
+                        background: 'transparent',
+                        border: 'none',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        transition: 'background 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#f3f4f6'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <div style={{ fontWeight: '600', color: '#1f2937' }}>{club.name}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>{club.city}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              
+              {/* Teams */}
+              {searchResults.teams.length > 0 && (
+                <div style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: '700', color: '#6b7280', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
+                    👥 Mannschaften ({searchResults.teams.length})
+                  </div>
+                  {searchResults.teams.map(team => (
+                    <button
+                      key={team.id}
+                      onClick={() => {
+                        console.log('👥 Selected team:', team);
+                        setSelectedClubTeamId(team.id);
+                        setSelectedTeamId(team.id);
+                        setSearchTerm('');
+                        setSearchResults(null);
+                      }}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '0.75rem',
+                        background: 'transparent',
+                        border: 'none',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        transition: 'background 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#f3f4f6'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <div style={{ fontWeight: '600', color: '#1f2937' }}>{team.club_name} - {team.category}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>{team.team_name}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              
+              {/* Spieler */}
+              {searchResults.players.length > 0 && (
+                <div style={{ padding: '0.75rem' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: '700', color: '#6b7280', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
+                    🎾 Spieler ({searchResults.players.length})
+                  </div>
+                  {searchResults.players.map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        console.log('🎾 Selected player:', p);
+                        // Wechsle zur Spieler-Ansicht und scrolle zum Spieler
+                        setViewMode('spieler');
+                        setSearchTerm('');
+                        setSearchResults(null);
+                        // TODO: Scroll to player
+                      }}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '0.75rem',
+                        background: 'transparent',
+                        border: 'none',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        transition: 'background 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#f3f4f6'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <div style={{ fontWeight: '600', color: '#1f2937' }}>{p.name}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>LK {p.current_lk}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* Keine Ergebnisse */}
+          {searchResults && searchResults.clubs.length === 0 && searchResults.teams.length === 0 && searchResults.players.length === 0 && (
+            <div style={{
+              maxWidth: '600px',
+              margin: '0.5rem auto 0 auto',
+              padding: '1rem',
+              background: '#fef3c7',
+              border: '2px solid #f59e0b',
+              borderRadius: '12px',
+              textAlign: 'center',
+              fontSize: '0.875rem',
+              color: '#92400e'
+            }}>
+              ⚠️ Keine Ergebnisse für &ldquo;{searchTerm}&rdquo;
+            </div>
+          )}
         </div>
       </div>
 
@@ -656,21 +1382,27 @@ const Results = () => {
       {viewMode === 'mannschaft' ? (
         /* Mannschafts-Ansicht Card */
         (() => {
-          // Filter Matches basierend auf gewähltem Team (oder alle Teams)
-          const filteredMatches = matches.filter(match => {
-            if (!match.teamInfo) {
-              return false; // Keine Matches ohne teamInfo anzeigen
+          // ✅ NEU: Filter Matches basierend auf Auswahl
+          const filteredMatches = (() => {
+            // Fall 1: Vereins-Team ausgewählt (auch ohne Membership!)
+            if (selectedClubTeamId) {
+              // Prüfe ob Matches für externes Team geladen wurden
+              if (externalTeamMatches[selectedClubTeamId]) {
+                return externalTeamMatches[selectedClubTeamId];
+              }
+              // Ansonsten filter aus eigenen Matches (falls es doch ein eigenes Team ist)
+              return matches.filter(m => m.teamInfo?.id === selectedClubTeamId);
             }
             
-            // Wenn ein spezifisches Team ausgewählt ist: Nur Matches von diesem Team
+            // Fall 2: Eigenes Team ausgewählt (alte Logik)
             if (selectedTeamId) {
-              return match.teamInfo.id === selectedTeamId;
+              return matches.filter(m => m.teamInfo?.id === selectedTeamId);
             }
             
-            // Wenn kein Team ausgewählt: Zeige alle Matches von allen Spieler-Teams
+            // Fall 3: Keine Auswahl → Zeige alle eigenen Team-Matches
             const playerTeamIds = playerTeams.map(team => team.id);
-            return playerTeamIds.includes(match.teamInfo.id);
-          });
+            return matches.filter(m => m.teamInfo && playerTeamIds.includes(m.teamInfo.id));
+          })();
           
           console.log('🔍 Filter Debug:', {
             totalMatches: matches.length,
@@ -691,52 +1423,6 @@ const Results = () => {
                   {filteredMatches.length} {filteredMatches.length === 1 ? 'Spiel' : 'Spiele'}
                 </div>
               </div>
-              
-              {/* Spieler-Teams Info */}
-              <div style={{ 
-                padding: '0.75rem 1rem', 
-                background: '#f0f9ff', 
-                border: '1px solid #bae6fd',
-                borderRadius: '8px',
-                margin: '0 1rem',
-                fontSize: '0.8rem',
-                color: '#0c4a6e'
-              }}>
-                <div style={{ fontWeight: '600', marginBottom: '0.25rem' }}>
-                  👤 {selectedTeamId ? 'Gefilterte Mannschaft:' : 'Deine Mannschaften:'}
-                </div>
-                {selectedTeamId ? (
-                  <div style={{ marginLeft: '1rem' }}>
-                    🏢 {playerTeams.find(t => t.id === selectedTeamId)?.club_name} - {playerTeams.find(t => t.id === selectedTeamId)?.team_name} ({playerTeams.find(t => t.id === selectedTeamId)?.category})
-                  </div>
-                ) : (
-                  playerTeams.map(team => (
-                    <div key={team.id} style={{ marginLeft: '1rem' }}>
-                      🏢 {team.club_name} - {team.team_name} ({team.category})
-                    </div>
-                  ))
-                )}
-              </div>
-              
-              {/* Team-Selector - nur in Mannschafts-Ansicht und nur wenn > 1 Team */}
-              {playerTeams.length > 1 && (
-                <div style={{ padding: '1rem 1rem 0 1rem' }}>
-                  <div className="team-selector-modern">
-                    <label className="team-selector-label">Team filtern:</label>
-                    <select 
-                      className="team-selector-dropdown"
-                      value={selectedTeamId || ''}
-                      onChange={(e) => setSelectedTeamId(e.target.value)}
-                    >
-                      {playerTeams.map(team => (
-                        <option key={team.id} value={team.id}>
-                          {team.club_name} - {team.team_name} ({team.category})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
               
               <div className="season-content">
               {filteredMatches.length === 0 ? (
