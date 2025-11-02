@@ -785,13 +785,17 @@ function Rankings() {
                       </div>
                       <button 
                         className="close-accordion"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          console.log('🔽 Closing accordion for:', player.name);
                           setExpandedPlayers(prev => {
                             const newSet = new Set(prev);
                             newSet.delete(player.id);
                             return newSet;
                           });
                         }}
+                        title="Berechnung zuklappen"
                       >
                         ✕
                       </button>
