@@ -424,9 +424,11 @@ function Dashboard() {
         <h1 className="hi">
           {getGreeting()}
         </h1>
-        
-        {/* LK-Card mit Formkurve */}
-        {(player?.current_lk || player?.ranking) && (
+      </div>
+      
+      {/* 2. LK-Card mit Formkurve - DIREKT NACH BEGRÜSSUNG */}
+      {(player?.current_lk || player?.ranking) && (
+        <div className="fade-in" style={{ marginBottom: '1.5rem' }}>
           <div className="lk-card-full">
             <div className="formkurve-header">
               <div className="formkurve-title">Deine Formkurve</div>
@@ -638,11 +640,8 @@ function Dashboard() {
                   );
                 })()}
           </div>
-        )}
-      </div>
-
-      {/* 2. Training-Teaser Card - ENTFERNT (war hardcoded) */}
-      {/* TODO: Dynamische Training-Anzeige implementieren */}
+        </div>
+      )}
 
       {/* 🔴 LIVE-SPIELE (gerade laufend) - DIREKT NACH FORMKURVE */}
       {liveMatches.length > 0 && (
@@ -719,7 +718,7 @@ function Dashboard() {
         </div>
       )}
 
-      {/* 3. Aktuelle Saison Card */}
+      {/* 4. Aktuelle Saison Card */}
       <div className="fade-in lk-card-full">
         <div className="formkurve-header">
           <div className="formkurve-title">Aktuelle Saison</div>
