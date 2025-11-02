@@ -249,10 +249,21 @@ const MatchdayResults = () => {
     const diff = matchTime - now;
     
     if (diff < 0) {
+      // Spiel hat bereits begonnen
       const elapsed = Math.abs(diff);
-      const hours = Math.floor(elapsed / 3600000);
-      const minutes = Math.floor((elapsed % 3600000) / 60000);
-      return `🔴 Läuft seit ${hours}h ${minutes}m`;
+      const hoursSinceStart = elapsed / 3600000;
+      
+      // 🔧 LIVE-Anzeige: Wenn < 7h her, zeige nur "LIVE" (keine Zeit-Berechnung)
+      if (hoursSinceStart <= 7) {
+        const startTime = matchTime.toLocaleTimeString('de-DE', {
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+        return `🔴 LIVE (seit ${startTime} Uhr)`;
+      }
+      
+      // Spiel ist vorbei (> 7h)
+      return `✅ Beendet`;
     }
     
     const hours = Math.floor(diff / 3600000);
