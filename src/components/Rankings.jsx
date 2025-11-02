@@ -720,8 +720,8 @@ function Rankings() {
                         </span>
                       )}
                     </h3>
-                    {/* Start-LK unter dem Namen */}
-                    {player.season_start_lk && player.season_start_lk !== player.current_lk && (
+                    {/* Start-LK unter dem Namen (immer anzeigen wenn vorhanden) */}
+                    {player.season_start_lk && (
                       <div style={{
                         fontSize: '0.75rem',
                         color: '#6b7280',
