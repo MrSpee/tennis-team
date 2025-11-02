@@ -95,33 +95,87 @@ function Dashboard() {
     }
   }, [matches, currentSeason, seasonDisplay, now]);
   
+  // 🔧 NEU: Lade match_results Counts für Live-Status
+  const [matchResultCounts, setMatchResultCounts] = useState({});
+  
+  useEffect(() => {
+    const loadMatchResults = async () => {
+      if (matches.length === 0) return;
+      
+      try {
+        const { data, error } = await supabase
+          .from('match_results')
+          .select('matchday_id, status, winner')
+          .in('matchday_id', matches.map(m => m.id));
+        
+        if (error) {
+          console.error('Error loading match results:', error);
+          return;
+        }
+        
+        // Zähle completed results pro matchday
+        const counts = {};
+        (data || []).forEach(r => {
+          if (!counts[r.matchday_id]) {
+            counts[r.matchday_id] = { total: 0, completed: 0 };
+          }
+          counts[r.matchday_id].total++;
+          if (r.status === 'completed' && r.winner) {
+            counts[r.matchday_id].completed++;
+          }
+        });
+        
+        setMatchResultCounts(counts);
+        console.log('✅ Match result counts loaded:', counts);
+      } catch (error) {
+        console.error('Error loading match result counts:', error);
+      }
+    };
+    
+    loadMatchResults();
+  }, [matches]);
+  
+  // Helper: Bestimme Match-Status (live, upcoming, finished)
+  const getMatchStatus = (match) => {
+    const timeSinceStart = (now - match.date) / (1000 * 60 * 60); // Stunden
+    const resultCount = matchResultCounts[match.id]?.completed || 0;
+    const expectedResults = match.season === 'summer' ? 9 : 6; // Sommer: 9, Winter: 6
+    
+    // Beendet: Alle Ergebnisse eingetragen ODER > 7h her
+    if (resultCount >= expectedResults || timeSinceStart > 7) {
+      return 'finished';
+    }
+    
+    // Live: Begonnen (< 7h her) aber nicht alle Ergebnisse
+    if (timeSinceStart > 0 && timeSinceStart <= 7) {
+      return 'live';
+    }
+    
+    // Upcoming: Noch nicht begonnen
+    return 'upcoming';
+  };
+  
+  // Live-Spiele (gerade laufend)
+  const liveMatches = matches
+    .filter(m => {
+      const status = getMatchStatus(m);
+      return status === 'live' && m.season === currentSeason;
+    })
+    .sort((a, b) => a.date - b.date);
+  
   // Kommende Spiele (noch nicht begonnen)
   const upcomingMatches = matches
     .filter(m => {
-      const isAfterNow = m.date > now;
-      const isCurrentSeason = m.season === currentSeason;
-      const matchesFilter = isAfterNow && isCurrentSeason;
-      
-      if (matches.length <= 10) { // Nur bei wenigen Matches loggen
-        console.log(`🔍 Match ${m.opponent}:`, { 
-          isAfterNow, 
-          isCurrentSeason, 
-          date: m.date?.toISOString?.() || m.date, 
-          now: now.toISOString?.() || now, 
-          season: m.season, 
-          currentSeason,
-          matchesFilter 
-        });
-      }
-      
-      return matchesFilter;
+      const status = getMatchStatus(m);
+      return status === 'upcoming' && m.season === currentSeason;
     })
     .sort((a, b) => a.date - b.date);
 
-  // Beendete Spiele der aktuellen Saison (bereits begonnen, OHNE Zeitlimit)
+  // Beendete Spiele der aktuellen Saison
   const recentlyFinishedMatches = matches
     .filter(m => {
-      return m.date < now && m.season === currentSeason;
+      const status = getMatchStatus(m);
+      return status === 'finished' && m.season === currentSeason;
     })
     .sort((a, b) => b.date - a.date); // Neueste zuerst
 
@@ -671,6 +725,71 @@ function Dashboard() {
             <div className="next-match-card empty">
               <div className="next-match-label">NÄCHSTES SPIEL</div>
               <div className="next-match-countdown">📅 Der Spielplan ist noch leer</div>
+            </div>
+          )}
+          
+          {/* 🔴 LIVE-SPIELE (gerade laufend) */}
+          {liveMatches.length > 0 && (
+            <div className="season-matches" style={{ marginBottom: '1.5rem' }}>
+              <div className="season-matches-label" style={{
+                background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                color: 'white',
+                animation: 'pulse 2s ease-in-out infinite'
+              }}>
+                🔴 Live-Spiele ({liveMatches.length})
+              </div>
+              {liveMatches.map((match) => {
+                const resultCount = matchResultCounts[match.id]?.completed || 0;
+                const expectedResults = match.season === 'summer' ? 9 : 6;
+                const timeSinceStart = (now - match.date) / (1000 * 60 * 60); // Stunden
+                
+                return (
+                  <div 
+                    key={match.id} 
+                    className="match-preview-card"
+                    onClick={() => navigate(`/ergebnisse/${match.id}`)}
+                    style={{ 
+                      cursor: 'pointer',
+                      border: '2px solid #ef4444',
+                      background: 'linear-gradient(135deg, #fef2f2 0%, #ffffff 100%)'
+                    }}
+                  >
+                    <div className="match-preview-header">
+                      <div className="match-preview-date" style={{ color: '#ef4444', fontWeight: '700' }}>
+                        🔴 LIVE - {format(match.date, 'EEE, dd. MMM', { locale: de })}
+                      </div>
+                      <div className="match-preview-time" style={{ 
+                        background: '#ef4444',
+                        color: 'white',
+                        padding: '0.25rem 0.75rem',
+                        borderRadius: '6px',
+                        fontSize: '0.75rem',
+                        fontWeight: '700'
+                      }}>
+                        {Math.floor(timeSinceStart)}h {Math.floor((timeSinceStart % 1) * 60)}m
+                      </div>
+                    </div>
+                    <div className="match-preview-opponent">{match.opponent}</div>
+                    <div style={{
+                      marginTop: '0.5rem',
+                      padding: '0.5rem',
+                      background: resultCount > 0 ? '#dcfce7' : '#fef3c7',
+                      borderRadius: '6px',
+                      fontSize: '0.8rem',
+                      fontWeight: '600',
+                      color: resultCount > 0 ? '#15803d' : '#92400e',
+                      textAlign: 'center'
+                    }}>
+                      {resultCount > 0 
+                        ? `✅ ${resultCount}/${expectedResults} Ergebnisse eingetragen`
+                        : '⏳ Ergebnisse noch nicht eingetragen'
+                      }
+                    </div>
+                    <div className="match-preview-location">{match.location === 'Home' ? '🏠 Heimspiel' : '✈️ Auswärtsspiel'}</div>
+                    <div className="match-preview-venue">{match.venue}</div>
+                  </div>
+                );
+              })}
             </div>
           )}
           
