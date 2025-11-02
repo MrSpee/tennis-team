@@ -366,8 +366,47 @@ export function DataProvider({ children }) {
         matchMatchesFilter: playerTeamIds.includes(m.home_team_id) || playerTeamIds.includes(m.away_team_id)
       })));
 
+      // ✅ NEU: Lade match_results und berechne scores
+      const matchIds = data.map(m => m.id);
+      let matchScoresMap = {};
+      
+      if (matchIds.length > 0) {
+        const { data: resultsData, error: resultsError } = await supabase
+          .from('match_results')
+          .select('match_id, matchday_id, status, winner')
+          .or(matchIds.map(id => `matchday_id.eq.${id}`).join(','));
+        
+        if (!resultsError && resultsData) {
+          // Berechne scores pro match
+          resultsData.forEach(result => {
+            const id = result.matchday_id || result.match_id;
+            if (!matchScoresMap[id]) {
+              matchScoresMap[id] = { home_wins: 0, away_wins: 0, completed: 0 };
+            }
+            
+            if (result.status === 'completed') {
+              matchScoresMap[id].completed++;
+              if (result.winner === 'home') {
+                matchScoresMap[id].home_wins++;
+              } else if (result.winner === 'guest' || result.winner === 'away') {
+                matchScoresMap[id].away_wins++;
+              }
+            }
+          });
+          
+          console.log('✅ Match results aggregated:', Object.keys(matchScoresMap).length, 'matches with results');
+        }
+      }
+
       // Transformiere Daten - handle sowohl matchdays als auch matches
       let transformedMatches = data.map(matchday => {
+        // ✅ Füge aggregierte Scores hinzu (überschreibe DB-Werte falls vorhanden)
+        const scores = matchScoresMap[matchday.id];
+        if (scores) {
+          matchday.home_score = scores.home_wins;
+          matchday.away_score = scores.away_wins;
+        }
+        
         // Prüfe ob es matchdays (neue Struktur) oder matches (alte Struktur) ist
         const isNewStructure = matchday.home_team_id || matchday.away_team_id;
         
@@ -417,6 +456,9 @@ export function DataProvider({ children }) {
             // WICHTIG: Behalte Original-IDs für score-Berechnung in Results.jsx
             home_team_id: matchday.home_team_id,
             away_team_id: matchday.away_team_id,
+            // ✅ NEU: Lade home_score und away_score aus matchday
+            home_score: matchday.home_score,
+            away_score: matchday.away_score,
             teamInfo: ourTeam ? {
               id: ourTeam.id,
               clubName: ourTeam.club_name,
@@ -443,6 +485,9 @@ export function DataProvider({ children }) {
             season: matchday.season,
             playersNeeded: matchday.players_needed,
             teamId: matchday.team_id,
+            // ✅ NEU: Lade home_score und away_score auch für alte Struktur
+            home_score: matchday.home_score,
+            away_score: matchday.away_score,
             teamInfo: matchday.team_info ? {
               id: matchday.team_info.id,
               clubName: matchday.team_info.club_name,

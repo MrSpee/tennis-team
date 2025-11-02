@@ -103,23 +103,22 @@ const ImportTab = () => {
 
       console.log('🔵 Creating new club:', newClubData);
 
-      // Erstelle Verein
-      const { data: club, error } = await supabase
-        .from('club_info')
-        .insert({
-          name: newClubData.name,
-          city: newClubData.city,
-          federation: newClubData.federation || 'TVM',
-          bundesland: newClubData.bundesland || null,
-          website: newClubData.website || null,
-          is_verified: true // Auto-approve vom Admin
-        })
-        .select()
-        .single();
+      // ✅ Erstelle Verein via RPC (umgeht RLS-Policies)
+      const { data: clubData, error } = await supabase
+        .rpc('create_club_as_super_admin', {
+          p_name: newClubData.name,
+          p_city: newClubData.city,
+          p_federation: newClubData.federation || 'TVM',
+          p_bundesland: newClubData.bundesland || null,
+          p_website: newClubData.website || null
+        });
 
       if (error) throw error;
 
-      console.log('✅ Club created:', club);
+      // RPC gibt Array zurück, nimm ersten Eintrag
+      const club = Array.isArray(clubData) ? clubData[0] : clubData;
+      
+      console.log('✅ Club created via RPC:', club);
 
       // Aktualisiere allClubs Liste
       setAllClubs([...allClubs, club]);
@@ -163,11 +162,7 @@ const ImportTab = () => {
       setSuccessMessage(`✅ Verein "${club.name}" wurde erfolgreich erstellt und allen Spielern zugeordnet!`);
       setTimeout(() => setSuccessMessage(null), 5000);
 
-      // Log Activity
-      await LoggingService.log('club_created', 'club', club.id, {
-        club_name: club.name,
-        source: 'import'
-      });
+      // ℹ️ Activity wird bereits in der RPC-Funktion geloggt
 
     } catch (err) {
       console.error('❌ Error creating club:', err);
@@ -187,30 +182,22 @@ const ImportTab = () => {
 
       console.log('🔵 Creating new team:', newTeamData);
 
-      // Hole Club-Info für club_name
-      const { data: club } = await supabase
-        .from('club_info')
-        .select('name')
-        .eq('id', newTeamData.club_id)
-        .single();
-
-      // Erstelle Team
-      const { data: team, error } = await supabase
-        .from('team_info')
-        .insert({
-          team_name: newTeamData.team_name,
-          category: newTeamData.category,
-          club_id: newTeamData.club_id,
-          club_name: club?.name || '',
-          tvm_link: newTeamData.tvm_link || null,
-          region: 'TVM' // Default
-        })
-        .select()
-        .single();
+      // ✅ Erstelle Team via RPC (umgeht RLS-Policies)
+      const { data: teamData, error } = await supabase
+        .rpc('create_team_as_super_admin', {
+          p_team_name: newTeamData.team_name,
+          p_category: newTeamData.category,
+          p_club_id: newTeamData.club_id,
+          p_tvm_link: newTeamData.tvm_link || null,
+          p_region: 'TVM' // Default
+        });
 
       if (error) throw error;
 
-      console.log('✅ Team created:', team);
+      // RPC gibt Array zurück, nimm ersten Eintrag
+      const team = Array.isArray(teamData) ? teamData[0] : teamData;
+      
+      console.log('✅ Team created via RPC:', team);
 
       // Aktualisiere allTeams Liste
       setAllTeams([...allTeams, team]);
@@ -255,13 +242,7 @@ const ImportTab = () => {
       setSuccessMessage(`✅ Team "${team.team_name}" (${team.category}) wurde erfolgreich erstellt und allen Spielern zugeordnet!`);
       setTimeout(() => setSuccessMessage(null), 5000);
 
-      // Log Activity
-      await LoggingService.log('team_created', 'team', team.id, {
-        team_name: team.team_name,
-        category: team.category,
-        club_name: club?.name,
-        source: 'import'
-      });
+      // ℹ️ Activity wird bereits in der RPC-Funktion geloggt
 
     } catch (err) {
       console.error('❌ Error creating team:', err);

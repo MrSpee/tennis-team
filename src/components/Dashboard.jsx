@@ -244,13 +244,7 @@ function Dashboard() {
     const diffMinutes = Math.floor((diffTime % (1000 * 60 * 60)) / (1000 * 60));
     const diffSeconds = Math.floor((diffTime % (1000 * 60)) / 1000);
 
-    // 🔧 Bestimme "HEUTE" basierend auf 06:00 Uhr als Tag-Start
-    const getTodayAt6AM = () => {
-      const today = new Date();
-      today.setHours(6, 0, 0, 0);
-      return today;
-    };
-
+    // 🔧 Bestimme "HEUTE" und "MORGEN" basierend auf 06:00 Uhr als Tag-Start
     const getTomorrowAt6AM = () => {
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
@@ -258,7 +252,6 @@ function Dashboard() {
       return tomorrow;
     };
 
-    const todayStart = getTodayAt6AM();
     const tomorrowStart = getTomorrowAt6AM();
 
     // Heute: Match ist zwischen jetzt und morgen 06:00 Uhr
@@ -379,13 +372,6 @@ function Dashboard() {
     
     const diffTime = nextMatchAnySeason.date - now;
     const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
-    
-    // 🔧 Bestimme "HEUTE" und "MORGEN" basierend auf 06:00 Uhr als Tag-Start
-    const getTodayAt6AM = () => {
-      const today = new Date();
-      today.setHours(6, 0, 0, 0);
-      return today;
-    };
 
     const getTomorrowAt6AM = () => {
       const tomorrow = new Date();
@@ -900,13 +886,47 @@ function Dashboard() {
             <div className="season-matches">
               <div className="season-matches-label">Beendete Spiele</div>
               {recentlyFinishedMatches.map((match) => {
-                // Hole Match-Ergebnis aus DB (später über API)
-                // Für jetzt: Mock-Daten (erster Match = Sieg, zweiter = Niederlage)
-                const matchResult = match.id.includes('test') 
-                  ? 'draw' 
-                  : recentlyFinishedMatches.indexOf(match) === 0 
-                    ? 'win' 
-                    : 'loss';
+                // ✅ RICHTIGE Logik: Berechne Sieg/Niederlage aus DB-Daten
+                let matchResult = null;
+                
+                if (match.home_score !== undefined && match.away_score !== undefined) {
+                  // Schritt 1: Bestimme "mein Team" Punkte basierend auf location
+                  let myScore, opponentScore;
+                  
+                  if (match.location === 'Away') {
+                    // Mein Team spielt auswärts → Ich bin GUEST
+                    myScore = match.away_score;
+                    opponentScore = match.home_score;
+                  } else {
+                    // Mein Team spielt zu Hause → Ich bin HOME
+                    myScore = match.home_score;
+                    opponentScore = match.away_score;
+                  }
+                  
+                  // Schritt 2: Vergleiche Punkte aus MEINER Sicht
+                  if (myScore > opponentScore) {
+                    matchResult = 'win';
+                  } else if (myScore < opponentScore) {
+                    matchResult = 'loss';
+                  } else {
+                    matchResult = 'draw';
+                  }
+                  
+                  // Debug Log
+                  console.log(`🎾 Match ${match.opponent}:`, {
+                    location: match.location,
+                    home_score: match.home_score,
+                    away_score: match.away_score,
+                    myScore,
+                    opponentScore,
+                    result: matchResult
+                  });
+                } else {
+                  console.warn('⚠️ Match ohne Ergebnis:', match.opponent, {
+                    home_score: match.home_score,
+                    away_score: match.away_score
+                  });
+                }
                 
                 return (
                   <div 
