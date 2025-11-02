@@ -423,10 +423,18 @@ function Rankings() {
         console.log('📊 Match results:', resultsData?.length || 0);
         
         for (const result of resultsData || []) {
-          const isPlayerInvolved = 
+          // 🔧 Prüfe ob Spieler im HOME oder GUEST Team ist
+          const isPlayerInHomeTeam = 
             result.home_player_id === player.id ||
             result.home_player1_id === player.id ||
             result.home_player2_id === player.id;
+          
+          const isPlayerInGuestTeam = 
+            result.guest_player_id === player.id ||
+            result.guest_player1_id === player.id ||
+            result.guest_player2_id === player.id;
+          
+          const isPlayerInvolved = isPlayerInHomeTeam || isPlayerInGuestTeam;
           
           if (!isPlayerInvolved) continue;
           
@@ -435,7 +443,12 @@ function Rankings() {
             winner = calculateMatchWinner(result);
           }
           
-          if (winner !== 'home') continue;
+          // 🔧 Prüfe ob Spieler gewonnen hat (egal ob home oder guest)
+          const didPlayerWin = 
+            (isPlayerInHomeTeam && winner === 'home') ||
+            (isPlayerInGuestTeam && winner === 'guest');
+          
+          if (!didPlayerWin) continue; // Nur Siege zählen für LK-Verbesserung
           
           matchesPlayed++;
           
@@ -444,10 +457,13 @@ function Rankings() {
           let ownLK = begleitLK;
           
           if (result.match_type === 'Einzel') {
+            // 🔧 Bestimme Gegner basierend auf Spieler-Position (home oder guest)
+            const opponentId = isPlayerInHomeTeam ? result.guest_player_id : result.home_player_id;
+            
             const { data: oppData } = await supabase
               .from('players_unified')
               .select('name, current_lk')
-              .eq('id', result.guest_player_id)
+              .eq('id', opponentId)
               .single();
             
             if (oppData) {
@@ -455,7 +471,10 @@ function Rankings() {
               oppName = oppData.name || 'Unbekannt';
             }
           } else {
-            const partnerId = result.home_player1_id === player.id ? result.home_player2_id : result.home_player1_id;
+            // Doppel: Bestimme Partner und Gegner basierend auf Spieler-Position
+            const partnerId = isPlayerInHomeTeam ?
+              (result.home_player1_id === player.id ? result.home_player2_id : result.home_player1_id) :
+              (result.guest_player1_id === player.id ? result.guest_player2_id : result.guest_player1_id);
             
             const { data: partnerData } = await supabase
               .from('players_unified')
@@ -471,16 +490,20 @@ function Rankings() {
             
             ownLK = (begleitLK + partnerLK) / 2;
             
+            // Bestimme Gegner-IDs basierend auf Spieler-Position
+            const opp1Id = isPlayerInHomeTeam ? result.guest_player1_id : result.home_player1_id;
+            const opp2Id = isPlayerInHomeTeam ? result.guest_player2_id : result.home_player2_id;
+            
             const { data: opp1Data } = await supabase
               .from('players_unified')
               .select('name, current_lk')
-              .eq('id', result.guest_player1_id)
+              .eq('id', opp1Id)
               .single();
             
             const { data: opp2Data } = await supabase
               .from('players_unified')
               .select('name, current_lk')
-              .eq('id', result.guest_player2_id)
+              .eq('id', opp2Id)
               .single();
             
             const oppLK1 = parseFloat((opp1Data?.current_lk || '25').replace(',', '.').replace('LK ', ''));
