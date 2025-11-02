@@ -714,11 +714,11 @@ function Rankings() {
                   <div>
                     <h3 className="player-name-large">
                       <span className="position-number">{index + 1}</span> - {player.name}
-                      {!player.is_active && (
-                        <span className="inactive-badge" title="Spieler ist in der App inaktiv">
-                          🚫 Inaktiv
-                        </span>
-                      )}
+                    {!player.is_active && (
+                      <span className="inactive-badge" title="Spieler hat sich noch nicht in der App registriert">
+                        🚫 Nicht in der App angemeldet
+                      </span>
+                    )}
                     </h3>
                     {/* Start-LK unter dem Namen (immer anzeigen wenn vorhanden) */}
                     {player.season_start_lk && (
