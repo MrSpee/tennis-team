@@ -139,25 +139,36 @@ WICHTIGE REGELN:
 
 **3. SPIELER-DATEN (falls Meldeliste vorhanden):**
    - **KRITISCH: Extrahiere ALLE Spieler aus der Meldeliste - keine Spieler weglassen!**
-   - **LK-ERKENNUNG (Priorität 1):**
-     * Versuche IMMER die LK-Spalte zu extrahieren
-     * LK Format ist "Zahl.Zahl" (z.B. "9.8", "11.3", "13.5") ODER ganzzahlig (z.B. "13", "14", "15")
-     * **WICHTIG: Wenn LK NICHT erkennbar oder leer ist, setze lk auf null oder ""**
+   - **LK-ERKENNUNG (ABSOLUTE PRIORITÄT!):**
+     * **WICHTIG: Die 4. Spalte ist IMMER die LK!**
+     * **Spaltenreihenfolge: Position | Mannschaft | Name | LK | ID-Nr. | Info | MF | Nation**
+     * LK Format kann sein:
+       - Ganzzahlig: "10", "13", "14", "15", "22", "25" → IMMER als STRING "10", "13", etc.
+       - Dezimal: "9.8", "11.3", "13.5", "13.6", "15.3" → IMMER als STRING "9.8", "11.3", etc.
+     * **KRITISCH: LK NIEMALS ignorieren! Wenn in der 4. Spalte eine Zahl steht, ist es die LK!**
+     * **Beispiele:**
+       - "1	1	Helmut Härle	10	15600082	" → lk="10" (ganzzahlig, NICHT "10.0"!)
+       - "2	1	Mario Gruben	13.6	15902595	" → lk="13.6"
+       - "3	1	Nikolaus Hiester	14	16202570	" → lk="14" (ganzzahlig!)
+     * Nur wenn die LK-Spalte komplett leer ist: lk=null
      * **NIEMALS erfundene oder Fallback-Werte verwenden!**
-     * Der Benutzer kann fehlende LK-Werte später manuell ergänzen
    - **TVM ID-Nummer (Priorität 2):**
-     * Wenn ID-Nummer erkennbar ist, extrahiere sie
-     * Wenn ID-Nummer fehlt oder leer, setze id_number auf "" (leeren String)
-     * ID-Nummer kann später manuell ergänzt werden
-   - Position in der Meldeliste beachten
-   - Mannschaftsführer markieren (Spalte "MF")
-   - **DETAILIERTES BEISPIEL:**
-     * Tabellenzeile: "9	3	Meik Frauenrath	9.8	18253069		GER"
+     * **WICHTIG: Die 5. Spalte ist IMMER die ID-Nr.!**
+     * ID-Nummer ist eine 8-stellige Zahl (z.B. "15600082", "16590908")
+     * **KRITISCH: ID-Nummer NIEMALS ignorieren! Wenn in der 5. Spalte eine Zahl steht, ist es die ID!**
+     * Nur wenn die ID-Spalte leer ist: id_number=""
+   - **Position:** 1. Spalte (z.B. "1", "2", "3", "9")
+   - **Mannschaftsführer:** Spalte "MF" → is_captain=true
+   - **DETAILIERTES BEISPIEL (GANZZAHLIGE LK):**
+     * Zeile: "1	1	Helmut Härle	10	15600082			GER"
+       → Position=1, Name="Helmut Härle", lk="10", id_number="15600082", is_captain=false
+     * Zeile: "9	1	Michael Scholz-Dumjahn	19.3	16590908		MF	GER"
+       → Position=9, Name="Michael Scholz-Dumjahn", lk="19.3", id_number="16590908", is_captain=true
+   - **DETAILIERTES BEISPIEL (DEZIMAL LK):**
+     * Zeile: "9	3	Meik Frauenrath	9.8	18253069			GER"
        → Position=9, Name="Meik Frauenrath", lk="9.8", id_number="18253069"
-     * Tabellenzeile: "15	4	Frank Tepferd	12.7	17656142		MF	GER"
+     * Zeile: "15	4	Frank Tepferd	12.7	17656142		MF	GER"
        → Position=15, Name="Frank Tepferd", lk="12.7", id_number="17656142", is_captain=true
-     * **FALLS LK SPALTE LEER/UNSICHTBAR: "10	3	Max Mustermann		12345678"**
-       → Position=10, Name="Max Mustermann", lk=null (oder ""), id_number="12345678"
 
 **4. SAISON & JAHR:**
    - Erkenne Saison basierend auf Monat:
@@ -167,7 +178,30 @@ WICHTIGE REGELN:
      * Winter-Saison: "2025/26" (Jahr/H+1)
      * Sommer-Saison: "2026" (Jahr)
 
-BEISPIEL INPUT 1 (TVM-Format mit Meldeliste):
+BEISPIEL INPUT 1 (TVM-Format mit Meldeliste - GANZZAHLIGE LK):
+"""
+RTHC Bayer Leverkusen
+Stadt Leverkusen
+Knochenbergsweg
+51373 Leverkusen
+http://www.rthc.de
+
+Mannschaftsführer
+Scholz-Dumjahn Michael (+4915204263541)
+
+Herren 55 1. Kreisliga 4-er Gr. 063
+Herren 55 1 (4er)
+
+Meldeliste:
+Position	Mannschaft	Name	LK	ID-Nr.	Info	MF	Nation
+1	1	Helmut Härle	10	15600082			GER
+2	1	Mario Gruben	13.6	15902595			GER
+3	1	Nikolaus Hiester	14	16202570			GER
+4	1	Johannes Orlowski	15.3	15702873			GER
+9	1	Michael Scholz-Dumjahn	19.3	16590908		MF	GER
+"""
+
+BEISPIEL INPUT 2 (TVM-Format mit Meldeliste - DEZIMAL LK):
 """
 TC Colonius
 Stadt Köln
@@ -191,7 +225,7 @@ Position	Mannschaft	Name	LK	ID-Nr.	Info	MF	Nation
 15	4	Frank Tepferd	12.7	17656142		MF	GER
 """
 
-BEISPIEL INPUT 2 (TVM-Format mit Spielplan):
+BEISPIEL INPUT 3 (TVM-Format mit Spielplan):
 """
 VKC Köln
 Stadt Köln
@@ -211,7 +245,60 @@ Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele
 08.03.2026, 16:00	TH Schloß Morsbroich	VKC Köln 1	TC Rath 1	0:0	0:0	0:0	offen
 """
 
-BEISPIEL OUTPUT 1 (Meldeliste):
+BEISPIEL OUTPUT 1 (Meldeliste - GANZZAHLIGE LK):
+{
+  "team_info": {
+    "club_name": "RTHC Bayer Leverkusen",
+    "team_name": "1",
+    "category": "Herren 55",
+    "league": "Herren 55 1. Kreisliga 4-er Gr. 063",
+    "address": "Knochenbergsweg, 51373 Leverkusen",
+    "website": "http://www.rthc.de",
+    "captain": "Scholz-Dumjahn Michael"
+  },
+  "matches": [],
+  "players": [
+    {
+      "name": "Helmut Härle",
+      "lk": "10",
+      "id_number": "15600082",
+      "position": 1,
+      "is_captain": false
+    },
+    {
+      "name": "Mario Gruben",
+      "lk": "13.6",
+      "id_number": "15902595",
+      "position": 2,
+      "is_captain": false
+    },
+    {
+      "name": "Nikolaus Hiester",
+      "lk": "14",
+      "id_number": "16202570",
+      "position": 3,
+      "is_captain": false
+    },
+    {
+      "name": "Johannes Orlowski",
+      "lk": "15.3",
+      "id_number": "15702873",
+      "position": 4,
+      "is_captain": false
+    },
+    {
+      "name": "Michael Scholz-Dumjahn",
+      "lk": "19.3",
+      "id_number": "16590908",
+      "position": 9,
+      "is_captain": true
+    }
+  ],
+  "season": "winter",
+  "year": "2025/26"
+}
+
+BEISPIEL OUTPUT 2 (Meldeliste - DEZIMAL LK):
 {
   "team_info": {
     "club_name": "TC Colonius",
@@ -271,7 +358,7 @@ BEISPIEL OUTPUT 1 (Meldeliste):
   "year": "2025/26"
 }
 
-BEISPIEL OUTPUT 2 (Spielplan):
+BEISPIEL OUTPUT 3 (Spielplan):
 {
   "team_info": {
     "club_name": "VKC Köln",
