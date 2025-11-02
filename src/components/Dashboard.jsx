@@ -183,9 +183,12 @@ function Dashboard() {
   // console.log('🔵 Finished matches for', currentSeason, ':', recentlyFinishedMatches.length);
 
   // Für Countdown: Das allernächste ZUKÜNFTIGE Spiel (egal welche Saison)
-  // Nur Spiele die noch nicht begonnen haben
+  // Nur Spiele die noch nicht begonnen haben UND nicht live sind
   const nextMatchAnySeason = matches
-    .filter(m => m.date > now)
+    .filter(m => {
+      const status = getMatchStatus(m);
+      return status === 'upcoming'; // Nur echte zukünftige Spiele
+    })
     .sort((a, b) => a.date - b.date)[0];
 
   // Tageszeit-abhängige Begrüßung
@@ -228,6 +231,15 @@ function Dashboard() {
 
     const now = new Date();
     const diffTime = nextMatchAnySeason.date - now;
+    
+    // 🔧 LIVE-SPIEL: Wenn bereits begonnen (diffTime < 0)
+    if (diffTime < 0) {
+      const timeSinceStart = Math.abs(diffTime) / (1000 * 60 * 60); // Positive Stunden
+      const hours = Math.floor(timeSinceStart);
+      const minutes = Math.floor((timeSinceStart % 1) * 60);
+      return `🔴 Läuft seit ${hours}h ${minutes}m`;
+    }
+    
     const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
     const diffMinutes = Math.floor((diffTime % (1000 * 60 * 60)) / (1000 * 60));
     const diffSeconds = Math.floor((diffTime % (1000 * 60)) / 1000);
