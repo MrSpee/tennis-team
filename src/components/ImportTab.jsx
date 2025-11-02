@@ -1088,42 +1088,17 @@ const ImportTab = () => {
           continue;
         }
 
-        // FALL 1: Existierender Spieler (exakte Übereinstimmung)
-        if (matchResult?.status === 'exact' && matchResult.playerId) {
-          console.log('✅ Updating existing player:', playerData.name);
+        // ✅ FALL 1: Existierender Spieler (ALLE Match-Typen: exact, fuzzy, name_lk, etc.)
+        if (matchResult?.playerId && matchResult.status !== 'new') {
+          console.log(`✅ Spieler existiert bereits (${matchResult.status}):`, playerData.name, '→ Nur Team-Zuordnung');
           
-          // Update LK und TVM ID (falls geändert oder fehlend)
-          const updateFields = {};
-          
-          if (playerData.lk) {
-            updateFields.current_lk = playerData.lk;
-            updateFields.last_lk_update = new Date().toISOString();
-          }
-          
-          if (playerData.id_number) {
-            updateFields.tvm_id_number = playerData.id_number;
-          }
-          
-          if (Object.keys(updateFields).length > 0) {
-            const { error: updateError } = await supabase
-              .from('players_unified')
-              .update(updateFields)
-              .eq('id', matchResult.playerId);
-
-            if (updateError) {
-              console.error('❌ Error updating player:', updateError);
-              skipped++;
-              continue;
-            }
+          // ✅ NEU: Nur Team-Zuordnung hinzufügen (Spieler-Daten NICHT ändern!)
+          if (playerData.team_id) {
+            await linkPlayerToTeam(matchResult.playerId, playerData.team_id, playerData.is_captain);
+            console.log(`  ✅ Team-Membership erstellt für ${playerData.name}`);
           }
           
           updated++;
-          
-          // Verknüpfe mit Team (falls noch nicht) - verwende team_id aus editablePlayers
-          if (playerData.team_id) {
-            await linkPlayerToTeam(matchResult.playerId, playerData.team_id, playerData.is_captain);
-          }
-          
           continue;
         }
 
@@ -1387,7 +1362,7 @@ const ImportTab = () => {
             .update({
               is_active: true,
               role: isCaptain ? 'captain' : 'player',
-              updated_at: new Date().toISOString()
+              season: 'Winter 2025/26'
             })
             .eq('id', existing.id);
           console.log('✅ Team membership activated');
@@ -1411,8 +1386,7 @@ const ImportTab = () => {
         await supabase
           .from('team_memberships')
           .update({
-            is_active: false,
-            updated_at: new Date().toISOString()
+            is_active: false
           })
           .eq('player_id', playerId)
           .eq('team_id', teamId)
@@ -2778,15 +2752,31 @@ Die KI erkennt automatisch:
                   {/* Existing Player Info */}
                   {matchResult.status !== 'new' && matchResult.existingName && (
                     <div style={{
-                      padding: '0.5rem',
-                      background: '#eff6ff',
-                      borderRadius: '6px',
-                      fontSize: '0.8rem',
-                      color: '#1e40af',
+                      padding: '0.75rem',
+                      background: 'linear-gradient(135deg, #dcfce7 0%, #d1fae5 100%)',
+                      border: '2px solid #10b981',
+                      borderRadius: '8px',
+                      fontSize: '0.85rem',
+                      color: '#065f46',
                       marginTop: '0.5rem'
                     }}>
-                      💾 <strong>Existierender Spieler:</strong> {matchResult.existingName}
-                      {matchResult.existingLk && ` (LK ${matchResult.existingLk})`}
+                      <div style={{ fontWeight: '700', marginBottom: '0.25rem' }}>
+                        ✅ Spieler existiert bereits
+                      </div>
+                      <div style={{ fontSize: '0.8rem', marginBottom: '0.5rem' }}>
+                        <strong>{matchResult.existingName}</strong>
+                        {matchResult.existingLk && ` (LK ${matchResult.existingLk})`}
+                      </div>
+                      <div style={{ 
+                        fontSize: '0.75rem', 
+                        color: '#047857',
+                        padding: '0.5rem',
+                        background: 'rgba(255, 255, 255, 0.6)',
+                        borderRadius: '4px',
+                        marginTop: '0.25rem'
+                      }}>
+                        💡 <strong>Aktion:</strong> Spieler wird zur neuen Mannschaft hinzugefügt. Spieler-Daten (LK, TVM ID) bleiben unverändert.
+                      </div>
                     </div>
                   )}
                 </div>
