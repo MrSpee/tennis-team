@@ -86,8 +86,8 @@ BEGIN
   -- Duplikat-Check
   IF EXISTS (
     SELECT 1 FROM club_info 
-    WHERE LOWER(name) = LOWER(TRIM(p_name))
-    AND LOWER(city) = LOWER(TRIM(p_city))
+    WHERE LOWER(club_info.name) = LOWER(TRIM(p_name))
+    AND LOWER(club_info.city) = LOWER(TRIM(p_city))
   ) THEN
     RAISE EXCEPTION 'Ein Verein mit diesem Namen existiert bereits in %', p_city;
   END IF;
@@ -107,7 +107,17 @@ BEGIN
   
   -- Gib Verein zurück
   RETURN QUERY
-  SELECT club_info.* FROM club_info WHERE club_info.id = v_new_club_id;
+  SELECT 
+    club_info.id,
+    club_info.name,
+    club_info.city,
+    club_info.federation,
+    club_info.bundesland,
+    club_info.website,
+    club_info.is_verified,
+    club_info.created_at
+  FROM club_info 
+  WHERE club_info.id = v_new_club_id;
 END;
 $$;
 
@@ -162,7 +172,7 @@ BEGIN
   END IF;
   
   -- Hole Club-Name
-  SELECT name INTO v_club_name FROM club_info WHERE club_info.id = p_club_id;
+  SELECT club_info.name INTO v_club_name FROM club_info WHERE club_info.id = p_club_id;
   
   IF v_club_name IS NULL THEN
     RAISE EXCEPTION 'Verein mit ID % nicht gefunden', p_club_id;
@@ -171,9 +181,9 @@ BEGIN
   -- Duplikat-Check
   IF EXISTS (
     SELECT 1 FROM team_info 
-    WHERE club_id = p_club_id
-    AND LOWER(team_name) = LOWER(TRIM(p_team_name))
-    AND category = p_category
+    WHERE team_info.club_id = p_club_id
+    AND LOWER(team_info.team_name) = LOWER(TRIM(p_team_name))
+    AND team_info.category = p_category
   ) THEN
     RAISE EXCEPTION 'Ein Team mit diesem Namen existiert bereits für % (%)', v_club_name, p_category;
   END IF;
@@ -193,7 +203,17 @@ BEGIN
   
   -- Gib Team zurück
   RETURN QUERY
-  SELECT team_info.* FROM team_info WHERE team_info.id = v_new_team_id;
+  SELECT 
+    team_info.id,
+    team_info.team_name,
+    team_info.category,
+    team_info.club_id,
+    team_info.club_name,
+    team_info.region,
+    team_info.tvm_link,
+    team_info.created_at
+  FROM team_info 
+  WHERE team_info.id = v_new_team_id;
 END;
 $$;
 

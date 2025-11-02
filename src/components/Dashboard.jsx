@@ -171,13 +171,26 @@ function Dashboard() {
     })
     .sort((a, b) => a.date - b.date);
 
-  // Beendete Spiele der aktuellen Saison
+  // Beendete Spiele der aktuellen Saison (NUR mit Ergebnis!)
   const recentlyFinishedMatches = matches
     .filter(m => {
       const status = getMatchStatus(m);
-      return status === 'finished' && m.season === currentSeason;
+      const hasResult = (m.home_score > 0 || m.away_score > 0);
+      // ✅ NUR finished Spiele MIT echtem Ergebnis
+      return status === 'finished' && hasResult && m.season === currentSeason;
     })
     .sort((a, b) => b.date - a.date); // Neueste zuerst
+
+  // ✅ NEU: Vergangene Spiele OHNE Ergebnis (brauchen dringend Eingabe!)
+  const pastMatchesWithoutResult = matches
+    .filter(m => {
+      const matchDate = new Date(m.date);
+      // ✅ Ein Match hat NUR ein Ergebnis wenn home_score ODER away_score > 0
+      const hasResult = (m.home_score > 0 || m.away_score > 0);
+      // Vergangen UND kein Ergebnis UND aktuelle Saison
+      return matchDate < now && !hasResult && m.season === currentSeason;
+    })
+    .sort((a, b) => a.date - b.date); // Älteste zuerst (dringendste)
 
   // console.log('🔵 Upcoming matches for', currentSeason, ':', upcomingMatches.length);
   // console.log('🔵 Finished matches for', currentSeason, ':', recentlyFinishedMatches.length);
@@ -808,6 +821,88 @@ function Dashboard() {
             </div>
           )}
           
+          {/* ⚠️ NEU: Vergangene Spiele OHNE Ergebnis - OFFEN */}
+          {pastMatchesWithoutResult.length > 0 && (
+            <div className="season-matches" style={{ 
+              marginTop: '1.5rem',
+              marginBottom: '1.5rem'
+            }}>
+              <div className="season-matches-label" style={{
+                background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+                color: '#92400e',
+                padding: '0.75rem 1rem',
+                borderRadius: '8px',
+                fontWeight: '700',
+                fontSize: '0.9rem',
+                marginBottom: '1rem',
+                border: '2px solid #f59e0b',
+                boxShadow: '0 2px 8px rgba(245, 158, 11, 0.2)'
+              }}>
+                ⚠️ OFFEN - Bitte Ergebnisse eintragen ({pastMatchesWithoutResult.length})
+              </div>
+              {pastMatchesWithoutResult.map((match) => (
+                <div 
+                  key={match.id} 
+                  className="match-preview-card"
+                  onClick={() => navigate(`/ergebnisse/${match.id}`)}
+                  style={{ 
+                    cursor: 'pointer',
+                    border: '2px solid #f59e0b',
+                    background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)'
+                  }}
+                >
+                  <div className="match-preview-header">
+                    <div className="match-preview-date">
+                      {format(match.date, 'EEE, dd. MMM', { locale: de })}
+                    </div>
+                    <div style={{
+                      padding: '0.25rem 0.75rem',
+                      background: '#f59e0b',
+                      color: 'white',
+                      borderRadius: '6px',
+                      fontSize: '0.75rem',
+                      fontWeight: '700'
+                    }}>
+                      ⚠️ OFFEN
+                    </div>
+                  </div>
+                  <div className="match-preview-opponent">{match.opponent}</div>
+                  
+                  {/* Team-Badge (wenn Multi-Team) */}
+                  {match.teamInfo && playerTeams.length > 1 && (
+                    <div className="match-team-badge">
+                      🏢 {match.teamInfo.clubName} - {match.teamInfo.teamName} ({match.teamInfo.category})
+                    </div>
+                  )}
+                  
+                  <div className="match-preview-type">
+                    {match.location === 'Home' ? '🏠 Heimspiel' : '✈️ Auswärtsspiel'}
+                  </div>
+                  {match.venue && (
+                    <div className="match-preview-location-simple">
+                      <span className="location-icon">📍</span>
+                      <span className="location-text">{match.venue}</span>
+                    </div>
+                  )}
+                  
+                  <button 
+                    className="btn-participation"
+                    style={{
+                      background: '#f59e0b',
+                      borderColor: '#f59e0b'
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/ergebnisse/${match.id}`);
+                    }}
+                  >
+                    ✏️ Ergebnis eintragen
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          
           {/* Kommende Spiele (nur echte zukünftige, nicht live) */}
           {upcomingMatches.length > 0 && (
             <div className="season-matches">
@@ -832,7 +927,7 @@ function Dashboard() {
                   {/* Team-Badge (wenn Multi-Team) */}
                   {match.teamInfo && playerTeams.length > 1 && (
                     <div className="match-team-badge">
-                      🏢 {match.teamInfo.clubName} - {match.teamInfo.teamName}
+                      🏢 {match.teamInfo.clubName} - {match.teamInfo.teamName} ({match.teamInfo.category})
                     </div>
                   )}
                   
@@ -889,7 +984,10 @@ function Dashboard() {
                 // ✅ RICHTIGE Logik: Berechne Sieg/Niederlage aus DB-Daten
                 let matchResult = null;
                 
-                if (match.home_score !== undefined && match.away_score !== undefined) {
+                // ✅ Prüfe ob ECHTES Ergebnis (nicht nur 0:0)
+                const hasRealResult = (match.home_score > 0 || match.away_score > 0);
+                
+                if (hasRealResult) {
                   // Schritt 1: Bestimme "mein Team" Punkte basierend auf location
                   let myScore, opponentScore;
                   
@@ -922,10 +1020,7 @@ function Dashboard() {
                     result: matchResult
                   });
                 } else {
-                  console.warn('⚠️ Match ohne Ergebnis:', match.opponent, {
-                    home_score: match.home_score,
-                    away_score: match.away_score
-                  });
+                  console.warn('⚠️ Match vergangen aber ohne Ergebnis:', match.opponent);
                 }
                 
                 return (
@@ -957,7 +1052,7 @@ function Dashboard() {
                   {/* Team-Badge (wenn Multi-Team) */}
                   {match.teamInfo && playerTeams.length > 1 && (
                     <div className="match-team-badge">
-                      🏢 {match.teamInfo.clubName} - {match.teamInfo.teamName}
+                      🏢 {match.teamInfo.clubName} - {match.teamInfo.teamName} ({match.teamInfo.category})
                     </div>
                   )}
                   

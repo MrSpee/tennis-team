@@ -585,8 +585,16 @@ const ImportTab = () => {
       // SCHRITT 4: Finde oder erstelle Gegner-Teams und erstelle matchdays
       const matchdaysToCreate = [];
       
+      // ✅ NEU: Team-Cache um Duplikate zu vermeiden
+      const teamCache = new Map(); // teamName → team_id
+      
       // Helper: Finde oder erstelle Team (mit Fuzzy Matching)
       const findOrCreateTeamByName = async (teamName) => {
+        // ✅ Prüfe Cache zuerst!
+        if (teamCache.has(teamName)) {
+          console.log(`💾 Team aus Cache: ${teamName} → ${teamCache.get(teamName)}`);
+          return teamCache.get(teamName);
+        }
         // Parse Team-Name (z.B. "SV RG Sürth 1" → club: "SV RG Sürth", team: "1")
         const parts = teamName.split(' ');
         const clubName = parts.slice(0, -1).join(' ') || teamName;
@@ -630,6 +638,8 @@ const ImportTab = () => {
             
             if (teamMatch.match) {
               console.log('✅ Team gefunden via Fuzzy Matching:', teamMatch.match.team_name);
+              // ✅ Speichere im Cache
+              teamCache.set(teamName, teamMatch.match.id);
               return teamMatch.match.id;
             }
           }
@@ -653,6 +663,8 @@ const ImportTab = () => {
           }
           
           console.log(`✅ Team erstellt: ${clubName} ${tn} (ID: ${newTeam.id})`);
+          // ✅ Speichere im Cache
+          teamCache.set(teamName, newTeam.id);
           return newTeam.id;
           
         } catch (matchError) {
@@ -666,7 +678,11 @@ const ImportTab = () => {
             .limit(1)
             .maybeSingle();
           
-          if (teamData) return teamData.id;
+          if (teamData) {
+            // ✅ Speichere im Cache
+            teamCache.set(teamName, teamData.id);
+            return teamData.id;
+          }
           
           // Erstelle neu
           const { data: newTeam, error: createError } = await supabase
@@ -683,6 +699,9 @@ const ImportTab = () => {
             throw new Error(`Team "${teamName}" konnte nicht erstellt werden: ${createError?.message}`);
           }
           
+          console.log(`✅ Team erstellt (Fallback): ${clubName} ${tn} (ID: ${newTeam.id})`);
+          // ✅ Speichere im Cache
+          teamCache.set(teamName, newTeam.id);
           return newTeam.id;
         }
       };
