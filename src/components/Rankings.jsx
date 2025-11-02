@@ -323,21 +323,45 @@ function Rankings() {
       let begleitLK = startLK;
       
       console.log('📊 Start-LK:', startLK);
-      console.log('📊 Available matches:', allMatches.length);
       
+      // 🔧 Lade Matches on-demand (für aktuellste Daten)
+      let matchesToProcess = allMatches;
       if (allMatches.length === 0) {
-        console.log('⚠️ No matches available');
-        alert('Keine Matches verfügbar. Bitte warten bis die Daten geladen sind.');
-        return;
+        console.log('⚠️ allMatches State leer, lade jetzt...');
+        const { data: matchdaysData, error: matchdaysError } = await supabase
+          .from('matchdays')
+          .select('id, match_date, opponent, location, venue, season, home_team_id, away_team_id')
+          .order('match_date', { ascending: false });
+        
+        if (!matchdaysError && matchdaysData) {
+          matchesToProcess = matchdaysData.map(m => ({
+            id: m.id,
+            date: new Date(m.match_date),
+            opponent: m.opponent || 'Unbekannt',
+            location: m.location,
+            venue: m.venue,
+            season: m.season
+          }));
+          console.log('✅ On-demand loaded', matchesToProcess.length, 'matches');
+        }
       }
       
-      console.log('🔍 Checking', allMatches.length, 'matches for player', player.name);
+      console.log('📊 Available matches:', matchesToProcess.length);
       
       let totalImprovements = 0;
       let matchesPlayed = 0;
       const matchDetails = [];
       
-      for (const match of allMatches) {
+      // 🔧 Auch ohne Matches: Berechne LK (nur wöchentlicher Abbau)
+      if (matchesToProcess.length === 0) {
+        console.log('⚠️ No matches in system - calculating decay only');
+        // Keine Matches → Nur wöchentlicher Abbau wird berechnet
+      } else {
+        console.log('🔍 Checking', matchesToProcess.length, 'matches for player', player.name);
+      }
+      
+      // Loop durch alle Matches (wenn vorhanden)
+      for (const match of matchesToProcess) {
         console.log('🔍 Checking match:', match.id, match.opponent);
         
         const { data: resultsData, error } = await supabase
