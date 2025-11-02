@@ -48,12 +48,24 @@ function Rankings() {
           .select(`
             id,
             match_date,
-            opponent,
+            start_time,
             location,
             venue,
             season,
             home_team_id,
-            away_team_id
+            away_team_id,
+            home_team:home_team_id (
+              id,
+              club_name,
+              team_name,
+              category
+            ),
+            away_team:away_team_id (
+              id,
+              club_name,
+              team_name,
+              category
+            )
           `)
           .order('match_date', { ascending: false });
         
@@ -63,14 +75,26 @@ function Rankings() {
         }
         
         // Konvertiere zu Format das calculatePlayerLK erwartet
-        const formattedMatches = (data || []).map(m => ({
-          id: m.id,
-          date: new Date(m.match_date),
-          opponent: m.opponent || 'Unbekannt',
-          location: m.location,
-          venue: m.venue,
-          season: m.season
-        }));
+        const formattedMatches = (data || []).map(m => {
+          // Bestimme Gegner-Name aus home/away teams
+          const homeTeamName = m.home_team ? 
+            `${m.home_team.club_name} ${m.home_team.team_name || ''}`.trim() : 
+            'Unbekannt';
+          const awayTeamName = m.away_team ? 
+            `${m.away_team.club_name} ${m.away_team.team_name || ''}`.trim() : 
+            'Unbekannt';
+          
+          return {
+            id: m.id,
+            date: new Date(m.match_date),
+            opponent: `${homeTeamName} vs ${awayTeamName}`, // Neutral
+            location: m.location,
+            venue: m.venue,
+            season: m.season,
+            home_team_id: m.home_team_id,
+            away_team_id: m.away_team_id
+          };
+        });
         
         setAllMatches(formattedMatches);
         console.log('✅ Rankings: Loaded', formattedMatches.length, 'matches');
@@ -330,18 +354,40 @@ function Rankings() {
         console.log('⚠️ allMatches State leer, lade jetzt...');
         const { data: matchdaysData, error: matchdaysError } = await supabase
           .from('matchdays')
-          .select('id, match_date, opponent, location, venue, season, home_team_id, away_team_id')
+          .select(`
+            id,
+            match_date,
+            start_time,
+            location,
+            venue,
+            season,
+            home_team_id,
+            away_team_id,
+            home_team:home_team_id (club_name, team_name),
+            away_team:away_team_id (club_name, team_name)
+          `)
           .order('match_date', { ascending: false });
         
         if (!matchdaysError && matchdaysData) {
-          matchesToProcess = matchdaysData.map(m => ({
-            id: m.id,
-            date: new Date(m.match_date),
-            opponent: m.opponent || 'Unbekannt',
-            location: m.location,
-            venue: m.venue,
-            season: m.season
-          }));
+          matchesToProcess = matchdaysData.map(m => {
+            const homeTeamName = m.home_team ? 
+              `${m.home_team.club_name} ${m.home_team.team_name || ''}`.trim() : 
+              'Unbekannt';
+            const awayTeamName = m.away_team ? 
+              `${m.away_team.club_name} ${m.away_team.team_name || ''}`.trim() : 
+              'Unbekannt';
+            
+            return {
+              id: m.id,
+              date: new Date(m.match_date),
+              opponent: `${homeTeamName} vs ${awayTeamName}`,
+              location: m.location,
+              venue: m.venue,
+              season: m.season,
+              home_team_id: m.home_team_id,
+              away_team_id: m.away_team_id
+            };
+          });
           console.log('✅ On-demand loaded', matchesToProcess.length, 'matches');
         }
       }
@@ -665,14 +711,28 @@ function Rankings() {
             return (
               <div key={player.id} className={`ranking-card card ${!player.is_active ? 'inactive-player' : ''}`}>
                 <div className="ranking-card-header">
-                  <h3 className="player-name-large">
-                    <span className="position-number">{index + 1}</span> - {player.name}
-                    {!player.is_active && (
-                      <span className="inactive-badge" title="Spieler ist in der App inaktiv">
-                        🚫 Inaktiv
-                      </span>
+                  <div>
+                    <h3 className="player-name-large">
+                      <span className="position-number">{index + 1}</span> - {player.name}
+                      {!player.is_active && (
+                        <span className="inactive-badge" title="Spieler ist in der App inaktiv">
+                          🚫 Inaktiv
+                        </span>
+                      )}
+                    </h3>
+                    {/* Start-LK unter dem Namen */}
+                    {player.season_start_lk && player.season_start_lk !== player.current_lk && (
+                      <div style={{
+                        fontSize: '0.75rem',
+                        color: '#6b7280',
+                        marginTop: '0.25rem',
+                        marginLeft: '3rem',
+                        fontStyle: 'italic'
+                      }}>
+                        📅 Saison-Start: {player.season_start_lk}
+                      </div>
                     )}
-                  </h3>
+                  </div>
                   <div className="player-stats">
                     <span 
                       className="ranking-badge"
