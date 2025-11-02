@@ -91,40 +91,61 @@ function Rankings() {
     console.log('📊 Loading stats for', playersToProcess.length, 'players');
     
     try {
-        const { data: allResults, error } = await supabase
+      // 🔧 Lade ALLE match_results (ohne Join, da matchday_id genügt)
+      const { data: allResults, error } = await supabase
         .from('match_results')
-        .select('*, matchday:matchday_id(match_date)');
+        .select('*')
+        .eq('status', 'completed'); // Nur abgeschlossene Matches
       
       if (error) {
         console.error('Error loading match results:', error);
         return;
       }
       
+      console.log('✅ Loaded', allResults?.length || 0, 'completed match results');
+      
       const stats = {};
       
       for (const player of playersToProcess) {
-        const playerResults = allResults.filter(result => 
+        // Filter Ergebnisse für diesen Spieler
+        const playerResults = (allResults || []).filter(result => 
           result.home_player_id === player.id ||
           result.home_player1_id === player.id ||
-          result.home_player2_id === player.id
+          result.home_player2_id === player.id ||
+          result.guest_player_id === player.id ||
+          result.guest_player1_id === player.id ||
+          result.guest_player2_id === player.id
         );
         
         let wins = 0;
         let losses = 0;
         
         playerResults.forEach(result => {
-          if (result.winner === 'home') {
-            wins++;
-          } else if (result.winner === 'guest') {
-            losses++;
+          // Bestimme: Ist Spieler im Home- oder Guest-Team?
+          const isPlayerInHomeTeam = 
+            result.home_player_id === player.id ||
+            result.home_player1_id === player.id ||
+            result.home_player2_id === player.id;
+          
+          // Zähle Siege und Niederlagen
+          if (isPlayerInHomeTeam) {
+            if (result.winner === 'home') wins++;
+            else if (result.winner === 'guest') losses++;
+          } else {
+            if (result.winner === 'guest') wins++;
+            else if (result.winner === 'home') losses++;
           }
         });
         
         stats[player.id] = { wins, losses, total: wins + losses };
+        
+        if (playerResults.length > 0) {
+          console.log(`  ✅ ${player.name}: ${wins} Siege, ${losses} Niederlagen (${playerResults.length} Matches)`);
+        }
       }
       
       setPlayerStats(stats);
-      console.log('✅ Stats loaded');
+      console.log('✅ Stats loaded for', Object.keys(stats).length, 'players');
     } catch (error) {
       console.error('Error loading player stats:', error);
     }
