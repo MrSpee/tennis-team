@@ -673,20 +673,33 @@ const ImportTab = () => {
         if (clubId === 'CREATE_NEW') {
           console.log('➕ Creating new club:', teamInfo.club_name);
           
+          // Parse Stadt aus Adresse (z.B. "Knochenbergsweg, 51373 Leverkusen" → "Leverkusen")
+          let city = null;
+          if (teamInfo.address) {
+            const addressParts = teamInfo.address.split(',').map(p => p.trim());
+            // Letzter Teil ist meist "PLZ Stadt" (z.B. "51373 Leverkusen")
+            const lastPart = addressParts[addressParts.length - 1];
+            const cityMatch = lastPart?.match(/\d{5}\s+(.+)/); // PLZ + Stadt
+            city = cityMatch ? cityMatch[1] : lastPart;
+          }
+          
           const { data: newClub, error: clubError } = await supabase
             .from('club_info')
             .insert({
               name: teamInfo.club_name,
-              city: null,
+              city: city,
+              address: teamInfo.address || null,
               region: 'Mittelrhein',
-              website: teamInfo.website || null
+              website: teamInfo.website || null,
+              federation: 'TVM',
+              is_verified: true // Admin hat importiert → automatisch verifiziert
             })
             .select('id')
             .single();
           
           if (clubError) throw clubError;
           clubId = newClub.id;
-          console.log('✅ New club created:', clubId);
+          console.log('✅ New club created:', clubId, 'City:', city);
         }
 
         // 2c. Jetzt Team erstellen mit club_id
@@ -698,6 +711,7 @@ const ImportTab = () => {
             club_name: teamInfo.club_name,
             team_name: teamInfo.team_name || null,
             category: teamInfo.category || 'Herren',
+            club_id: clubId, // ← WICHTIG: Foreign Key!
             region: 'Mittelrhein',
             tvm_link: teamInfo.website || null
           })
