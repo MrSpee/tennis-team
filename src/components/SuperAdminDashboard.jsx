@@ -1145,53 +1145,94 @@ function SuperAdminDashboard() {
         <div className="formkurve-header">
           <div className="formkurve-title">
             👑 Super-Admin Dashboard
-            {/* Build-Info Badge */}
-            <span style={{
-              marginLeft: '0.75rem',
-              fontSize: '0.7rem',
-              fontWeight: 700,
-              background: buildInfo.shortCommit ? '#dcfce7' : '#fef3c7',
-              color: buildInfo.shortCommit ? '#15803d' : '#92400e',
-              border: buildInfo.shortCommit ? '1px solid #86efac' : '1px solid #fcd34d',
-              borderRadius: '6px',
-              padding: '0.25rem 0.6rem',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.35rem'
-            }}
-              title={`Build: ${buildInfo.buildDateTime}${buildInfo.commitSha ? `\nCommit: ${buildInfo.commitSha}` : ''}`}
-            >
-              {buildInfo.shortCommit ? (
+          </div>
+          <div className="formkurve-subtitle" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <span>System-Übersicht & Vereinsverwaltung</span>
+            
+            {/* Build-Info Details (immer sichtbar) */}
+            <div style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '0.75rem',
+              fontSize: '0.75rem',
+              color: '#6b7280',
+              marginTop: '0.25rem'
+            }}>
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.35rem 0.75rem',
+                background: buildInfo.shortCommit ? '#dcfce7' : '#fef3c7',
+                color: buildInfo.shortCommit ? '#15803d' : '#92400e',
+                border: buildInfo.shortCommit ? '1px solid #86efac' : '1px solid #fcd34d',
+                borderRadius: '6px',
+                fontWeight: '600'
+              }}>
+                {buildInfo.shortCommit ? (
+                  <>
+                    <span>🚀</span>
+                    <span>Build #{buildInfo.shortCommit}</span>
+                  </>
+                ) : (
+                  <>
+                    <span>🏠</span>
+                    <span>LOCAL Dev-Mode</span>
+                  </>
+                )}
+              </div>
+              
+              {buildInfo.shortCommit && (
                 <>
-                  <span>🚀 Build #{buildInfo.shortCommit}</span>
-                  <span style={{ 
-                    opacity: 0.7, 
-                    fontSize: '0.65rem',
-                    borderLeft: '1px solid #86efac',
-                    paddingLeft: '0.4rem',
-                    whiteSpace: 'nowrap'
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.35rem 0.75rem',
+                    background: '#f3f4f6',
+                    color: '#4b5563',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '6px',
+                    fontWeight: '500'
                   }}>
-                    {buildInfo.buildDate} {buildInfo.buildTimeFormatted}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span>🏠 LOCAL</span>
-                  <span style={{ 
-                    opacity: 0.7, 
-                    fontSize: '0.65rem',
-                    borderLeft: '1px solid #fcd34d',
-                    paddingLeft: '0.4rem',
-                    whiteSpace: 'nowrap'
+                    <span>📅</span>
+                    <span>{buildInfo.buildDate}</span>
+                  </div>
+                  
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.35rem 0.75rem',
+                    background: '#f3f4f6',
+                    color: '#4b5563',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '6px',
+                    fontWeight: '500'
                   }}>
-                    Dev-Mode
-                  </span>
+                    <span>🕐</span>
+                    <span>{buildInfo.buildTimeFormatted} Uhr</span>
+                  </div>
+                  
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.35rem 0.75rem',
+                    background: '#eff6ff',
+                    color: '#1e40af',
+                    border: '1px solid #bfdbfe',
+                    borderRadius: '6px',
+                    fontWeight: '500',
+                    fontSize: '0.7rem',
+                    fontFamily: 'monospace'
+                  }}>
+                    <span>🔗</span>
+                    <span>git:{buildInfo.commitSha ? buildInfo.commitSha.substring(0, 10) : 'local'}</span>
+                  </div>
                 </>
               )}
-            </span>
-          </div>
-          <div className="formkurve-subtitle">
-            System-Übersicht & Vereinsverwaltung
+            </div>
           </div>
         </div>
       </div>
