@@ -901,16 +901,14 @@ const ImportTab = () => {
     }
 
     try {
-      console.log('🔍 Searching for team:', teamInfo.club_name, teamInfo.team_name);
+      console.log('🔍 Searching for team:', teamInfo.club_name, teamInfo.team_name, teamInfo.category);
       
-      // SCHRITT 1: Suche existierendes Team in team_info
-      const { data: existingTeam, error: searchError } = await supabase
+      // ✅ SCHRITT 1: Suche nach club_name + category (WICHTIGSTER Match!)
+      const { data: existingTeams, error: searchError } = await supabase
         .from('team_info')
-        .select('id')
-        .eq('club_name', teamInfo.club_name)
-        .eq('team_name', teamInfo.team_name || null)
-        .eq('category', teamInfo.category || 'Herren')
-        .maybeSingle();
+        .select('id, team_name, club_name, category')
+        .ilike('club_name', teamInfo.club_name) // Case-insensitive
+        .eq('category', teamInfo.category || 'Herren');
 
       if (searchError && searchError.code !== 'PGRST116') {
         throw searchError;
@@ -918,9 +916,11 @@ const ImportTab = () => {
 
       let teamId;
 
-      if (existingTeam) {
-        console.log('✅ Team found in team_info:', existingTeam.id);
-        teamId = existingTeam.id;
+      if (existingTeams && existingTeams.length > 0) {
+        // Team(s) mit gleichem Club + Category gefunden!
+        const existing = existingTeams[0]; // Nimm das erste (sollte nur eins sein)
+        console.log('✅ Team found in team_info:', existing.id, existing);
+        teamId = existing.id;
       } else {
         // SCHRITT 2: Team existiert nicht → Finde/Erstelle Verein zuerst!
         console.log('⚠️ Team not found, finding/creating club first...');
@@ -965,26 +965,39 @@ const ImportTab = () => {
           console.log('✅ New club created:', clubId, 'City:', city);
         }
 
-        // 2c. Jetzt Team erstellen mit club_id
-        console.log('📝 Creating team with club_id:', clubId);
-        
-        const { data: newTeam, error: insertError } = await supabase
+        // 2c. ✅ VORHER: Prüfe nochmal ob Team mit diesem club_id + category existiert!
+        const { data: teamByClubId, error: clubTeamError } = await supabase
           .from('team_info')
-          .insert({
-            club_name: teamInfo.club_name,
-            team_name: teamInfo.team_name || null,
-            category: teamInfo.category || 'Herren',
-            club_id: clubId, // ← WICHTIG: Foreign Key!
-            region: 'Mittelrhein',
-            tvm_link: teamInfo.website || null
-          })
-          .select('id')
-          .single();
+          .select('id, team_name, club_name, category')
+          .eq('club_id', clubId)
+          .eq('category', teamInfo.category || 'Herren');
+        
+        if (teamByClubId && teamByClubId.length > 0) {
+          // Team existiert bereits mit diesem club_id + category!
+          console.log('✅ Team already exists with this club_id + category:', teamByClubId[0]);
+          teamId = teamByClubId[0].id;
+        } else {
+          // 2d. Jetzt Team erstellen mit club_id
+          console.log('📝 Creating team with club_id:', clubId);
+          
+          const { data: newTeam, error: insertError } = await supabase
+            .from('team_info')
+            .insert({
+              club_name: teamInfo.club_name,
+              team_name: teamInfo.team_name || null,
+              category: teamInfo.category || 'Herren',
+              club_id: clubId,
+              region: 'Mittelrhein',
+              tvm_link: teamInfo.website || null
+            })
+            .select('id')
+            .single();
 
-        if (insertError) throw insertError;
+          if (insertError) throw insertError;
 
-        console.log('✅ Team created in team_info:', newTeam.id);
-        teamId = newTeam.id;
+          console.log('✅ Team created in team_info:', newTeam.id);
+          teamId = newTeam.id;
+        }
       }
 
       // SCHRITT 3: Prüfe/Erstelle team_seasons Eintrag

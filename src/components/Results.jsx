@@ -202,7 +202,7 @@ const Results = () => {
     try {
       console.log('📥 Loading matches for external team:', teamId);
       
-      // ✅ OHNE Season-Filter (alle Matches laden)
+      // ✅ MIT Team-Info laden!
       const { data, error } = await supabase
         .from('matchdays')
         .select(`
@@ -215,10 +215,12 @@ const Results = () => {
           season,
           status,
           home_score,
-          away_score
+          away_score,
+          home_team:team_info!matchdays_home_team_id_fkey(id, club_name, team_name, category),
+          away_team:team_info!matchdays_away_team_id_fkey(id, club_name, team_name, category)
         `)
         .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
-        .order('match_date', { ascending: false });
+        .order('match_date', { ascending: true }); // ✅ Chronologisch aufsteigend
       
       if (error) {
         console.error('❌ Error loading external team matches:', error);
@@ -230,17 +232,20 @@ const Results = () => {
       // Transformiere wie DataContext
       const transformedMatches = (data || []).map(m => {
         const isHome = m.home_team_id === teamId;
+        const opponentTeam = isHome ? m.away_team : m.home_team;
+        const ourTeam = isHome ? m.home_team : m.away_team;
+        
         return {
           id: m.id,
           date: new Date(m.match_date),
-          opponent: isHome ? 'Away Team' : 'Home Team', // Wird später aufgelöst
+          opponent: opponentTeam ? `${opponentTeam.club_name} ${opponentTeam.team_name || ''} (${opponentTeam.category})`.trim() : 'Unbekannt',
           location: isHome ? 'Home' : 'Away',
           venue: m.venue,
           season: m.season,
           home_score: m.home_score,
           away_score: m.away_score,
           teamId: teamId,
-          teamInfo: { id: teamId } // Für Filterung
+          teamInfo: ourTeam || { id: teamId }
         };
       });
       
