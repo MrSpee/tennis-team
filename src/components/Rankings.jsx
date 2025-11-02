@@ -436,19 +436,32 @@ function Rankings() {
           
           const isPlayerInvolved = isPlayerInHomeTeam || isPlayerInGuestTeam;
           
-          if (!isPlayerInvolved) continue;
+          console.log('  🔍 Result:', result.match_type, 'Player in home?', isPlayerInHomeTeam, 'in guest?', isPlayerInGuestTeam, 'involved?', isPlayerInvolved);
+          
+          if (!isPlayerInvolved) {
+            console.log('  ⏭️ Skipping - player not involved');
+            continue;
+          }
           
           let winner = result.winner;
           if (!winner) {
+            console.log('  🔍 Winner not set, calculating...');
             winner = calculateMatchWinner(result);
           }
+          
+          console.log('  🏆 Winner:', winner, 'Status:', result.status);
           
           // 🔧 Prüfe ob Spieler gewonnen hat (egal ob home oder guest)
           const didPlayerWin = 
             (isPlayerInHomeTeam && winner === 'home') ||
             (isPlayerInGuestTeam && winner === 'guest');
           
-          if (!didPlayerWin) continue; // Nur Siege zählen für LK-Verbesserung
+          console.log('  ✅ Did player win?', didPlayerWin, '(home:', isPlayerInHomeTeam, 'winner:', winner, ')');
+          
+          if (!didPlayerWin) {
+            console.log('  ⏭️ Skipping - player lost or draw');
+            continue; // Nur Siege zählen für LK-Verbesserung
+          }
           
           matchesPlayed++;
           
