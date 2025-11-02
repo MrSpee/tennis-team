@@ -71,3 +71,4 @@ COMMIT;
 -- Der AuthContext lädt den Player bei Login und cached das primary_team
 -- → Robert sollte sich ausloggen und neu einloggen nach dem Fix!
 
+

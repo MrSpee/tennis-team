@@ -31,3 +31,4 @@ COMMIT;
 -- Nach dem Ausführen sollte die Spalte profile_image existieren
 -- ==========================================
 
+

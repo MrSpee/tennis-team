@@ -273,3 +273,4 @@ ORDER BY ps.email;
 -- → Wenn Inkonsistent: FIX_MARKUS_CONSISTENCY.sql
 -- ==========================================
 
+

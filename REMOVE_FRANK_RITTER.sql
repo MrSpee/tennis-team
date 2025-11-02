@@ -59,3 +59,4 @@ AND ts.date >= CURRENT_DATE;
 
 
 
+

@@ -334,3 +334,4 @@ ORDER BY
 -- - Migration erfolgt nur wenn alte Daten vorhanden sind
 -- - Team-Zuordnungen werden aus "player_teams" übernommen (falls vorhanden)
 
+

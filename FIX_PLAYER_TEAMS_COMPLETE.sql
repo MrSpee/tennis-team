@@ -232,3 +232,4 @@ WHERE pu.id IN (
 -- 4. Führe Schritt 4 aus (primary_team_id aktualisieren)
 -- 5. Prüfe mit Schritt 5 (Verifikation)
 
+

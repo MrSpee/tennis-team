@@ -239,3 +239,4 @@ WHERE player_id = (SELECT id FROM players_unified WHERE email = 'robert.ellrich@
 
 Ich erstelle jetzt die Fixes!
 
+

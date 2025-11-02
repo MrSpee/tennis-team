@@ -134,3 +134,4 @@ ORDER BY pu.name;
 -- 3. Der primary_team_id wird automatisch auf das is_primary=true Team gesetzt
 -- 4. Nach dem Ausführen sollten alle Spieler ein Team haben
 
+

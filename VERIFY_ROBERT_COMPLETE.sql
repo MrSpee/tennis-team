@@ -214,3 +214,4 @@ FROM robert_data rd;
 -- → Ich erstelle einen spezifischen Fix
 -- ==========================================
 
+

@@ -178,3 +178,4 @@ ORDER BY
 -- 4. Lösche zugehörige team_seasons
 -- 5. Korrigiere team_name für Konsistenz
 
+

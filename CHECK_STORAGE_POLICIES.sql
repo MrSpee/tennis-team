@@ -82,3 +82,4 @@ LIMIT 5;
 -- → Bucket erstellen (im Dashboard oder SQL)
 -- ==========================================
 
+

@@ -330,3 +330,4 @@ team_memberships = [Rot-Gelb Sürth] ✅
 `teamInfo` ist nur ein Fallback für Spieler OHNE Teams.  
 → Das Problem liegt wahrscheinlich im **DataContext** oder **Browser-Cache**!
 
+

@@ -167,3 +167,4 @@ WHERE p.email = 'markus@domrauschen.com';
 -- → Sollte dann 4 Matches sehen (wie Raoul)
 -- ==========================================
 
+

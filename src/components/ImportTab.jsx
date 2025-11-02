@@ -32,6 +32,24 @@ const ImportTab = () => {
   const [teams, setTeams] = useState([]);
   const [allTeams, setAllTeams] = useState([]); // Alle Teams für manuelle Auswahl (für Matches)
   const [manualTeamId, setManualTeamId] = useState(null); // Manuell ausgewähltes Team für Spieler-Import
+  
+  // NEU: Verein erstellen Modal
+  const [showCreateClubModal, setShowCreateClubModal] = useState(false);
+  const [newClubData, setNewClubData] = useState({
+    name: '',
+    city: '',
+    federation: 'TVM',
+    website: ''
+  });
+  
+  // NEU: Team erstellen Modal
+  const [showCreateTeamModal, setShowCreateTeamModal] = useState(false);
+  const [newTeamData, setNewTeamData] = useState({
+    team_name: '',
+    category: '',
+    club_id: null,
+    tvm_link: ''
+  });
 
   // Lade Teams beim Mount
   useEffect(() => {
@@ -69,6 +87,182 @@ const ImportTab = () => {
       setAllTeams(data || []);
     } catch (err) {
       console.error('Error loading teams:', err);
+    }
+  };
+
+  /**
+   * NEU: Erstelle einen neuen Verein
+   */
+  const handleCreateNewClub = async () => {
+    try {
+      if (!newClubData.name || !newClubData.city) {
+        alert('Bitte Name und Stadt eingeben!');
+        return;
+      }
+
+      console.log('🔵 Creating new club:', newClubData);
+
+      // Erstelle Verein
+      const { data: club, error } = await supabase
+        .from('club_info')
+        .insert({
+          name: newClubData.name,
+          city: newClubData.city,
+          federation: newClubData.federation || 'TVM',
+          website: newClubData.website || null,
+          is_verified: true // Auto-approve vom Admin
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      console.log('✅ Club created:', club);
+
+      // Aktualisiere allClubs Liste
+      setAllClubs([...allClubs, club]);
+
+      // Aktualisiere matchingReview mit neuem Club
+      const updatedReview = { ...matchingReview };
+      updatedReview.club.matched = club;
+      updatedReview.club.confidence = 100;
+      updatedReview.club.needsReview = false;
+      setMatchingReview(updatedReview);
+
+      // Update parsedData
+      const newData = { ...parsedData };
+      newData.team_info = newData.team_info || {};
+      newData.team_info.matched_club_id = club.id;
+      newData.team_info.matched_club_name = club.name;
+      setParsedData(newData);
+
+      // Update editablePlayers auch (für alle Spieler aus dieser Meldeliste!)
+      if (editablePlayers.length > 0) {
+        setEditablePlayers(editablePlayers.map(editable => ({
+          ...editable,
+          club_id: club.id,
+          club_name: club.name
+        })));
+      }
+
+      // Schließe Modal
+      setShowCreateClubModal(false);
+      
+      // Reset Form
+      setNewClubData({
+        name: '',
+        city: '',
+        federation: 'TVM',
+        website: ''
+      });
+
+      // Zeige Erfolg
+      setSuccessMessage(`✅ Verein "${club.name}" wurde erfolgreich erstellt und allen Spielern zugeordnet!`);
+      setTimeout(() => setSuccessMessage(null), 5000);
+
+      // Log Activity
+      await LoggingService.log('club_created', 'club', club.id, {
+        club_name: club.name,
+        source: 'import'
+      });
+
+    } catch (err) {
+      console.error('❌ Error creating club:', err);
+      setError(`Fehler beim Erstellen des Vereins: ${err.message}`);
+    }
+  };
+
+  /**
+   * NEU: Erstelle ein neues Team
+   */
+  const handleCreateNewTeam = async () => {
+    try {
+      if (!newTeamData.team_name || !newTeamData.category || !newTeamData.club_id) {
+        alert('Bitte Team-Name, Kategorie und Verein auswählen!');
+        return;
+      }
+
+      console.log('🔵 Creating new team:', newTeamData);
+
+      // Hole Club-Info für club_name
+      const { data: club } = await supabase
+        .from('club_info')
+        .select('name')
+        .eq('id', newTeamData.club_id)
+        .single();
+
+      // Erstelle Team
+      const { data: team, error } = await supabase
+        .from('team_info')
+        .insert({
+          team_name: newTeamData.team_name,
+          category: newTeamData.category,
+          club_id: newTeamData.club_id,
+          club_name: club?.name || '',
+          tvm_link: newTeamData.tvm_link || null,
+          region: 'TVM' // Default
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      console.log('✅ Team created:', team);
+
+      // Aktualisiere allTeams Liste
+      setAllTeams([...allTeams, team]);
+      setAllTeamsForPlayers([...allTeamsForPlayers, team]);
+
+      // Aktualisiere matchingReview mit neuem Team
+      const updatedReview = { ...matchingReview };
+      updatedReview.team.matched = team;
+      updatedReview.team.confidence = 100;
+      updatedReview.team.needsReview = false;
+      setMatchingReview(updatedReview);
+
+      // Update parsedData
+      const newData = { ...parsedData };
+      newData.team_info = newData.team_info || {};
+      newData.team_info.matched_team_id = team.id;
+      newData.team_info.team_name = team.team_name;
+      newData.team_info.category = team.category;
+      setParsedData(newData);
+
+      // Update editablePlayers auch (für alle Spieler aus dieser Meldeliste!)
+      if (editablePlayers.length > 0) {
+        setEditablePlayers(editablePlayers.map(editable => ({
+          ...editable,
+          team_id: team.id,
+          category: team.category
+        })));
+      }
+
+      // Schließe Modal
+      setShowCreateTeamModal(false);
+      
+      // Reset Form
+      setNewTeamData({
+        team_name: '',
+        category: '',
+        club_id: null,
+        tvm_link: ''
+      });
+
+      // Zeige Erfolg
+      setSuccessMessage(`✅ Team "${team.team_name}" (${team.category}) wurde erfolgreich erstellt und allen Spielern zugeordnet!`);
+      setTimeout(() => setSuccessMessage(null), 5000);
+
+      // Log Activity
+      await LoggingService.log('team_created', 'team', team.id, {
+        team_name: team.team_name,
+        category: team.category,
+        club_name: club?.name,
+        source: 'import'
+      });
+
+    } catch (err) {
+      console.error('❌ Error creating team:', err);
+      setError(`Fehler beim Erstellen des Teams: ${err.message}`);
     }
   };
 
@@ -1591,7 +1785,7 @@ Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele
                 </div>
               ) : (
                 <div style={{ fontSize: '0.85rem', color: '#92400e', marginBottom: '0.75rem' }}>
-                  ⚠️ Kein passender Verein gefunden. Bitte manuell zuordnen.
+                  ⚠️ Kein passender Verein gefunden. Bitte manuell zuordnen oder neuen Verein erstellen.
                 </div>
               )}
               
@@ -1652,6 +1846,47 @@ Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele
                   ))}
                 </select>
               </div>
+              
+              {/* NEU: Button zum Erstellen eines neuen Vereins */}
+              <button
+                onClick={() => {
+                  // Vorausfüllen mit erkannten Daten
+                  setNewClubData({
+                    name: matchingReview.club.raw || '',
+                    city: '',
+                    federation: 'TVM',
+                    website: ''
+                  });
+                  setShowCreateClubModal(true);
+                }}
+                style={{
+                  marginTop: '0.75rem',
+                  width: '100%',
+                  padding: '0.75rem',
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  transition: 'transform 0.2s, box-shadow 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.4)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                ➕ Neuen Verein erstellen
+              </button>
               
               {matchingReview.club.alternatives && matchingReview.club.alternatives.length > 0 && (
                 <details style={{ marginTop: '0.5rem' }}>
@@ -1737,7 +1972,7 @@ Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele
                 </div>
               ) : (
                 <div style={{ fontSize: '0.85rem', color: '#92400e', marginBottom: '0.75rem' }}>
-                  ⚠️ Kein passendes Team gefunden. Bitte manuell auswählen.
+                  ⚠️ Kein passendes Team gefunden. Bitte manuell auswählen oder neues Team erstellen.
                 </div>
               )}
               
@@ -1812,6 +2047,49 @@ Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele
                   </div>
                 )}
               </div>
+              
+              {/* NEU: Button zum Erstellen eines neuen Teams */}
+              {(matchingReview.club?.matched || parsedData?.team_info?.matched_club_id) && (
+                <button
+                  onClick={() => {
+                    // Vorausfüllen mit erkannten Daten
+                    setNewTeamData({
+                      team_name: matchingReview.team.raw || '',
+                      category: matchingReview.team.category || '',
+                      club_id: matchingReview.club?.matched?.id || parsedData?.team_info?.matched_club_id,
+                      tvm_link: ''
+                    });
+                    setShowCreateTeamModal(true);
+                  }}
+                  style={{
+                    marginTop: '0.75rem',
+                    width: '100%',
+                    padding: '0.75rem',
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '600',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                    transition: 'transform 0.2s, box-shadow 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.4)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                >
+                  ➕ Neues Team erstellen
+                </button>
+              )}
             </div>
           )}
           
@@ -2700,6 +2978,430 @@ Die KI erkennt automatisch:
                   ❌ Abbrechen
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NEU: Modal zum Erstellen eines neuen Vereins */}
+      {showCreateClubModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '1rem'
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '16px',
+            maxWidth: '600px',
+            width: '100%',
+            padding: '2rem',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+          }}>
+            {/* Header */}
+            <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '2px solid #e5e7eb' }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: '700', margin: 0, color: '#1f2937' }}>
+                ➕ Neuen Verein erstellen
+              </h2>
+              <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                Dieser Verein wird für alle Spieler in der aktuellen Meldeliste verwendet
+              </p>
+            </div>
+
+            {/* Form */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Vereinsname */}
+              <div>
+                <label style={{ fontSize: '0.875rem', fontWeight: '600', display: 'block', marginBottom: '0.5rem', color: '#374151' }}>
+                  Vereinsname <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newClubData.name}
+                  onChange={(e) => setNewClubData({ ...newClubData, name: e.target.value })}
+                  placeholder="z.B. TC Blau-Weiß München"
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '2px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    outline: 'none',
+                    transition: 'border-color 0.2s'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = '#667eea'}
+                  onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                />
+              </div>
+
+              {/* Stadt */}
+              <div>
+                <label style={{ fontSize: '0.875rem', fontWeight: '600', display: 'block', marginBottom: '0.5rem', color: '#374151' }}>
+                  Stadt <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newClubData.city}
+                  onChange={(e) => setNewClubData({ ...newClubData, city: e.target.value })}
+                  placeholder="z.B. München"
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '2px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    outline: 'none',
+                    transition: 'border-color 0.2s'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = '#667eea'}
+                  onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                />
+              </div>
+
+              {/* Verband */}
+              <div>
+                <label style={{ fontSize: '0.875rem', fontWeight: '600', display: 'block', marginBottom: '0.5rem', color: '#374151' }}>
+                  Tennisverband
+                </label>
+                <select
+                  value={newClubData.federation}
+                  onChange={(e) => setNewClubData({ ...newClubData, federation: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '2px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    outline: 'none',
+                    background: 'white'
+                  }}
+                >
+                  <option value="TVM">TVM (Bayerischer Tennis-Verband München)</option>
+                  <option value="BTV">BTV (Bayerischer Tennis-Verband)</option>
+                  <option value="DTB">DTB (Deutscher Tennis Bund)</option>
+                  <option value="WTV">WTV (Württembergischer Tennis-Bund)</option>
+                  <option value="TNB">TNB (Tennis-Verband Niedersachsen-Bremen)</option>
+                  <option value="Sonstige">Sonstige</option>
+                </select>
+              </div>
+
+              {/* Website (optional) */}
+              <div>
+                <label style={{ fontSize: '0.875rem', fontWeight: '600', display: 'block', marginBottom: '0.5rem', color: '#374151' }}>
+                  Website (optional)
+                </label>
+                <input
+                  type="url"
+                  value={newClubData.website}
+                  onChange={(e) => setNewClubData({ ...newClubData, website: e.target.value })}
+                  placeholder="https://..."
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '2px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    outline: 'none',
+                    transition: 'border-color 0.2s'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = '#667eea'}
+                  onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                />
+              </div>
+
+              {/* Info Box */}
+              <div style={{
+                padding: '1rem',
+                background: '#eff6ff',
+                border: '2px solid #bfdbfe',
+                borderRadius: '8px',
+                fontSize: '0.8rem',
+                color: '#1e40af'
+              }}>
+                <strong>💡 Hinweis:</strong> Dieser Verein wird automatisch allen {editablePlayers.length || 0} Spielern aus dieser Meldeliste zugeordnet.
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '2px solid #e5e7eb' }}>
+              <button
+                onClick={handleCreateNewClub}
+                disabled={!newClubData.name || !newClubData.city}
+                style={{
+                  flex: 1,
+                  padding: '0.875rem',
+                  background: (!newClubData.name || !newClubData.city) 
+                    ? '#d1d5db' 
+                    : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: (!newClubData.name || !newClubData.city) ? 'not-allowed' : 'pointer',
+                  fontSize: '0.875rem',
+                  fontWeight: '700',
+                  transition: 'transform 0.2s, box-shadow 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  if (newClubData.name && newClubData.city) {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = '0 8px 20px rgba(102, 126, 234, 0.4)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                ✅ Verein erstellen und zuordnen
+              </button>
+              <button
+                onClick={() => {
+                  setShowCreateClubModal(false);
+                  setNewClubData({
+                    name: '',
+                    city: '',
+                    federation: 'TVM',
+                    website: ''
+                  });
+                }}
+                style={{
+                  padding: '0.875rem 1.5rem',
+                  background: '#f3f4f6',
+                  color: '#4b5563',
+                  border: '2px solid #e5e7eb',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  fontWeight: '600',
+                  transition: 'background 0.2s'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#e5e7eb'}
+                onMouseLeave={(e) => e.currentTarget.style.background = '#f3f4f6'}
+              >
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NEU: Modal zum Erstellen eines neuen Teams */}
+      {showCreateTeamModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '1rem'
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '16px',
+            maxWidth: '600px',
+            width: '100%',
+            padding: '2rem',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+          }}>
+            {/* Header */}
+            <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '2px solid #e5e7eb' }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: '700', margin: 0, color: '#1f2937' }}>
+                ➕ Neues Team erstellen
+              </h2>
+              <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                Dieses Team wird für alle Spieler in der aktuellen Meldeliste verwendet
+              </p>
+            </div>
+
+            {/* Form */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Verein (Read-Only Anzeige) */}
+              <div>
+                <label style={{ fontSize: '0.875rem', fontWeight: '600', display: 'block', marginBottom: '0.5rem', color: '#374151' }}>
+                  Verein
+                </label>
+                <div style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  border: '2px solid #e5e7eb',
+                  borderRadius: '8px',
+                  fontSize: '0.875rem',
+                  background: '#f9fafb',
+                  color: '#6b7280'
+                }}>
+                  {allClubs.find(c => c.id === newTeamData.club_id)?.name || 'Verein auswählen...'}
+                </div>
+              </div>
+
+              {/* Teamname */}
+              <div>
+                <label style={{ fontSize: '0.875rem', fontWeight: '600', display: 'block', marginBottom: '0.5rem', color: '#374151' }}>
+                  Team-Name <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newTeamData.team_name}
+                  onChange={(e) => setNewTeamData({ ...newTeamData, team_name: e.target.value })}
+                  placeholder="z.B. Herren 50-1, Damen 30"
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '2px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    outline: 'none',
+                    transition: 'border-color 0.2s'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = '#10b981'}
+                  onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                />
+              </div>
+
+              {/* Kategorie */}
+              <div>
+                <label style={{ fontSize: '0.875rem', fontWeight: '600', display: 'block', marginBottom: '0.5rem', color: '#374151' }}>
+                  Kategorie <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <select
+                  value={newTeamData.category}
+                  onChange={(e) => setNewTeamData({ ...newTeamData, category: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '2px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    outline: 'none',
+                    background: 'white'
+                  }}
+                >
+                  <option value="">-- Kategorie wählen --</option>
+                  <option value="Herren 30">Herren 30</option>
+                  <option value="Herren 40">Herren 40</option>
+                  <option value="Herren 50">Herren 50</option>
+                  <option value="Herren 55">Herren 55</option>
+                  <option value="Herren 60">Herren 60</option>
+                  <option value="Herren 65">Herren 65</option>
+                  <option value="Herren 70">Herren 70</option>
+                  <option value="Damen 30">Damen 30</option>
+                  <option value="Damen 40">Damen 40</option>
+                  <option value="Damen 50">Damen 50</option>
+                  <option value="Damen 55">Damen 55</option>
+                  <option value="Damen 60">Damen 60</option>
+                  <option value="Junioren">Junioren</option>
+                  <option value="Jugend">Jugend</option>
+                  <option value="Sonstige">Sonstige</option>
+                </select>
+              </div>
+
+              {/* TVM Link (optional) */}
+              <div>
+                <label style={{ fontSize: '0.875rem', fontWeight: '600', display: 'block', marginBottom: '0.5rem', color: '#374151' }}>
+                  TVM Link (optional)
+                </label>
+                <input
+                  type="url"
+                  value={newTeamData.tvm_link}
+                  onChange={(e) => setNewTeamData({ ...newTeamData, tvm_link: e.target.value })}
+                  placeholder="https://www.tvm-tennis.de/..."
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '2px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    outline: 'none',
+                    transition: 'border-color 0.2s'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = '#10b981'}
+                  onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                />
+              </div>
+
+              {/* Info Box */}
+              <div style={{
+                padding: '1rem',
+                background: '#dcfce7',
+                border: '2px solid #86efac',
+                borderRadius: '8px',
+                fontSize: '0.8rem',
+                color: '#15803d'
+              }}>
+                <strong>💡 Hinweis:</strong> Dieses Team wird automatisch allen {editablePlayers.length || 0} Spielern aus dieser Meldeliste zugeordnet.
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '2px solid #e5e7eb' }}>
+              <button
+                onClick={handleCreateNewTeam}
+                disabled={!newTeamData.team_name || !newTeamData.category || !newTeamData.club_id}
+                style={{
+                  flex: 1,
+                  padding: '0.875rem',
+                  background: (!newTeamData.team_name || !newTeamData.category || !newTeamData.club_id) 
+                    ? '#d1d5db' 
+                    : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: (!newTeamData.team_name || !newTeamData.category || !newTeamData.club_id) ? 'not-allowed' : 'pointer',
+                  fontSize: '0.875rem',
+                  fontWeight: '700',
+                  transition: 'transform 0.2s, box-shadow 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  if (newTeamData.team_name && newTeamData.category && newTeamData.club_id) {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = '0 8px 20px rgba(16, 185, 129, 0.4)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                ✅ Team erstellen und zuordnen
+              </button>
+              <button
+                onClick={() => {
+                  setShowCreateTeamModal(false);
+                  setNewTeamData({
+                    team_name: '',
+                    category: '',
+                    club_id: null,
+                    tvm_link: ''
+                  });
+                }}
+                style={{
+                  padding: '0.875rem 1.5rem',
+                  background: '#f3f4f6',
+                  color: '#4b5563',
+                  border: '2px solid #e5e7eb',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  fontWeight: '600',
+                  transition: 'background 0.2s'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#e5e7eb'}
+                onMouseLeave={(e) => e.currentTarget.style.background = '#f3f4f6'}
+              >
+                Abbrechen
+              </button>
             </div>
           </div>
         </div>

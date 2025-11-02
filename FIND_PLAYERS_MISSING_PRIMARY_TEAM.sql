@@ -99,3 +99,4 @@ LIMIT 5;
 -- den Fallback auf .limit(1) aus team_info, was vermutlich
 -- "TC Rot-Weiss Köln" ist (alphabetisch erstes Team).
 
+

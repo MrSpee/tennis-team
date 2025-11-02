@@ -106,3 +106,4 @@ LIMIT 5;
 -- 3. User nicht authentifiziert → Login-Problem im Frontend
 -- ==========================================
 
+

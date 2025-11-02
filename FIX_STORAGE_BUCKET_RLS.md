@@ -324,3 +324,4 @@ USING (bucket_id = 'profile-images');
 
 **Starte mit dem Quick Fix SQL!** 🚀
 
+

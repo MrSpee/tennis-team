@@ -61,3 +61,4 @@ WHERE club_name ILIKE '%sürth%'
    OR club_name ILIKE '%suerth%'
 ORDER BY category;
 
+
