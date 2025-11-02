@@ -110,17 +110,32 @@ WICHTIGE REGELN:
 
 **2. MATCH-DATEN:**
    - Extrahiere ALLE Matches aus dem Text
-   - Datumsformat: YYYY-MM-DD (z.B. "11.10.2025" → "2025-10-11")
-   - Zeitformat: HH:MM (24-Stunden-Format, z.B. "18:00")
+   - **DATUMSFORMAT (KRITISCH!):**
+     * **INPUT kann verschiedene Formate haben:**
+       - "01.11.2025, 00:00" → Extrahiere Datum "01.11.2025", ignoriere ", 00:00"
+       - "11.10.2025" → Verwende direkt
+       - "24.01.2026, 17:00" → Extrahiere Datum "24.01.2026", Zeit "17:00"
+     * **OUTPUT Format: IMMER "YYYY-MM-DD"**
+       - "01.11.2025, 00:00" → "2025-11-01"
+       - "11.10.2025" → "2025-10-11"
+       - "24.01.2026, 17:00" → "2026-01-24"
+     * **WICHTIG: Trenne Datum und Uhrzeit korrekt!**
+       - Vor Komma = Datum (DD.MM.YYYY)
+       - Nach Komma = Uhrzeit (HH:MM)
+       - Konvertiere Datum immer zu YYYY-MM-DD!
+   - **ZEITFORMAT:**
+     * 24-Stunden-Format HH:MM (z.B. "18:00", "17:00")
+     * Wenn Zeit "00:00" ist, kann sie weggelassen werden
+     * Wenn keine Zeit angegeben, setze start_time auf "" (leerer String)
    - **CRITICAL: Extrahiere BEIDE Teams separat!**
      * Spalte "Heim Verein" → home_team
      * Spalte "Gastverein" → away_team
    - Heimspiel-Erkennung (is_home_match):
      * Wenn unser Team in Spalte "Heim Verein" steht → is_home_match = true
      * Wenn unser Team in Spalte "Gastverein" steht → is_home_match = false
-   - Venue/Spielort extrahieren
-   - Matchpunkte extrahieren (z.B. "1:5")
-   - Status extrahieren (z.B. "offen" oder "completed")
+   - Venue/Spielort extrahieren (Spalte "Spielort")
+   - Matchpunkte extrahieren (z.B. "1:5", "6:0", "0:0")
+   - Status extrahieren (z.B. "offen" oder "completed" basierend auf Matchpunkte)
 
 **3. SPIELER-DATEN (falls Meldeliste vorhanden):**
    - **KRITISCH: Extrahiere ALLE Spieler aus der Meldeliste - keine Spieler weglassen!**
@@ -152,7 +167,7 @@ WICHTIGE REGELN:
      * Winter-Saison: "2025/26" (Jahr/H+1)
      * Sommer-Saison: "2026" (Jahr)
 
-BEISPIEL INPUT (TVM-Format):
+BEISPIEL INPUT 1 (TVM-Format mit Meldeliste):
 """
 TC Colonius
 Stadt Köln
@@ -176,7 +191,27 @@ Position	Mannschaft	Name	LK	ID-Nr.	Info	MF	Nation
 15	4	Frank Tepferd	12.7	17656142		MF	GER
 """
 
-BEISPIEL OUTPUT:
+BEISPIEL INPUT 2 (TVM-Format mit Spielplan):
+"""
+VKC Köln
+Stadt Köln
+Alfred Schütte Allee 51
+51105 Köln
+http://www.vkc-koeln.de
+
+Mannschaftsführer
+Borcic Zoran (-)
+
+Herren 55 1. Kreisliga 4-er Gr. 063
+Herren 55 1 (4er)
+
+Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele	
+01.11.2025, 00:00	TH Schloß Morsbroich	VKC Köln 1	RTHC Bayer Leverkusen 1	6:0	12:0	73:31	Spielbericht
+24.01.2026, 17:00	RTHC Bayer Leverkusen	TC BW Zündorf 1	VKC Köln 1	0:0	0:0	0:0	offen
+08.03.2026, 16:00	TH Schloß Morsbroich	VKC Köln 1	TC Rath 1	0:0	0:0	0:0	offen
+"""
+
+BEISPIEL OUTPUT 1 (Meldeliste):
 {
   "team_info": {
     "club_name": "TC Colonius",
@@ -236,8 +271,67 @@ BEISPIEL OUTPUT:
   "year": "2025/26"
 }
 
+BEISPIEL OUTPUT 2 (Spielplan):
+{
+  "team_info": {
+    "club_name": "VKC Köln",
+    "team_name": "1",
+    "category": "Herren 55",
+    "league": "Herren 55 1. Kreisliga 4-er Gr. 063",
+    "address": "Alfred Schütte Allee 51, 51105 Köln",
+    "website": "http://www.vkc-koeln.de",
+    "captain": "Borcic Zoran"
+  },
+  "matches": [
+    {
+      "match_date": "2025-11-01",
+      "start_time": "",
+      "home_team": "VKC Köln 1",
+      "away_team": "RTHC Bayer Leverkusen 1",
+      "opponent": "RTHC Bayer Leverkusen 1",
+      "is_home_match": true,
+      "venue": "TH Schloß Morsbroich",
+      "matchday": 1,
+      "match_points": "6:0",
+      "status": "completed"
+    },
+    {
+      "match_date": "2026-01-24",
+      "start_time": "17:00",
+      "home_team": "TC BW Zündorf 1",
+      "away_team": "VKC Köln 1",
+      "opponent": "TC BW Zündorf 1",
+      "is_home_match": false,
+      "venue": "RTHC Bayer Leverkusen",
+      "matchday": 2,
+      "match_points": "0:0",
+      "status": "offen"
+    },
+    {
+      "match_date": "2026-03-08",
+      "start_time": "16:00",
+      "home_team": "VKC Köln 1",
+      "away_team": "TC Rath 1",
+      "opponent": "TC Rath 1",
+      "is_home_match": true,
+      "venue": "TH Schloß Morsbroich",
+      "matchday": 3,
+      "match_points": "0:0",
+      "status": "offen"
+    }
+  ],
+  "players": [],
+  "season": "winter",
+  "year": "2025/26"
+}
+
 **WICHTIGE HINWEISE:**
 - JEDE Tabellenzeile aus der Meldeliste MUSS einen Spieler-Eintrag ergeben
+- **JEDE Zeile aus dem Spielplan MUSS ein Match sein!**
+- **DATUMSFORMAT: Immer "YYYY-MM-DD" ausgeben!**
+  * "01.11.2025, 00:00" → "2025-11-01" (Zeit ignorieren wenn 00:00)
+  * "24.01.2026, 17:00" → "2026-01-24" (Zeit "17:00")
+  * "08.03.2026, 16:00" → "2026-03-08" (Zeit "16:00")
 - Extrahiere LK-Werte wenn möglich, aber setze NICHT erfundene Werte
 - Wenn LK nicht erkennbar ist: lk = null oder "" (wird später manuell ergänzt)
 - Wenn ID-Nummer nicht erkennbar ist: id_number = "" (wird später manuell ergänzt)
