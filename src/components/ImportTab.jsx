@@ -1727,16 +1727,95 @@ Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele
         <p>Kopiere TVM-Daten hier rein - die KI erkennt automatisch Matches, Spieler & Teams!</p>
       </div>
 
-      {/* NEU: Review-Panel für Fuzzy Matching */}
+      {/* Text-Eingabe */}
+      <div className="import-section">
+        <div className="input-header">
+          <label htmlFor="match-text">📋 TVM-Meldeliste:</label>
+          <button 
+            onClick={insertExampleText}
+            className="btn-example"
+            type="button"
+          >
+            📝 Beispiel einfügen
+          </button>
+        </div>
+        
+        <textarea
+          id="match-text"
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
+          placeholder="Kopiere hier die komplette TVM-Seite (inkl. Team-Info und Spielplan)...
+
+Die KI erkennt automatisch:
+✅ Verein & Mannschaft
+✅ Alle Spieltage
+✅ Spieler (falls Meldeliste dabei)"
+          rows={12}
+          className="match-input"
+        />
+
+        <div className="input-actions">
+          <button
+            onClick={handleParseMatches}
+            disabled={!inputText.trim() || isProcessing}
+            className="btn-parse"
+          >
+            {isProcessing ? '⏳ Verarbeite...' : '🤖 KI analysieren'}
+          </button>
+          
+          <button
+            onClick={() => {
+              setInputText('');
+              setParsedData(null);
+              setMatchingReview(null);
+              setShowReview(false);
+              setEditablePlayers([]);
+              setEditableMatches([]);
+              setError(null);
+              setSuccessMessage(null);
+            }}
+            className="btn-clear"
+            type="button"
+          >
+            🗑️ Zurücksetzen
+          </button>
+        </div>
+      </div>
+
+      {/* ========================================= */}
+      {/* ERKANNTE INFORMATIONEN - DIREKT DARUNTER */}
+      {/* ========================================= */}
+
+      {/* Error Message */}
+      {error && (
+        <div className="message error-message">
+          <span className="message-icon">❌</span>
+          <div>
+            <strong>Fehler:</strong>
+            <p>{error}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Success Message (nur wenn kein parsedData) */}
+      {successMessage && !parsedData && (
+        <div className="message success-message">
+          <span className="message-icon">✅</span>
+          <p>{successMessage}</p>
+        </div>
+      )}
+
+      {/* NEU: Review-Panel für Fuzzy Matching - DIREKT NACH EINGABE */}
       {showReview && matchingReview && (
         <div className="import-section" style={{ 
-          background: '#fef3c7', 
+          background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
           border: '2px solid #f59e0b', 
           borderRadius: '12px',
-          padding: '1.5rem'
+          padding: '1.5rem',
+          boxShadow: '0 4px 12px rgba(245, 158, 11, 0.2)'
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '700' }}>
+            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '700', color: '#92400e' }}>
               🔍 Review: Entity-Matching
             </h3>
             <button
@@ -2228,88 +2307,23 @@ Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele
         </div>
       )}
 
-      {/* Text-Eingabe */}
-      <div className="import-section">
-        <div className="input-header">
-          <label htmlFor="match-text">📋 TVM-Meldeliste:</label>
-          <button 
-            onClick={insertExampleText}
-            className="btn-example"
-            type="button"
-          >
-            📝 Beispiel einfügen
-          </button>
-        </div>
-        
-        <textarea
-          id="match-text"
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          placeholder="Kopiere hier die komplette TVM-Seite (inkl. Team-Info und Spielplan)...
-
-Die KI erkennt automatisch:
-✅ Verein & Mannschaft
-✅ Alle Spieltage
-✅ Spieler (falls Meldeliste dabei)"
-          rows={12}
-          className="match-input"
-        />
-
-        <div className="input-actions">
-          <button
-            onClick={handleParseMatches}
-            disabled={!inputText.trim() || isProcessing}
-            className="btn-parse"
-          >
-            {isProcessing ? '⏳ Verarbeite...' : '🤖 KI analysieren'}
-          </button>
-          
-          <button
-            onClick={() => {
-              setInputText('');
-              setParsedData(null);
-              setError(null);
-              setSuccessMessage(null);
-            }}
-            className="btn-clear"
-            type="button"
-          >
-            🗑️ Zurücksetzen
-          </button>
-        </div>
-      </div>
-
-      {/* Error Message */}
-      {error && (
-        <div className="message error-message">
-          <span className="message-icon">❌</span>
-          <div>
-            <strong>Fehler:</strong>
-            <p>{error}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Success Message */}
-      {successMessage && !parsedData && (
-        <div className="message success-message">
-          <span className="message-icon">✅</span>
-          <div>
-            <strong>Erfolgreich!</strong>
-            <p style={{ whiteSpace: 'pre-line' }}>{successMessage}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Parsed Matches Vorschau */}
+      {/* Parsed Matches Vorschau - DIREKT NACH TEAM-INFO */}
       {parsedData && parsedData.matches && parsedData.matches.length > 0 && (
-        <div className="import-section">
+        <div className="import-section" style={{
+          background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+          border: '2px solid #10b981',
+          borderRadius: '12px',
+          padding: '1.5rem',
+          boxShadow: '0 4px 12px rgba(16, 185, 129, 0.2)'
+        }}>
           <div className="preview-header">
-            <h3>🎯 Erkannte Matches ({parsedData.matches.length})</h3>
-            <div className="preview-meta">
-              {parsedData.season && <span className="meta-badge">📅 {parsedData.season}</span>}
-              {parsedData.category && <span className="meta-badge">🎾 {parsedData.category}</span>}
-              <span className="meta-badge">💰 {parsedData.metadata.cost_estimate}</span>
+            <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem', fontWeight: '700', color: '#065f46' }}>
+              🎯 Erkannte Matches ({parsedData.matches.length})
+            </h3>
+            <div className="preview-meta" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+              {parsedData.season && <span className="meta-badge" style={{ padding: '0.25rem 0.75rem', background: '#dcfce7', color: '#15803d', borderRadius: '6px', fontSize: '0.8rem', fontWeight: '600' }}>📅 {parsedData.season}</span>}
+              {parsedData.category && <span className="meta-badge" style={{ padding: '0.25rem 0.75rem', background: '#dcfce7', color: '#15803d', borderRadius: '6px', fontSize: '0.8rem', fontWeight: '600' }}>🎾 {parsedData.category}</span>}
+              <span className="meta-badge" style={{ padding: '0.25rem 0.75rem', background: '#dcfce7', color: '#15803d', borderRadius: '6px', fontSize: '0.8rem', fontWeight: '600' }}>💰 {parsedData.metadata.cost_estimate}</span>
             </div>
           </div>
 
@@ -2457,14 +2471,22 @@ Die KI erkennt automatisch:
         </div>
       )}
 
-      {/* Parsed Players Vorschau */}
+      {/* Parsed Players Vorschau - DIREKT NACH MATCHES */}
       {parsedData && parsedData.players && parsedData.players.length > 0 && (
-        <div className="import-section">
+        <div className="import-section" style={{
+          background: 'linear-gradient(135deg, #faf5ff 0%, #e9d5ff 100%)',
+          border: '2px solid #a855f7',
+          borderRadius: '12px',
+          padding: '1.5rem',
+          boxShadow: '0 4px 12px rgba(168, 85, 247, 0.2)'
+        }}>
           <div className="preview-header">
-            <h3>👥 Erkannte Spieler ({parsedData.players.length})</h3>
-            <div className="preview-meta">
-              {parsedData.season && <span className="meta-badge">📅 {parsedData.season}</span>}
-              <span className="meta-badge">💰 {parsedData.metadata.cost_estimate}</span>
+            <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem', fontWeight: '700', color: '#6b21a8' }}>
+              👥 Erkannte Spieler ({parsedData.players.length})
+            </h3>
+            <div className="preview-meta" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+              {parsedData.season && <span className="meta-badge" style={{ padding: '0.25rem 0.75rem', background: '#f3e8ff', color: '#6b21a8', borderRadius: '6px', fontSize: '0.8rem', fontWeight: '600' }}>📅 {parsedData.season}</span>}
+              <span className="meta-badge" style={{ padding: '0.25rem 0.75rem', background: '#f3e8ff', color: '#6b21a8', borderRadius: '6px', fontSize: '0.8rem', fontWeight: '600' }}>💰 {parsedData.metadata.cost_estimate}</span>
             </div>
           </div>
 
