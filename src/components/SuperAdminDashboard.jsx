@@ -63,23 +63,45 @@ function SuperAdminDashboard() {
       
       // Build-Timestamp (aus import.meta oder statisch)
       const buildTime = import.meta.env?.VITE_BUILD_TIME || new Date().toISOString();
+      const buildDateTime = new Date(buildTime);
       
       return {
         commitSha,
         buildTime,
         shortCommit: commitSha ? String(commitSha).substring(0, 7) : null,
-        buildDate: new Date(buildTime).toLocaleDateString('de-DE', { 
+        buildDate: buildDateTime.toLocaleDateString('de-DE', { 
           day: '2-digit', 
           month: '2-digit', 
           year: 'numeric' 
+        }),
+        buildTimeFormatted: buildDateTime.toLocaleTimeString('de-DE', {
+          hour: '2-digit',
+          minute: '2-digit'
+        }),
+        buildDateTime: buildDateTime.toLocaleDateString('de-DE', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        }) + ' ' + buildDateTime.toLocaleTimeString('de-DE', {
+          hour: '2-digit',
+          minute: '2-digit'
         })
       };
     } catch (_) {
+      const now = new Date();
       return {
         commitSha: '',
-        buildTime: new Date().toISOString(),
+        buildTime: now.toISOString(),
         shortCommit: null,
-        buildDate: new Date().toLocaleDateString('de-DE')
+        buildDate: now.toLocaleDateString('de-DE'),
+        buildTimeFormatted: now.toLocaleTimeString('de-DE', {
+          hour: '2-digit',
+          minute: '2-digit'
+        }),
+        buildDateTime: now.toLocaleDateString('de-DE') + ' ' + now.toLocaleTimeString('de-DE', {
+          hour: '2-digit',
+          minute: '2-digit'
+        })
       };
     }
   };
@@ -1137,7 +1159,7 @@ function SuperAdminDashboard() {
               alignItems: 'center',
               gap: '0.5rem'
             }}
-              title={`Build: ${buildInfo.buildDate}${buildInfo.commitSha ? `\nCommit: ${buildInfo.commitSha}` : ''}`}
+              title={`Build: ${buildInfo.buildDateTime}${buildInfo.commitSha ? `\nCommit: ${buildInfo.commitSha}` : ''}`}
             >
               {buildInfo.shortCommit ? (
                 <>
@@ -1154,9 +1176,10 @@ function SuperAdminDashboard() {
                 opacity: 0.7, 
                 fontSize: '0.65rem',
                 borderLeft: buildInfo.shortCommit ? '1px solid #86efac' : '1px solid #fcd34d',
-                paddingLeft: '0.5rem'
+                paddingLeft: '0.5rem',
+                whiteSpace: 'nowrap'
               }}>
-                {buildInfo.buildDate}
+                {buildInfo.buildDate} {buildInfo.buildTimeFormatted}
               </span>
             </span>
           </div>
