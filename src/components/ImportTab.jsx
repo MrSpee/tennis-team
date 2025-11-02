@@ -23,6 +23,7 @@ const ImportTab = () => {
   const [importStats, setImportStats] = useState(null);
   const [showReview, setShowReview] = useState(false); // NEU: Review-Panel anzeigen
   const [editablePlayers, setEditablePlayers] = useState([]); // NEU: Editierbare Spieler-Daten
+  const [editableMatches, setEditableMatches] = useState([]); // NEU: Editierbare Match-Daten (für Datum-Fix)
   const [allClubs, setAllClubs] = useState([]); // NEU: Alle Vereine für Dropdown
   const [allTeamsForPlayers, setAllTeamsForPlayers] = useState([]); // NEU: Alle Teams für Spieler-Dropdown
   
@@ -320,9 +321,20 @@ const ImportTab = () => {
     setError(null);
 
     try {
-      const matchesToImport = selectedMatches.map(idx => parsedData.matches[idx]);
+      // Nutze editableMatches falls vorhanden (für Datum-Fixes)
+      const matchesToImport = selectedMatches.map(idx => {
+        const originalMatch = parsedData.matches[idx];
+        const editedMatch = editableMatches[idx];
+        
+        // Merge: Wenn editiert, nutze editierte Werte
+        return {
+          ...originalMatch,
+          match_date: editedMatch?.match_date || originalMatch.match_date,
+          start_time: editedMatch?.start_time || originalMatch.start_time
+        };
+      });
       
-      console.log('💾 Importing matches to Supabase:', matchesToImport);
+      console.log('💾 Importing matches to Supabase (mit editierten Daten):', matchesToImport);
       
       // SCHRITT 1: Finde oder erstelle das Team (inkl. Season)
       // Nutze matched_club_id/matched_team_id aus Review falls vorhanden
@@ -2006,7 +2018,16 @@ Die KI erkennt automatisch:
           </div>
 
           <div className="matches-preview">
-            {parsedData.matches.map((match, idx) => (
+            {parsedData.matches.map((match, idx) => {
+              const editable = editableMatches[idx] || {
+                match_date: match.match_date || '',
+                start_time: match.start_time || ''
+              };
+              
+              // Check if date is invalid
+              const isInvalidDate = !editable.match_date || isNaN(new Date(editable.match_date).getTime());
+              
+              return (
               <div 
                 key={idx}
                 className={`match-card ${selectedMatches.includes(idx) ? 'selected' : ''}`}
@@ -2022,17 +2043,57 @@ Die KI erkennt automatisch:
                 </div>
                 
                 <div className="match-details">
-                  <div className="match-header">
-                    <span className="match-date">
-                      📅 {new Date(match.match_date).toLocaleDateString('de-DE', { 
-                        weekday: 'short', 
-                        day: '2-digit', 
-                        month: '2-digit', 
-                        year: 'numeric' 
-                      })}
-                    </span>
-                    {match.start_time && (
-                      <span className="match-time">🕐 {match.start_time} Uhr</span>
+                  <div className="match-header" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
+                    {/* Datum - mit Inline-Edit bei Invalid Date */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: '1 1 auto' }}>
+                      {isInvalidDate ? (
+                        <>
+                          <span style={{ 
+                            color: '#dc2626', 
+                            fontWeight: '600', 
+                            fontSize: '0.75rem',
+                            padding: '0.25rem 0.5rem',
+                            background: '#fee2e2',
+                            borderRadius: '4px'
+                          }}>
+                            ⚠️ Datum fehlt
+                          </span>
+                          <input 
+                            type="date"
+                            value={editable.match_date || ''}
+                            onChange={(e) => {
+                              const newEditableMatches = [...editableMatches];
+                              newEditableMatches[idx] = {
+                                ...editable,
+                                match_date: e.target.value
+                              };
+                              setEditableMatches(newEditableMatches);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              padding: '0.25rem 0.5rem',
+                              fontSize: '0.875rem',
+                              border: '2px solid #3b82f6',
+                              borderRadius: '6px',
+                              background: 'white'
+                            }}
+                          />
+                        </>
+                      ) : (
+                        <span className="match-date">
+                          📅 {new Date(editable.match_date).toLocaleDateString('de-DE', { 
+                            weekday: 'short', 
+                            day: '2-digit', 
+                            month: '2-digit', 
+                            year: 'numeric' 
+                          })}
+                        </span>
+                      )}
+                    </div>
+                    
+                    {/* Zeit */}
+                    {editable.start_time && (
+                      <span className="match-time">🕐 {editable.start_time} Uhr</span>
                     )}
                     {match.matchday && (
                       <span className="match-day">🎯 Spieltag {match.matchday}</span>
@@ -2070,7 +2131,8 @@ Die KI erkennt automatisch:
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="import-actions">
