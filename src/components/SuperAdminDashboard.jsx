@@ -1157,30 +1157,37 @@ function SuperAdminDashboard() {
               padding: '0.25rem 0.6rem',
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.5rem'
+              gap: '0.35rem'
             }}
               title={`Build: ${buildInfo.buildDateTime}${buildInfo.commitSha ? `\nCommit: ${buildInfo.commitSha}` : ''}`}
             >
               {buildInfo.shortCommit ? (
                 <>
-                  <span>🚀</span>
-                  <span>{buildInfo.shortCommit}</span>
+                  <span>🚀 Build #{buildInfo.shortCommit}</span>
+                  <span style={{ 
+                    opacity: 0.7, 
+                    fontSize: '0.65rem',
+                    borderLeft: '1px solid #86efac',
+                    paddingLeft: '0.4rem',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    {buildInfo.buildDate} {buildInfo.buildTimeFormatted}
+                  </span>
                 </>
               ) : (
                 <>
-                  <span>🏠</span>
-                  <span>LOCAL</span>
+                  <span>🏠 LOCAL</span>
+                  <span style={{ 
+                    opacity: 0.7, 
+                    fontSize: '0.65rem',
+                    borderLeft: '1px solid #fcd34d',
+                    paddingLeft: '0.4rem',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    Dev-Mode
+                  </span>
                 </>
               )}
-              <span style={{ 
-                opacity: 0.7, 
-                fontSize: '0.65rem',
-                borderLeft: buildInfo.shortCommit ? '1px solid #86efac' : '1px solid #fcd34d',
-                paddingLeft: '0.5rem',
-                whiteSpace: 'nowrap'
-              }}>
-                {buildInfo.buildDate} {buildInfo.buildTimeFormatted}
-              </span>
             </span>
           </div>
           <div className="formkurve-subtitle">
