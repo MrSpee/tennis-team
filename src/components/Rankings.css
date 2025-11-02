@@ -95,9 +95,31 @@
 .player-name-large {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.75rem;
   font-size: 1.2rem;
   font-weight: 600;
+  flex-wrap: wrap; /* Inactive-Badge kann umbrechen falls nötig */
+  line-height: 1.3;
+}
+
+/* Mobile: Kleinere Font-Size + kompakteres Layout */
+@media (max-width: 768px) {
+  .player-name-large {
+    font-size: 0.95rem;
+    gap: 0.5rem;
+  }
+  
+  .position-number {
+    width: 32px;
+    height: 32px;
+    font-size: 0.85rem;
+    flex-shrink: 0; /* Position-Number bleibt immer gleich groß */
+  }
+  
+  .inactive-badge {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.4rem;
+  }
 }
 
 .position-number {
