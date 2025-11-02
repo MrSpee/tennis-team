@@ -644,6 +644,81 @@ function Dashboard() {
       {/* 2. Training-Teaser Card - ENTFERNT (war hardcoded) */}
       {/* TODO: Dynamische Training-Anzeige implementieren */}
 
+      {/* 🔴 LIVE-SPIELE (gerade laufend) - DIREKT NACH FORMKURVE */}
+      {liveMatches.length > 0 && (
+        <div className="fade-in" style={{ marginBottom: '1.5rem' }}>
+          <div className="lk-card-full">
+            <div className="formkurve-header">
+              <div className="formkurve-title" style={{ color: '#ef4444' }}>
+                🔴 Live-Spiele
+              </div>
+              <div className="match-count-badge" style={{
+                background: '#ef4444',
+                color: 'white',
+                animation: 'pulse 2s ease-in-out infinite'
+              }}>
+                {liveMatches.length}
+              </div>
+            </div>
+            <div className="season-content" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {liveMatches.map((match) => {
+                const resultCount = matchResultCounts[match.id]?.completed || 0;
+                const expectedResults = match.season === 'summer' ? 9 : 6;
+                const timeSinceStart = (now - match.date) / (1000 * 60 * 60); // Stunden
+                
+                return (
+                  <div 
+                    key={match.id} 
+                    className="match-preview-card"
+                    onClick={() => navigate(`/ergebnisse/${match.id}`)}
+                    style={{ 
+                      cursor: 'pointer',
+                      border: '2px solid #ef4444',
+                      background: 'linear-gradient(135deg, #fef2f2 0%, #ffffff 100%)',
+                      margin: 0
+                    }}
+                  >
+                    <div className="match-preview-header">
+                      <div className="match-preview-date" style={{ color: '#ef4444', fontWeight: '700' }}>
+                        🔴 LIVE - {format(match.date, 'EEE, dd. MMM', { locale: de })}
+                      </div>
+                      <div className="match-preview-time" style={{ 
+                        background: '#ef4444',
+                        color: 'white',
+                        padding: '0.25rem 0.75rem',
+                        borderRadius: '6px',
+                        fontSize: '0.75rem',
+                        fontWeight: '700'
+                      }}>
+                        {Math.floor(timeSinceStart)}h {Math.floor((timeSinceStart % 1) * 60)}m
+                      </div>
+                    </div>
+                    <div className="match-preview-opponent">{match.opponent}</div>
+                    <div style={{
+                      marginTop: '0.5rem',
+                      padding: '0.5rem',
+                      background: resultCount > 0 ? '#dcfce7' : '#fef3c7',
+                      borderRadius: '6px',
+                      fontSize: '0.8rem',
+                      fontWeight: '600',
+                      color: resultCount > 0 ? '#15803d' : '#92400e',
+                      textAlign: 'center'
+                    }}>
+                      {resultCount > 0 
+                        ? `✅ ${resultCount}/${expectedResults} Ergebnisse eingetragen`
+                        : '⏳ Ergebnisse noch nicht eingetragen'
+                      }
+                    </div>
+                    <div className="match-preview-location">{match.location === 'Home' ? '🏠 Heimspiel' : '✈️ Auswärtsspiel'}</div>
+                    <div className="match-preview-venue">{match.venue}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 3. Aktuelle Saison Card */}
       <div className="fade-in lk-card-full">
         <div className="formkurve-header">
@@ -669,11 +744,17 @@ function Dashboard() {
           )}
       </div>
 
-          {/* Nächstes Spiel */}
+          {/* Nächstes Spiel - NUR anzeigen wenn < 24h */}
           {nextMatchAnySeason ? (() => {
             const diffTime = nextMatchAnySeason.date - now;
+            const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
             const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
             const isSoon = diffDays <= 7;
+            
+            // 🔧 NUR anzeigen wenn < 24 Stunden
+            if (diffHours >= 24) {
+              return null;
+            }
             
             // Verfügbare Spieler
         const availablePlayers = Object.entries(nextMatchAnySeason.availability || {})
@@ -728,72 +809,7 @@ function Dashboard() {
             </div>
           )}
           
-          {/* 🔴 LIVE-SPIELE (gerade laufend) */}
-          {liveMatches.length > 0 && (
-            <div className="season-matches" style={{ marginBottom: '1.5rem' }}>
-              <div className="season-matches-label" style={{
-                background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
-                color: 'white',
-                animation: 'pulse 2s ease-in-out infinite'
-              }}>
-                🔴 Live-Spiele ({liveMatches.length})
-              </div>
-              {liveMatches.map((match) => {
-                const resultCount = matchResultCounts[match.id]?.completed || 0;
-                const expectedResults = match.season === 'summer' ? 9 : 6;
-                const timeSinceStart = (now - match.date) / (1000 * 60 * 60); // Stunden
-                
-                return (
-                  <div 
-                    key={match.id} 
-                    className="match-preview-card"
-                    onClick={() => navigate(`/ergebnisse/${match.id}`)}
-                    style={{ 
-                      cursor: 'pointer',
-                      border: '2px solid #ef4444',
-                      background: 'linear-gradient(135deg, #fef2f2 0%, #ffffff 100%)'
-                    }}
-                  >
-                    <div className="match-preview-header">
-                      <div className="match-preview-date" style={{ color: '#ef4444', fontWeight: '700' }}>
-                        🔴 LIVE - {format(match.date, 'EEE, dd. MMM', { locale: de })}
-                      </div>
-                      <div className="match-preview-time" style={{ 
-                        background: '#ef4444',
-                        color: 'white',
-                        padding: '0.25rem 0.75rem',
-                        borderRadius: '6px',
-                        fontSize: '0.75rem',
-                        fontWeight: '700'
-                      }}>
-                        {Math.floor(timeSinceStart)}h {Math.floor((timeSinceStart % 1) * 60)}m
-                      </div>
-                    </div>
-                    <div className="match-preview-opponent">{match.opponent}</div>
-                    <div style={{
-                      marginTop: '0.5rem',
-                      padding: '0.5rem',
-                      background: resultCount > 0 ? '#dcfce7' : '#fef3c7',
-                      borderRadius: '6px',
-                      fontSize: '0.8rem',
-                      fontWeight: '600',
-                      color: resultCount > 0 ? '#15803d' : '#92400e',
-                      textAlign: 'center'
-                    }}>
-                      {resultCount > 0 
-                        ? `✅ ${resultCount}/${expectedResults} Ergebnisse eingetragen`
-                        : '⏳ Ergebnisse noch nicht eingetragen'
-                      }
-                    </div>
-                    <div className="match-preview-location">{match.location === 'Home' ? '🏠 Heimspiel' : '✈️ Auswärtsspiel'}</div>
-                    <div className="match-preview-venue">{match.venue}</div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          
-          {/* Alle Spiele der laufenden Saison */}
+          {/* Kommende Spiele (nur echte zukünftige, nicht live) */}
           {upcomingMatches.length > 0 && (
             <div className="season-matches">
               <div className="season-matches-label">Kommende Spiele</div>
