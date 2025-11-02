@@ -253,17 +253,26 @@ const MatchdayResults = () => {
       const elapsed = Math.abs(diff);
       const hoursSinceStart = elapsed / 3600000;
       
-      // 🔧 LIVE-Anzeige: Wenn < 7h her, zeige nur "LIVE" (keine Zeit-Berechnung)
+      // 🔧 Prüfe Anzahl der Ergebnisse (Winter: 6, Sommer: 9)
+      const expectedResults = matchday.season === 'summer' ? 9 : 6;
+      const completedResults = results.filter(r => r.status === 'completed' && r.winner).length;
+      
+      // Beendet: Alle Ergebnisse eingetragen ODER > 7h her
+      if (completedResults >= expectedResults) {
+        return `✅ Beendet (${completedResults}/${expectedResults})`;
+      }
+      
+      // LIVE: < 7h ODER nicht alle Ergebnisse
       if (hoursSinceStart <= 7) {
         const startTime = matchTime.toLocaleTimeString('de-DE', {
           hour: '2-digit',
           minute: '2-digit'
         });
-        return `🔴 LIVE (seit ${startTime} Uhr)`;
+        return `🔴 LIVE (seit ${startTime} Uhr) • ${completedResults}/${expectedResults}`;
       }
       
-      // Spiel ist vorbei (> 7h)
-      return `✅ Beendet`;
+      // Spiel ist > 7h her aber nicht alle Ergebnisse
+      return `⏳ Ergebnisse fehlen (${completedResults}/${expectedResults})`;
     }
     
     const hours = Math.floor(diff / 3600000);
@@ -273,7 +282,7 @@ const MatchdayResults = () => {
     if (hours > 24) return `📅 In ${Math.floor(hours / 24)} Tagen`;
     if (hours > 2) return `⏰ In ${hours}h ${minutes}m`;
     return `🔥 ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-  }, [matchday, currentTime]);
+  }, [matchday, currentTime, results]);
 
   // Prüfe ob Live-Button angezeigt werden soll
   const shouldShowLiveBadge = useCallback(() => {
