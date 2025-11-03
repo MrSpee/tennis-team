@@ -19,6 +19,11 @@ function PlayerProfileSimple() {
   const [isOwnProfile, setIsOwnProfile] = useState(false);
   const [isEditingTeams, setIsEditingTeams] = useState(false);
   const [editingTeam, setEditingTeam] = useState(null);
+  
+  // ✅ NEU: Performance-Daten
+  const [performanceStats, setPerformanceStats] = useState(null);
+  const [recentMatches, setRecentMatches] = useState([]);
+  const [loadingStats, setLoadingStats] = useState(false);
 
   useEffect(() => {
     // ProtectedRoute garantiert bereits, dass User eingeloggt ist
@@ -98,6 +103,9 @@ function PlayerProfileSimple() {
         setPlayer(data);
         setIsOwnProfile(currentUser?.id === data.user_id);
         
+        // ✅ Lade Performance-Statistiken
+        loadPerformanceStats(data.id);
+        
         // Lade Vereins- und Mannschafts-Daten
         await loadPlayerTeamsAndClubs(data.id);
       } else {
@@ -108,6 +116,244 @@ function PlayerProfileSimple() {
       setError('Fehler beim Laden des Spieler-Profils.');
     } finally {
       setLoading(false);
+    }
+  };
+  
+  // ✅ NEU: Lade Performance-Statistiken
+  const loadPerformanceStats = async (playerId) => {
+    if (!playerId) return;
+    
+    setLoadingStats(true);
+    
+    try {
+      console.log('📊 Loading performance stats for player:', playerId);
+      
+      // Lade alle match_results für diesen Spieler
+      const { data: results, error } = await supabase
+        .from('match_results')
+        .select(`
+          *,
+          matchday:matchdays(
+            id,
+            match_date,
+            home_team_id,
+            away_team_id,
+            season,
+            status,
+            home_team:team_info!matchdays_home_team_id_fkey(club_name, team_name, category),
+            away_team:team_info!matchdays_away_team_id_fkey(club_name, team_name, category)
+          )
+        `)
+        .or(`home_player_id.eq.${playerId},home_player1_id.eq.${playerId},home_player2_id.eq.${playerId},guest_player_id.eq.${playerId},guest_player1_id.eq.${playerId},guest_player2_id.eq.${playerId}`)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      
+      if (error) throw error;
+      
+      console.log('✅ Match results loaded (Raouls Spiele):', results?.length || 0);
+      console.log('📋 Raw results:', results);
+      
+      // ✅ Hole ALLE Matchday-IDs wo Raoul gespielt hat
+      const matchdayIds = [...new Set((results || []).map(r => r.matchday_id).filter(Boolean))];
+      console.log('📋 Matchday IDs wo Raoul gespielt hat:', matchdayIds);
+      
+      // ✅ Lade ALLE Ergebnisse dieser Matchdays (für Team-Bilanz!)
+      let allMatchdayResults = [];
+      if (matchdayIds.length > 0) {
+        const { data: fullResults, error: fullError } = await supabase
+          .from('match_results')
+          .select('*')
+          .in('matchday_id', matchdayIds);
+        
+        if (!fullError) {
+          allMatchdayResults = fullResults || [];
+          console.log('✅ ALLE Ergebnisse geladen (für Team-Bilanz):', allMatchdayResults.length);
+        }
+      }
+      
+      // ✅ Berechne PERSÖNLICHE Statistiken (nur Raouls Spiele!)
+      let einzelWins = 0, einzelLosses = 0, einzelDraws = 0;
+      let doppelWins = 0, doppelLosses = 0, doppelDraws = 0;
+      
+      const matchesMap = new Map(); // Für Mannschafts-Bilanz
+      
+      (results || []).forEach(result => {
+        // Bestimme ob Spieler im Home oder Guest Team ist
+        const isInHomeTeam = 
+          result.home_player_id === playerId ||
+          result.home_player1_id === playerId ||
+          result.home_player2_id === playerId;
+        
+        // ✅ Bestimme Sieg/Niederlage (WICHTIG: winner ist 'home' oder 'guest', NICHT 'away'!)
+        let didWin = false;
+        let didLose = false;
+        let isDraw = false;
+        
+        if (result.winner) {
+          if ((isInHomeTeam && result.winner === 'home') || 
+              (!isInHomeTeam && result.winner === 'guest')) {
+            didWin = true;
+          } else if ((isInHomeTeam && result.winner === 'guest') || 
+                     (!isInHomeTeam && result.winner === 'home')) {
+            didLose = true;
+          } else if (result.winner === 'draw') {
+            isDraw = true;
+          }
+        }
+        
+        console.log(`  🔍 Result: ${result.match_type}, isInHomeTeam: ${isInHomeTeam}, winner: ${result.winner}, didWin: ${didWin}, didLose: ${didLose}`);
+        
+        // ✅ Zähle nach Spiel-Typ (Einzel vs Doppel)
+        if (result.match_type === 'Einzel') {
+          if (didWin) einzelWins++;
+          else if (didLose) einzelLosses++;
+          else if (isDraw) einzelDraws++;
+        } else if (result.match_type === 'Doppel') {
+          if (didWin) doppelWins++;
+          else if (didLose) doppelLosses++;
+          else if (isDraw) doppelDraws++;
+        }
+        
+        // Gruppiere nach Matchday (für Mannschafts-Bilanz)
+        if (result.matchday && result.matchday.id) {
+          if (!matchesMap.has(result.matchday.id)) {
+            matchesMap.set(result.matchday.id, {
+              matchday: result.matchday,
+              results: []
+            });
+          }
+          matchesMap.get(result.matchday.id).results.push(result);
+        }
+      });
+      
+      // Konvertiere zu Array und sortiere nach Datum (für Mannschafts-Spiele)
+      const matchesArray = Array.from(matchesMap.values())
+        .sort((a, b) => new Date(b.matchday.match_date) - new Date(a.matchday.match_date))
+        .slice(0, 10); // Letzte 10 Matchdays
+      
+      // ✅ Berechne MANNSCHAFTS-Bilanz (Siege/Niederlagen der Matchdays)
+      let teamWins = 0;
+      let teamLosses = 0;
+      let teamDraws = 0;
+      
+      const matchdaysWithStats = matchesArray.map((m, idx) => {
+        console.log(`\n🏆 Processing Matchday ${idx + 1}:`, m.matchday.id);
+        
+        // ✅ Hole ALLE Ergebnisse dieses Matchdays (nicht nur Raouls!)
+        const allResultsForThisMatch = allMatchdayResults.filter(r => r.matchday_id === m.matchday.id);
+        
+        console.log(`   Raouls Results: ${m.results.length}`);
+        console.log(`   ALLE Results: ${allResultsForThisMatch.length}`);
+        
+        let homeScore = 0;
+        let guestScore = 0;
+        
+        allResultsForThisMatch.forEach((r, rIdx) => {
+          console.log(`   Result ${rIdx + 1}: match_type=${r.match_type}, winner=${r.winner}, status=${r.status}`);
+          
+          if (r.winner === 'home') {
+            homeScore++;
+            console.log(`     → HOME gewonnen (homeScore now ${homeScore})`);
+          } else if (r.winner === 'guest') {
+            guestScore++;
+            console.log(`     → GUEST gewonnen (guestScore now ${guestScore})`);
+          } else {
+            console.log(`     → Kein Winner oder Draw`);
+          }
+        });
+        
+        // Bestimme ob Spieler im Home-Team war
+        const isHome = m.results.some(r => 
+          r.home_player_id === playerId ||
+          r.home_player1_id === playerId ||
+          r.home_player2_id === playerId
+        );
+        
+        const ourScore = isHome ? homeScore : guestScore;
+        const oppScore = isHome ? guestScore : homeScore;
+        
+        console.log(`   📊 FINAL: homeScore=${homeScore}, guestScore=${guestScore}`);
+        console.log(`   📊 Spieler war im ${isHome ? 'HOME' : 'GUEST'} Team`);
+        console.log(`   📊 ourScore=${ourScore}, oppScore=${oppScore}`);
+        
+        // Zähle Team-Ergebnis
+        if (ourScore > oppScore) {
+          teamWins++;
+          console.log(`   ✅ TEAM-SIEG gezählt! (teamWins now ${teamWins})`);
+        } else if (ourScore < oppScore) {
+          teamLosses++;
+          console.log(`   ❌ TEAM-NIEDERLAGE gezählt! (teamLosses now ${teamLosses})`);
+        } else if (ourScore === oppScore && ourScore > 0) {
+          teamDraws++;
+          console.log(`   🤝 TEAM-REMIS gezählt! (teamDraws now ${teamDraws})`);
+        } else {
+          console.log(`   ⚠️  Nicht gezählt (beide 0)`);
+        }
+        
+        const opponent = isHome ? m.matchday.away_team : m.matchday.home_team;
+        
+        return {
+          id: m.matchday.id,
+          date: new Date(m.matchday.match_date),
+          opponent: opponent ? `${opponent.club_name} ${opponent.team_name || ''} (${opponent.category})`.trim() : 'Unbekannt',
+          location: isHome ? 'Home' : 'Away',
+          ourScore,
+          oppScore,
+          total: allResultsForThisMatch.length, // ✅ ALLE Ergebnisse
+          season: m.matchday.season
+        };
+      });
+      
+      // ✅ Setze beide Statistiken
+      setPerformanceStats({
+        // Persönliche Stats
+        personal: {
+          einzel: {
+            wins: einzelWins,
+            losses: einzelLosses,
+            draws: einzelDraws,
+            total: einzelWins + einzelLosses + einzelDraws,
+            winRate: einzelWins + einzelLosses > 0 ? ((einzelWins / (einzelWins + einzelLosses)) * 100).toFixed(0) : 0
+          },
+          doppel: {
+            wins: doppelWins,
+            losses: doppelLosses,
+            draws: doppelDraws,
+            total: doppelWins + doppelLosses + doppelDraws,
+            winRate: doppelWins + doppelLosses > 0 ? ((doppelWins / (doppelWins + doppelLosses)) * 100).toFixed(0) : 0
+          },
+          gesamt: {
+            wins: einzelWins + doppelWins,
+            losses: einzelLosses + doppelLosses,
+            draws: einzelDraws + doppelDraws,
+            total: einzelWins + einzelLosses + einzelDraws + doppelWins + doppelLosses + doppelDraws,
+            winRate: einzelWins + einzelLosses + doppelWins + doppelLosses > 0 ? 
+              (((einzelWins + doppelWins) / (einzelWins + einzelLosses + doppelWins + doppelLosses)) * 100).toFixed(0) : 0
+          }
+        },
+        // Mannschafts-Stats
+        team: {
+          wins: teamWins,
+          losses: teamLosses,
+          draws: teamDraws,
+          total: teamWins + teamLosses + teamDraws,
+          winRate: teamWins + teamLosses > 0 ? ((teamWins / (teamWins + teamLosses)) * 100).toFixed(0) : 0
+        }
+      });
+      
+      setRecentMatches(matchdaysWithStats);
+      
+      console.log('✅ Performance stats calculated:', {
+        einzel: `${einzelWins}-${einzelLosses}`,
+        doppel: `${doppelWins}-${doppelLosses}`,
+        team: `${teamWins}-${teamLosses}`,
+        recentMatches: matchdaysWithStats.length
+      });
+      
+    } catch (error) {
+      console.error('❌ Error loading performance stats:', error);
+    } finally {
+      setLoadingStats(false);
     }
   };
 
@@ -128,12 +374,7 @@ function PlayerProfileSimple() {
             category,
             region,
             tvm_link,
-            address,
-            contact,
-            phone,
-            email,
-            website,
-            logo_url
+            club_id
           )
         `)
         .eq('player_id', playerId)
@@ -281,9 +522,382 @@ function PlayerProfileSimple() {
   return (
     <div className="dashboard container">
       {/* Kopfbereich im Dashboard-Stil */}
-      <div className="fade-in" style={{ marginBottom: '1rem', paddingTop: '0.5rem' }}>
-        <h1 className="hi">{player?.name || 'Spieler-Profil'}</h1>
+      <div className="fade-in" style={{ marginBottom: '1rem', paddingTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <button 
+          onClick={() => navigate(-1)}
+          style={{
+            padding: '0.5rem 1rem',
+            background: 'white',
+            border: '2px solid #e5e7eb',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            fontSize: '0.875rem',
+            fontWeight: '600',
+            color: '#1f2937',
+            transition: 'all 0.2s'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = '#f3f4f6';
+            e.currentTarget.style.borderColor = '#9ca3af';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'white';
+            e.currentTarget.style.borderColor = '#e5e7eb';
+          }}
+        >
+          <ArrowLeft size={18} />
+          Zurück
+        </button>
+        <h1 className="hi" style={{ margin: 0 }}>{player?.name || 'Spieler-Profil'}</h1>
       </div>
+      
+      {/* ✅ NEU: 1. PERSÖNLICHE PERFORMANCE (WICHTIGER!) */}
+      {!loadingStats && performanceStats && (
+        <div className="fade-in" style={{ marginBottom: '1.5rem' }}>
+          <div className="lk-card-full">
+            <div style={{
+              background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+              padding: '1.5rem',
+              borderRadius: '12px 12px 0 0',
+              color: 'white'
+            }}>
+              <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: '700', color: 'white' }}>
+                👤 Persönliche Performance
+              </h2>
+              <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.875rem', opacity: 0.9 }}>
+                Deine Einzel- und Doppel-Ergebnisse
+              </p>
+            </div>
+            
+            <div style={{ padding: '1.5rem', background: 'white', borderRadius: '0 0 12px 12px' }}>
+              {/* LK */}
+              <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
+                <div style={{
+                  display: 'inline-block',
+                  padding: '1.5rem 2rem',
+                  background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+                  border: '3px solid #3b82f6',
+                  borderRadius: '16px'
+                }}>
+                  <div style={{ fontSize: '2.5rem', fontWeight: '700', color: '#2563eb' }}>
+                    {player.current_lk || 'LK ?'}
+                  </div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#1e40af', marginTop: '0.5rem' }}>
+                    AKTUELLE LEISTUNGSKLASSE
+                  </div>
+                  
+                  {/* ✅ LK-Veränderung */}
+                  {player.season_start_lk && player.current_lk && (() => {
+                    const startLK = parseFloat((player.season_start_lk || '').replace('LK ', '').replace(',', '.'));
+                    const currentLK = parseFloat((player.current_lk || '').replace('LK ', '').replace(',', '.'));
+                    const diff = currentLK - startLK;
+                    
+                    if (Math.abs(diff) < 0.1) return null; // Keine Änderung
+                    
+                    return (
+                      <div style={{
+                        marginTop: '0.75rem',
+                        padding: '0.5rem 1rem',
+                        background: diff < 0 ? '#ecfdf5' : '#fee2e2',
+                        borderRadius: '8px',
+                        fontSize: '0.875rem',
+                        fontWeight: '600',
+                        color: diff < 0 ? '#047857' : '#991b1b'
+                      }}>
+                        {diff < 0 ? '📈 Verbessert:' : '📉 Verschlechtert:'} {diff > 0 ? '+' : ''}{diff.toFixed(1)} seit Saison-Start
+                      </div>
+                    );
+                  })()}
+                </div>
+                
+                {/* Saison-Start LK */}
+                {player.season_start_lk && (
+                  <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.75rem' }}>
+                    📅 Saison-Start: {player.season_start_lk}
+                  </div>
+                )}
+              </div>
+              
+              {/* Einzel Stats */}
+              <div style={{ marginBottom: '1.5rem' }}>
+                <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1rem', fontWeight: '700', color: '#1f2937' }}>
+                  👤 Einzel
+                </h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '0.75rem' }}>
+                  <div style={{
+                    padding: '0.75rem',
+                    background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+                    border: '2px solid #10b981',
+                    borderRadius: '8px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#059669' }}>
+                      {performanceStats.personal.einzel.wins}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', fontWeight: '600', color: '#047857' }}>SIEGE</div>
+                  </div>
+                  <div style={{
+                    padding: '0.75rem',
+                    background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
+                    border: '2px solid #ef4444',
+                    borderRadius: '8px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#dc2626' }}>
+                      {performanceStats.personal.einzel.losses}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', fontWeight: '600', color: '#991b1b' }}>NIEDERLAGEN</div>
+                  </div>
+                  <div style={{
+                    padding: '0.75rem',
+                    background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+                    border: '2px solid #f59e0b',
+                    borderRadius: '8px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#d97706' }}>
+                      {performanceStats.personal.einzel.winRate}%
+                    </div>
+                    <div style={{ fontSize: '0.7rem', fontWeight: '600', color: '#92400e' }}>QUOTE</div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Doppel Stats */}
+              <div style={{ marginBottom: '1.5rem' }}>
+                <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1rem', fontWeight: '700', color: '#1f2937' }}>
+                  👥 Doppel
+                </h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '0.75rem' }}>
+                  <div style={{
+                    padding: '0.75rem',
+                    background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+                    border: '2px solid #10b981',
+                    borderRadius: '8px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#059669' }}>
+                      {performanceStats.personal.doppel.wins}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', fontWeight: '600', color: '#047857' }}>SIEGE</div>
+                  </div>
+                  <div style={{
+                    padding: '0.75rem',
+                    background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
+                    border: '2px solid #ef4444',
+                    borderRadius: '8px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#dc2626' }}>
+                      {performanceStats.personal.doppel.losses}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', fontWeight: '600', color: '#991b1b' }}>NIEDERLAGEN</div>
+                  </div>
+                  <div style={{
+                    padding: '0.75rem',
+                    background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+                    border: '2px solid #f59e0b',
+                    borderRadius: '8px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#d97706' }}>
+                      {performanceStats.personal.doppel.winRate}%
+                    </div>
+                    <div style={{ fontSize: '0.7rem', fontWeight: '600', color: '#92400e' }}>QUOTE</div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Gesamt Persönlich */}
+              <div style={{
+                padding: '1rem',
+                background: 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)',
+                borderRadius: '8px',
+                display: 'flex',
+                justifyContent: 'space-around',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '1rem'
+              }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.25rem', fontWeight: '700', color: '#1f2937' }}>
+                    {performanceStats.personal.gesamt.total}
+                  </div>
+                  <div style={{ fontSize: '0.7rem', fontWeight: '600', color: '#6b7280' }}>GESAMT SPIELE</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.25rem', fontWeight: '700', color: '#059669' }}>
+                    {performanceStats.personal.gesamt.wins}
+                  </div>
+                  <div style={{ fontSize: '0.7rem', fontWeight: '600', color: '#047857' }}>SIEGE</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.25rem', fontWeight: '700', color: '#dc2626' }}>
+                    {performanceStats.personal.gesamt.losses}
+                  </div>
+                  <div style={{ fontSize: '0.7rem', fontWeight: '600', color: '#991b1b' }}>NIEDERLAGEN</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.25rem', fontWeight: '700', color: '#d97706' }}>
+                    {performanceStats.personal.gesamt.winRate}%
+                  </div>
+                  <div style={{ fontSize: '0.7rem', fontWeight: '600', color: '#92400e' }}>QUOTE</div>
+                </div>
+              </div>
+              
+              {/* Keine Einzel-Matches Hinweis */}
+              {performanceStats.personal.gesamt.total === 0 && (
+                <div style={{
+                  padding: '2rem',
+                  textAlign: 'center',
+                  color: '#6b7280',
+                  fontSize: '0.875rem',
+                  background: '#f9fafb',
+                  borderRadius: '8px',
+                  marginTop: '1rem'
+                }}>
+                  <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🎾</div>
+                  Noch keine persönlichen Spiele in dieser Saison
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* ✅ NEU: 2. MANNSCHAFTS-PERFORMANCE */}
+      {!loadingStats && performanceStats && performanceStats.team.total > 0 && (
+        <div className="fade-in" style={{ marginBottom: '1.5rem' }}>
+          <div className="lk-card-full">
+            <div style={{
+              background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+              padding: '1.5rem',
+              borderRadius: '12px 12px 0 0',
+              color: 'white'
+            }}>
+              <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: '700', color: 'white' }}>
+                👥 Mannschafts-Bilanz
+              </h2>
+              <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.875rem', opacity: 0.9 }}>
+                Team-Ergebnisse der letzten Medenspiele
+              </p>
+            </div>
+            
+            <div style={{ padding: '1.5rem', background: 'white', borderRadius: '0 0 12px 12px' }}>
+              {/* Team Stats Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+                <div style={{
+                  padding: '1rem',
+                  background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+                  border: '2px solid #10b981',
+                  borderRadius: '12px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: '1.75rem', fontWeight: '700', color: '#059669' }}>
+                    {performanceStats.team.wins}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#047857', marginTop: '0.25rem' }}>
+                    TEAM-SIEGE
+                  </div>
+                </div>
+                
+                <div style={{
+                  padding: '1rem',
+                  background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
+                  border: '2px solid #ef4444',
+                  borderRadius: '12px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: '1.75rem', fontWeight: '700', color: '#dc2626' }}>
+                    {performanceStats.team.losses}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#991b1b', marginTop: '0.25rem' }}>
+                    TEAM-NIEDERLAGEN
+                  </div>
+                </div>
+                
+                <div style={{
+                  padding: '1rem',
+                  background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+                  border: '2px solid #f59e0b',
+                  borderRadius: '12px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: '1.75rem', fontWeight: '700', color: '#d97706' }}>
+                    {performanceStats.team.winRate}%
+                  </div>
+                  <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#92400e', marginTop: '0.25rem' }}>
+                    TEAM-QUOTE
+                  </div>
+                </div>
+              </div>
+              
+              {/* Letzte Team-Matches */}
+              {recentMatches.length > 0 && (
+                <div>
+                  <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1rem', fontWeight: '700', color: '#1f2937' }}>
+                    🏆 Letzte {recentMatches.length} Medenspiele
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {recentMatches.map(match => {
+                      const outcome = match.ourScore > match.oppScore ? 'win' : match.ourScore < match.oppScore ? 'loss' : 'draw';
+                      
+                      return (
+                        <div
+                          key={match.id}
+                          onClick={() => navigate(`/results?match=${match.id}`)}
+                          style={{
+                            padding: '0.75rem 1rem',
+                            background: outcome === 'win' ? '#ecfdf5' : outcome === 'loss' ? '#fee2e2' : '#fef3c7',
+                            border: `2px solid ${outcome === 'win' ? '#10b981' : outcome === 'loss' ? '#ef4444' : '#f59e0b'}`,
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: '0.5rem'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                          onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+                        >
+                          <div>
+                            <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#1f2937' }}>
+                              {match.opponent}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                              {match.date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })} • {match.location === 'Home' ? '🏠 Heim' : '✈️ Auswärts'}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <div style={{
+                              padding: '0.25rem 0.75rem',
+                              background: 'white',
+                              borderRadius: '6px',
+                              fontSize: '0.875rem',
+                              fontWeight: '700',
+                              color: outcome === 'win' ? '#059669' : outcome === 'loss' ? '#dc2626' : '#d97706'
+                            }}>
+                              {match.ourScore}:{match.oppScore}
+                            </div>
+                            <div style={{ fontSize: '1.25rem' }}>
+                              {outcome === 'win' ? '🎉' : outcome === 'loss' ? '😞' : '🤝'}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Hero-Card mit Profilbild und Grundinfo */}
       <div className="fade-in lk-card-full">

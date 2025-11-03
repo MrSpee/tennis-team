@@ -1262,12 +1262,86 @@ const Results = () => {
                   {searchResults.clubs.map(club => (
                     <button
                       key={club.id}
-                      onClick={() => {
-                        // Zeige alle Teams dieses Vereins
+                      onClick={async () => {
                         console.log('🏢 Selected club:', club);
+                        
+                        try {
+                          // Lade alle Teams dieses Vereins
+                          const { data: clubTeams, error: teamsError } = await supabase
+                            .from('team_info')
+                            .select('id, team_name, club_name, category')
+                            .eq('club_id', club.id)
+                            .order('category', { ascending: true });
+                          
+                          if (teamsError) throw teamsError;
+                          
+                          setAllClubTeams(clubTeams || []);
+                          
+                          // Lade Matches für diese Teams
+                          const teamIds = (clubTeams || []).map(t => t.id);
+                          
+                          if (teamIds.length > 0) {
+                            const { data: clubMatches, error: matchesError } = await supabase
+                              .from('matchdays')
+                              .select('id, match_date, home_team_id, away_team_id, home_score, away_score, season, status')
+                              .or(`home_team_id.in.(${teamIds.join(',')}),away_team_id.in.(${teamIds.join(',')})`);
+                            
+                            if (!matchesError) {
+                              // Berechne Club-Statistiken
+                              const { data: allMatchResults } = await supabase
+                                .from('match_results')
+                                .select('*')
+                                .in('matchday_id', (clubMatches || []).map(m => m.id));
+                              
+                              const matchScoresMap = {};
+                              (allMatchResults || []).forEach(result => {
+                                if (!matchScoresMap[result.matchday_id]) {
+                                  matchScoresMap[result.matchday_id] = { home: 0, away: 0, completed: 0 };
+                                }
+                                if (result.winner === 'home') matchScoresMap[result.matchday_id].home++;
+                                else if (result.winner === 'away') matchScoresMap[result.matchday_id].away++;
+                                if (result.winner) matchScoresMap[result.matchday_id].completed++;
+                              });
+                              
+                              let totalWins = 0, totalLosses = 0, totalDraws = 0, totalPlayed = 0;
+                              
+                              (clubMatches || []).forEach(match => {
+                                const scores = matchScoresMap[match.id];
+                                if (scores && scores.completed > 0) {
+                                  const isHomeTeam = teamIds.includes(match.home_team_id);
+                                  const ourScore = isHomeTeam ? scores.home : scores.away;
+                                  const oppScore = isHomeTeam ? scores.away : scores.home;
+                                  
+                                  if (ourScore > 0 || oppScore > 0) {
+                                    totalPlayed++;
+                                    if (ourScore > oppScore) totalWins++;
+                                    else if (ourScore < oppScore) totalLosses++;
+                                    else totalDraws++;
+                                  }
+                                }
+                              });
+                              
+                              setClubOverview({
+                                clubName: club.name,
+                                totalTeams: clubTeams.length,
+                                totalMatches: (clubMatches || []).length,
+                                totalPlayed,
+                                totalWins,
+                                totalLosses,
+                                totalDraws
+                              });
+                            }
+                          }
+                          
+                          setShowClubOverview(true);
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                          
+                        } catch (error) {
+                          console.error('❌ Error loading club:', error);
+                        }
+                        
                         setSearchTerm('');
                         setSearchResults(null);
-                        // TODO: Filter nach Verein implementieren
                       }}
                       style={{
                         width: '100%',
@@ -1336,11 +1410,12 @@ const Results = () => {
                       key={p.id}
                       onClick={() => {
                         console.log('🎾 Selected player:', p);
-                        // Wechsle zur Spieler-Ansicht und scrolle zum Spieler
-                        setViewMode('spieler');
+                        
+                        // ✅ Navigate zu Spieler-Profil
+                        navigate(`/player/${encodeURIComponent(p.name)}`);
+                        
                         setSearchTerm('');
                         setSearchResults(null);
-                        // TODO: Scroll to player
                       }}
                       style={{
                         width: '100%',

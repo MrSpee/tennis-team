@@ -7,6 +7,7 @@ import PasswordReset from './PasswordReset';
 import { Building2, Users, MapPin, Phone, Mail, Globe, Edit3 } from 'lucide-react';
 import { normalizeLK } from '../lib/lkUtils';
 import TeamSelector from './TeamSelector';
+import PerformanceStats from './PerformanceStats';
 import './Profile.css';
 import './Dashboard.css';
 
@@ -52,6 +53,14 @@ function SupabaseProfile() {
   const [viewingPlayer, setViewingPlayer] = useState(null);
   const [isViewingOtherPlayer, setIsViewingOtherPlayer] = useState(false);
   const [isLoadingOtherPlayer, setIsLoadingOtherPlayer] = useState(false);
+  
+  // ✅ NEU: Tab-Navigation
+  const [activeTab, setActiveTab] = useState('spielbilanz'); // 'spielbilanz' | 'teams' | 'details'
+  
+  // ✅ NEU: Performance-Daten (wie PlayerProfileSimple)
+  const [performanceStats, setPerformanceStats] = useState(null);
+  const [recentMatches, setRecentMatches] = useState([]);
+  const [loadingStats, setLoadingStats] = useState(false);
   const [currentBucket, setCurrentBucket] = useState('profile-images');
   const [showPasswordReset, setShowPasswordReset] = useState(false);
   const [autoSaveTimer, setAutoSaveTimer] = useState(null);
@@ -206,6 +215,121 @@ function SupabaseProfile() {
     }
   };
 
+  // ✅ NEU: Lade Performance-Statistiken (kopiert von PlayerProfileSimple)
+  const loadPerformanceStats = async (playerId) => {
+    if (!playerId) return;
+    
+    setLoadingStats(true);
+    
+    try {
+      const { data: results, error } = await supabase
+        .from('match_results')
+        .select(`
+          *,
+          matchday:matchdays(id, match_date, home_team_id, away_team_id, season, status,
+            home_team:team_info!matchdays_home_team_id_fkey(club_name, team_name, category),
+            away_team:team_info!matchdays_away_team_id_fkey(club_name, team_name, category))
+        `)
+        .or(`home_player_id.eq.${playerId},home_player1_id.eq.${playerId},home_player2_id.eq.${playerId},guest_player_id.eq.${playerId},guest_player1_id.eq.${playerId},guest_player2_id.eq.${playerId}`)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      
+      if (error) throw error;
+      
+      const matchdayIds = [...new Set((results || []).map(r => r.matchday_id).filter(Boolean))];
+      
+      let allMatchdayResults = [];
+      if (matchdayIds.length > 0) {
+        const { data: fullResults } = await supabase
+          .from('match_results')
+          .select('*')
+          .in('matchday_id', matchdayIds);
+        allMatchdayResults = fullResults || [];
+      }
+      
+      let einzelWins = 0, einzelLosses = 0, einzelDraws = 0;
+      let doppelWins = 0, doppelLosses = 0, doppelDraws = 0;
+      const matchesMap = new Map();
+      
+      (results || []).forEach(result => {
+        const isInHomeTeam = result.home_player_id === playerId || result.home_player1_id === playerId || result.home_player2_id === playerId;
+        let didWin = false, didLose = false, isDraw = false;
+        
+        if (result.winner) {
+          if ((isInHomeTeam && result.winner === 'home') || (!isInHomeTeam && result.winner === 'guest')) didWin = true;
+          else if ((isInHomeTeam && result.winner === 'guest') || (!isInHomeTeam && result.winner === 'home')) didLose = true;
+          else if (result.winner === 'draw') isDraw = true;
+        }
+        
+        if (result.match_type === 'Einzel') {
+          if (didWin) einzelWins++;
+          else if (didLose) einzelLosses++;
+          else if (isDraw) einzelDraws++;
+        } else if (result.match_type === 'Doppel') {
+          if (didWin) doppelWins++;
+          else if (didLose) doppelLosses++;
+          else if (isDraw) doppelDraws++;
+        }
+        
+        if (result.matchday && result.matchday.id) {
+          if (!matchesMap.has(result.matchday.id)) {
+            matchesMap.set(result.matchday.id, { matchday: result.matchday, results: [] });
+          }
+          matchesMap.get(result.matchday.id).results.push(result);
+        }
+      });
+      
+      const matchesArray = Array.from(matchesMap.values()).sort((a, b) => new Date(b.matchday.match_date) - new Date(a.matchday.match_date)).slice(0, 10);
+      let teamWins = 0, teamLosses = 0, teamDraws = 0;
+      
+      const matchdaysWithStats = matchesArray.map(m => {
+        const allResultsForThisMatch = allMatchdayResults.filter(r => r.matchday_id === m.matchday.id);
+        let homeScore = 0, guestScore = 0;
+        
+        allResultsForThisMatch.forEach(r => {
+          if (r.winner === 'home') homeScore++;
+          else if (r.winner === 'guest') guestScore++;
+        });
+        
+        const isHome = m.results.some(r => r.home_player_id === playerId || r.home_player1_id === playerId || r.home_player2_id === playerId);
+        const ourScore = isHome ? homeScore : guestScore;
+        const oppScore = isHome ? guestScore : homeScore;
+        
+        if (ourScore > oppScore) teamWins++;
+        else if (ourScore < oppScore) teamLosses++;
+        else if (ourScore === oppScore && ourScore > 0) teamDraws++;
+        
+        const opponent = isHome ? m.matchday.away_team : m.matchday.home_team;
+        
+        return {
+          id: m.matchday.id,
+          date: new Date(m.matchday.match_date),
+          opponent: opponent ? `${opponent.club_name} ${opponent.team_name || ''} (${opponent.category})`.trim() : 'Unbekannt',
+          location: isHome ? 'Home' : 'Away',
+          ourScore,
+          oppScore,
+          total: allResultsForThisMatch.length,
+          season: m.matchday.season
+        };
+      });
+      
+      setPerformanceStats({
+        personal: {
+          einzel: { wins: einzelWins, losses: einzelLosses, draws: einzelDraws, total: einzelWins + einzelLosses + einzelDraws, winRate: einzelWins + einzelLosses > 0 ? ((einzelWins / (einzelWins + einzelLosses)) * 100).toFixed(0) : 0 },
+          doppel: { wins: doppelWins, losses: doppelLosses, draws: doppelDraws, total: doppelWins + doppelLosses + doppelDraws, winRate: doppelWins + doppelLosses > 0 ? ((doppelWins / (doppelWins + doppelLosses)) * 100).toFixed(0) : 0 },
+          gesamt: { wins: einzelWins + doppelWins, losses: einzelLosses + doppelLosses, draws: einzelDraws + doppelDraws, total: einzelWins + einzelLosses + einzelDraws + doppelWins + doppelLosses + doppelDraws, winRate: einzelWins + einzelLosses + doppelWins + doppelLosses > 0 ? (((einzelWins + doppelWins) / (einzelWins + einzelLosses + doppelWins + doppelLosses)) * 100).toFixed(0) : 0 }
+        },
+        team: { wins: teamWins, losses: teamLosses, draws: teamDraws, total: teamWins + teamLosses + teamDraws, winRate: teamWins + teamLosses > 0 ? ((teamWins / (teamWins + teamLosses)) * 100).toFixed(0) : 0 }
+      });
+      
+      setRecentMatches(matchdaysWithStats);
+    } catch (error) {
+      console.error('❌ Error loading performance stats:', error);
+    } finally {
+      setLoadingStats(false);
+    }
+  };
+
   useEffect(() => {
     // Prüfe ob ein anderer Spieler angezeigt werden soll
     if (playerName && playerName !== player?.name) {
@@ -224,6 +348,10 @@ function SupabaseProfile() {
     if (player) {
       console.log('🔵 Loading own player data:', player);
       setIsViewingOtherPlayer(false);
+      
+      // ✅ Lade Performance-Stats
+      loadPerformanceStats(player.id);
+      
       setProfile({
         name: player.name || '',
         email: player.email || currentUser?.email || '',
@@ -820,7 +948,67 @@ function SupabaseProfile() {
         )}
       </div>
       
-      
+      {/* ✅ NEU: Tab-Navigation */}
+      {!isSetup && (
+        <div className="fade-in" style={{ marginBottom: '1.5rem' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '2px solid #e5e7eb', paddingBottom: '0.5rem' }}>
+            <button
+              onClick={() => setActiveTab('spielbilanz')}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: activeTab === 'spielbilanz' ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' : 'white',
+                color: activeTab === 'spielbilanz' ? 'white' : '#1f2937',
+                border: activeTab === 'spielbilanz' ? '2px solid #1e40af' : '2px solid #e5e7eb',
+                borderRadius: '8px 8px 0 0',
+                cursor: 'pointer',
+                fontSize: '0.875rem',
+                fontWeight: '600',
+                transition: 'all 0.2s',
+                borderBottom: activeTab === 'spielbilanz' ? '2px solid #3b82f6' : 'none'
+              }}
+            >
+              📊 Spielbilanz
+            </button>
+            
+            <button
+              onClick={() => setActiveTab('teams')}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: activeTab === 'teams' ? 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)' : 'white',
+                color: activeTab === 'teams' ? 'white' : '#1f2937',
+                border: activeTab === 'teams' ? '2px solid #6d28d9' : '2px solid #e5e7eb',
+                borderRadius: '8px 8px 0 0',
+                cursor: 'pointer',
+                fontSize: '0.875rem',
+                fontWeight: '600',
+                transition: 'all 0.2s',
+                borderBottom: activeTab === 'teams' ? '2px solid #8b5cf6' : 'none'
+              }}
+            >
+              🏢 Verein(e) & Teams
+            </button>
+            
+            <button
+              onClick={() => setActiveTab('details')}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: activeTab === 'details' ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'white',
+                color: activeTab === 'details' ? 'white' : '#1f2937',
+                border: activeTab === 'details' ? '2px solid #047857' : '2px solid #e5e7eb',
+                borderRadius: '8px 8px 0 0',
+                cursor: 'pointer',
+                fontSize: '0.875rem',
+                fontWeight: '600',
+                transition: 'all 0.2s',
+                borderBottom: activeTab === 'details' ? '2px solid #10b981' : 'none'
+              }}
+            >
+              👤 Persönliche Details
+            </button>
+          </div>
+        </div>
+      )}
+
 
 
       {errorMessage && (
@@ -836,23 +1024,206 @@ function SupabaseProfile() {
         </div>
       )}
 
-      {/* Team-Auswahl / Team-Verwaltung */}
-      {!isViewingOtherPlayer && !isEditing && (
-        <div className="fade-in lk-card-full" style={{ marginBottom: '1.5rem' }}>
-          <TeamSelector onTeamsUpdated={() => {
-            // Reload wenn sich Teams ändern
-            if (player) {
-              loadPlayerTeamsAndClubs(player.id);
-              // Trigger auch DataContext reload
-              window.dispatchEvent(new CustomEvent('reloadTeams', { 
-                detail: { playerId: player.id } 
-              }));
-            }
-          }} />
+      {/* ✅ TAB 1: SPIELBILANZ */}
+      {activeTab === 'spielbilanz' && !isSetup && (
+        <div>
+          {!loadingStats && performanceStats ? (
+            <PerformanceStats 
+              player={player} 
+              performanceStats={performanceStats} 
+              recentMatches={recentMatches} 
+            />
+          ) : loadingStats ? (
+            <div style={{ textAlign: 'center', padding: '3rem', color: '#6b7280' }}>
+              <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>⏳</div>
+              Lade Performance-Daten...
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '3rem', color: '#6b7280' }}>
+              <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>🎾</div>
+              Keine Performance-Daten verfügbar
+            </div>
+          )}
+        </div>
+      )}
+      
+      {/* ✅ TAB 2: VEREIN(E) & TEAMS */}
+      {activeTab === 'teams' && !isSetup && !isViewingOtherPlayer && (
+        <div>
+          {/* Übersicht: Meine Vereine & Teams */}
+          {clubs.length > 0 && playerTeams.length > 0 && (
+            <div className="fade-in lk-card-full" style={{ marginBottom: '1.5rem' }}>
+              <div className="formkurve-header">
+                <div className="formkurve-title">Meine Vereine & Mannschaften</div>
+                <div className="match-count-badge">
+                  {clubs.length} {clubs.length === 1 ? 'Verein' : 'Vereine'}
+                </div>
+              </div>
+              
+              <div className="season-content">
+                {clubs.map(club => {
+                  const clubTeams = playerTeams.filter(pt => 
+                    (pt.team_info?.club_name || pt.club_name) === club.name
+                  );
+                  
+                  return (
+                    <div key={club.id} className="club-section" style={{ marginBottom: '1.5rem' }}>
+                      {/* Club Header */}
+                      <div className="club-header" style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        marginBottom: '1rem',
+                        padding: '0.75rem',
+                        background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
+                        borderRadius: '8px',
+                        border: '1px solid #bae6fd'
+                      }}>
+                        <Building2 size={20} color="#0369a1" style={{ marginRight: '0.5rem' }} />
+                        <h3 style={{ margin: 0, color: '#0369a1', fontSize: '1.1rem', fontWeight: 600 }}>
+                          {club.name}
+                        </h3>
+                      </div>
+                      
+                      {/* Teams Grid */}
+                      <div className="teams-grid" style={{
+                        display: 'grid',
+                        gap: '0.75rem',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))'
+                      }}>
+                        {clubTeams.map(pt => {
+                          const team = pt.team_info || pt;
+                          const isPrimary = pt.is_primary;
+                          
+                          return (
+                            <div
+                              key={pt.id}
+                              className="team-card"
+                              style={{
+                                padding: '1.5rem',
+                                border: isPrimary ? '2px solid #f59e0b' : '2px solid #e5e7eb',
+                                borderRadius: '12px',
+                                background: isPrimary 
+                                  ? 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)'
+                                  : 'linear-gradient(135deg, #ffffff 0%, #f9fafb 100%)',
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                                transition: 'all 0.2s'
+                              }}
+                            >
+                              {/* Team Header */}
+                              <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                marginBottom: '1rem',
+                                flexWrap: 'wrap',
+                                gap: '0.5rem'
+                              }}>
+                                <div style={{ flex: '1 1 200px' }}>
+                                  <h4 style={{ margin: '0 0 0.25rem 0', fontSize: '1.25rem', fontWeight: 700, color: '#1f2937' }}>
+                                    {team.category} {team.team_name}. Mannschaft
+                                  </h4>
+                                  <p style={{ margin: 0, fontSize: '0.9rem', color: '#6b7280', fontWeight: 500 }}>
+                                    {team.region || 'Mittelrhein'}
+                                  </p>
+                                </div>
+                                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                  {isPrimary && (
+                                    <span style={{
+                                      background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                                      color: 'white',
+                                      padding: '0.375rem 0.75rem',
+                                      borderRadius: '6px',
+                                      fontSize: '0.8rem',
+                                      fontWeight: 700,
+                                      boxShadow: '0 2px 4px rgba(245,158,11,0.3)'
+                                    }}>
+                                      ⭐ Hauptmannschaft
+                                    </span>
+                                  )}
+                                  <span style={{
+                                    background: 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)',
+                                    color: 'white',
+                                    padding: '0.375rem 0.75rem',
+                                    borderRadius: '6px',
+                                    fontSize: '0.8rem',
+                                    fontWeight: 700,
+                                    boxShadow: '0 2px 4px rgba(107,114,128,0.3)'
+                                  }}>
+                                    🎾 {pt.role || 'Spieler'}
+                                  </span>
+                                </div>
+                              </div>
+                              
+                              {/* Saison-Details */}
+                              <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                                gap: '0.75rem',
+                                marginBottom: '1rem',
+                                padding: '1rem',
+                                background: 'rgba(255, 255, 255, 0.6)',
+                                borderRadius: '8px',
+                                border: '1px solid rgba(0,0,0,0.05)'
+                              }}>
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ fontSize: '0.7rem', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.25rem' }}>
+                                    Liga
+                                  </div>
+                                  <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1f2937' }}>
+                                    🏆 {pt.current_league || 'Unbekannt'}
+                                  </div>
+                                </div>
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ fontSize: '0.7rem', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.25rem' }}>
+                                    Gruppe
+                                  </div>
+                                  <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1f2937' }}>
+                                    📋 {pt.current_group || '-'}
+                                  </div>
+                                </div>
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ fontSize: '0.7rem', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.25rem' }}>
+                                    Saison
+                                  </div>
+                                  <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1f2937' }}>
+                                    📅 {pt.current_season || 'Winter 2025/26'}
+                                  </div>
+                                </div>
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ fontSize: '0.7rem', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.25rem' }}>
+                                    Team-Größe
+                                  </div>
+                                  <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1f2937' }}>
+                                    👥 {pt.team_size || 4}er
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          
+          {/* TeamSelector (für Hinzufügen/Bearbeiten) */}
+          <div className="fade-in lk-card-full" style={{ marginBottom: '1.5rem' }}>
+            <TeamSelector onTeamsUpdated={() => {
+              if (player) {
+                loadPlayerTeamsAndClubs(player.id);
+                window.dispatchEvent(new CustomEvent('reloadTeams', { detail: { playerId: player.id } }));
+              }
+            }} />
+          </div>
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="profile-form">
+      {/* ✅ TAB 3: PERSÖNLICHE DETAILS */}
+      {activeTab === 'details' && (
+        <form onSubmit={handleSubmit} className="profile-form">
         {/* Profilbild */}
         <section className="profile-section">
           <h2>📸 Profilbild</h2>
@@ -1624,7 +1995,8 @@ function SupabaseProfile() {
             </div>
           </div>
         )}
-      </form>
+        </form>
+      )}
 
       {/* Passwort-Reset-Modal */}
       {showPasswordReset && (

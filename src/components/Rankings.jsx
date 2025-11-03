@@ -175,22 +175,34 @@ function Rankings() {
     }
   }, []);
   
-  const loadClubTeams = useCallback((clubId) => {
-    if (!clubId || !playerTeams) return;
+  const loadClubTeams = useCallback(async (clubId) => {
+    if (!clubId) return;
     
-    const clubTeams = playerTeams.filter(t => 
-      (t.club_id || t.team_info?.club_id) === clubId
-    );
-    
-    setSelectedClubTeams(clubTeams);
-    
-    const clubTeam = clubTeams[0];
-    if (clubTeam) {
-      setSelectedClubName(clubTeam.club_name || clubTeam.team_info?.club_name || '');
+    try {
+      // ✅ Lade ALLE Teams des Vereins (nicht nur eigene Memberships!)
+      const { data: allClubTeams, error } = await supabase
+        .from('team_info')
+        .select('id, team_name, club_name, category, club_id')
+        .eq('club_id', clubId)
+        .order('category', { ascending: true });
+      
+      if (error) {
+        console.error('Error loading club teams:', error);
+        return;
+      }
+      
+      console.log('📊 All club teams loaded:', allClubTeams?.length || 0, allClubTeams);
+      
+      setSelectedClubTeams(allClubTeams || []);
+      
+      if (allClubTeams && allClubTeams.length > 0) {
+        setSelectedClubName(allClubTeams[0].club_name);
+      }
+      
+    } catch (error) {
+      console.error('Error loading club teams:', error);
     }
-    
-    console.log('📊 Club Teams:', clubTeams);
-  }, [playerTeams]);
+  }, []);
   
   const loadFilteredPlayers = useCallback(async () => {
     if (!selectedClubId || !players || players.length === 0) {
@@ -679,17 +691,17 @@ function Rankings() {
           </select>
         )}
         
-        {selectedClubTeams.length > 1 && (
+        {selectedClubTeams.length > 0 && (
           <select 
             value={selectedTeamId}
             onChange={(e) => setSelectedTeamId(e.target.value)}
             className="btn-modern"
             style={{ padding: '0.5rem 1rem', minWidth: '200px' }}
           >
-            <option value="all">Alle Mannschaften</option>
+            <option value="all">✅ Alle Mannschaften</option>
             {selectedClubTeams.map(team => (
               <option key={team.id} value={team.id}>
-                {team.team_name || team.category}
+                {team.club_name} {team.team_name} ({team.category})
               </option>
             ))}
           </select>
