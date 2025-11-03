@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
-import { ArrowLeft, Trophy, Heart, Edit3, Building2, Users, MapPin, Phone, Mail, Globe } from 'lucide-react';
+import { ArrowLeft, Trophy, Heart, Edit3, Building2, Users, MapPin, Phone, Mail, Globe, UserPlus, UserMinus, UserX, Shield, Bell, BellOff } from 'lucide-react';
 import './PlayerProfile.css';
 import './Dashboard.css';
 
@@ -24,6 +24,14 @@ function PlayerProfileSimple() {
   const [performanceStats, setPerformanceStats] = useState(null);
   const [recentMatches, setRecentMatches] = useState([]);
   const [loadingStats, setLoadingStats] = useState(false);
+  
+  // 🎯 SOCIAL FEATURES
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [tennismateCount, setTennismateCount] = useState(0);  // Tennismates = folgen mir
+  const [followingCount, setFollowingCount] = useState(0);    // Following = ich folge ihnen
+  const [isMutual, setIsMutual] = useState(false);
+  const [socialLoading, setSocialLoading] = useState(false);
 
   useEffect(() => {
     // ProtectedRoute garantiert bereits, dass User eingeloggt ist
@@ -101,10 +109,16 @@ function PlayerProfileSimple() {
       if (data) {
         console.log('✅ Player data loaded:', data);
         setPlayer(data);
-        setIsOwnProfile(currentUser?.id === data.user_id);
+        const _isOwnProfile = currentUser?.id === data.user_id;
+        setIsOwnProfile(_isOwnProfile);
         
         // ✅ Lade Performance-Statistiken
         loadPerformanceStats(data.id);
+        
+        // ✅ Lade Social Features (nur für fremde Profile)
+        if (!_isOwnProfile) {
+          loadSocialFeatures(data.id);
+        }
         
         // Lade Vereins- und Mannschafts-Daten
         await loadPlayerTeamsAndClubs(data.id);
@@ -354,6 +368,183 @@ function PlayerProfileSimple() {
       console.error('❌ Error loading performance stats:', error);
     } finally {
       setLoadingStats(false);
+    }
+  };
+  
+  // 🎯 SOCIAL FEATURES LADEN
+  const loadSocialFeatures = async (targetPlayerId) => {
+    if (!currentPlayer?.id) return;
+    
+    try {
+      console.log('👥 Loading social features for:', targetPlayerId);
+      
+      // 1. Tennismates & Following Count
+      const { data: followData } = await supabase
+        .from('player_followers')
+        .select('id, follower_id, following_id, is_mutual')
+        .or(`follower_id.eq.${targetPlayerId},following_id.eq.${targetPlayerId}`);
+      
+      const tennismates = followData?.filter(f => f.following_id === targetPlayerId) || [];
+      const following = followData?.filter(f => f.follower_id === targetPlayerId) || [];
+      
+      setTennismateCount(tennismates.length);
+      setFollowingCount(following.length);
+      
+      // 2. Check if current user follows target player
+      const isCurrentUserFollowing = tennismates.some(f => f.follower_id === currentPlayer.id);
+      setIsFollowing(isCurrentUserFollowing);
+      
+      // 3. Check if mutual
+      const mutualFollow = followData?.find(
+        f => f.follower_id === currentPlayer.id && 
+             f.following_id === targetPlayerId && 
+             f.is_mutual === true
+      );
+      setIsMutual(!!mutualFollow);
+      
+      // 4. Check if blocked
+      const { data: blockData } = await supabase
+        .from('player_blocks')
+        .select('id')
+        .or(`and(blocker_id.eq.${currentPlayer.id},blocked_id.eq.${targetPlayerId}),and(blocker_id.eq.${targetPlayerId},blocked_id.eq.${currentPlayer.id})`)
+        .limit(1);
+      
+      setIsBlocked(blockData && blockData.length > 0);
+      
+      console.log('✅ Social features loaded:', {
+        tennismates: tennismates.length,
+        following: following.length,
+        isFollowing: isCurrentUserFollowing,
+        isMutual: !!mutualFollow,
+        isBlocked: blockData && blockData.length > 0
+      });
+      
+    } catch (error) {
+      console.error('❌ Error loading social features:', error);
+    }
+  };
+  
+  // 🎯 FOLLOW/UNFOLLOW HANDLER
+  const handleFollowToggle = async () => {
+    if (!currentPlayer?.id || !player?.id || socialLoading) return;
+    
+    setSocialLoading(true);
+    
+    try {
+      if (isFollowing) {
+        // UNFOLLOW
+        const { error } = await supabase
+          .from('player_followers')
+          .delete()
+          .eq('follower_id', currentPlayer.id)
+          .eq('following_id', player.id);
+        
+        if (error) throw error;
+        
+        setIsFollowing(false);
+        setIsMutual(false);
+        setTennismateCount(prev => Math.max(0, prev - 1));
+        console.log('✅ Unfollowed:', player.name);
+        
+      } else {
+        // FOLLOW
+        const { error } = await supabase
+          .from('player_followers')
+          .insert({
+            follower_id: currentPlayer.id,
+            following_id: player.id
+          });
+        
+        if (error) throw error;
+        
+        setIsFollowing(true);
+        setTennismateCount(prev => prev + 1);
+        console.log('✅ Followed:', player.name);
+        
+        // Reload um mutual zu checken
+        setTimeout(() => loadSocialFeatures(player.id), 500);
+      }
+      
+    } catch (error) {
+      console.error('❌ Error toggling follow:', error);
+      alert('Fehler beim Folgen/Entfolgen. Bitte versuche es erneut.');
+    } finally {
+      setSocialLoading(false);
+    }
+  };
+  
+  // 🎯 BLOCK HANDLER
+  const handleBlock = async () => {
+    if (!currentPlayer?.id || !player?.id || socialLoading) return;
+    
+    const confirmed = window.confirm(
+      `Möchtest du ${player.name} wirklich blockieren?\n\n` +
+      `Blockierte Spieler können:\n` +
+      `• Dir nicht mehr folgen\n` +
+      `• Dein Profil nicht mehr sehen (falls du es auf "Privat" stellst)\n\n` +
+      `Bestehende Follows werden automatisch entfernt.`
+    );
+    
+    if (!confirmed) return;
+    
+    setSocialLoading(true);
+    
+    try {
+      const { error } = await supabase
+        .from('player_blocks')
+        .insert({
+          blocker_id: currentPlayer.id,
+          blocked_id: player.id,
+          reason: 'User-initiated block'
+        });
+      
+      if (error) throw error;
+      
+      setIsBlocked(true);
+      setIsFollowing(false);
+      setIsMutual(false);
+      console.log('✅ Blocked:', player.name);
+      alert(`${player.name} wurde blockiert.`);
+      
+    } catch (error) {
+      console.error('❌ Error blocking user:', error);
+      alert('Fehler beim Blockieren. Bitte versuche es erneut.');
+    } finally {
+      setSocialLoading(false);
+    }
+  };
+  
+  // 🎯 UNBLOCK HANDLER
+  const handleUnblock = async () => {
+    if (!currentPlayer?.id || !player?.id || socialLoading) return;
+    
+    const confirmed = window.confirm(
+      `Möchtest du ${player.name} entblocken?\n\n` +
+      `Nach dem Entblocken kann dieser Spieler dir wieder folgen.`
+    );
+    
+    if (!confirmed) return;
+    
+    setSocialLoading(true);
+    
+    try {
+      const { error } = await supabase
+        .from('player_blocks')
+        .delete()
+        .eq('blocker_id', currentPlayer.id)
+        .eq('blocked_id', player.id);
+      
+      if (error) throw error;
+      
+      setIsBlocked(false);
+      console.log('✅ Unblocked:', player.name);
+      alert(`${player.name} wurde entblockt.`);
+      
+    } catch (error) {
+      console.error('❌ Error unblocking user:', error);
+      alert('Fehler beim Entblocken. Bitte versuche es erneut.');
+    } finally {
+      setSocialLoading(false);
     }
   };
 
@@ -998,6 +1189,208 @@ function PlayerProfileSimple() {
           </div>
         </div>
       </div>
+
+      {/* 🎯 KONTAKTAUFNAHME & SOCIAL CARD (nur für fremde Profile) */}
+      {!isOwnProfile && (
+        <div className="fade-in lk-card-full" style={{ marginTop: '1.5rem' }}>
+          <div className="formkurve-header" style={{
+            background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+            borderRadius: '12px 12px 0 0'
+          }}>
+            <div className="formkurve-title" style={{ color: 'white' }}>
+              🤝 Vernetzung & Kontakt
+            </div>
+            <div className="match-count-badge" style={{
+              background: 'rgba(255, 255, 255, 0.2)',
+              color: 'white',
+              border: '1px solid rgba(255, 255, 255, 0.3)'
+            }}>
+              {tennismateCount} Tennismates • {followingCount} folge ich
+            </div>
+          </div>
+          
+          <div className="season-content">
+            {/* Status-Anzeige */}
+            {isMutual && !isBlocked && (
+              <div style={{
+                padding: '1rem',
+                background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+                border: '2px solid #10b981',
+                borderRadius: '12px',
+                marginBottom: '1.5rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.75rem'
+              }}>
+                <Heart size={24} style={{ color: '#10b981', fill: '#10b981' }} />
+                <div>
+                  <div style={{ fontWeight: '700', color: '#047857', fontSize: '1rem' }}>
+                    🤝 Freunde
+                  </div>
+                  <div style={{ fontSize: '0.875rem', color: '#059669', marginTop: '0.25rem' }}>
+                    Ihr folgt euch gegenseitig
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {isBlocked && (
+              <div style={{
+                padding: '1rem',
+                background: 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
+                border: '2px solid #ef4444',
+                borderRadius: '12px',
+                marginBottom: '1.5rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.75rem'
+              }}>
+                <Shield size={24} style={{ color: '#dc2626' }} />
+                <div>
+                  <div style={{ fontWeight: '700', color: '#dc2626', fontSize: '1rem' }}>
+                    🚫 Blockiert
+                  </div>
+                  <div style={{ fontSize: '0.875rem', color: '#b91c1c', marginTop: '0.25rem' }}>
+                    Du hast diesen Spieler blockiert
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Action Buttons */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: isBlocked ? '1fr' : '1fr 1fr',
+              gap: '1rem',
+              marginBottom: '1.5rem'
+            }}>
+              {!isBlocked ? (
+                <>
+                  {/* Follow/Unfollow Button */}
+                  <button
+                    onClick={handleFollowToggle}
+                    disabled={socialLoading}
+                    style={{
+                      padding: '1rem 1.5rem',
+                      background: isFollowing 
+                        ? 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)' 
+                        : 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                      color: isFollowing ? '#4b5563' : 'white',
+                      border: isFollowing ? '2px solid #d1d5db' : '2px solid #6d28d9',
+                      borderRadius: '12px',
+                      cursor: socialLoading ? 'wait' : 'pointer',
+                      fontSize: '1rem',
+                      fontWeight: '700',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.75rem',
+                      transition: 'all 0.3s ease',
+                      opacity: socialLoading ? 0.6 : 1
+                    }}
+                  >
+                    {socialLoading ? (
+                      <>⏳ Lädt...</>
+                    ) : isFollowing ? (
+                      <>
+                        <UserMinus size={20} />
+                        <span>Entfolgen</span>
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus size={20} />
+                        <span>Folgen</span>
+                      </>
+                    )}
+                  </button>
+                  
+                  {/* Block Button */}
+                  <button
+                    onClick={handleBlock}
+                    disabled={socialLoading}
+                    style={{
+                      padding: '1rem 1.5rem',
+                      background: 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
+                      color: '#dc2626',
+                      border: '2px solid #ef4444',
+                      borderRadius: '12px',
+                      cursor: socialLoading ? 'wait' : 'pointer',
+                      fontSize: '1rem',
+                      fontWeight: '700',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.75rem',
+                      transition: 'all 0.3s ease',
+                      opacity: socialLoading ? 0.6 : 1
+                    }}
+                  >
+                    {socialLoading ? (
+                      <>⏳ Lädt...</>
+                    ) : (
+                      <>
+                        <UserX size={20} />
+                        <span>Blockieren</span>
+                      </>
+                    )}
+                  </button>
+                </>
+              ) : (
+                /* Unblock Button */
+                <button
+                  onClick={handleUnblock}
+                  disabled={socialLoading}
+                  style={{
+                    padding: '1rem 1.5rem',
+                    background: 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)',
+                    color: '#4b5563',
+                    border: '2px solid #d1d5db',
+                    borderRadius: '12px',
+                    cursor: socialLoading ? 'wait' : 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '700',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.75rem',
+                    transition: 'all 0.3s ease',
+                    opacity: socialLoading ? 0.6 : 1
+                  }}
+                >
+                  {socialLoading ? (
+                    <>⏳ Lädt...</>
+                  ) : (
+                    <>
+                      <Shield size={20} />
+                      <span>Blockierung aufheben</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+            
+            {/* Info-Text */}
+            <div style={{
+              padding: '1rem',
+              background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+              borderRadius: '12px',
+              fontSize: '0.875rem',
+              color: '#1e40af',
+              lineHeight: '1.6'
+            }}>
+              <div style={{ fontWeight: '700', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Bell size={16} />
+                Warum folgen?
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
+                <li>Verfolge Match-Ergebnisse in Echtzeit</li>
+                <li>Erhalte Benachrichtigungen bei wichtigen Spielen</li>
+                <li>Siehe favorisierte Spieler in der Results-Seite</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Vereins-/Mannschafts-Zugehörigkeit Card */}
       {clubs.length > 0 && (

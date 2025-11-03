@@ -26,7 +26,8 @@ function Dashboard() {
       hasPlayer: !!player,
       totalMatches: matches.length
     });
-  }, [playerTeams?.length, !!teamInfo, !!player, matches.length]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerTeams?.length, matches.length]);
   
   // State für Live-Timer
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -35,6 +36,14 @@ function Dashboard() {
   const [editingTeam, setEditingTeam] = useState(null);
   const [editForm, setEditForm] = useState({ league: '', group_name: '' });
   const [savingTeam, setSavingTeam] = useState(false);
+  
+  // 🎾 State für Social Stats (Tennismates)
+  const [socialStats, setSocialStats] = useState({
+    tennismatesCount: 0,      // Wie viele mir folgen
+    followingCount: 0,         // Wie vielen ich folge
+    newThisWeek: 0,            // Neue Tennismates letzte 7 Tage
+    mutualCount: 0             // Freunde (gegenseitig)
+  });
 
   // Timer für Live-Updates (alle 30 Sekunden)
   useEffect(() => {
@@ -74,6 +83,20 @@ function Dashboard() {
     }
   }
   
+  // ✅ HELPER: Check if match belongs to current season (flexible)
+  const isCurrentSeason = (matchSeason) => {
+    if (!matchSeason) return false;
+    const lowerSeason = matchSeason.toLowerCase();
+    
+    if (currentSeason === 'winter') {
+      // Akzeptiere: 'winter', 'Winter', 'Winter 2025/26', 'winter_25_26', etc.
+      return lowerSeason.includes('winter');
+    } else {
+      // Akzeptiere: 'summer', 'Sommer', 'Sommer 2025', etc.
+      return lowerSeason.includes('sommer') || lowerSeason.includes('summer');
+    }
+  };
+  
   // Debug: Zeige was geladen wurde (nur bei Änderungen)
   useEffect(() => {
     console.log('🔵 Dashboard Data:', {
@@ -90,9 +113,10 @@ function Dashboard() {
         opponent: m.opponent,
         season: m.season,
         isAfterNow: m.date > now,
-        seasonMatches: m.season === currentSeason
+        seasonMatches: isCurrentSeason(m.season)
       })));
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matches, currentSeason, seasonDisplay, now]);
   
   // 🔧 NEU: Lade match_results Counts für Live-Status
@@ -135,6 +159,52 @@ function Dashboard() {
     loadMatchResults();
   }, [matches]);
   
+  // 🎾 Lade Social Stats (Tennismates)
+  useEffect(() => {
+    const loadSocialStats = async () => {
+      if (!player?.id) return;
+      
+      try {
+        // Lade alle Follow-Beziehungen
+        const { data: followData, error } = await supabase
+          .from('player_followers')
+          .select('*')
+          .or(`follower_id.eq.${player.id},following_id.eq.${player.id}`);
+        
+        if (error) throw error;
+        
+        // Berechne Stats
+        const tennismates = followData?.filter(f => f.following_id === player.id) || [];
+        const following = followData?.filter(f => f.follower_id === player.id) || [];
+        const mutual = tennismates.filter(t => following.some(f => f.following_id === t.follower_id));
+        
+        // Neue Tennismates letzte 7 Tage
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        const newThisWeek = tennismates.filter(t => new Date(t.created_at) > weekAgo).length;
+        
+        setSocialStats({
+          tennismatesCount: tennismates.length,
+          followingCount: following.length,
+          newThisWeek,
+          mutualCount: mutual.length
+        });
+        
+        console.log('🎾 Social stats loaded:', {
+          tennismates: tennismates.length,
+          following: following.length,
+          newThisWeek,
+          mutual: mutual.length
+        });
+        
+      } catch (error) {
+        console.error('Error loading social stats:', error);
+      }
+    };
+    
+    loadSocialStats();
+  }, [player?.id]);
+  
   // Helper: Bestimme Match-Status (live, upcoming, finished)
   const getMatchStatus = (match) => {
     const timeSinceStart = (now - match.date) / (1000 * 60 * 60); // Stunden
@@ -159,7 +229,7 @@ function Dashboard() {
   const liveMatches = matches
     .filter(m => {
       const status = getMatchStatus(m);
-      return status === 'live' && m.season === currentSeason;
+      return status === 'live' && isCurrentSeason(m.season);
     })
     .sort((a, b) => a.date - b.date);
   
@@ -167,7 +237,7 @@ function Dashboard() {
   const upcomingMatches = matches
     .filter(m => {
       const status = getMatchStatus(m);
-      return status === 'upcoming' && m.season === currentSeason;
+      return status === 'upcoming' && isCurrentSeason(m.season);
     })
     .sort((a, b) => a.date - b.date);
 
@@ -177,7 +247,7 @@ function Dashboard() {
       const status = getMatchStatus(m);
       const hasResult = (m.home_score > 0 || m.away_score > 0);
       // ✅ NUR finished Spiele MIT echtem Ergebnis
-      return status === 'finished' && hasResult && m.season === currentSeason;
+      return status === 'finished' && hasResult && isCurrentSeason(m.season);
     })
     .sort((a, b) => b.date - a.date); // Neueste zuerst
 
@@ -188,12 +258,19 @@ function Dashboard() {
       // ✅ Ein Match hat NUR ein Ergebnis wenn home_score ODER away_score > 0
       const hasResult = (m.home_score > 0 || m.away_score > 0);
       // Vergangen UND kein Ergebnis UND aktuelle Saison
-      return matchDate < now && !hasResult && m.season === currentSeason;
+      return matchDate < now && !hasResult && isCurrentSeason(m.season);
     })
     .sort((a, b) => a.date - b.date); // Älteste zuerst (dringendste)
 
-  // console.log('🔵 Upcoming matches for', currentSeason, ':', upcomingMatches.length);
-  // console.log('🔵 Finished matches for', currentSeason, ':', recentlyFinishedMatches.length);
+  console.log('🔵 Dashboard Matches Debug:', {
+    totalMatches: matches.length,
+    currentSeason,
+    seasonDisplay,
+    matchSeasons: [...new Set(matches.map(m => m.season))],
+    upcomingMatches: upcomingMatches.length,
+    finishedMatches: recentlyFinishedMatches.length,
+    pastWithoutResult: pastMatchesWithoutResult.length
+  });
 
   // Für Countdown: Das allernächste ZUKÜNFTIGE Spiel (egal welche Saison)
   // Nur Spiele die noch nicht begonnen haben UND nicht live sind
@@ -731,6 +808,136 @@ function Dashboard() {
         </div>
       )}
 
+      {/* 🎾 3. Social Stats Card (Tennismates) */}
+      {player && (
+        <div 
+          className="fade-in" 
+          style={{ marginBottom: '1.5rem', cursor: 'pointer' }}
+          onClick={() => navigate('/profile?tab=tennismates')}
+        >
+          <div className="lk-card-full">
+            <div className="formkurve-header" style={{
+              background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+              borderRadius: '12px 12px 0 0'
+            }}>
+              <div className="formkurve-title" style={{ color: 'white' }}>
+                🎾 Deine Tennismates
+              </div>
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.2)',
+                color: 'white',
+                padding: '0.25rem 0.75rem',
+                borderRadius: '12px',
+                fontSize: '0.75rem',
+                fontWeight: '600',
+                border: '1px solid rgba(255, 255, 255, 0.3)'
+              }}>
+                {socialStats.tennismatesCount + socialStats.followingCount} Vernetzungen
+              </div>
+            </div>
+            
+            <div className="season-content" style={{ padding: '0.75rem' }}>
+              {/* Stats Grid - SEHR KOMPAKT */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: socialStats.newThisWeek > 0 || socialStats.mutualCount > 0 
+                  ? 'repeat(auto-fit, minmax(90px, 1fr))' 
+                  : 'repeat(2, 1fr)',
+                gap: '0.5rem'
+              }}>
+                {/* Tennismates */}
+                <div style={{
+                  padding: '0.5rem',
+                  background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+                  border: '2px solid #10b981',
+                  borderRadius: '6px',
+                  textAlign: 'center',
+                  transition: 'transform 0.2s',
+                  cursor: 'pointer'
+                }}
+                  onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                >
+                  <div style={{ fontSize: '1.25rem', fontWeight: '700', color: '#059669' }}>
+                    {socialStats.tennismatesCount}
+                  </div>
+                  <div style={{ fontSize: '0.55rem', fontWeight: '600', color: '#047857', textTransform: 'uppercase' }}>
+                    Mates
+                  </div>
+                </div>
+                
+                {/* Following */}
+                <div style={{
+                  padding: '0.5rem',
+                  background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+                  border: '2px solid #3b82f6',
+                  borderRadius: '6px',
+                  textAlign: 'center',
+                  transition: 'transform 0.2s',
+                  cursor: 'pointer'
+                }}
+                  onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                >
+                  <div style={{ fontSize: '1.25rem', fontWeight: '700', color: '#2563eb' }}>
+                    {socialStats.followingCount}
+                  </div>
+                  <div style={{ fontSize: '0.55rem', fontWeight: '600', color: '#1e40af', textTransform: 'uppercase' }}>
+                    Folge
+                  </div>
+                </div>
+                
+                {/* Neu diese Woche */}
+                {socialStats.newThisWeek > 0 && (
+                  <div style={{
+                    padding: '0.5rem',
+                    background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+                    border: '2px solid #f59e0b',
+                    borderRadius: '6px',
+                    textAlign: 'center',
+                    transition: 'transform 0.2s',
+                    cursor: 'pointer'
+                  }}
+                    onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                    onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                  >
+                    <div style={{ fontSize: '1.25rem', fontWeight: '700', color: '#d97706' }}>
+                      +{socialStats.newThisWeek}
+                    </div>
+                    <div style={{ fontSize: '0.55rem', fontWeight: '600', color: '#92400e', textTransform: 'uppercase' }}>
+                      Neu ✨
+                    </div>
+                  </div>
+                )}
+                
+                {/* Freunde (Mutual) */}
+                {socialStats.mutualCount > 0 && (
+                  <div style={{
+                    padding: '0.5rem',
+                    background: 'linear-gradient(135deg, #fce7f3 0%, #fbcfe8 100%)',
+                    border: '2px solid #ec4899',
+                    borderRadius: '6px',
+                    textAlign: 'center',
+                    transition: 'transform 0.2s',
+                    cursor: 'pointer'
+                  }}
+                    onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                    onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                  >
+                    <div style={{ fontSize: '1.25rem', fontWeight: '700', color: '#db2777' }}>
+                      {socialStats.mutualCount}
+                    </div>
+                    <div style={{ fontSize: '0.55rem', fontWeight: '600', color: '#9f1239', textTransform: 'uppercase' }}>
+                      Freunde ❤️
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 4. Aktuelle Saison Card */}
       <div className="fade-in lk-card-full">
         <div className="formkurve-header">
@@ -906,7 +1113,9 @@ function Dashboard() {
           {/* Kommende Spiele (nur echte zukünftige, nicht live) */}
           {upcomingMatches.length > 0 && (
             <div className="season-matches">
-              <div className="season-matches-label">Kommende Spiele</div>
+              <div className="season-matches-label">
+                Kommende Spiele ({upcomingMatches.length})
+              </div>
               {upcomingMatches.map((match) => (
                 <div 
                   key={match.id} 
@@ -979,7 +1188,9 @@ function Dashboard() {
           {/* Beendete Spiele */}
           {recentlyFinishedMatches.length > 0 && (
             <div className="season-matches">
-              <div className="season-matches-label">Beendete Spiele</div>
+              <div className="season-matches-label">
+                Beendete Spiele ({recentlyFinishedMatches.length})
+              </div>
               {recentlyFinishedMatches.map((match) => {
                 // ✅ RICHTIGE Logik: Berechne Sieg/Niederlage aus DB-Daten
                 let matchResult = null;
@@ -1539,3 +1750,4 @@ function Dashboard() {
 }
 
 export default Dashboard;
+

@@ -55,12 +55,18 @@ function SupabaseProfile() {
   const [isLoadingOtherPlayer, setIsLoadingOtherPlayer] = useState(false);
   
   // ✅ NEU: Tab-Navigation
-  const [activeTab, setActiveTab] = useState('spielbilanz'); // 'spielbilanz' | 'teams' | 'details'
+  const tabFromUrl = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState(tabFromUrl || 'spielbilanz'); // 'spielbilanz' | 'teams' | 'tennismates' | 'details'
   
   // ✅ NEU: Performance-Daten (wie PlayerProfileSimple)
   const [performanceStats, setPerformanceStats] = useState(null);
   const [recentMatches, setRecentMatches] = useState([]);
   const [loadingStats, setLoadingStats] = useState(false);
+  
+  // 🎾 NEU: Social Stats (Tennismates)
+  const [tennismatesList, setTennismatesList] = useState([]);
+  const [followingList, setFollowingList] = useState([]);
+  const [loadingSocial, setLoadingSocial] = useState(false);
   const [currentBucket, setCurrentBucket] = useState('profile-images');
   const [showPasswordReset, setShowPasswordReset] = useState(false);
   const [autoSaveTimer, setAutoSaveTimer] = useState(null);
@@ -390,8 +396,74 @@ function SupabaseProfile() {
     // Lade Vereins-/Mannschafts-Daten wenn Player verfügbar
     if (player?.id) {
       loadPlayerTeamsAndClubs(player.id);
+      // 🎾 Lade Tennismates beim initialen Load
+      loadTennismates(player.id);
     }
-  }, [player, currentUser, authLoading, playerName]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [player?.id, currentUser, authLoading, playerName]);
+
+  // 🎾 Lade Tennismates-Daten
+  const loadTennismates = async (playerId) => {
+    if (!playerId) return;
+    
+    setLoadingSocial(true);
+    
+    try {
+      console.log('🎾 Loading tennismates for player:', playerId);
+      
+      // Lade alle Follow-Beziehungen
+      const { data: followData, error } = await supabase
+        .from('player_followers')
+        .select(`
+          *,
+          follower:players_unified!player_followers_follower_id_fkey(
+            id,
+            name,
+            current_lk,
+            season_start_lk,
+            profile_image
+          ),
+          following:players_unified!player_followers_following_id_fkey(
+            id,
+            name,
+            current_lk,
+            season_start_lk,
+            profile_image
+          )
+        `)
+        .or(`follower_id.eq.${playerId},following_id.eq.${playerId}`)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      
+      // Trenne Tennismates (folgen mir) und Following (ich folge)
+      const tennismates = followData?.filter(f => f.following_id === playerId).map(f => ({
+        ...f.follower,
+        followedSince: f.created_at,
+        isMutual: f.is_mutual
+      })) || [];
+      
+      const following = followData?.filter(f => f.follower_id === playerId).map(f => ({
+        ...f.following,
+        followedSince: f.created_at,
+        isMutual: f.is_mutual
+      })) || [];
+      
+      setTennismatesList(tennismates);
+      setFollowingList(following);
+      
+      console.log('✅ Tennismates loaded:', {
+        tennismates: tennismates.length,
+        following: following.length,
+        mutual: tennismates.filter(t => t.isMutual).length
+      });
+      
+    } catch (error) {
+      console.error('❌ Error loading tennismates:', error);
+    } finally {
+      setLoadingSocial(false);
+    }
+  };
 
   // Lade Vereins- und Mannschafts-Daten für den Spieler
   const loadPlayerTeamsAndClubs = async (playerId) => {
@@ -989,6 +1061,27 @@ function SupabaseProfile() {
             </button>
             
             <button
+              onClick={() => {
+                setActiveTab('tennismates');
+                if (player?.id) loadTennismates(player.id);
+              }}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: activeTab === 'tennismates' ? 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)' : 'white',
+                color: activeTab === 'tennismates' ? 'white' : '#1f2937',
+                border: activeTab === 'tennismates' ? '2px solid #be185d' : '2px solid #e5e7eb',
+                borderRadius: '8px 8px 0 0',
+                cursor: 'pointer',
+                fontSize: '0.875rem',
+                fontWeight: '600',
+                transition: 'all 0.2s',
+                borderBottom: activeTab === 'tennismates' ? '2px solid #ec4899' : 'none'
+              }}
+            >
+              🎾 Tennismates
+            </button>
+            
+            <button
               onClick={() => setActiveTab('details')}
               style={{
                 padding: '0.75rem 1.5rem',
@@ -1210,20 +1303,345 @@ function SupabaseProfile() {
           )}
           
           {/* TeamSelector (für Hinzufügen/Bearbeiten) */}
-          <div className="fade-in lk-card-full" style={{ marginBottom: '1.5rem' }}>
-            <TeamSelector onTeamsUpdated={() => {
-              if (player) {
-                loadPlayerTeamsAndClubs(player.id);
+        <div className="fade-in lk-card-full" style={{ marginBottom: '1.5rem' }}>
+          <TeamSelector onTeamsUpdated={() => {
+            if (player) {
+              loadPlayerTeamsAndClubs(player.id);
                 window.dispatchEvent(new CustomEvent('reloadTeams', { detail: { playerId: player.id } }));
-              }
-            }} />
+            }
+          }} />
           </div>
         </div>
       )}
 
-      {/* ✅ TAB 3: PERSÖNLICHE DETAILS */}
+      {/* ✅ TAB 3: TENNISMATES */}
+      {activeTab === 'tennismates' && !isSetup && !isViewingOtherPlayer && (
+        <div>
+          {/* Übersicht Stats */}
+          <div className="fade-in lk-card-full" style={{ marginBottom: '1.5rem' }}>
+            <div className="formkurve-header" style={{
+              background: 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)'
+            }}>
+              <div className="formkurve-title" style={{ color: 'white' }}>
+                🎾 Meine Tennismates
+              </div>
+              <div className="match-count-badge" style={{
+                background: 'rgba(255, 255, 255, 0.2)',
+                color: 'white',
+                border: '1px solid rgba(255, 255, 255, 0.3)'
+              }}>
+                {tennismatesList.length + followingList.length} Vernetzungen
+              </div>
+            </div>
+            
+            <div className="season-content">
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                gap: '1rem',
+                marginBottom: '1rem'
+              }}>
+                <div style={{
+                  padding: '1.25rem',
+                  background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+                  border: '2px solid #10b981',
+                  borderRadius: '12px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: '2.5rem', fontWeight: '700', color: '#059669' }}>
+                    {tennismatesList.length}
+                  </div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#047857', marginTop: '0.5rem' }}>
+                    Tennismates
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#059669', marginTop: '0.25rem' }}>
+                    folgen mir
+                  </div>
+                </div>
+                
+                <div style={{
+                  padding: '1.25rem',
+                  background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+                  border: '2px solid #3b82f6',
+                  borderRadius: '12px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: '2.5rem', fontWeight: '700', color: '#2563eb' }}>
+                    {followingList.length}
+                  </div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#1e40af', marginTop: '0.5rem' }}>
+                    Folge ich
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#2563eb', marginTop: '0.25rem' }}>
+                    anderen Spielern
+                  </div>
+                </div>
+                
+                <div style={{
+                  padding: '1.25rem',
+                  background: 'linear-gradient(135deg, #fce7f3 0%, #fbcfe8 100%)',
+                  border: '2px solid #ec4899',
+                  borderRadius: '12px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: '2.5rem', fontWeight: '700', color: '#db2777' }}>
+                    {tennismatesList.filter(t => t.isMutual).length}
+                  </div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#9f1239', marginTop: '0.5rem' }}>
+                    Freunde ❤️
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#db2777', marginTop: '0.25rem' }}>
+                    gegenseitig
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Meine Tennismates (folgen mir) */}
+          {tennismatesList.length > 0 && (
+            <div className="fade-in lk-card-full" style={{ marginBottom: '1.5rem' }}>
+              <div className="formkurve-header">
+                <div className="formkurve-title">🎾 Meine Tennismates</div>
+                <div className="match-count-badge">{tennismatesList.length}</div>
+              </div>
+              
+              <div className="season-content">
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                  gap: '1rem'
+                }}>
+                  {tennismatesList.map((mate) => (
+                    <div
+                      key={mate.id}
+                      onClick={() => navigate(`/player/${encodeURIComponent(mate.name)}`)}
+                      style={{
+                        padding: '1.25rem',
+                        background: mate.isMutual 
+                          ? 'linear-gradient(135deg, #fce7f3 0%, #fbcfe8 100%)'
+                          : 'linear-gradient(135deg, #ffffff 0%, #f9fafb 100%)',
+                        border: mate.isMutual ? '2px solid #ec4899' : '2px solid #e5e7eb',
+                        borderRadius: '12px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        position: 'relative'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
+                    >
+                      {mate.isMutual && (
+                        <div style={{
+                          position: 'absolute',
+                          top: '0.75rem',
+                          right: '0.75rem',
+                          fontSize: '1.5rem'
+                        }}>❤️</div>
+                      )}
+                      
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+                        <div style={{
+                          width: '60px',
+                          height: '60px',
+                          borderRadius: '50%',
+                          background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '2rem',
+                          flexShrink: 0
+                        }}>
+                          {mate.profile_image ? (
+                            <img src={mate.profile_image} alt={mate.name} style={{
+                              width: '100%',
+                              height: '100%',
+                              borderRadius: '50%',
+                              objectFit: 'cover'
+                            }} />
+                          ) : (
+                            '🎾'
+                          )}
+                        </div>
+                        
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <h4 style={{ margin: '0 0 0.25rem 0', fontSize: '1.1rem', fontWeight: '700', color: '#1f2937' }}>
+                            {mate.name}
+                          </h4>
+                          <div style={{ fontSize: '0.875rem', color: '#6b7280', fontWeight: '600' }}>
+                            LK {mate.current_lk || mate.season_start_lk || '?'}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div style={{
+                        padding: '0.5rem',
+                        background: 'rgba(243, 244, 246, 0.5)',
+                        borderRadius: '6px',
+                        fontSize: '0.75rem',
+                        color: '#6b7280',
+                        textAlign: 'center'
+                      }}>
+                        Folgt dir seit {new Date(mate.followedSince).toLocaleDateString('de-DE')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Ich folge (Following) */}
+          {followingList.length > 0 && (
+            <div className="fade-in lk-card-full" style={{ marginBottom: '1.5rem' }}>
+              <div className="formkurve-header">
+                <div className="formkurve-title">👥 Ich folge</div>
+                <div className="match-count-badge">{followingList.length}</div>
+              </div>
+              
+              <div className="season-content">
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                  gap: '1rem'
+                }}>
+                  {followingList.map((mate) => (
+                    <div
+                      key={mate.id}
+                      onClick={() => navigate(`/player/${encodeURIComponent(mate.name)}`)}
+                      style={{
+                        padding: '1.25rem',
+                        background: mate.isMutual 
+                          ? 'linear-gradient(135deg, #fce7f3 0%, #fbcfe8 100%)'
+                          : 'linear-gradient(135deg, #ffffff 0%, #f9fafb 100%)',
+                        border: mate.isMutual ? '2px solid #ec4899' : '2px solid #e5e7eb',
+                        borderRadius: '12px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        position: 'relative'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
+                    >
+                      {mate.isMutual && (
+                        <div style={{
+                          position: 'absolute',
+                          top: '0.75rem',
+                          right: '0.75rem',
+                          fontSize: '1.5rem'
+                        }}>❤️</div>
+                      )}
+                      
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+                        <div style={{
+                          width: '60px',
+                          height: '60px',
+                          borderRadius: '50%',
+                          background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '2rem',
+                          flexShrink: 0
+                        }}>
+                          {mate.profile_image ? (
+                            <img src={mate.profile_image} alt={mate.name} style={{
+                              width: '100%',
+                              height: '100%',
+                              borderRadius: '50%',
+                              objectFit: 'cover'
+                            }} />
+                          ) : (
+                            '🎾'
+                          )}
+                        </div>
+                        
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <h4 style={{ margin: '0 0 0.25rem 0', fontSize: '1.1rem', fontWeight: '700', color: '#1f2937' }}>
+                            {mate.name}
+                          </h4>
+                          <div style={{ fontSize: '0.875rem', color: '#6b7280', fontWeight: '600' }}>
+                            LK {mate.current_lk || mate.season_start_lk || '?'}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div style={{
+                        padding: '0.5rem',
+                        background: 'rgba(243, 244, 246, 0.5)',
+                        borderRadius: '6px',
+                        fontSize: '0.75rem',
+                        color: '#6b7280',
+                        textAlign: 'center'
+                      }}>
+                        Du folgst seit {new Date(mate.followedSince).toLocaleDateString('de-DE')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Empty State */}
+          {tennismatesList.length === 0 && followingList.length === 0 && !loadingSocial && (
+            <div className="fade-in lk-card-full">
+              <div className="season-content" style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
+                <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>🎾</div>
+                <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.5rem', fontWeight: '700', color: '#1f2937' }}>
+                  Noch keine Tennismates
+                </h3>
+                <p style={{ margin: '0 0 1.5rem 0', fontSize: '1rem', color: '#6b7280', lineHeight: '1.6' }}>
+                  Folge anderen Spielern um ihre Match-Ergebnisse zu verfolgen und vernetzt zu bleiben!
+                </p>
+                <button
+                  onClick={() => navigate('/results')}
+                  style={{
+                    padding: '1rem 2rem',
+                    background: 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)',
+                    color: 'white',
+                    border: '2px solid #be185d',
+                    borderRadius: '12px',
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '700',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                >
+                  🔍 Spieler entdecken
+                </button>
+              </div>
+            </div>
+          )}
+          
+          {/* Loading State */}
+          {loadingSocial && (
+            <div className="fade-in lk-card-full">
+              <div className="season-content" style={{ textAlign: 'center', padding: '2rem' }}>
+                <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>⏳</div>
+                <p style={{ margin: 0, color: '#6b7280' }}>Lade Tennismates...</p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ✅ TAB 4: PERSÖNLICHE DETAILS */}
       {activeTab === 'details' && (
-        <form onSubmit={handleSubmit} className="profile-form">
+      <form onSubmit={handleSubmit} className="profile-form">
         {/* Profilbild */}
         <section className="profile-section">
           <h2>📸 Profilbild</h2>
@@ -1995,7 +2413,7 @@ function SupabaseProfile() {
             </div>
           </div>
         )}
-        </form>
+      </form>
       )}
 
       {/* Passwort-Reset-Modal */}
