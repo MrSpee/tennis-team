@@ -1330,7 +1330,15 @@ function SupabaseProfile() {
                 color: 'white',
                 border: '1px solid rgba(255, 255, 255, 0.3)'
               }}>
-                {tennismatesList.length + followingList.length} Vernetzungen
+                {(() => {
+                  // ✅ Berechne einzigartige Vernetzungen (keine Duplikate!)
+                  const uniqueIds = new Set([
+                    ...tennismatesList.map(t => t.id),
+                    ...followingList.map(f => f.id)
+                  ]);
+                  const count = uniqueIds.size;
+                  return `${count} ${count === 1 ? 'Vernetzung' : 'Vernetzungen'}`;
+                })()}
               </div>
             </div>
             

@@ -41,6 +41,7 @@ function Dashboard() {
   const [socialStats, setSocialStats] = useState({
     tennismatesCount: 0,      // Wie viele mir folgen
     followingCount: 0,         // Wie vielen ich folge
+    totalConnections: 0,       // Einzigartige Vernetzungen (keine Duplikate)
     newThisWeek: 0,            // Neue Tennismates letzte 7 Tage
     mutualCount: 0             // Freunde (gegenseitig)
   });
@@ -178,6 +179,13 @@ function Dashboard() {
         const following = followData?.filter(f => f.follower_id === player.id) || [];
         const mutual = tennismates.filter(t => following.some(f => f.following_id === t.follower_id));
         
+        // ✅ EINZIGARTIGE Vernetzungen (keine Duplikate!)
+        const uniqueConnections = new Set([
+          ...tennismates.map(t => t.follower_id),
+          ...following.map(f => f.following_id)
+        ]);
+        const totalUniqueConnections = uniqueConnections.size;
+        
         // Neue Tennismates letzte 7 Tage
         const weekAgo = new Date();
         weekAgo.setDate(weekAgo.getDate() - 7);
@@ -186,6 +194,7 @@ function Dashboard() {
         setSocialStats({
           tennismatesCount: tennismates.length,
           followingCount: following.length,
+          totalConnections: totalUniqueConnections,  // ✅ NEU: Einzigartige Vernetzungen
           newThisWeek,
           mutualCount: mutual.length
         });
@@ -193,8 +202,10 @@ function Dashboard() {
         console.log('🎾 Social stats loaded:', {
           tennismates: tennismates.length,
           following: following.length,
+          uniqueConnections: totalUniqueConnections,
           newThisWeek,
-          mutual: mutual.length
+          mutual: mutual.length,
+          calculation: `${tennismates.length} Mates + ${following.length} Folge = ${totalUniqueConnections} einzigartige Personen`
         });
         
       } catch (error) {
@@ -832,7 +843,7 @@ function Dashboard() {
                 fontWeight: '600',
                 border: '1px solid rgba(255, 255, 255, 0.3)'
               }}>
-                {socialStats.tennismatesCount + socialStats.followingCount} Vernetzungen
+                {socialStats.totalConnections} {socialStats.totalConnections === 1 ? 'Vernetzung' : 'Vernetzungen'}
               </div>
             </div>
             
