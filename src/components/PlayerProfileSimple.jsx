@@ -909,25 +909,30 @@ function PlayerProfileSimple() {
         </div>
 
         <div className="season-content">
-          {/* Navigation */}
-          <div className="profile-header" style={{ marginBottom: '1rem' }}>
-        <button 
-          onClick={() => navigate(-1)}
-          className="back-button"
-        >
-          <ArrowLeft size={20} />
-          Zurück
-        </button>
-        
-        {isOwnProfile && (
-          <button 
-            onClick={() => navigate('/profile')}
-            className="edit-button"
-          >
-            Profil bearbeiten
-          </button>
-        )}
-      </div>
+          {/* Edit-Button (falls eigenes Profil) */}
+          {isOwnProfile && (
+            <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
+              <button 
+                onClick={() => navigate('/profile')}
+                style={{
+                  padding: '0.5rem 1rem',
+                  background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}
+              >
+                <Edit3 size={16} />
+                Profil bearbeiten
+              </button>
+            </div>
+          )}
 
           {/* Hero-Section */}
           <div className="profile-hero-modern">
