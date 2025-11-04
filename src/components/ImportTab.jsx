@@ -949,8 +949,8 @@ const ImportTab = () => {
         matchdaysToCreate.push({
           match_date: match.match_date,
           start_time: match.start_time || null,
-          home_team_id: homeTeamId,
-          away_team_id: awayTeamId,
+          home_team_id: match.home_team_id, // ✅ Aus matchdaysWithTeams
+          away_team_id: match.away_team_id, // ✅ Aus matchdaysWithTeams
           venue: match.venue || null,
           venue_id: venueId, // ✅ NEU: venue_id für Surface-Info!
           court_number: courtNumber,
