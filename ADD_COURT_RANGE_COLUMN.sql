@@ -20,3 +20,4 @@ SELECT
   COUNT(court_number_end) as has_court_end
 FROM matchdays;
 
+

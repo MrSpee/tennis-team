@@ -51,3 +51,4 @@ FROM get_shoe_recommendation_for_match(
   (SELECT id FROM matchdays WHERE court_number IS NOT NULL LIMIT 1)
 );
 
+

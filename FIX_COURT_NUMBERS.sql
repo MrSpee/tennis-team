@@ -119,3 +119,4 @@ SET court_number = 14  -- ⚠️ Anpassen!
 WHERE id = 'MATCH_UUID_HIER';  -- ⚠️ UUID einfügen!
 */
 
+

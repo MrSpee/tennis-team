@@ -509,3 +509,4 @@ FROM venues v
 LEFT JOIN surface_types st ON st.id = v.primary_surface_id
 ORDER BY v.city, v.name;
 
+

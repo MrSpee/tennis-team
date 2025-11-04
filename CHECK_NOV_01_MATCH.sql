@@ -124,3 +124,4 @@ LEFT JOIN team_info at ON at.id = m.away_team_id
 WHERE m.match_date::DATE = '2025-11-01'
 AND m.venue ILIKE '%Schloß Morsbroich%';
 
+

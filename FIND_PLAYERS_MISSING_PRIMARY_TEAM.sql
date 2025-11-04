@@ -100,3 +100,4 @@ LIMIT 5;
 -- "TC Rot-Weiss Köln" ist (alphabetisch erstes Team).
 
 
+

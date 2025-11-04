@@ -476,3 +476,4 @@ SELECT COUNT(*) as total_blocks FROM player_blocks;
 **Erstellt:** 03.11.2025  
 **Zuletzt aktualisiert:** 03.11.2025
 
+

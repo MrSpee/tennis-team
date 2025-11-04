@@ -59,3 +59,4 @@ LEFT JOIN team_seasons ts ON ts.team_id = ti.id AND ts.is_active = true
 WHERE ti.club_name ILIKE '%VKC%'
   AND ti.category = 'Herren 30';
 
+

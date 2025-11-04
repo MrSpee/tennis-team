@@ -131,3 +131,4 @@ SELECT
   COUNT(*) as current_follows
 FROM player_followers;
 
+

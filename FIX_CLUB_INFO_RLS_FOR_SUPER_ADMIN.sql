@@ -181,3 +181,4 @@ FROM pg_policies
 WHERE tablename = 'club_info'
 ORDER BY cmd;
 
+

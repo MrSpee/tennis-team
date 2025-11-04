@@ -135,3 +135,4 @@ ORDER BY pu.name;
 -- 4. Nach dem Ausführen sollten alle Spieler ein Team haben
 
 
+

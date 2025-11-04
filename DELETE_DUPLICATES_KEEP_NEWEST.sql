@@ -77,3 +77,4 @@ RETURNING 'DELETED' as status, id, team_id, season;
 
 
 
+

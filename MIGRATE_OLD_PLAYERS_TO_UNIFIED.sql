@@ -335,3 +335,4 @@ ORDER BY
 -- - Team-Zuordnungen werden aus "player_teams" übernommen (falls vorhanden)
 
 
+
