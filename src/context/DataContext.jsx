@@ -450,6 +450,9 @@ export function DataProvider({ children }) {
             opponent: opponentName,
             location: isOurTeamHome ? 'Home' : (isOurTeamAway ? 'Away' : matchday.location), // ✅ AUS SPIELER-PERSPEKTIVE!
             venue: matchday.venue,
+            venue_id: matchday.venue_id, // ✅ NEU: Für Surface-Info
+            court_number: matchday.court_number, // ✅ NEU: Platz-Start
+            court_number_end: matchday.court_number_end, // ✅ NEU: Platz-Ende
             season: matchday.season,
             playersNeeded: 4, // Standard für matchdays (kann später aus DB kommen)
             teamId: ourTeam?.id,

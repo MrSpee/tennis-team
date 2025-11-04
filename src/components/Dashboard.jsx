@@ -1191,6 +1191,21 @@ function Dashboard() {
                     </div>
                   )}
                   
+                  {/* Court-Nummern anzeigen */}
+                  {(match.court_number || match.court_number_end) && (
+                    <div style={{
+                      padding: '0.5rem',
+                      background: '#f3f4f6',
+                      borderRadius: '6px',
+                      fontSize: '0.875rem',
+                      fontWeight: '600',
+                      color: '#374151',
+                      marginTop: '0.5rem'
+                    }}>
+                      🎾 Plätze: {match.court_number}{match.court_number_end ? `–${match.court_number_end}` : ''}
+                    </div>
+                  )}
+                  
                   {/* 🎾 BELAG + SCHUHEMPFEHLUNG - JETZT NACH UNTEN */}
                   <SurfaceInfo matchdayId={match.id} compact={false} />
                   
