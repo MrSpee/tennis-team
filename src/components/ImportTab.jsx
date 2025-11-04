@@ -28,6 +28,10 @@ const ImportTab = () => {
   const [allClubs, setAllClubs] = useState([]); // NEU: Alle Vereine für Dropdown
   const [allTeamsForPlayers, setAllTeamsForPlayers] = useState([]); // NEU: Alle Teams für Spieler-Dropdown
   
+  // ✅ NEU: Venue Review System
+  const [venueReview, setVenueReview] = useState(null); // { matches: [{venue, venueMatch, confidence}], needsConfirm: true/false }
+  const [duplicateWarning, setDuplicateWarning] = useState(null); // { duplicates: [{date, home, away}], count: X }
+  
   // Team auswählen (später aus Context/Props)
   const [selectedTeamId, setSelectedTeamId] = useState(null);
   const [teams, setTeams] = useState([]);
@@ -60,7 +64,7 @@ const ImportTab = () => {
     loadAllTeamsList(); // NEU: Lade alle Teams
   }, [player]);
 
-  // Reset beim Modus-Wechsel
+  // ✅ Reset beim Modus-Wechsel (VERBESSERT)
   useEffect(() => {
     setParsedData(null);
     setMatchingReview(null);
@@ -70,6 +74,8 @@ const ImportTab = () => {
     setEditableMatches([]);
     setError(null);
     setSuccessMessage(null);
+    setVenueReview(null); // ✅ NEU
+    setDuplicateWarning(null); // ✅ NEU
   }, [importMode]);
 
   // NEU: Lade alle Vereine für Spieler-Zuordnung
@@ -603,11 +609,15 @@ const ImportTab = () => {
   /**
    * ✅ NEU: Finde venue_id basierend auf Venue-Name
    */
-  const findVenueId = async (venueName) => {
-    if (!venueName) return null;
+  /**
+   * ✅ VERBESSERT: Finde venue_id mit Confidence Score
+   * Gibt zurück: { venueId, venueName, confidence, matchType }
+   */
+  const findVenueWithConfidence = async (venueName) => {
+    if (!venueName) return { venueId: null, venueName: null, confidence: 0, matchType: 'none' };
     
     try {
-      // 1. Versuche exakte Matches mit Varianten (TH vs Tennishalle, ß vs ss)
+      // 1. Exakte Matches mit Varianten (100% Confidence)
       const searchVariants = [
         venueName,
         venueName.replace(/^TH /, 'Tennishalle '),
@@ -617,36 +627,121 @@ const ImportTab = () => {
       ];
       
       for (const variant of searchVariants) {
-        const { data, error } = await supabase
-          .from('venues')
-          .select('id, name')
+      const { data, error } = await supabase
+        .from('venues')
+          .select('id, name, vnr')
           .ilike('name', variant)
-          .limit(1)
-          .maybeSingle();
-        
+        .limit(1)
+        .maybeSingle();
+      
         if (!error && data) {
-          console.log(`✅ Venue exakt: "${venueName}" → "${data.name}" (ID: ${data.id})`);
-          return data.id;
+          console.log(`✅ Venue EXAKT: "${venueName}" → "${data.name}" (VNR: ${data.vnr})`);
+          return { 
+            venueId: data.id, 
+            venueName: data.name, 
+            confidence: 1.0, 
+            matchType: 'exact',
+            vnr: data.vnr 
+          };
         }
       }
       
-      // 2. Fuzzy-Search als Fallback
+      // 2. Fuzzy-Search (60-95% Confidence)
       const { data, error } = await supabase
         .from('venues')
-        .select('id, name')
+        .select('id, name, vnr, club_name')
         .or(`name.ilike.%${venueName}%,club_name.ilike.%${venueName}%`)
         .limit(5);
       
       if (!error && data && data.length > 0) {
-        console.log(`🔍 Venue fuzzy: "${venueName}" → "${data[0].name}" (ID: ${data[0].id})`);
-        return data[0].id;
+        // Berechne Similarity Score (einfacher String-Match)
+        const scores = data.map(venue => {
+          const searchLower = venueName.toLowerCase();
+          const nameLower = (venue.name || '').toLowerCase();
+          const clubLower = (venue.club_name || '').toLowerCase();
+          
+          let score = 0;
+          if (nameLower.includes(searchLower)) score = 0.8;
+          else if (clubLower.includes(searchLower)) score = 0.6;
+          else if (searchLower.includes(nameLower)) score = 0.7;
+          
+          return { ...venue, score };
+        });
+        
+        scores.sort((a, b) => b.score - a.score);
+        const best = scores[0];
+        
+        console.log(`🔍 Venue FUZZY: "${venueName}" → "${best.name}" (Score: ${best.score})`);
+        return { 
+          venueId: best.id, 
+          venueName: best.name, 
+          confidence: best.score, 
+          matchType: 'fuzzy',
+          vnr: best.vnr,
+          alternatives: scores.slice(1, 3) // Top 2 Alternativen
+        };
       }
       
-      console.warn(`⚠️ Venue "${venueName}" nicht in venues Tabelle`);
-      return null;
+      console.warn(`⚠️ Venue "${venueName}" nicht gefunden`);
+      return { venueId: null, venueName: null, confidence: 0, matchType: 'none' };
     } catch (err) {
       console.error(`❌ Error finding venue "${venueName}":`, err);
-      return null;
+      return { venueId: null, venueName: null, confidence: 0, matchType: 'error' };
+    }
+  };
+  
+  // Legacy-Wrapper für Rückwärtskompatibilität
+  const findVenueId = async (venueName) => {
+    const result = await findVenueWithConfidence(venueName);
+    return result.venueId;
+  };
+
+  /**
+   * ✅ NEU: Prüfe auf Duplikate
+   * Gibt zurück: { hasDuplicates: boolean, duplicates: Array, existingMatches: Array }
+   */
+  const checkForDuplicates = async (matchesToCheck) => {
+    try {
+      const duplicates = [];
+      const existingMatches = [];
+      
+      for (const match of matchesToCheck) {
+        // Suche nach Match mit gleichem Datum + Teams (±1 Tag Toleranz)
+        const matchDate = new Date(match.match_date);
+        const dayBefore = new Date(matchDate);
+        dayBefore.setDate(matchDate.getDate() - 1);
+        const dayAfter = new Date(matchDate);
+        dayAfter.setDate(matchDate.getDate() + 1);
+        
+        const { data, error } = await supabase
+          .from('matchdays')
+          .select('id, match_date, home_team_id, away_team_id, venue')
+          .gte('match_date', dayBefore.toISOString())
+          .lte('match_date', dayAfter.toISOString())
+          .or(`and(home_team_id.eq.${match.home_team_id},away_team_id.eq.${match.away_team_id}),and(home_team_id.eq.${match.away_team_id},away_team_id.eq.${match.home_team_id})`)
+          .limit(1)
+          .maybeSingle();
+        
+        if (!error && data) {
+          duplicates.push({
+            match: match,
+            existing: data
+          });
+          existingMatches.push(data);
+        }
+      }
+      
+      console.log(`🔍 Duplikat-Check: ${duplicates.length} von ${matchesToCheck.length} Matches existieren bereits`);
+      
+      return {
+        hasDuplicates: duplicates.length > 0,
+        duplicates: duplicates,
+        existingMatches: existingMatches,
+        newMatches: matchesToCheck.length - duplicates.length
+      };
+    } catch (err) {
+      console.error('❌ Error checking duplicates:', err);
+      return { hasDuplicates: false, duplicates: [], existingMatches: [], newMatches: matchesToCheck.length };
     }
   };
 
@@ -654,7 +749,7 @@ const ImportTab = () => {
    * NEU: Generischer Liga-Import (ohne Team-Zwang)
    * Importiert ALLE Matchdays einer Liga
    */
-  const handleGenericLeagueImport = async (matchesToImport) => {
+  const handleGenericLeagueImport = async (matchesToImport, skipReview = false) => {
     try {
       console.log('🌐 Starting generic league import...');
       
@@ -664,6 +759,42 @@ const ImportTab = () => {
       const year = parsedData.year;
       
       console.log(`📋 Liga-Info: ${category} - ${league} (${season} ${year})`);
+      
+      // ✅ SCHRITT 1: Venue-Matching für alle Matches
+      if (!skipReview) {
+        console.log('🔍 SCHRITT 1: Venue-Matching...');
+        const venueMatches = [];
+        let needsConfirmation = false;
+        
+        for (const match of matchesToImport) {
+          if (match.venue) {
+            const venueMatch = await findVenueWithConfidence(match.venue);
+            venueMatches.push({
+              originalVenue: match.venue,
+              matchedVenue: venueMatch,
+              homeTeam: match.home_team,
+              awayTeam: match.away_team,
+              date: match.match_date,
+              courts: match.court_range
+            });
+            
+            // Wenn Confidence < 0.9 → User-Bestätigung nötig
+            if (venueMatch.confidence < 0.9) {
+              needsConfirmation = true;
+            }
+          }
+        }
+        
+        // Zeige Venue-Review, wenn Bestätigung nötig
+        if (needsConfirmation) {
+          console.log('⚠️ Unsichere Venue-Zuordnungen → zeige Review');
+          setVenueReview({
+            matches: venueMatches,
+            needsConfirm: true
+          });
+          return; // Warte auf User-Bestätigung
+        }
+      }
       
       // Team-Cache um Duplikate zu vermeiden
       const teamCache = new Map();
@@ -765,8 +896,9 @@ const ImportTab = () => {
         return teamId;
       };
       
-      // Matchdays erstellen
-      const matchdaysToCreate = [];
+      // ✅ SCHRITT 2: Team-IDs sammeln für Duplikat-Check
+      console.log('🔍 SCHRITT 2: Erstelle/Finde Teams...');
+      const matchdaysWithTeams = [];
       
       for (const match of matchesToImport) {
         console.log(`📋 Match: ${match.home_team} vs ${match.away_team} | Platz: ${match.court_range || 'N/A'} | Venue: ${match.venue || 'N/A'}`);
@@ -774,6 +906,34 @@ const ImportTab = () => {
         const homeTeamId = await findOrCreateTeamGeneric(match.home_team);
         const awayTeamId = await findOrCreateTeamGeneric(match.away_team);
         
+        matchdaysWithTeams.push({
+          ...match,
+          home_team_id: homeTeamId,
+          away_team_id: awayTeamId
+        });
+      }
+      
+      // ✅ SCHRITT 3: Duplikat-Check
+      if (!skipReview) {
+        console.log('🔍 SCHRITT 3: Duplikat-Check...');
+        const dupCheck = await checkForDuplicates(matchdaysWithTeams);
+        
+        if (dupCheck.hasDuplicates) {
+          console.warn(`⚠️ ${dupCheck.duplicates.length} Duplikate gefunden!`);
+          setDuplicateWarning({
+            duplicates: dupCheck.duplicates,
+            count: dupCheck.duplicates.length,
+            newCount: dupCheck.newMatches
+          });
+          return; // Warte auf User-Bestätigung
+        }
+      }
+      
+      // ✅ SCHRITT 4: Matchdays erstellen
+      console.log('📥 SCHRITT 4: Erstelle Matchdays...');
+      const matchdaysToCreate = [];
+      
+      for (const match of matchdaysWithTeams) {
         // ✅ Finde venue_id via Venue-Name
         const venueId = match.venue ? await findVenueId(match.venue) : null;
         
@@ -2826,6 +2986,162 @@ Die KI erkennt automatisch:
               </div>
             </div>
             
+            {/* ✅ NEU: Venue-Review (falls unsicher) */}
+            {venueReview && (
+              <div style={{
+                background: '#fef3c7',
+                border: '2px solid #f59e0b',
+                borderRadius: '8px',
+                padding: '1rem',
+                marginBottom: '1rem'
+              }}>
+                <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '1rem', fontWeight: '700', color: '#92400e' }}>
+                  ⚠️ Spielort-Zuordnung überprüfen
+                </h4>
+                {venueReview.matches.map((vm, idx) => (
+                  <div key={idx} style={{
+                    background: 'white',
+                    padding: '0.75rem',
+                    borderRadius: '6px',
+                    marginBottom: '0.5rem',
+                    border: vm.matchedVenue.confidence < 0.7 ? '2px solid #ef4444' : '1px solid #d1d5db'
+                  }}>
+                    <div style={{ fontWeight: '600', marginBottom: '0.25rem' }}>
+                      {vm.homeTeam} vs {vm.awayTeam}
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>
+                      📍 Gesucht: <strong>{vm.originalVenue}</strong>
+                    </div>
+                    {vm.matchedVenue.confidence > 0 ? (
+                      <div style={{ fontSize: '0.85rem', color: vm.matchedVenue.confidence >= 0.9 ? '#10b981' : '#f59e0b', marginTop: '0.25rem' }}>
+                        {vm.matchedVenue.confidence >= 0.9 ? '✅' : '🔍'} Zugeordnet: <strong>{vm.matchedVenue.venueName}</strong> (VNR: {vm.matchedVenue.vnr})
+                        <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem' }}>
+                          ({Math.round(vm.matchedVenue.confidence * 100)}% sicher)
+                        </span>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '0.85rem', color: '#ef4444', marginTop: '0.25rem' }}>
+                        ❌ Keine Übereinstimmung gefunden - Venue muss manuell erstellt werden
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <button
+                  onClick={() => {
+                    setVenueReview(null);
+                    handleGenericLeagueImport(parsedData.matches, true); // Skip Review
+                  }}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    background: '#10b981',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    marginTop: '0.5rem',
+                    width: '100%'
+                  }}
+                >
+                  ✅ Zuordnungen bestätigen & Importieren
+                </button>
+                <button
+                  onClick={() => setVenueReview(null)}
+                  style={{
+                    padding: '0.5rem',
+                    background: 'transparent',
+                    color: '#6b7280',
+                    border: 'none',
+                    cursor: 'pointer',
+                    marginTop: '0.5rem',
+                    width: '100%'
+                  }}
+                >
+                  ❌ Abbrechen
+                </button>
+              </div>
+            )}
+            
+            {/* ✅ NEU: Duplikat-Warnung */}
+            {duplicateWarning && (
+              <div style={{
+                background: '#fee2e2',
+                border: '2px solid #ef4444',
+                borderRadius: '8px',
+                padding: '1rem',
+                marginBottom: '1rem'
+              }}>
+                <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '1rem', fontWeight: '700', color: '#991b1b' }}>
+                  ⚠️ {duplicateWarning.count} Duplikat{duplicateWarning.count > 1 ? 'e' : ''} gefunden!
+                </h4>
+                <p style={{ fontSize: '0.875rem', color: '#7f1d1d', marginBottom: '0.75rem' }}>
+                  Diese Matches existieren bereits in der Datenbank:
+                </p>
+                {duplicateWarning.duplicates.slice(0, 5).map((dup, idx) => (
+                  <div key={idx} style={{
+                    background: 'white',
+                    padding: '0.5rem',
+                    borderRadius: '4px',
+                    marginBottom: '0.5rem',
+                    fontSize: '0.85rem'
+                  }}>
+                    {new Date(dup.match.match_date).toLocaleDateString('de-DE')} - 
+                    {dup.match.home_team} vs {dup.match.away_team}
+                  </div>
+                ))}
+                {duplicateWarning.count > 5 && (
+                  <div style={{ fontSize: '0.85rem', color: '#6b7280', fontStyle: 'italic' }}>
+                    ... und {duplicateWarning.count - 5} weitere
+                  </div>
+                )}
+                <div style={{ marginTop: '1rem', fontSize: '0.9rem', fontWeight: '600' }}>
+                  {duplicateWarning.newCount > 0 ? (
+                    <p>✅ {duplicateWarning.newCount} neue Matches können importiert werden.</p>
+                  ) : (
+                    <p>⚠️ Alle Matches existieren bereits!</p>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+                  <button
+                    onClick={() => {
+                      setDuplicateWarning(null);
+                      handleGenericLeagueImport(parsedData.matches, true); // Importiere trotzdem
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '0.75rem',
+                      background: '#ef4444',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontWeight: '600',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Trotzdem importieren
+                  </button>
+                  <button
+                    onClick={() => {
+                      setDuplicateWarning(null);
+                      setParsedData(null);
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '0.75rem',
+                      background: '#6b7280',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontWeight: '600',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    ❌ Abbrechen
+                  </button>
+                </div>
+              </div>
+            )}
+            
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
               <button
                 onClick={async () => {
@@ -2836,17 +3152,17 @@ Die KI erkennt automatisch:
                     setIsProcessing(false);
                   }
                 }}
-                disabled={isProcessing}
+                disabled={isProcessing || venueReview || duplicateWarning}
                 style={{
                   padding: '1rem 2rem',
                   fontSize: '1.1rem',
                   fontWeight: '700',
-                  background: '#10b981',
+                  background: (venueReview || duplicateWarning) ? '#9ca3af' : '#10b981',
                   color: 'white',
                   border: 'none',
                   borderRadius: '8px',
-                  cursor: isProcessing ? 'not-allowed' : 'pointer',
-                  opacity: isProcessing ? 0.7 : 1
+                  cursor: (isProcessing || venueReview || duplicateWarning) ? 'not-allowed' : 'pointer',
+                  opacity: (isProcessing || venueReview || duplicateWarning) ? 0.7 : 1
                 }}
               >
                 {isProcessing ? '⏳ Importiere...' : '✅ Jetzt importieren'}
