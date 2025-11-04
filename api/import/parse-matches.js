@@ -50,6 +50,7 @@ const MATCH_SCHEMA = {
           is_home_match: { type: "boolean", description: "true = Heimspiel, false = Auswärtsspiel" },
           venue: { type: "string", description: "Spielort/Anlage (z.B. 'Cologne Sportspark')" },
           address: { type: "string", description: "Adresse des Spielorts (falls angegeben)" },
+          court_range: { type: "string", description: "Platz-Angabe aus TVM (z.B. '1+4', '3+4', '14+15', '1+2') - GENAU wie im Original!" },
           matchday: { type: "integer", description: "Spieltag-Nummer (falls angegeben)" },
           match_points: { type: "string", description: "Matchpunkte (z.B. '1:5' oder '0:0')" },
           status: { type: "string", description: "Matchstatus (z.B. 'offen', 'completed')" },
@@ -127,6 +128,15 @@ WICHTIGE REGELN:
      * 24-Stunden-Format HH:MM (z.B. "18:00", "17:00")
      * Wenn Zeit "00:00" ist, kann sie weggelassen werden
      * Wenn keine Zeit angegeben, setze start_time auf "" (leerer String)
+   - **PLATZ-ANGABE (NEU - WICHTIG!):**
+     * Spalte "Platz" im TVM-Spielplan enthält Platzbuchung
+     * Formate: "1+4", "3+4", "14+15", "1+2", "1-7"
+     * **KRITISCH: Kopiere EXAKT wie im Original! z.B. "3+4" bleibt "3+4"**
+     * Wenn Spalte "Platz" leer ist → court_range = null oder ""
+     * Beispiele:
+       - "1+4" → court_range = "1+4"
+       - "3+4" → court_range = "3+4"
+       - "14+15" → court_range = "14+15"
    - **CRITICAL: Extrahiere BEIDE Teams separat!**
      * Spalte "Heim Verein" → home_team
      * Spalte "Gastverein" → away_team
@@ -177,6 +187,13 @@ WICHTIGE REGELN:
    - Erkenne Jahr basierend auf Datum:
      * Winter-Saison: "2025/26" (Jahr/H+1)
      * Sommer-Saison: "2026" (Jahr)
+
+**5. IGNORIERE TABELLEN-DATEN:**
+   - Wenn im Text eine "Tabelle" mit Rang, Begegnungen, Punkten etc. vorhanden ist → **IGNORIERE SIE KOMPLETT**
+   - Nur der "Spielplan" ist relevant (mit Datum, Spielort, Platz, Teams)
+   - Beispiel zu ignorieren:
+     * "Rang	Mannschaft	Begegnungen	S	U	N	Tab.Punkte..."
+     * Diese Zeilen sind NICHT relevant und sollten übersprungen werden
 
 BEISPIEL INPUT 1 (TVM-Format mit Meldeliste - GANZZAHLIGE LK):
 """
@@ -378,6 +395,7 @@ BEISPIEL OUTPUT 3 (Spielplan):
       "opponent": "RTHC Bayer Leverkusen 1",
       "is_home_match": true,
       "venue": "TH Schloß Morsbroich",
+      "court_range": "1+4",
       "matchday": 1,
       "match_points": "6:0",
       "status": "completed"
@@ -390,6 +408,7 @@ BEISPIEL OUTPUT 3 (Spielplan):
       "opponent": "TC BW Zündorf 1",
       "is_home_match": false,
       "venue": "RTHC Bayer Leverkusen",
+      "court_range": "3+4",
       "matchday": 2,
       "match_points": "0:0",
       "status": "offen"
@@ -402,6 +421,7 @@ BEISPIEL OUTPUT 3 (Spielplan):
       "opponent": "TC Rath 1",
       "is_home_match": true,
       "venue": "TH Schloß Morsbroich",
+      "court_range": "14+15",
       "matchday": 3,
       "match_points": "0:0",
       "status": "offen"

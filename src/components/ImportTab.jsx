@@ -553,6 +553,68 @@ const ImportTab = () => {
   };
 
   /**
+   * ✅ NEU: Parse Court Range aus TVM-Format
+   * z.B. "3+4" → {start: 3, end: 4}
+   * z.B. "1+4" → {start: 1, end: 4}
+   * z.B. "14+15" → {start: 14, end: 15}
+   */
+  const parseCourtRange = (courtRangeString) => {
+    if (!courtRangeString) return { start: null, end: null };
+    
+    // Extrahiere Zahlen aus String (z.B. "3+4" → [3, 4])
+    const numbers = courtRangeString.match(/\d+/g);
+    
+    if (!numbers || numbers.length === 0) {
+      return { start: null, end: null };
+    }
+    
+    if (numbers.length === 1) {
+      // Nur eine Zahl (z.B. "3")
+      const num = parseInt(numbers[0]);
+      return { start: num, end: null };
+    }
+    
+    // Mehrere Zahlen (z.B. "3+4" → [3, 4])
+    const start = parseInt(numbers[0]);
+    const end = parseInt(numbers[numbers.length - 1]);
+    
+    return { start, end };
+  };
+  
+  /**
+   * ✅ NEU: Finde venue_id basierend auf Venue-Name
+   */
+  const findVenueId = async (venueName) => {
+    if (!venueName) return null;
+    
+    try {
+      // Fuzzy-Search in venues Tabelle
+      const { data, error } = await supabase
+        .from('venues')
+        .select('id')
+        .or(`name.ilike.%${venueName}%,club_name.ilike.%${venueName}%`)
+        .limit(1)
+        .maybeSingle();
+      
+      if (error) {
+        console.warn(`⚠️ Venue "${venueName}" nicht gefunden:`, error);
+        return null;
+      }
+      
+      if (data) {
+        console.log(`✅ Venue gemappt: "${venueName}" → ${data.id}`);
+        return data.id;
+      }
+      
+      console.warn(`⚠️ Venue "${venueName}" nicht in venues Tabelle`);
+      return null;
+    } catch (err) {
+      console.error(`❌ Error finding venue "${venueName}":`, err);
+      return null;
+    }
+  };
+
+  /**
    * Matches in Supabase importieren
    */
   const handleImportMatches = async () => {
@@ -816,12 +878,30 @@ const ImportTab = () => {
         const finalSeason = parsedData.season || determinedSeason;
         const finalYear = parsedData.year || null;
         
+        // ✅ NEU: Parse Court Range (z.B. "3+4" → start=3, end=4)
+        let courtNumber = null;
+        let courtNumberEnd = null;
+        if (match.court_range) {
+          const parsed = parseCourtRange(match.court_range);
+          courtNumber = parsed.start;
+          courtNumberEnd = parsed.end;
+        }
+        
+        // ✅ NEU: Mappe Venue-Name zu venue_id
+        let venueId = null;
+        if (match.venue) {
+          venueId = await findVenueId(match.venue);
+        }
+        
         matchdaysToCreate.push({
           home_team_id: homeTeamId,
           away_team_id: awayTeamId,
           match_date: matchDateTime.toISOString(),
           start_time: startTime.substring(0, 5), // "15:00"
           venue: match.venue || null,
+          venue_id: venueId, // ✅ NEU!
+          court_number: courtNumber, // ✅ NEU!
+          court_number_end: courtNumberEnd, // ✅ NEU!
           location: 'Home', // Default (könnte später verbessert werden)
           season: finalSeason, // Manuell bearbeitet oder automatisch
           year: finalYear, // NEU: Jahr für die Saison

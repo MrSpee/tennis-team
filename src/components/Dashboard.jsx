@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { parseLK } from '../lib/lkUtils';
 import { supabase } from '../lib/supabaseClient';
+import SurfaceInfo from './SurfaceInfo';
 import './Dashboard.css';
 
 function Dashboard() {
@@ -794,6 +795,17 @@ function Dashboard() {
                       </div>
                     </div>
                     <div className="match-preview-opponent">{match.opponent}</div>
+                    
+                    {/* Heimspiel/Auswärtsspiel - NACH OBEN */}
+                    <div className="match-preview-location">{match.location === 'Home' ? '🏠 Heimspiel' : '✈️ Auswärtsspiel'}</div>
+                    
+                    {/* Venue - NACH OBEN */}
+                    <div className="match-preview-venue">{match.venue}</div>
+                    
+                    {/* 🎾 BELAG + SCHUHEMPFEHLUNG - NACH UNTEN */}
+                    <SurfaceInfo matchdayId={match.id} compact={true} />
+                    
+                    {/* Status - GANZ UNTEN */}
                     <div style={{
                       marginTop: '0.5rem',
                       padding: '0.5rem',
@@ -809,8 +821,6 @@ function Dashboard() {
                         : '⏳ Ergebnisse noch nicht eingetragen'
                       }
                     </div>
-                    <div className="match-preview-location">{match.location === 'Home' ? '🏠 Heimspiel' : '✈️ Auswärtsspiel'}</div>
-                    <div className="match-preview-venue">{match.venue}</div>
                   </div>
                 );
               })}
@@ -1093,15 +1103,21 @@ function Dashboard() {
                     </div>
                   )}
                   
+                  {/* Heimspiel/Auswärtsspiel - NACH OBEN */}
                   <div className="match-preview-type">
                     {match.location === 'Home' ? '🏠 Heimspiel' : '✈️ Auswärtsspiel'}
                   </div>
+                  
+                  {/* Venue - NACH OBEN */}
                   {match.venue && (
                     <div className="match-preview-location-simple">
                       <span className="location-icon">📍</span>
                       <span className="location-text">{match.venue}</span>
                     </div>
                   )}
+                  
+                  {/* 🎾 BELAG + SCHUHEMPFEHLUNG - NACH UNTEN */}
+                  <SurfaceInfo matchdayId={match.id} compact={true} />
                   
                   <button 
                     className="btn-participation"
@@ -1151,9 +1167,12 @@ function Dashboard() {
                     </div>
                   )}
                   
+                  {/* Heimspiel/Auswärtsspiel - NACH OBEN */}
                   <div className="match-preview-type">
                     {match.location === 'Home' ? '🏠 Heimspiel' : '✈️ Auswärtsspiel'}
-                      </div>
+                  </div>
+                  
+                  {/* Location mit Maps Link - NACH OBEN */}
                   {match.venue && (
                     <div className="match-preview-location">
                       <span className="location-icon">📍</span>
@@ -1171,6 +1190,9 @@ function Dashboard() {
                       </a>
                     </div>
                   )}
+                  
+                  {/* 🎾 BELAG + SCHUHEMPFEHLUNG - JETZT NACH UNTEN */}
+                  <SurfaceInfo matchdayId={match.id} compact={false} />
                   
                   {/* Meine Teilnahme Button */}
                   <button 
@@ -1278,15 +1300,21 @@ function Dashboard() {
                     </div>
                   )}
                   
+                  {/* Heimspiel/Auswärtsspiel - NACH OBEN */}
                   <div className="match-preview-type">
                     {match.location === 'Home' ? '🏠 Heimspiel' : '✈️ Auswärtsspiel'}
                   </div>
+                  
+                  {/* Venue - NACH OBEN */}
                   {match.venue && (
                     <div className="match-preview-location-simple">
                       <span className="location-icon">📍</span>
                       <span className="location-text">{match.venue}</span>
                   </div>
                   )}
+                  
+                  {/* 🎾 BELAG + SCHUHEMPFEHLUNG - NACH UNTEN */}
+                  <SurfaceInfo matchdayId={match.id} compact={true} />
                   
                   {/* Ergebnisse anzeigen Button */}
                   <button

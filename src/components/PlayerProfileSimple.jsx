@@ -579,27 +579,38 @@ function PlayerProfileSimple() {
 
       console.log('✅ Player teams loaded:', teamsData);
       
-      // Transformiere die Daten
-      const teams = teamsData.map(pt => ({
-        ...pt.team_info,
-        is_primary: pt.is_primary,
-        role: pt.role,
-        team_membership_id: pt.id
-      }));
+      // Transformiere die Daten (OHNE team_seasons - wie vorher!)
+      // ✅ Filtere ungültige Memberships (team_id = NULL)
+      const teams = teamsData
+        .filter(pt => pt.team_info && pt.team_info.id)  // ✅ Nur wenn team_info existiert
+        .map(pt => ({
+          ...pt.team_info,
+          is_primary: pt.is_primary,
+          role: pt.role,
+          team_membership_id: pt.id
+        }));
       
       setPlayerTeams(teams);
 
-      // Extrahiere einzigartige Vereine
-      const uniqueClubs = teams.reduce((acc, team) => {
-        const clubName = team.club_name;
-        if (!acc.find(club => club.name === clubName)) {
-          acc.push({
-            name: clubName,
-            teams: teams.filter(t => t.club_name === clubName)
-          });
-        }
-        return acc;
-      }, []);
+      // Extrahiere einzigartige Vereine (filtere leere club_names)
+      const uniqueClubs = teams
+        .filter(team => team.club_name && team.club_name.trim() !== '')  // ✅ Nur Teams mit club_name
+        .reduce((acc, team) => {
+          const clubName = team.club_name;
+          if (!acc.find(club => club.name === clubName)) {
+            acc.push({
+              name: clubName,
+              teams: teams.filter(t => t.club_name === clubName)
+            });
+          }
+          return acc;
+        }, []);
+      
+      // ⚠️ Warning für Teams ohne club_name
+      const teamsWithoutClub = teams.filter(team => !team.club_name || team.club_name.trim() === '');
+      if (teamsWithoutClub.length > 0) {
+        console.warn('⚠️ TEAMS OHNE CLUB_NAME:', teamsWithoutClub);
+      }
 
       setClubs(uniqueClubs);
       console.log('✅ Clubs extracted:', uniqueClubs);
@@ -1454,14 +1465,14 @@ function PlayerProfileSimple() {
                             fontWeight: '600',
                             color: '#1f2937'
                           }}>
-                            {team.team_name || team.category}
+                            {team.category || 'Unbekannt'} {team.team_name || '1'}. Mannschaft
                           </h4>
                           <p style={{ 
                             margin: '0.25rem 0 0 0', 
                             fontSize: '0.875rem',
                             color: '#6b7280'
                           }}>
-                            {team.category} • {team.region}
+                            {team.region || 'Mittelrhein'}
                           </p>
                         </div>
                         

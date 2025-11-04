@@ -455,7 +455,9 @@ function SupabaseProfile() {
       console.log('✅ Tennismates loaded:', {
         tennismates: tennismates.length,
         following: following.length,
-        mutual: tennismates.filter(t => t.isMutual).length
+        mutual: tennismates.filter(t => t.isMutual).length,
+        sampleTennismate: tennismates[0],
+        sampleFollowing: following[0]
       });
       
     } catch (error) {
@@ -543,19 +545,29 @@ function SupabaseProfile() {
       const teams = teamsWithSeasons;
       
       console.log('✅ Transformed teams:', teams);
+      
+      // ⚠️ Check for teams without club_name
+      const teamsWithoutClub = teams.filter(team => !team.club_name || team.club_name.trim() === '');
+      if (teamsWithoutClub.length > 0) {
+        console.warn('⚠️ TEAMS OHNE CLUB_NAME:', teamsWithoutClub);
+        console.warn('⚠️ Führe DEBUG_ROBERT_TEAMS.sql aus um das Problem zu finden!');
+      }
+      
       setPlayerTeams(teams);
 
-      // Extrahiere einzigartige Vereine
-      const uniqueClubs = teams.reduce((acc, team) => {
-        const clubName = team.club_name;
-        if (!acc.find(club => club.name === clubName)) {
-          acc.push({
-            name: clubName,
-            teams: teams.filter(t => t.club_name === clubName)
-          });
-        }
-        return acc;
-      }, []);
+      // Extrahiere einzigartige Vereine (filtere Teams ohne club_name)
+      const uniqueClubs = teams
+        .filter(team => team.club_name && team.club_name.trim() !== '')  // ✅ Nur Teams mit club_name
+        .reduce((acc, team) => {
+          const clubName = team.club_name;
+          if (!acc.find(club => club.name === clubName)) {
+            acc.push({
+              name: clubName,
+              teams: teams.filter(t => t.club_name === clubName)
+            });
+          }
+          return acc;
+        }, []);
 
       setClubs(uniqueClubs);
       console.log('✅ Clubs extracted:', uniqueClubs);
@@ -1020,83 +1032,117 @@ function SupabaseProfile() {
         )}
       </div>
       
-      {/* ✅ NEU: Tab-Navigation */}
+      {/* ✅ NEU: Tab-Navigation - RESPONSIVE */}
       {!isSetup && (
         <div className="fade-in" style={{ marginBottom: '1.5rem' }}>
-          <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '2px solid #e5e7eb', paddingBottom: '0.5rem' }}>
+          <div style={{ 
+            display: 'grid',
+            gridTemplateColumns: 'repeat(4, 1fr)',
+            gap: '0.5rem',
+            borderBottom: '2px solid #e5e7eb',
+            paddingBottom: '0.5rem'
+          }}>
+            {/* Tab 1: Spielbilanz */}
             <button
               onClick={() => setActiveTab('spielbilanz')}
               style={{
-                padding: '0.75rem 1.5rem',
+                padding: '0.75rem 0.5rem',
                 background: activeTab === 'spielbilanz' ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' : 'white',
                 color: activeTab === 'spielbilanz' ? 'white' : '#1f2937',
                 border: activeTab === 'spielbilanz' ? '2px solid #1e40af' : '2px solid #e5e7eb',
                 borderRadius: '8px 8px 0 0',
                 cursor: 'pointer',
-                fontSize: '0.875rem',
+                fontSize: '0.75rem',
                 fontWeight: '600',
                 transition: 'all 0.2s',
-                borderBottom: activeTab === 'spielbilanz' ? '2px solid #3b82f6' : 'none'
+                borderBottom: activeTab === 'spielbilanz' ? '2px solid #3b82f6' : 'none',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '0.25rem'
               }}
             >
-              📊 Spielbilanz
+              <span style={{ fontSize: '1.5rem' }}>📊</span>
+              <span className="tab-label-desktop">Spielbilanz</span>
+              <span className="tab-label-mobile">Bilanz</span>
             </button>
             
+            {/* Tab 2: Teams */}
             <button
               onClick={() => setActiveTab('teams')}
               style={{
-                padding: '0.75rem 1.5rem',
+                padding: '0.75rem 0.5rem',
                 background: activeTab === 'teams' ? 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)' : 'white',
                 color: activeTab === 'teams' ? 'white' : '#1f2937',
                 border: activeTab === 'teams' ? '2px solid #6d28d9' : '2px solid #e5e7eb',
                 borderRadius: '8px 8px 0 0',
                 cursor: 'pointer',
-                fontSize: '0.875rem',
+                fontSize: '0.75rem',
                 fontWeight: '600',
                 transition: 'all 0.2s',
-                borderBottom: activeTab === 'teams' ? '2px solid #8b5cf6' : 'none'
+                borderBottom: activeTab === 'teams' ? '2px solid #8b5cf6' : 'none',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '0.25rem'
               }}
             >
-              🏢 Verein(e) & Teams
+              <span style={{ fontSize: '1.5rem' }}>🏢</span>
+              <span className="tab-label-desktop">Verein(e) & Teams</span>
+              <span className="tab-label-mobile">Teams</span>
             </button>
             
+            {/* Tab 3: Tennismates */}
             <button
               onClick={() => {
                 setActiveTab('tennismates');
                 if (player?.id) loadTennismates(player.id);
               }}
               style={{
-                padding: '0.75rem 1.5rem',
+                padding: '0.75rem 0.5rem',
                 background: activeTab === 'tennismates' ? 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)' : 'white',
                 color: activeTab === 'tennismates' ? 'white' : '#1f2937',
                 border: activeTab === 'tennismates' ? '2px solid #be185d' : '2px solid #e5e7eb',
                 borderRadius: '8px 8px 0 0',
                 cursor: 'pointer',
-                fontSize: '0.875rem',
+                fontSize: '0.75rem',
                 fontWeight: '600',
                 transition: 'all 0.2s',
-                borderBottom: activeTab === 'tennismates' ? '2px solid #ec4899' : 'none'
+                borderBottom: activeTab === 'tennismates' ? '2px solid #ec4899' : 'none',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '0.25rem'
               }}
             >
-              🎾 Tennismates
+              <span style={{ fontSize: '1.5rem' }}>🎾</span>
+              <span className="tab-label-desktop">Tennismates</span>
+              <span className="tab-label-mobile">Mates</span>
             </button>
             
+            {/* Tab 4: Details */}
             <button
               onClick={() => setActiveTab('details')}
               style={{
-                padding: '0.75rem 1.5rem',
+                padding: '0.75rem 0.5rem',
                 background: activeTab === 'details' ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'white',
                 color: activeTab === 'details' ? 'white' : '#1f2937',
                 border: activeTab === 'details' ? '2px solid #047857' : '2px solid #e5e7eb',
                 borderRadius: '8px 8px 0 0',
                 cursor: 'pointer',
-                fontSize: '0.875rem',
+                fontSize: '0.75rem',
                 fontWeight: '600',
                 transition: 'all 0.2s',
-                borderBottom: activeTab === 'details' ? '2px solid #10b981' : 'none'
+                borderBottom: activeTab === 'details' ? '2px solid #10b981' : 'none',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '0.25rem'
               }}
             >
-              👤 Persönliche Details
+              <span style={{ fontSize: '1.5rem' }}>👤</span>
+              <span className="tab-label-desktop">Persönliche Details</span>
+              <span className="tab-label-mobile">Profil</span>
             </button>
           </div>
         </div>
@@ -1213,7 +1259,7 @@ function SupabaseProfile() {
                               }}>
                                 <div style={{ flex: '1 1 200px' }}>
                                   <h4 style={{ margin: '0 0 0.25rem 0', fontSize: '1.25rem', fontWeight: 700, color: '#1f2937' }}>
-                                    {team.category} {team.team_name}. Mannschaft
+                                    {team.category || 'Unbekannt'} {team.team_name || '?'}. Mannschaft
                                   </h4>
                                   <p style={{ margin: 0, fontSize: '0.9rem', color: '#6b7280', fontWeight: 500 }}>
                                     {team.region || 'Mittelrhein'}

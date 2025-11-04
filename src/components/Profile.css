@@ -845,3 +845,33 @@
   }
 }
 
+/* ============================================
+   TAB NAVIGATION - RESPONSIVE
+   ============================================ */
+
+/* Desktop: Volle Labels */
+.tab-label-desktop {
+  display: inline;
+}
+
+.tab-label-mobile {
+  display: none;
+}
+
+/* Tablet & Mobile: Kurze Labels */
+@media (max-width: 768px) {
+  .tab-label-desktop {
+    display: none;
+  }
+  
+  .tab-label-mobile {
+    display: inline;
+  }
+}
+
+/* Extra Small: Noch kompakter */
+@media (max-width: 480px) {
+  .tab-label-mobile {
+    font-size: 0.65rem !important;
+  }
+}

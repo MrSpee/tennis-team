@@ -357,9 +357,9 @@ const Results = () => {
         if (result.winner === 'home') {
           matchScoresMap[result.matchday_id].home++;
           console.log(`  ✅ Home win for match ${result.matchday_id}`);
-        } else if (result.winner === 'away') {
+        } else if (result.winner === 'guest' || result.winner === 'away') {
           matchScoresMap[result.matchday_id].away++;
-          console.log(`  ✅ Away win for match ${result.matchday_id}`);
+          console.log(`  ✅ Away/Guest win for match ${result.matchday_id}`);
         }
         
         // ✅ Zähle ALLE Ergebnisse mit winner (nicht nur is_completed)
@@ -380,14 +380,19 @@ const Results = () => {
       
       (clubMatches || []).forEach(match => {
         const scores = matchScoresMap[match.id];
+        const isHomeTeam = teamIds.includes(match.home_team_id);
+        const isAwayTeam = teamIds.includes(match.away_team_id);
         
         console.log(`🔍 Match ${match.id}:`, {
+          date: match.match_date,
           hasScores: !!scores,
           scores,
           home_team_id: match.home_team_id,
           away_team_id: match.away_team_id,
-          isVKCHome: teamIds.includes(match.home_team_id),
-          isVKCAway: teamIds.includes(match.away_team_id)
+          isOurTeamHome: isHomeTeam,
+          isOurTeamAway: isAwayTeam,
+          dbHomeScore: match.home_score,
+          dbAwayScore: match.away_score
         });
         
         // Prüfe ob Match echte Ergebnisse hat
