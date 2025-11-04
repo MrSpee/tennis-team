@@ -750,13 +750,23 @@ const ImportTab = () => {
         const homeTeamId = await findOrCreateTeamGeneric(match.home_team);
         const awayTeamId = await findOrCreateTeamGeneric(match.away_team);
         
+        // Parse court_range (z.B. "3+4" → court_number=3, court_number_end=4)
+        let courtNumber = null;
+        let courtNumberEnd = null;
+        if (match.court_range) {
+          const parts = match.court_range.split(/[+-]/);
+          courtNumber = parseInt(parts[0]) || null;
+          courtNumberEnd = parts[1] ? parseInt(parts[1]) : null;
+        }
+        
         matchdaysToCreate.push({
           match_date: match.match_date,
           start_time: match.start_time || null,
           home_team_id: homeTeamId,
           away_team_id: awayTeamId,
           venue: match.venue || null,
-          court_number_start: match.court_range ? parseInt(match.court_range.split(/[+-]/)[0]) : null,
+          court_number: courtNumber,
+          court_number_end: courtNumberEnd,
           season: `${season.charAt(0).toUpperCase() + season.slice(1)} ${year}`,
           status: match.status === 'offen' ? 'scheduled' : 'completed',
           home_score: match.status === 'completed' ? parseInt(match.match_points?.split(':')[0] || 0) : null,
