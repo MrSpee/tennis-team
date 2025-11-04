@@ -2741,6 +2741,63 @@ Die KI erkennt automatisch:
               Bestehende Teams werden erkannt und wiederverwendet.
             </div>
             
+            {/* Matchday-Liste */}
+            <div style={{ marginBottom: '1.5rem' }}>
+              <h4 style={{ marginBottom: '0.75rem', fontSize: '1rem', fontWeight: '600' }}>
+                📋 Matchdays im Detail:
+              </h4>
+              <div style={{ 
+                maxHeight: '400px', 
+                overflowY: 'auto',
+                background: 'white',
+                borderRadius: '8px',
+                border: '1px solid #d1d5db'
+              }}>
+                {parsedData.matches.map((match, idx) => (
+                  <div 
+                    key={idx}
+                    style={{
+                      padding: '0.75rem',
+                      borderBottom: idx < parsedData.matches.length - 1 ? '1px solid #e5e7eb' : 'none',
+                      fontSize: '0.875rem'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.25rem' }}>
+                      <div style={{ fontWeight: '600', color: '#111827' }}>
+                        {match.home_team} <span style={{ color: '#9ca3af' }}>vs</span> {match.away_team}
+                      </div>
+                      {match.match_points && match.match_points !== '0:0' && (
+                        <div style={{ 
+                          fontWeight: '700',
+                          color: '#10b981',
+                          padding: '0.125rem 0.5rem',
+                          background: '#d1fae5',
+                          borderRadius: '4px'
+                        }}>
+                          {match.match_points}
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', color: '#6b7280', fontSize: '0.8rem' }}>
+                      {match.match_date && (
+                        <span>📅 {new Date(match.match_date).toLocaleDateString('de-DE')}</span>
+                      )}
+                      {match.start_time && (
+                        <span>🕐 {match.start_time}</span>
+                      )}
+                      {match.venue && (
+                        <span>📍 {match.venue}</span>
+                      )}
+                      {match.court_range && (
+                        <span>🎾 Plätze {match.court_range}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
               <button
                 onClick={async () => {
