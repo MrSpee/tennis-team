@@ -430,41 +430,47 @@ const ImportTab = () => {
       const parsed = result.data || result;
       setParsedData(parsed);
       
-      // NEU: Führe Fuzzy Matching für Club, Team, League durch
-      console.log('🔍 Performing entity fuzzy-matching...');
-      try {
-        const review = await MatchdayImportService.analyzeParsedData(parsed);
-        setMatchingReview(review);
-        console.log('✅ Matching review:', review);
-        
-        // Merge Review-Ergebnisse zurück in parsedData (für späteren Import)
-        if (review.club?.matched) {
-          parsed.team_info = parsed.team_info || {};
-          parsed.team_info.matched_club_id = review.club.matched.id;
-          parsed.team_info.matched_club_name = review.club.matched.name;
+      // ✅ LIGA-MODUS: Überspringe Review, zeige direkt einfache Vorschau
+      if (importMode === 'league' || parsed.team_info?.club_name === 'GENERIC_LEAGUE_SCHEDULE') {
+        console.log('🏆 Liga-Modus: Überspringe Fuzzy-Matching, zeige direkte Vorschau');
+        // Keine Review notwendig - User kann direkt importieren
+      } else {
+        // TEAM-MODUS: Führe Fuzzy Matching für Club, Team, League durch
+        console.log('🔍 Performing entity fuzzy-matching...');
+        try {
+          const review = await MatchdayImportService.analyzeParsedData(parsed);
+          setMatchingReview(review);
+          console.log('✅ Matching review:', review);
+          
+          // Merge Review-Ergebnisse zurück in parsedData (für späteren Import)
+          if (review.club?.matched) {
+            parsed.team_info = parsed.team_info || {};
+            parsed.team_info.matched_club_id = review.club.matched.id;
+            parsed.team_info.matched_club_name = review.club.matched.name;
+          }
+          
+          if (review.team?.matched) {
+            parsed.team_info.matched_team_id = review.team.matched.id;
+            parsed.team_info.matched_team_name = review.team.matched.team_name || review.team.matched.name;
+          }
+          
+          if (review.league) {
+            parsed.team_info.matched_league = review.league.normalized;
+            parsed.team_info.matched_group = review.league.group;
+          }
+          
+          // Zeige Review-Panel wenn etwas überprüft werden muss
+          const needsReview = review.club?.needsReview || review.team?.needsReview || 
+                             review.league?.needsReview ||
+                             review.matches?.some(m => m.needsReview);
+          
+          if (needsReview) {
+            setShowReview(true);
+          }
+        } catch (reviewError) {
+          console.warn('⚠️ Review-Matching fehlgeschlagen (weiterhin nutzbar):', reviewError);
+          // Fehler ist nicht kritisch - User kann trotzdem importieren
         }
-        
-        if (review.team?.matched) {
-          parsed.team_info.matched_team_id = review.team.matched.id;
-          parsed.team_info.matched_team_name = review.team.matched.team_name || review.team.matched.name;
-        }
-        
-        if (review.league) {
-          parsed.team_info.matched_league = review.league.normalized;
-          parsed.team_info.matched_group = review.league.group;
-        }
-        
-        // Zeige Review-Panel wenn etwas überprüft werden muss
-        const needsReview = review.club?.needsReview || review.team?.needsReview || 
-                           review.league?.needsReview ||
-                           review.matches?.some(m => m.needsReview);
-        
-        if (needsReview) {
-          setShowReview(true);
-        }
-      } catch (reviewError) {
-        console.warn('⚠️ Review-Matching fehlgeschlagen (weiterhin nutzbar):', reviewError);
-        // Fehler ist nicht kritisch - User kann trotzdem importieren
       }
       
       // Auto-Select: Alle Matches
@@ -658,24 +664,41 @@ const ImportTab = () => {
         
         console.log(`🔍 Suche Team: ${clubName} ${teamNumber} (${category})`);
         
-        // Versuche Team zu finden
-        const clubMatch = await MatchdayImportService.matchClub(clubName);
+        // Versuche Team zu finden (mit niedrigerer Threshold für besseres Matching)
+        const clubMatch = await MatchdayImportService.matchClub(clubName, 0.7);
         let clubId = clubMatch.match?.id;
         
         if (!clubId) {
-          // Club erstellen
-          console.log(`➕ Erstelle neuen Club: ${clubName}`);
-          const { data: newClub, error } = await supabase
-            .rpc('create_club_as_super_admin', {
-              p_name: clubName,
-              p_city: null,
-              p_federation: 'TVM',
-              p_bundesland: null,
-              p_website: null
-            });
+          // Nochmal direkt in DB suchen mit LIKE
+          console.log(`🔍 Direct DB search for club: ${clubName}`);
+          const { data: existingClub } = await supabase
+            .from('club_info')
+            .select('id, name')
+            .ilike('name', `%${clubName}%`)
+            .limit(1)
+            .maybeSingle();
           
-          if (error) throw error;
-          clubId = Array.isArray(newClub) ? newClub[0].id : newClub.id;
+          if (existingClub) {
+            console.log(`✅ Club gefunden via direkter Suche: ${existingClub.name}`);
+            clubId = existingClub.id;
+          } else {
+            // Club WIRKLICH erstellen (mit Stadt-Fallback)
+            console.log(`➕ Erstelle neuen Club: ${clubName}`);
+            // Extrahiere Stadt aus Liga-Header falls vorhanden
+            const region = parsedData.team_info.league.includes('Leverkusen') ? 'Leverkusen' : 'Köln';
+            
+            const { data: newClub, error } = await supabase
+              .rpc('create_club_as_super_admin', {
+                p_name: clubName,
+                p_city: region, // Fallback: Nutze Region aus Liga-Name
+                p_federation: 'TVM',
+                p_bundesland: 'Nordrhein-Westfalen',
+                p_website: null
+              });
+            
+            if (error) throw error;
+            clubId = Array.isArray(newClub) ? newClub[0].id : newClub.id;
+          }
         }
         
         // Team finden oder erstellen
@@ -722,6 +745,8 @@ const ImportTab = () => {
       const matchdaysToCreate = [];
       
       for (const match of matchesToImport) {
+        console.log(`📋 Match: ${match.home_team} vs ${match.away_team} | Platz: ${match.court_range || 'N/A'} | Venue: ${match.venue || 'N/A'}`);
+        
         const homeTeamId = await findOrCreateTeamGeneric(match.home_team);
         const awayTeamId = await findOrCreateTeamGeneric(match.away_team);
         
@@ -778,7 +803,7 @@ const ImportTab = () => {
     setError(null);
 
     try {
-      // Nutze editableMatches falls vorhanden (für Datum-Fixes)
+      // Nutze editableMatches falls vorhanden (für Datum-Fixes + Venue + Court)
       const matchesToImport = selectedMatches.map(idx => {
         const originalMatch = parsedData.matches[idx];
         const editedMatch = editableMatches[idx];
@@ -787,7 +812,9 @@ const ImportTab = () => {
         return {
           ...originalMatch,
           match_date: editedMatch?.match_date || originalMatch.match_date,
-          start_time: editedMatch?.start_time || originalMatch.start_time
+          start_time: editedMatch?.start_time || originalMatch.start_time,
+          venue: editedMatch?.venue || originalMatch.venue,
+          court_range: editedMatch?.court_range || originalMatch.court_range
         };
       });
       
@@ -2664,8 +2691,99 @@ Die KI erkennt automatisch:
         </div>
       )}
 
-      {/* Parsed Matches Vorschau - DIREKT NACH TEAM-INFO */}
-      {parsedData && parsedData.matches && parsedData.matches.length > 0 && (
+      {/* LIGA-MODUS: Vereinfachte Bestätigungs-Vorschau */}
+      {parsedData && (importMode === 'league' || parsedData.team_info?.club_name === 'GENERIC_LEAGUE_SCHEDULE') && parsedData.matches?.length > 0 && (
+        <div className="import-section" style={{
+          background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+          padding: '1.5rem',
+          borderRadius: '12px',
+          marginTop: '1.5rem',
+          border: '2px solid #f59e0b'
+        }}>
+          <div style={{ marginBottom: '1.5rem' }}>
+            <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.25rem', fontWeight: '700', color: '#92400e' }}>
+              🏆 Liga-Import Bestätigung
+            </h3>
+            
+            <div style={{ 
+              background: 'white', 
+              padding: '1rem', 
+              borderRadius: '8px',
+              marginBottom: '1rem'
+            }}>
+              <div style={{ display: 'grid', gap: '0.5rem', fontSize: '0.95rem' }}>
+                <div><strong>📋 Kategorie:</strong> {parsedData.team_info?.category || 'N/A'}</div>
+                <div><strong>🏆 Liga:</strong> {parsedData.team_info?.league || 'N/A'}</div>
+                <div><strong>📅 Season:</strong> {parsedData.season} {parsedData.year}</div>
+                <div><strong>🎾 Matchdays:</strong> {parsedData.matches.length} Spiele</div>
+                <div><strong>👥 Teams:</strong> {[...new Set(parsedData.matches.flatMap(m => [m.home_team, m.away_team]))].length} verschiedene Teams</div>
+              </div>
+            </div>
+            
+            <div style={{ 
+              padding: '0.75rem', 
+              background: '#fef3c7', 
+              borderRadius: '6px',
+              fontSize: '0.9rem',
+              marginBottom: '1rem'
+            }}>
+              ℹ️ <strong>Info:</strong> Alle Teams und Matchdays werden automatisch in der Datenbank angelegt. 
+              Bestehende Teams werden erkannt und wiederverwendet.
+            </div>
+            
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+              <button
+                onClick={async () => {
+                  setIsProcessing(true);
+                  try {
+                    await handleGenericLeagueImport(parsedData.matches);
+                  } finally {
+                    setIsProcessing(false);
+                  }
+                }}
+                disabled={isProcessing}
+                style={{
+                  padding: '1rem 2rem',
+                  fontSize: '1.1rem',
+                  fontWeight: '700',
+                  background: '#10b981',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: isProcessing ? 'not-allowed' : 'pointer',
+                  opacity: isProcessing ? 0.7 : 1
+                }}
+              >
+                {isProcessing ? '⏳ Importiere...' : '✅ Jetzt importieren'}
+              </button>
+              
+              <button
+                onClick={() => {
+                  setParsedData(null);
+                  setInputText('');
+                  setError(null);
+                }}
+                disabled={isProcessing}
+                style={{
+                  padding: '1rem 2rem',
+                  fontSize: '1rem',
+                  background: '#6b7280',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: isProcessing ? 'not-allowed' : 'pointer',
+                  opacity: isProcessing ? 0.7 : 1
+                }}
+              >
+                ❌ Abbrechen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TEAM-MODUS: Parsed Matches Vorschau - DIREKT NACH TEAM-INFO */}
+      {parsedData && importMode === 'team' && parsedData.matches && parsedData.matches.length > 0 && (
         <div className="import-section" style={{
           background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
           border: '2px solid #10b981',
@@ -2688,7 +2806,9 @@ Die KI erkennt automatisch:
             {parsedData.matches.map((match, idx) => {
               const editable = editableMatches[idx] || {
                 match_date: match.match_date || '',
-                start_time: match.start_time || ''
+                start_time: match.start_time || '',
+                venue: match.venue || '',
+                court_range: match.court_range || ''
               };
               
               // Check if date is invalid
@@ -2778,12 +2898,59 @@ Die KI erkennt automatisch:
                     </strong>
                   </div>
                   
-                  {match.venue && (
-                    <div className="match-venue">
-                      📍 {match.venue}
-                      {match.address && `, ${match.address}`}
-                    </div>
-                  )}
+                  {/* Venue - editierbar */}
+                  <div className="match-venue" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+                    <span style={{ fontWeight: '500', minWidth: '60px' }}>📍 Ort:</span>
+                    <input 
+                      type="text"
+                      value={editable.venue || ''}
+                      onChange={(e) => {
+                        const newEditableMatches = [...editableMatches];
+                        newEditableMatches[idx] = {
+                          ...editable,
+                          venue: e.target.value
+                        };
+                        setEditableMatches(newEditableMatches);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      placeholder="Venue/Spielort"
+                      style={{
+                        flex: 1,
+                        padding: '0.25rem 0.5rem',
+                        fontSize: '0.875rem',
+                        border: '1px solid var(--border)',
+                        borderRadius: '4px',
+                        background: 'var(--surface)'
+                      }}
+                    />
+                  </div>
+                  
+                  {/* Court Range - editierbar */}
+                  <div className="match-court" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+                    <span style={{ fontWeight: '500', minWidth: '60px' }}>🎾 Plätze:</span>
+                    <input 
+                      type="text"
+                      value={editable.court_range || ''}
+                      onChange={(e) => {
+                        const newEditableMatches = [...editableMatches];
+                        newEditableMatches[idx] = {
+                          ...editable,
+                          court_range: e.target.value
+                        };
+                        setEditableMatches(newEditableMatches);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      placeholder="z.B. 3+4 oder 1+2"
+                      style={{
+                        flex: 1,
+                        padding: '0.25rem 0.5rem',
+                        fontSize: '0.875rem',
+                        border: '1px solid var(--border)',
+                        borderRadius: '4px',
+                        background: 'var(--surface)'
+                      }}
+                    />
+                  </div>
                   
                   {match.league && (
                     <div className="match-league">
