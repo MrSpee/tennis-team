@@ -1328,9 +1328,6 @@ function Dashboard() {
                   </div>
                   )}
                   
-                  {/* 🎾 BELAG + SCHUHEMPFEHLUNG - NACH UNTEN */}
-                  <SurfaceInfo matchdayId={match.id} compact={true} />
-                  
                   {/* Ergebnisse anzeigen Button */}
                   <button
                     className="btn-participation"
