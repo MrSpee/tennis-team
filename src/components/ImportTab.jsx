@@ -607,22 +607,39 @@ const ImportTab = () => {
     if (!venueName) return null;
     
     try {
-      // Fuzzy-Search in venues Tabelle
-      const { data, error } = await supabase
-        .from('venues')
-        .select('id')
-        .or(`name.ilike.%${venueName}%,club_name.ilike.%${venueName}%`)
-        .limit(1)
-        .maybeSingle();
+      // 1. Versuche exakte Matches mit Varianten (TH vs Tennishalle, ß vs ss)
+      const searchVariants = [
+        venueName,
+        venueName.replace(/^TH /, 'Tennishalle '),
+        venueName.replace(/^Tennishalle /, 'TH '),
+        venueName.replace('Schloß', 'Schloss'),
+        venueName.replace('Schloss', 'Schloß')
+      ];
       
-      if (error) {
-        console.warn(`⚠️ Venue "${venueName}" nicht gefunden:`, error);
-        return null;
+      for (const variant of searchVariants) {
+        const { data, error } = await supabase
+          .from('venues')
+          .select('id, name')
+          .ilike('name', variant)
+          .limit(1)
+          .maybeSingle();
+        
+        if (!error && data) {
+          console.log(`✅ Venue exakt: "${venueName}" → "${data.name}" (ID: ${data.id})`);
+          return data.id;
+        }
       }
       
-      if (data) {
-        console.log(`✅ Venue gemappt: "${venueName}" → ${data.id}`);
-        return data.id;
+      // 2. Fuzzy-Search als Fallback
+      const { data, error } = await supabase
+        .from('venues')
+        .select('id, name')
+        .or(`name.ilike.%${venueName}%,club_name.ilike.%${venueName}%`)
+        .limit(5);
+      
+      if (!error && data && data.length > 0) {
+        console.log(`🔍 Venue fuzzy: "${venueName}" → "${data[0].name}" (ID: ${data[0].id})`);
+        return data[0].id;
       }
       
       console.warn(`⚠️ Venue "${venueName}" nicht in venues Tabelle`);
