@@ -659,8 +659,8 @@ const ImportTab = () => {
         
         // Parse Team-Name (z.B. "VKC Köln 1" → club: "VKC Köln", team: "1")
         const parts = teamName.trim().split(' ');
-        const teamNumber = parts[parts.length - 1];
-        const clubName = parts.slice(0, -1).join(' ');
+        const teamNumber = parts[parts.length - 1].trim(); // ✅ WICHTIG: Trim whitespace!
+        const clubName = parts.slice(0, -1).join(' ').trim();
         
         console.log(`🔍 Suche Team: ${clubName} ${teamNumber} (${category})`);
         
@@ -701,19 +701,22 @@ const ImportTab = () => {
           }
         }
         
-        // Team finden oder erstellen
-        const { data: existingTeam } = await supabase
+        // Team finden oder erstellen (suche alle Teams dieses Clubs mit Category)
+        const { data: existingTeams } = await supabase
           .from('team_info')
-          .select('id')
+          .select('id, team_name')
           .eq('club_id', clubId)
-          .eq('team_name', teamNumber)
-          .eq('category', category)
-          .maybeSingle();
+          .eq('category', category);
+        
+        // ✅ Suche Team mit flexiblem Matching (ignoriert Leerzeichen)
+        const matchedTeam = existingTeams?.find(t => 
+          t.team_name.trim() === teamNumber.trim()
+        );
         
         let teamId;
-        if (existingTeam) {
-          teamId = existingTeam.id;
-          console.log(`✅ Team gefunden: ${teamName}`);
+        if (matchedTeam) {
+          teamId = matchedTeam.id;
+          console.log(`✅ Team gefunden: ${teamName} (DB: "${matchedTeam.team_name}")`);
         } else {
           // Team erstellen
           console.log(`➕ Erstelle neues Team: ${teamName}`);
