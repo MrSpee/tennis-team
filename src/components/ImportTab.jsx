@@ -436,40 +436,40 @@ const ImportTab = () => {
         // Keine Review notwendig - User kann direkt importieren
       } else {
         // TEAM-MODUS: Führe Fuzzy Matching für Club, Team, League durch
-        console.log('🔍 Performing entity fuzzy-matching...');
-        try {
-          const review = await MatchdayImportService.analyzeParsedData(parsed);
-          setMatchingReview(review);
-          console.log('✅ Matching review:', review);
-          
-          // Merge Review-Ergebnisse zurück in parsedData (für späteren Import)
-          if (review.club?.matched) {
-            parsed.team_info = parsed.team_info || {};
-            parsed.team_info.matched_club_id = review.club.matched.id;
-            parsed.team_info.matched_club_name = review.club.matched.name;
-          }
-          
-          if (review.team?.matched) {
-            parsed.team_info.matched_team_id = review.team.matched.id;
-            parsed.team_info.matched_team_name = review.team.matched.team_name || review.team.matched.name;
-          }
-          
-          if (review.league) {
-            parsed.team_info.matched_league = review.league.normalized;
-            parsed.team_info.matched_group = review.league.group;
-          }
-          
-          // Zeige Review-Panel wenn etwas überprüft werden muss
-          const needsReview = review.club?.needsReview || review.team?.needsReview || 
-                             review.league?.needsReview ||
-                             review.matches?.some(m => m.needsReview);
-          
-          if (needsReview) {
-            setShowReview(true);
-          }
-        } catch (reviewError) {
-          console.warn('⚠️ Review-Matching fehlgeschlagen (weiterhin nutzbar):', reviewError);
-          // Fehler ist nicht kritisch - User kann trotzdem importieren
+      console.log('🔍 Performing entity fuzzy-matching...');
+      try {
+        const review = await MatchdayImportService.analyzeParsedData(parsed);
+        setMatchingReview(review);
+        console.log('✅ Matching review:', review);
+        
+        // Merge Review-Ergebnisse zurück in parsedData (für späteren Import)
+        if (review.club?.matched) {
+          parsed.team_info = parsed.team_info || {};
+          parsed.team_info.matched_club_id = review.club.matched.id;
+          parsed.team_info.matched_club_name = review.club.matched.name;
+        }
+        
+        if (review.team?.matched) {
+          parsed.team_info.matched_team_id = review.team.matched.id;
+          parsed.team_info.matched_team_name = review.team.matched.team_name || review.team.matched.name;
+        }
+        
+        if (review.league) {
+          parsed.team_info.matched_league = review.league.normalized;
+          parsed.team_info.matched_group = review.league.group;
+        }
+        
+        // Zeige Review-Panel wenn etwas überprüft werden muss
+        const needsReview = review.club?.needsReview || review.team?.needsReview || 
+                           review.league?.needsReview ||
+                           review.matches?.some(m => m.needsReview);
+        
+        if (needsReview) {
+          setShowReview(true);
+        }
+      } catch (reviewError) {
+        console.warn('⚠️ Review-Matching fehlgeschlagen (weiterhin nutzbar):', reviewError);
+        // Fehler ist nicht kritisch - User kann trotzdem importieren
         }
       }
       
@@ -925,9 +925,9 @@ const ImportTab = () => {
           return teamCache.get(teamName);
         }
         // Parse Team-Name (z.B. "SV RG Sürth 1" → club: "SV RG Sürth", team: "1")
-        const parts = teamName.split(' ');
-        const clubName = parts.slice(0, -1).join(' ') || teamName;
-        const tn = parts[parts.length - 1] || null;
+        const parts = teamName.trim().split(' ');
+        const clubName = parts.slice(0, -1).join(' ').trim() || teamName.trim();
+        const tn = parts[parts.length - 1]?.trim() || null;
         
         // NEU: Versuche Fuzzy Matching für Club
         try {
@@ -981,7 +981,7 @@ const ImportTab = () => {
             .insert({
               club_name: clubName,
               club_id: clubId, // NEU: Link zu Club falls vorhanden
-              team_name: tn,
+              team_name: tn?.trim(), // ✅ Trim whitespace!
               category: ourTeamData.category || null
             })
             .select('id')
@@ -1018,7 +1018,7 @@ const ImportTab = () => {
             .from('team_info')
             .insert({
               club_name: clubName,
-              team_name: tn,
+              team_name: tn?.trim(), // ✅ Trim whitespace!
               category: ourTeamData.category || null
             })
             .select('id')
@@ -2993,7 +2993,7 @@ Die KI erkennt automatisch:
                         background: 'var(--surface)'
                       }}
                     />
-                  </div>
+                    </div>
                   
                   {/* Court Range - editierbar */}
                   <div className="match-court" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
