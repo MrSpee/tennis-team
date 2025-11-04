@@ -681,9 +681,13 @@ const ImportTab = () => {
         
         console.log(`🔍 Suche Team: ${clubName} ${teamNumber} (${category})`);
         
-        // Versuche Team zu finden (mit niedrigerer Threshold für besseres Matching)
-        const clubMatch = await MatchdayImportService.matchClub(clubName, 0.7);
+        // Versuche Team zu finden (mit SEHR niedriger Threshold für robustes Matching)
+        const clubMatch = await MatchdayImportService.matchClub(clubName, 0.5); // ✅ 0.5 statt 0.7!
         let clubId = clubMatch.match?.id;
+        
+        if (clubId) {
+          console.log(`✅ Club gefunden via Fuzzy: "${clubMatch.match.name}"`);
+        }
         
         if (!clubId) {
           // Nochmal direkt in DB suchen mit LIKE
@@ -770,6 +774,9 @@ const ImportTab = () => {
         const homeTeamId = await findOrCreateTeamGeneric(match.home_team);
         const awayTeamId = await findOrCreateTeamGeneric(match.away_team);
         
+        // ✅ Finde venue_id via Venue-Name
+        const venueId = match.venue ? await findVenueId(match.venue) : null;
+        
         // Parse court_range (z.B. "3+4" → court_number=3, court_number_end=4)
         let courtNumber = null;
         let courtNumberEnd = null;
@@ -785,6 +792,7 @@ const ImportTab = () => {
           home_team_id: homeTeamId,
           away_team_id: awayTeamId,
           venue: match.venue || null,
+          venue_id: venueId, // ✅ NEU: venue_id für Surface-Info!
           court_number: courtNumber,
           court_number_end: courtNumberEnd,
           season: `${season.charAt(0).toUpperCase() + season.slice(1)} ${year}`,
