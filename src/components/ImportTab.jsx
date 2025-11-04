@@ -9,6 +9,7 @@ const ImportTab = () => {
   const { player } = useAuth();
   
   // State Management
+  const [importMode, setImportMode] = useState('team'); // 'team' oder 'league'
   const [inputText, setInputText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [parsedData, setParsedData] = useState(null);
@@ -58,6 +59,18 @@ const ImportTab = () => {
     loadAllClubs(); // NEU: Lade alle Vereine für Spieler-Zuordnung
     loadAllTeamsList(); // NEU: Lade alle Teams
   }, [player]);
+
+  // Reset beim Modus-Wechsel
+  useEffect(() => {
+    setParsedData(null);
+    setMatchingReview(null);
+    setSelectedMatches([]);
+    setSelectedPlayers([]);
+    setEditablePlayers([]);
+    setEditableMatches([]);
+    setError(null);
+    setSuccessMessage(null);
+  }, [importMode]);
 
   // NEU: Lade alle Vereine für Spieler-Zuordnung
   const loadAllClubs = async () => {
@@ -615,6 +628,144 @@ const ImportTab = () => {
   };
 
   /**
+   * NEU: Generischer Liga-Import (ohne Team-Zwang)
+   * Importiert ALLE Matchdays einer Liga
+   */
+  const handleGenericLeagueImport = async (matchesToImport) => {
+    try {
+      console.log('🌐 Starting generic league import...');
+      
+      // Extrahiere League-Info
+      const { category, league } = parsedData.team_info;
+      const season = parsedData.season;
+      const year = parsedData.year;
+      
+      console.log(`📋 Liga-Info: ${category} - ${league} (${season} ${year})`);
+      
+      // Team-Cache um Duplikate zu vermeiden
+      const teamCache = new Map();
+      
+      // Helper: Finde oder erstelle Team
+      const findOrCreateTeamGeneric = async (teamName) => {
+        if (teamCache.has(teamName)) {
+          return teamCache.get(teamName);
+        }
+        
+        // Parse Team-Name (z.B. "VKC Köln 1" → club: "VKC Köln", team: "1")
+        const parts = teamName.trim().split(' ');
+        const teamNumber = parts[parts.length - 1];
+        const clubName = parts.slice(0, -1).join(' ');
+        
+        console.log(`🔍 Suche Team: ${clubName} ${teamNumber} (${category})`);
+        
+        // Versuche Team zu finden
+        const clubMatch = await MatchdayImportService.matchClub(clubName);
+        let clubId = clubMatch.match?.id;
+        
+        if (!clubId) {
+          // Club erstellen
+          console.log(`➕ Erstelle neuen Club: ${clubName}`);
+          const { data: newClub, error } = await supabase
+            .rpc('create_club_as_super_admin', {
+              p_name: clubName,
+              p_city: null,
+              p_federation: 'TVM',
+              p_bundesland: null,
+              p_website: null
+            });
+          
+          if (error) throw error;
+          clubId = Array.isArray(newClub) ? newClub[0].id : newClub.id;
+        }
+        
+        // Team finden oder erstellen
+        const { data: existingTeam } = await supabase
+          .from('team_info')
+          .select('id')
+          .eq('club_id', clubId)
+          .eq('team_name', teamNumber)
+          .eq('category', category)
+          .maybeSingle();
+        
+        let teamId;
+        if (existingTeam) {
+          teamId = existingTeam.id;
+          console.log(`✅ Team gefunden: ${teamName}`);
+        } else {
+          // Team erstellen
+          console.log(`➕ Erstelle neues Team: ${teamName}`);
+          const { data: newTeam, error } = await supabase
+            .rpc('create_team_as_super_admin', {
+              p_team_name: teamNumber,
+              p_club_id: clubId,
+              p_category: category,
+              p_region: 'Mittelrhein'
+            });
+          
+          if (error) throw error;
+          teamId = Array.isArray(newTeam) ? newTeam[0].id : newTeam.id;
+          
+          // Team-Season erstellen
+          await supabase.from('team_seasons').insert({
+            team_id: teamId,
+            season: `${season.charAt(0).toUpperCase() + season.slice(1)} ${year}`,
+            league: league,
+            is_active: true
+          });
+        }
+        
+        teamCache.set(teamName, teamId);
+        return teamId;
+      };
+      
+      // Matchdays erstellen
+      const matchdaysToCreate = [];
+      
+      for (const match of matchesToImport) {
+        const homeTeamId = await findOrCreateTeamGeneric(match.home_team);
+        const awayTeamId = await findOrCreateTeamGeneric(match.away_team);
+        
+        matchdaysToCreate.push({
+          match_date: match.match_date,
+          start_time: match.start_time || null,
+          home_team_id: homeTeamId,
+          away_team_id: awayTeamId,
+          venue: match.venue || null,
+          court_number_start: match.court_range ? parseInt(match.court_range.split(/[+-]/)[0]) : null,
+          season: `${season.charAt(0).toUpperCase() + season.slice(1)} ${year}`,
+          status: match.status === 'offen' ? 'scheduled' : 'completed',
+          home_score: match.status === 'completed' ? parseInt(match.match_points?.split(':')[0] || 0) : null,
+          away_score: match.status === 'completed' ? parseInt(match.match_points?.split(':')[1] || 0) : null
+        });
+      }
+      
+      console.log(`📥 Importiere ${matchdaysToCreate.length} Matchdays...`);
+      
+      const { data, error } = await supabase
+        .from('matchdays')
+        .insert(matchdaysToCreate)
+        .select();
+      
+      if (error) throw error;
+      
+      setSuccessMessage(`✅ Erfolgreicher Liga-Import: ${data.length} Matchdays importiert!`);
+      setImportStats({
+        matchesImported: data.length,
+        teamsCreated: teamCache.size
+      });
+      
+      // Reset
+      setParsedData(null);
+      setSelectedMatches([]);
+      setInputText('');
+      
+    } catch (err) {
+      console.error('❌ Generic league import error:', err);
+      setError(`Fehler beim Liga-Import: ${err.message}`);
+    }
+  };
+
+  /**
    * Matches in Supabase importieren
    */
   const handleImportMatches = async () => {
@@ -643,14 +794,11 @@ const ImportTab = () => {
       console.log('💾 Importing matches to Supabase (mit editierten Daten):', matchesToImport);
       
       // ✅ ERKENNUNG: Generischer Liga-Spielplan?
-      const isGenericLeagueSchedule = parsedData.team_info?.club_name === 'GENERIC_LEAGUE_SCHEDULE';
+      const isGenericLeagueSchedule = parsedData.team_info?.club_name === 'GENERIC_LEAGUE_SCHEDULE' || importMode === 'league';
       
       if (isGenericLeagueSchedule) {
-        console.log('🔵 GENERISCHER LIGA-SPIELPLAN erkannt - nutze speziellen Import-Flow');
-        alert('⚠️ HINWEIS: Dies ist ein generischer Liga-Spielplan (alle Teams der Liga).\n\nDu musst zuerst DEIN Team aus dem Spielplan auswählen, damit die Matches korrekt als Heim-/Auswärtsspiele markiert werden können.');
-        
-        // TODO: Hier könnte eine Auswahl-UI für "Mein Team" erscheinen
-        setError('Generische Liga-Spielpläne werden noch nicht vollständig unterstützt. Bitte nutze den spezifischen Spielplan deines Teams von der TVM-Website.');
+        console.log('🔵 GENERISCHER LIGA-SPIELPLAN erkannt - nutze speziellen Import-Flow (ohne Team-Zwang)');
+        await handleGenericLeagueImport(matchesToImport);
         setIsProcessing(false);
         return;
       }
@@ -1873,6 +2021,60 @@ Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele
         <p>Kopiere TVM-Daten hier rein - die KI erkennt automatisch Matches, Spieler & Teams!</p>
       </div>
 
+      {/* NEU: Import-Modus Auswahl */}
+      <div className="import-mode-selector" style={{
+        background: 'var(--surface-elevated)',
+        padding: '1rem',
+        borderRadius: '8px',
+        marginBottom: '1.5rem',
+        border: '1px solid var(--border)'
+      }}>
+        <h3 style={{ marginBottom: '0.75rem', fontSize: '1rem' }}>📂 Import-Typ wählen:</h3>
+        <div style={{ display: 'flex', gap: '1rem' }}>
+          <button
+            onClick={() => setImportMode('team')}
+            className={`mode-btn ${importMode === 'team' ? 'active' : ''}`}
+            style={{
+              flex: 1,
+              padding: '1rem',
+              border: importMode === 'team' ? '2px solid var(--primary)' : '2px solid var(--border)',
+              background: importMode === 'team' ? 'var(--primary-transparent)' : 'var(--surface)',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+          >
+            <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>👥</div>
+            <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>Mein Team</div>
+            <div style={{ fontSize: '0.85rem', opacity: 0.8 }}>
+              Meldeliste, Medenspiele<br />
+              (benötigt: Verein + Team)
+            </div>
+          </button>
+          
+          <button
+            onClick={() => setImportMode('league')}
+            className={`mode-btn ${importMode === 'league' ? 'active' : ''}`}
+            style={{
+              flex: 1,
+              padding: '1rem',
+              border: importMode === 'league' ? '2px solid var(--primary)' : '2px solid var(--border)',
+              background: importMode === 'league' ? 'var(--primary-transparent)' : 'var(--surface)',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+          >
+            <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🏆</div>
+            <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>Liga-Übersicht</div>
+            <div style={{ fontSize: '0.85rem', opacity: 0.8 }}>
+              ALLE Teams & Matchdays<br />
+              (nur: Season + Kategorie + Liga)
+            </div>
+          </button>
+        </div>
+      </div>
+
       {/* Text-Eingabe */}
       <div className="import-section">
         <div className="input-header">
@@ -1890,12 +2092,21 @@ Datum	Spielort	Heim Verein	Gastverein	Matchpunkte	Sätze	Spiele
           id="match-text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
-          placeholder="Kopiere hier die komplette TVM-Seite (inkl. Team-Info und Spielplan)...
+          placeholder={importMode === 'team' 
+            ? `Kopiere hier die komplette TVM-Seite (inkl. Team-Info und Spielplan)...
 
 Die KI erkennt automatisch:
 ✅ Verein & Mannschaft
 ✅ Alle Spieltage
-✅ Spieler (falls Meldeliste dabei)"
+✅ Spieler (falls Meldeliste dabei)`
+            : `Kopiere hier den Liga-Spielplan von TVM...
+
+Die KI erkennt automatisch:
+✅ Season & Kategorie (z.B. "Winter 2025/2026", "Herren 55")
+✅ Liga & Gruppe (z.B. "1. Kreisliga 4-er Gr. 063")
+✅ ALLE Teams der Liga
+✅ ALLE Matchdays mit Datum, Platz, Ergebnissen`
+          }
           rows={12}
           className="match-input"
         />
