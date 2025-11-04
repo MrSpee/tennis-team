@@ -1043,7 +1043,7 @@ const ImportTab = () => {
       }
 
       // SCHRITT 2: Prüfe auf Duplikate
-      const duplicateCheck = await checkForDuplicates(matchesToImport, teamId);
+      const duplicateCheck = await checkForDuplicatesTeamMode(matchesToImport, teamId);
       
       if (duplicateCheck.duplicates.length > 0) {
         const confirmImport = window.confirm(
@@ -1518,9 +1518,9 @@ const ImportTab = () => {
   };
 
   /**
-   * Prüfe auf Duplikate in der Datenbank
+   * Prüfe auf Duplikate in der Datenbank (TEAM-IMPORT)
    */
-  const checkForDuplicates = async (matches, teamId) => {
+  const checkForDuplicatesTeamMode = async (matches, teamId) => {
     try {
       // Hole unser Team
       const { data: ourTeamData } = await supabase
