@@ -297,7 +297,7 @@ export const matchTeam = async (teamName, clubId, category, options = {}) => {
     if (resolvedClubName) {
       const { data: clubTeamsByName, error: nameError } = await supabase
         .from('team_info')
-        .select('id, team_name, club_name, category, group_name')
+        .select('id, team_name, club_name, category')
         .ilike('club_name', `%${resolvedClubName}%`);
       
       if (!nameError && clubTeamsByName) {
@@ -436,28 +436,28 @@ export const matchLeague = async (leagueString, category, group, options = {}) =
     
     if (seasonsError) {
       // Fallback: team_info
-      const { data: teams, error: teamsError } = await supabase
-        .from('team_info')
-        .select('league, group_name, category')
+      const { data: seasons, error: teamsError } = await supabase
+        .from('team_seasons')
+        .select('league, group_name, team_info(category)')
         .not('league', 'is', null);
       
       if (teamsError) throw teamsError;
       
-      const leagueMatches = teams
-        .map(team => {
-          const teamLeagueNorm = normalizeString(team.league || '');
+      const leagueMatches = seasons
+        .map(season => {
+          const teamLeagueNorm = normalizeString(season.league || '');
           const inputLeagueNorm = normalizeString(leagueString);
           const score = calculateSimilarity(inputLeagueNorm, teamLeagueNorm);
           
-          const groupBonus = leagueParts.group && team.group_name && 
-                            normalizeString(leagueParts.group) === normalizeString(team.group_name) ? 0.15 : 0;
-          const categoryBonus = category && team.category &&
-                               normalizeString(category) === normalizeString(team.category) ? 0.1 : 0;
+          const groupBonus = leagueParts.group && season.group_name && 
+                            normalizeString(leagueParts.group) === normalizeString(season.group_name) ? 0.15 : 0;
+          const categoryBonus = category && season.team_info?.category &&
+                               normalizeString(category) === normalizeString(season.team_info.category) ? 0.1 : 0;
           
           return {
-            league: team.league,
-            group: team.group_name,
-            category: team.category,
+            league: season.league,
+            group: season.group_name,
+            category: season.team_info?.category,
             score: Math.min(1.0, score + groupBonus + categoryBonus)
           };
         })

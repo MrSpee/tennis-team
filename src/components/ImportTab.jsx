@@ -642,6 +642,19 @@ const ImportTab = () => {
       
       console.log('💾 Importing matches to Supabase (mit editierten Daten):', matchesToImport);
       
+      // ✅ ERKENNUNG: Generischer Liga-Spielplan?
+      const isGenericLeagueSchedule = parsedData.team_info?.club_name === 'GENERIC_LEAGUE_SCHEDULE';
+      
+      if (isGenericLeagueSchedule) {
+        console.log('🔵 GENERISCHER LIGA-SPIELPLAN erkannt - nutze speziellen Import-Flow');
+        alert('⚠️ HINWEIS: Dies ist ein generischer Liga-Spielplan (alle Teams der Liga).\n\nDu musst zuerst DEIN Team aus dem Spielplan auswählen, damit die Matches korrekt als Heim-/Auswärtsspiele markiert werden können.');
+        
+        // TODO: Hier könnte eine Auswahl-UI für "Mein Team" erscheinen
+        setError('Generische Liga-Spielpläne werden noch nicht vollständig unterstützt. Bitte nutze den spezifischen Spielplan deines Teams von der TVM-Website.');
+        setIsProcessing(false);
+        return;
+      }
+      
       // SCHRITT 1: Finde oder erstelle das Team (inkl. Season)
       // Nutze matched_club_id/matched_team_id aus Review falls vorhanden
       let teamId = null;

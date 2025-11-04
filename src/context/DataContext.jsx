@@ -559,13 +559,22 @@ export function DataProvider({ children }) {
 
         if (data) {
           console.log('✅ Team info loaded:', data);
+          
+          // Lade group_name aus team_seasons (nicht aus team_info!)
+          const { data: seasonData } = await supabase
+            .from('team_seasons')
+            .select('group_name, league')
+            .eq('team_id', data.id)
+            .eq('season', getCurrentSeason())
+            .maybeSingle();
+          
           setTeamInfo({
             id: data.id,
             teamName: data.team_name,
             clubName: data.club_name,
             category: data.category || 'Herren',
-            league: data.league || 'Kreisliga',
-            group: data.group_name || '',
+            league: seasonData?.league || data.league || 'Kreisliga',
+            group: seasonData?.group_name || '',
             region: data.region || 'Köln',
             tvmLink: data.tvm_link || '',
             address: data.address || '',

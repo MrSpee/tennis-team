@@ -24,15 +24,15 @@ const MATCH_SCHEMA = {
       type: "object",
       additionalProperties: false,
       properties: {
-        club_name: { type: "string", description: "Name des Vereins (z.B. 'VKC Köln')" },
-        team_name: { type: "string", description: "Mannschaftsnummer (z.B. '1' aus 'Herren 40 1 (4er)' - ohne Kategorie, ohne Klammern)" },
+        club_name: { type: "string", description: "Name des Vereins (z.B. 'VKC Köln') ODER 'GENERIC_LEAGUE_SCHEDULE' bei generischen Liga-Spielplänen" },
+        team_name: { type: "string", description: "Mannschaftsnummer (z.B. '1' aus 'Herren 40 1 (4er)' - ohne Kategorie, ohne Klammern) ODER leer bei generischen Liga-Spielplänen" },
         category: { type: "string", description: "Kategorie (z.B. 'Herren 40' oder 'Herren 50')" },
         league: { type: "string", description: "Liga-Name (z.B. 'Herren 50 2. Bezirksliga Gr. 054')" },
-        address: { type: "string", description: "Vereinsadresse (falls im Text)" },
-        website: { type: "string", description: "Website URL (falls im Text)" },
-        captain: { type: "string", description: "Mannschaftsführer Name (falls im Text)" }
+        address: { type: "string", description: "Vereinsadresse (falls im Text, sonst leer)" },
+        website: { type: "string", description: "Website URL (falls im Text, sonst leer)" },
+        captain: { type: "string", description: "Mannschaftsführer Name (falls im Text, sonst leer)" }
       },
-      required: ["club_name", "team_name", "category", "league", "address", "website", "captain"]
+      required: ["club_name", "category", "league"]
     },
     
     // Match-Daten
@@ -95,9 +95,40 @@ const SYSTEM_PROMPT = `Du bist ein Experte für das Parsen von Tennis-Meldeliste
 
 Deine Aufgabe: Extrahiere ALLE Informationen (Team, Matches, Spieler) aus dem bereitgestellten Text und gib sie strukturiert im JSON-Format zurück.
 
+**WICHTIG: Es gibt ZWEI verschiedene Formate:**
+
+**FORMAT A: SPEZIFISCHER VEREINS-SPIELPLAN** (wie bisher)
+   - Beginnt mit Vereinsname (z.B. "VKC Köln")
+   - Enthält Vereinsadresse, Website, Mannschaftsführer
+   - Enthält ENTWEDER Meldeliste ODER Spielplan für DIESES Team
+
+**FORMAT B: GENERISCHER LIGA-SPIELPLAN** (NEU!)
+   - Beginnt mit Bezirk und Season (z.B. "Köln-Leverkusen Winter 2025/2026")
+   - Gefolgt von Liga-Info (z.B. "Herren 55 1. Kreisliga 4-er Gr. 063")
+   - Optional: Spielleiter-Info (ignorieren!)
+   - Enthält Tabelle mit ALLEN Teams der Liga (→ IGNORIEREN!)
+   - Enthält Spielplan mit ALLEN Matches der Liga (→ ALLE EXTRAHIEREN!)
+   - **KEINE Vereinsinformationen am Anfang!**
+
+**WIE ERKENNE ICH FORMAT B?**
+   - KEIN Vereinsname am Anfang
+   - Erste Zeile: Bezirk + Season (z.B. "Köln-Leverkusen Winter 2025/2026")
+   - Zweite Zeile: Liga-Kategorie (z.B. "Herren 55 1. Kreisliga 4-er Gr. 063")
+   - Optional: "Spielleiter:" (ignorieren!)
+   - Tabelle mit Überschrift "Tabelle" und Rang/Mannschaft/Begegnungen (→ IGNORIEREN!)
+   - Spielplan mit Überschrift "Spielplan" (→ ALLE MATCHES EXTRAHIEREN!)
+
+**BEI FORMAT B:**
+   - Setze team_info.club_name = "GENERIC_LEAGUE_SCHEDULE"
+   - Setze team_info.team_name = "" (leer)
+   - Erkenne category aus dem Header (z.B. "Herren 55")
+   - Erkenne league aus dem Header (z.B. "Herren 55 1. Kreisliga 4-er Gr. 063")
+   - Setze address = "", website = "", captain = "" (keine Vereinsinfos vorhanden)
+   - Extrahiere ALLE Matches aus dem Spielplan (nicht nur für ein Team!)
+
 WICHTIGE REGELN:
 
-**1. TEAM-INFORMATIONEN:**
+**1. TEAM-INFORMATIONEN (FORMAT A):**
    - Erkenne automatisch den Vereinsnamen (z.B. "VKC Köln")
    - Erkenne die Mannschaft (z.B. "Herren 50 1" oder "Herren 40 1 (4er)")
      * WICHTIG: "1 (4er)" bedeutet team_name = "1", category = "Herren 40"
@@ -423,6 +454,126 @@ BEISPIEL OUTPUT 3 (Spielplan):
       "venue": "TH Schloß Morsbroich",
       "court_range": "14+15",
       "matchday": 3,
+      "match_points": "0:0",
+      "status": "offen"
+    }
+  ],
+  "players": [],
+  "season": "winter",
+  "year": "2025/26"
+}
+
+BEISPIEL INPUT 4 (FORMAT B: GENERISCHER LIGA-SPIELPLAN):
+"""
+Köln-Leverkusen Winter 2025/2026
+Herren 55 1. Kreisliga 4-er Gr. 063
+Spielleiter: Peter Krebs, ,
+Tel: 0 / eMail: peter.krebs@tcfk.de
+
+Tabelle
+ 	Rang	Mannschaft	Begegnungen	S	U	N	Tab.Punkte	Matchpunkte	Sätze	Spiele
+ 	1	VKC Köln 1	1	1	0	0	2:0	6:0	12:0	73:31
+ 	2	TC BW Zündorf 1	1	1	0	0	2:0	5:1	10:2	65:24
+ 	3	TC Rath 1	1	0	0	1	0:2	1:5	2:10	24:65
+ 	4	RTHC Bayer Leverkusen 1	1	0	0	1	0:2	0:6	0:12	31:73
+
+Spielplan
+Datum	Nr.	Spielort	Platz	Heimmannschaft	Gastmannschaft	Matchpunkte	Sätze	Spiele	Spielbericht
+Sa.	25.10.2025 17:00	 	776	Tennishalle Köln-Rath  	3+4 	TC Rath 1	TC BW Zündorf 1	1:5	2:10	24:65	anzeigen 
+Sa.	01.11.2025 15:00	 	777	TH Schloß Morsbroich  	3+4 	VKC Köln 1	RTHC Bayer Leverkusen 1	6:0	12:0	73:31	anzeigen 
+Sa.	24.01.2026 17:00	 	778	RTHC Bayer Leverkusen  	1+2 	TC BW Zündorf 1	VKC Köln 1	 	 	 	offen 
+ 	 	 	779	Tennishalle Köln-Rath  	3+4 	TC Rath 1	RTHC Bayer Leverkusen 1	 	 	 	offen 
+Sa.	07.03.2026 17:00	 	780	RTHC Bayer Leverkusen  	1+2 	RTHC Bayer Leverkusen 1	TC BW Zündorf 1	 	 	 	offen 
+So.	08.03.2026 16:00	 	781	TH Schloß Morsbroich  	3+4 	VKC Köln 1	TC Rath 1	 	 	 	offen
+"""
+
+BEISPIEL OUTPUT 4 (FORMAT B: GENERISCHER LIGA-SPIELPLAN):
+{
+  "team_info": {
+    "club_name": "GENERIC_LEAGUE_SCHEDULE",
+    "team_name": "",
+    "category": "Herren 55",
+    "league": "Herren 55 1. Kreisliga 4-er Gr. 063",
+    "address": "",
+    "website": "",
+    "captain": ""
+  },
+  "matches": [
+    {
+      "match_date": "2025-10-25",
+      "start_time": "17:00",
+      "home_team": "TC Rath 1",
+      "away_team": "TC BW Zündorf 1",
+      "opponent": "",
+      "is_home_match": false,
+      "venue": "Tennishalle Köln-Rath",
+      "court_range": "3+4",
+      "matchday": 1,
+      "match_points": "1:5",
+      "status": "completed"
+    },
+    {
+      "match_date": "2025-11-01",
+      "start_time": "15:00",
+      "home_team": "VKC Köln 1",
+      "away_team": "RTHC Bayer Leverkusen 1",
+      "opponent": "",
+      "is_home_match": false,
+      "venue": "TH Schloß Morsbroich",
+      "court_range": "3+4",
+      "matchday": 2,
+      "match_points": "6:0",
+      "status": "completed"
+    },
+    {
+      "match_date": "2026-01-24",
+      "start_time": "17:00",
+      "home_team": "TC BW Zündorf 1",
+      "away_team": "VKC Köln 1",
+      "opponent": "",
+      "is_home_match": false,
+      "venue": "RTHC Bayer Leverkusen",
+      "court_range": "1+2",
+      "matchday": 3,
+      "match_points": "0:0",
+      "status": "offen"
+    },
+    {
+      "match_date": "2026-01-24",
+      "start_time": "17:00",
+      "home_team": "TC Rath 1",
+      "away_team": "RTHC Bayer Leverkusen 1",
+      "opponent": "",
+      "is_home_match": false,
+      "venue": "Tennishalle Köln-Rath",
+      "court_range": "3+4",
+      "matchday": 3,
+      "match_points": "0:0",
+      "status": "offen"
+    },
+    {
+      "match_date": "2026-03-07",
+      "start_time": "17:00",
+      "home_team": "RTHC Bayer Leverkusen 1",
+      "away_team": "TC BW Zündorf 1",
+      "opponent": "",
+      "is_home_match": false,
+      "venue": "RTHC Bayer Leverkusen",
+      "court_range": "1+2",
+      "matchday": 4,
+      "match_points": "0:0",
+      "status": "offen"
+    },
+    {
+      "match_date": "2026-03-08",
+      "start_time": "16:00",
+      "home_team": "VKC Köln 1",
+      "away_team": "TC Rath 1",
+      "opponent": "",
+      "is_home_match": false,
+      "venue": "TH Schloß Morsbroich",
+      "court_range": "3+4",
+      "matchday": 5,
       "match_points": "0:0",
       "status": "offen"
     }
