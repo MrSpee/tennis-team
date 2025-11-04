@@ -561,11 +561,12 @@ export function DataProvider({ children }) {
           console.log('✅ Team info loaded:', data);
           
           // Lade group_name aus team_seasons (nicht aus team_info!)
+          // Nutze is_active statt hartkodierter Season
           const { data: seasonData } = await supabase
             .from('team_seasons')
             .select('group_name, league')
             .eq('team_id', data.id)
-            .eq('season', getCurrentSeason())
+            .eq('is_active', true)
             .maybeSingle();
           
           setTeamInfo({
