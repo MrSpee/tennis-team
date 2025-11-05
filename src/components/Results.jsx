@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useData } from '../context/DataContext';
+import TeamView from './TeamView';
 import './Results.css';
 import './Dashboard.css';
 
@@ -1435,6 +1436,23 @@ const Results = () => {
           });
           
           return (
+            <>
+              {/* ✅ NEUES TAB-DESIGN (TEST) */}
+              <TeamView 
+                teamId={selectedClubTeamId || selectedTeamId}
+                matches={filteredMatches}
+                matchScores={matchScores}
+                display={display}
+                getMatchStatus={getMatchStatus}
+                calculatePlayerPerspectiveScore={calculatePlayerPerspectiveScore}
+              />
+              
+              {/* ALTE ANSICHT (zum Vergleich - kann später entfernt werden) */}
+              <div style={{ marginTop: '2rem', padding: '1rem', background: '#fef3c7', borderRadius: '12px', border: '2px solid #f59e0b' }}>
+                <p style={{ margin: 0, fontSize: '0.875rem', color: '#92400e', fontWeight: '600' }}>
+                  ⚠️ Alte Ansicht (zum Vergleich) - wird später entfernt
+                </p>
+              </div>
             <div className="fade-in lk-card-full">
               <div className="formkurve-header">
                 <div className="formkurve-title">Alle Spiele</div>
@@ -1624,6 +1642,7 @@ const Results = () => {
               )}
               </div>
             </div>
+            </>
           );
         })()
       ) : (

@@ -986,3 +986,95 @@
     transform: scale(1.02);
   }
 }
+
+/* ✅ Standings Table Styles */
+.standings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.standings-table thead {
+  background: #f9fafb;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.standings-table th {
+  padding: 0.75rem 0.5rem;
+  text-align: center;
+  font-weight: 600;
+  color: #6b7280;
+  border-bottom: 2px solid #e5e7eb;
+  white-space: nowrap;
+}
+
+.standings-table th:nth-child(2) {
+  text-align: left;
+}
+
+.standings-table td {
+  padding: 0.875rem 0.5rem;
+  border-bottom: 1px solid #f3f4f6;
+  text-align: center;
+}
+
+.standings-table td:nth-child(2) {
+  text-align: left;
+}
+
+.standings-table tr.own-team {
+  border-left: 4px solid #3b82f6 !important;
+}
+
+.standings-table tr.own-team td:first-child {
+  border-left: none;
+}
+
+.standings-table .points {
+  font-weight: 700;
+  color: #059669;
+  font-size: 1rem;
+}
+
+/* Mobile: Erste zwei Spalten (Pos + Mannschaft) sticky */
+@media (max-width: 768px) {
+  .standings-table {
+    font-size: 0.75rem;
+  }
+  
+  .standings-table th:first-child,
+  .standings-table td:first-child {
+    position: sticky;
+    left: 0;
+    background: white;
+    z-index: 2;
+    padding-right: 0.25rem;
+  }
+  
+  .standings-table th:nth-child(2),
+  .standings-table td:nth-child(2) {
+    position: sticky;
+    left: 35px;
+    background: white;
+    z-index: 2;
+    min-width: 150px;
+  }
+  
+  .standings-table thead th:first-child,
+  .standings-table thead th:nth-child(2) {
+    background: #f9fafb;
+    z-index: 3;
+  }
+  
+  .standings-table tr.own-team td:first-child,
+  .standings-table tr.own-team td:nth-child(2) {
+    background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+  }
+  
+  .standings-table th,
+  .standings-table td {
+    padding: 0.5rem 0.25rem;
+  }
+}

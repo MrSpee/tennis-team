@@ -1,19 +1,60 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient';
 import './Login.css';
 
 function AppLogin() {
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [sendingReset, setSendingReset] = useState(false);
   
   const auth = useAuth();
   const navigate = useNavigate();
+
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    setSendingReset(true);
+
+    try {
+      console.log('🔄 Sending password reset email to:', resetEmail);
+      
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+        redirectTo: `${window.location.origin}/password-reset`
+      });
+
+      if (resetError) {
+        console.error('❌ Password reset error:', resetError);
+        setError(`Fehler beim Versenden: ${resetError.message}`);
+        setSendingReset(false);
+        return;
+      }
+
+      console.log('✅ Password reset email sent');
+      setSuccess('📧 Super! Wir haben dir eine E-Mail geschickt. Schau in dein Postfach (auch im Spam-Ordner!) und klicke auf den Link zum Passwort zurücksetzen.');
+      setResetEmail('');
+      
+      // Nach 3 Sekunden zurück zum Login
+      setTimeout(() => {
+        setShowForgotPassword(false);
+        setSuccess('');
+      }, 5000);
+      
+    } catch (err) {
+      console.error('❌ Password reset exception:', err);
+      setError('Fehler: ' + err.message);
+    } finally {
+      setSendingReset(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -159,6 +200,29 @@ function AppLogin() {
               minLength={6}
               required
             />
+            {!isRegister && (
+              <div style={{ marginTop: '0.5rem', textAlign: 'right' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForgotPassword(true);
+                    setError('');
+                    setSuccess('');
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#3498db',
+                    fontSize: '0.875rem',
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    padding: '0'
+                  }}
+                >
+                  Passwort vergessen?
+                </button>
+              </div>
+            )}
           </div>
 
           {error && (
@@ -232,6 +296,118 @@ function AppLogin() {
           </button>
         </div>
       </div>
+
+      {/* Passwort vergessen Modal */}
+      {showForgotPassword && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '1rem'
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '16px',
+            padding: '2rem',
+            maxWidth: '500px',
+            width: '100%',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+          }}>
+            <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
+              <div style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>🔑</div>
+              <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.5rem', fontWeight: '700' }}>
+                Passwort vergessen?
+              </h2>
+              <p style={{ margin: 0, fontSize: '0.875rem', color: '#6b7280' }}>
+                Kein Problem! Gib deine E-Mail-Adresse ein und wir schicken dir einen Link zum Zurücksetzen.
+              </p>
+            </div>
+
+            {error && (
+              <div className="error-message" style={{ marginBottom: '1rem' }}>
+                ❌ {error}
+              </div>
+            )}
+
+            {success && (
+              <div className="success-message" style={{ marginBottom: '1rem' }}>
+                ✅ {success}
+              </div>
+            )}
+
+            <form onSubmit={handleForgotPassword}>
+              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }}>
+                  ✉️ E-Mail-Adresse
+                </label>
+                <input
+                  type="email"
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                  placeholder="max@example.com"
+                  required
+                  disabled={sendingReset}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '2px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '1rem'
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForgotPassword(false);
+                    setError('');
+                    setSuccess('');
+                    setResetEmail('');
+                  }}
+                  disabled={sendingReset}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    background: '#f3f4f6',
+                    color: '#374151',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    fontWeight: '600',
+                    cursor: sendingReset ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  Abbrechen
+                </button>
+                <button
+                  type="submit"
+                  disabled={sendingReset}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    background: sendingReset ? '#9ca3af' : '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    fontWeight: '600',
+                    cursor: sendingReset ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {sendingReset ? '⏳ Sende E-Mail...' : '📧 Link senden'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
