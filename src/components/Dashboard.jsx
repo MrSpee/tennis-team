@@ -837,27 +837,20 @@ function Dashboard() {
           onClick={() => navigate('/profile?tab=tennismates')}
         >
           <div className="lk-card-full">
-            <div className="formkurve-header" style={{
-              background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
-              borderRadius: '12px 12px 0 0'
-            }}>
-              <div className="formkurve-title" style={{ color: 'white' }}>
-                🎾 Deine Tennismates
-              </div>
-              <div style={{
-                background: 'rgba(255, 255, 255, 0.2)',
+            <div className="formkurve-header">
+              <div className="formkurve-title">Deine Tennismates</div>
+              {/* Vernetzungs-Badge oben rechts - wie improvement-badge */}
+              <div className="improvement-badge-top neutral" style={{
+                background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
                 color: 'white',
-                padding: '0.25rem 0.75rem',
-                borderRadius: '12px',
-                fontSize: '0.75rem',
-                fontWeight: '600',
-                border: '1px solid rgba(255, 255, 255, 0.3)'
+                border: '2px solid #7c3aed'
               }}>
-                {socialStats.totalConnections} {socialStats.totalConnections === 1 ? 'Vernetzung' : 'Vernetzungen'}
+                <span className="badge-icon">🤝</span>
+                <span className="badge-value">{socialStats.totalConnections}</span>
               </div>
             </div>
             
-            <div className="season-content" style={{ padding: '0.75rem' }}>
+            <div className="sparkline-container">
               {/* Stats Grid - SEHR KOMPAKT */}
               <div style={{
                 display: 'grid',

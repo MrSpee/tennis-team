@@ -56,3 +56,4 @@ WHERE club_name = 'VKC Köln'
   AND category = 'Herren 55';
 
 
+

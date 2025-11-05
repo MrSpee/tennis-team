@@ -310,3 +310,4 @@ SELECT * FROM create_club_as_super_admin('Test', 'München', 'BTV', 'Bayern', nu
 
 
 
+

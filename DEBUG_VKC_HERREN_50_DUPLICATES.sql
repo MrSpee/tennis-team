@@ -52,3 +52,4 @@ ORDER BY total_score DESC, created_at ASC;
 
 
 
+
