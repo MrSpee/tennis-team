@@ -1724,7 +1724,6 @@ function SupabaseProfile() {
                 type="file"
                 id="profileImage"
                 accept="image/*,image/heic,image/heif"
-                capture="environment"
                 onChange={handleImageUpload}
                 disabled={isViewingOtherPlayer || isUploading}
                 style={{ display: 'none' }}
