@@ -94,8 +94,8 @@ function PasswordResetPage() {
       
       // Nach 3 Sekunden zur App weiterleiten
       setTimeout(() => {
-        console.log('🔄 Redirecting to dashboard...');
-        navigate('/dashboard');
+        console.log('🔄 Redirecting to home...');
+        navigate('/');
       }, 3000);
 
     } catch (error) {
