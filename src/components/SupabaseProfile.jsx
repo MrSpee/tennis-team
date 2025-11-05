@@ -834,6 +834,9 @@ function SupabaseProfile() {
       userAgent: navigator.userAgent
     });
 
+    // Reset input nach Auswahl, damit dasselbe Bild erneut hochgeladen werden kann
+    e.target.value = null;
+
     // Validiere Dateityp - iPhone kann verschiedene MIME-Types haben
     const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif'];
     const isValidType = validTypes.includes(file.type.toLowerCase()) || file.type.startsWith('image/');

@@ -60,3 +60,4 @@ WHERE ti.club_name ILIKE '%VKC%'
   AND ti.category = 'Herren 30';
 
 
+

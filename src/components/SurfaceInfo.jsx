@@ -6,7 +6,7 @@ import './SurfaceInfo.css';
  * Zeigt Belag-Info und Schuhempfehlung für ein Match
  * Prominent und visuell ansprechend
  */
-function SurfaceInfo({ matchdayId, compact = false }) {
+function SurfaceInfo({ matchdayId, compact = false, hideShoes = false }) {
   const [surfaceData, setSurfaceData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -58,8 +58,12 @@ function SurfaceInfo({ matchdayId, compact = false }) {
       <div className="surface-info-compact">
         <span className="surface-icon">{surfaceData.icon_emoji || '🎾'}</span>
         <span className="surface-name">{surfaceData.surface_name}</span>
-        <span className="shoe-icon">👟</span>
-        <span className="shoe-text">{surfaceData.shoe_recommendation || 'Standard'}</span>
+        {!hideShoes && (
+          <>
+            <span className="shoe-icon">👟</span>
+            <span className="shoe-text">{surfaceData.shoe_recommendation || 'Standard'}</span>
+          </>
+        )}
       </div>
     );
   }

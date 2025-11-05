@@ -2794,8 +2794,8 @@ Die KI erkennt automatisch:
         </div>
       )}
 
-      {/* Team-Info wird automatisch erkannt (editierbar) */}
-      {parsedData?.team_info && (
+      {/* Team-Info wird automatisch erkannt (editierbar) - NUR im TEAM-MODUS */}
+      {parsedData?.team_info && importMode === 'team' && parsedData.team_info.club_name !== 'GENERIC_LEAGUE_SCHEDULE' && (
         <div className="import-section">
           <div className="team-info-banner">
             <h3>🎾 Erkanntes Team: ✏️</h3>

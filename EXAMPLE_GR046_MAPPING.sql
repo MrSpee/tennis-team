@@ -217,3 +217,4 @@ WHERE venue ILIKE ''%Marienburger%'' AND venue_id IS NULL;
 ' as sql_code;
 
 
+

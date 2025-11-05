@@ -126,3 +126,4 @@ FROM club_info
 WHERE bundesland IS NULL;
 
 
+
