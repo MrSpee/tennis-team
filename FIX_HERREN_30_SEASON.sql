@@ -62,3 +62,4 @@ WHERE ti.club_name ILIKE '%VKC%'
 
 
 
+

@@ -170,3 +170,4 @@ WHERE ts.league = '1. Kreisliga'
   AND ts.is_active = true
 ORDER BY ti.club_name, ti.team_name;
 
+

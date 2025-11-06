@@ -86,3 +86,4 @@ WHERE (home_team.club_name ILIKE '%sürth%' OR away_team.club_name ILIKE '%sürt
   AND (home_team.club_name ILIKE '%leverkusen%' OR away_team.club_name ILIKE '%leverkusen%')
 GROUP BY m.id, home_team.club_name, away_team.club_name;
 
+

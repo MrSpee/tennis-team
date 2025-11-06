@@ -145,3 +145,4 @@ psql -d tennis_team -f migrations/ADD_BUNDESLAND_TO_CLUB_INFO.sql
 
 
 
+

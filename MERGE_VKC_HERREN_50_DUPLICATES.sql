@@ -113,3 +113,4 @@ WHERE club_name ILIKE '%VKC%' AND category ILIKE '%Herren 50%';
 
 
 
+
