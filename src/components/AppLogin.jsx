@@ -77,7 +77,7 @@ function AppLogin() {
           setEmail('');
           setPassword('');
         } else {
-          setError(result.error || 'Registrierung fehlgeschlagen');
+          setError(result.error || '❌ Registrierung fehlgeschlagen. Versuche es nochmal!');
         }
       } else {
         // Login
@@ -91,7 +91,7 @@ function AppLogin() {
             navigate('/');
           }, 100); // Kurze Verzögerung für State-Update
         } else {
-          setError(result.error || 'Login fehlgeschlagen. Bitte prüfen Sie Ihre Daten.');
+          setError(result.error || '❌ Login fehlgeschlagen. Prüfe deine E-Mail und dein Passwort!');
         }
       }
     } catch (err) {
@@ -226,8 +226,8 @@ function AppLogin() {
           </div>
 
           {error && (
-            <div className="error-message">
-              ❌ {error}
+            <div className="error-message" style={{ whiteSpace: 'pre-line' }}>
+              {error}
             </div>
           )}
 

@@ -261,19 +261,172 @@ export function AuthProvider({ children }) {
   };
 
   /**
-   * Login mit Email/Passwort
+   * Übersetze Supabase-Fehler in benutzerfreundliche deutsche Meldungen
+   */
+  const getLoginErrorMessage = (error) => {
+    const errorMsg = error?.message?.toLowerCase() || '';
+    
+    // Falsche Credentials
+    if (errorMsg.includes('invalid login credentials') || 
+        errorMsg.includes('invalid email or password')) {
+      return '🔒 E-Mail oder Passwort falsch. Noch mal versuchen!';
+    }
+    
+    // Email nicht bestätigt
+    if (errorMsg.includes('email not confirmed')) {
+      return '📧 Bitte bestätige zuerst deine E-Mail-Adresse. Schau in dein Postfach!';
+    }
+    
+    // Zu viele Versuche
+    if (errorMsg.includes('too many requests') || errorMsg.includes('rate limit')) {
+      return '⏱️ Zu viele Versuche! Warte kurz und probier es dann nochmal.';
+    }
+    
+    // User existiert nicht
+    if (errorMsg.includes('user not found')) {
+      return '❓ Kein Account mit dieser E-Mail gefunden. Registriere dich zuerst!';
+    }
+    
+    // Netzwerkfehler
+    if (errorMsg.includes('fetch') || errorMsg.includes('network')) {
+      return '📡 Keine Verbindung zum Server. Prüfe deine Internetverbindung!';
+    }
+    
+    // Fallback: Ursprüngliche Fehlermeldung
+    return `Fehler: ${error.message}`;
+  };
+
+  /**
+   * Prüfe ob Account temporär gesperrt ist (Brute-Force-Schutz)
+   */
+  const checkIfAccountLocked = async (email) => {
+    const lockoutKey = `loginAttempts_${email}`;
+    const lockoutData = localStorage.getItem(lockoutKey);
+    
+    if (!lockoutData) return { isLocked: false };
+    
+    try {
+      const { attempts, lastAttempt, lockedUntil } = JSON.parse(lockoutData);
+      
+      // Prüfe ob Account noch gesperrt ist
+      if (lockedUntil && new Date(lockedUntil) > new Date()) {
+        const minutesLeft = Math.ceil((new Date(lockedUntil) - new Date()) / 60000);
+        return { 
+          isLocked: true, 
+          minutesLeft,
+          message: `🔒 Account temporär gesperrt! Zu viele fehlgeschlagene Versuche. Versuche es in ${minutesLeft} Minute(n) nochmal.`
+        };
+      }
+      
+      // Lockout abgelaufen - zurücksetzen
+      if (lockedUntil && new Date(lockedUntil) <= new Date()) {
+        localStorage.removeItem(lockoutKey);
+        return { isLocked: false };
+      }
+      
+      return { isLocked: false, attempts };
+    } catch (error) {
+      console.error('❌ Error checking lockout:', error);
+      return { isLocked: false };
+    }
+  };
+  
+  /**
+   * Registriere fehlgeschlagenen Login-Versuch
+   */
+  const recordFailedLogin = (email) => {
+    const lockoutKey = `loginAttempts_${email}`;
+    const lockoutData = localStorage.getItem(lockoutKey);
+    
+    const MAX_ATTEMPTS = 5; // Nach 5 Versuchen wird gesperrt
+    const LOCKOUT_DURATION_MINUTES = 15; // 15 Minuten Sperre
+    
+    let attempts = 1;
+    let lastAttempt = new Date().toISOString();
+    
+    if (lockoutData) {
+      try {
+        const data = JSON.parse(lockoutData);
+        attempts = (data.attempts || 0) + 1;
+      } catch (error) {
+        console.error('❌ Error parsing lockout data:', error);
+      }
+    }
+    
+    // Nach MAX_ATTEMPTS wird Account gesperrt
+    if (attempts >= MAX_ATTEMPTS) {
+      const lockedUntil = new Date(Date.now() + LOCKOUT_DURATION_MINUTES * 60000).toISOString();
+      localStorage.setItem(lockoutKey, JSON.stringify({ 
+        attempts, 
+        lastAttempt, 
+        lockedUntil 
+      }));
+      
+      console.warn(`⚠️ Account ${email} locked for ${LOCKOUT_DURATION_MINUTES} minutes after ${attempts} failed attempts`);
+      
+      return {
+        isLocked: true,
+        message: `🔒 Zu viele fehlgeschlagene Versuche! Account ist für ${LOCKOUT_DURATION_MINUTES} Minuten gesperrt.`
+      };
+    }
+    
+    // Speichere aktuelle Versuche
+    localStorage.setItem(lockoutKey, JSON.stringify({ attempts, lastAttempt }));
+    
+    const remaining = MAX_ATTEMPTS - attempts;
+    return {
+      isLocked: false,
+      remaining,
+      message: remaining <= 2 ? `⚠️ Noch ${remaining} Versuch(e) übrig, dann wird der Account gesperrt!` : null
+    };
+  };
+  
+  /**
+   * Lösche fehlgeschlagene Login-Versuche nach erfolgreichem Login
+   */
+  const clearFailedLogins = (email) => {
+    const lockoutKey = `loginAttempts_${email}`;
+    localStorage.removeItem(lockoutKey);
+  };
+
+  /**
+   * Login mit Email/Passwort (mit Brute-Force-Schutz)
    */
   const login = async (email, password) => {
     try {
       console.log('🔵 Login attempt for:', email);
       
+      // 1. PRÜFE OB ACCOUNT GESPERRT IST
+      const lockCheck = await checkIfAccountLocked(email);
+      if (lockCheck.isLocked) {
+        return {
+          success: false,
+          needsProfile: false,
+          error: lockCheck.message
+        };
+      }
+      
+      // 2. VERSUCH LOGIN
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password
       });
 
-      if (error) throw error;
+      if (error) {
+        // LOGIN FEHLGESCHLAGEN - Registriere fehlgeschlagenen Versuch
+        const failedAttempt = recordFailedLogin(email);
+        
+        let errorMessage = getLoginErrorMessage(error);
+        if (failedAttempt.message) {
+          errorMessage += '\n\n' + failedAttempt.message;
+        }
+        
+        throw { ...error, message: errorMessage };
+      }
 
+      // 3. LOGIN ERFOLGREICH - Lösche fehlgeschlagene Versuche
+      clearFailedLogins(email);
+      
       console.log('✅ Login successful, user:', data.user.email);
       
       // Setze sofort authenticated
@@ -296,9 +449,41 @@ export function AuthProvider({ children }) {
       return { 
         success: false, 
         needsProfile: false,
-        error: error.message 
+        error: error.message
       };
     }
+  };
+
+  /**
+   * Übersetze Registrierungs-Fehler in benutzerfreundliche deutsche Meldungen
+   */
+  const getRegisterErrorMessage = (error) => {
+    const errorMsg = error?.message?.toLowerCase() || '';
+    
+    // E-Mail bereits registriert
+    if (errorMsg.includes('user already registered') || 
+        errorMsg.includes('email already registered') ||
+        errorMsg.includes('already been registered')) {
+      return '📧 Diese E-Mail ist bereits registriert. Versuche dich anzumelden!';
+    }
+    
+    // Schwaches Passwort
+    if (errorMsg.includes('password') && (errorMsg.includes('weak') || errorMsg.includes('short'))) {
+      return '🔒 Passwort ist zu schwach. Mindestens 6 Zeichen bitte!';
+    }
+    
+    // Ungültige E-Mail
+    if (errorMsg.includes('invalid email')) {
+      return '✉️ Diese E-Mail-Adresse ist ungültig. Prüfe die Schreibweise!';
+    }
+    
+    // Rate Limit
+    if (errorMsg.includes('rate limit') || errorMsg.includes('too many')) {
+      return '⏱️ Zu viele Versuche! Warte kurz und probier es dann nochmal.';
+    }
+    
+    // Fallback
+    return `Registrierung fehlgeschlagen: ${error.message}`;
   };
 
   /**
@@ -336,7 +521,7 @@ export function AuthProvider({ children }) {
       console.error('❌ Registration error:', error);
       return { 
         success: false,
-        error: error.message 
+        error: getRegisterErrorMessage(error)
       };
     }
   };
