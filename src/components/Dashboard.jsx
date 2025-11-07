@@ -1347,9 +1347,17 @@ function Dashboard() {
             </div>
           )}
           
+          {upcomingMatches.length > 0 && (
+            <div className="matches-divider tennis-divider">
+              <div className="divider-line"></div>
+              <div className="divider-icon">🎾</div>
+              <div className="divider-line"></div>
+            </div>
+          )}
+          
           {/* Kommende Spiele (nur echte zukünftige, nicht live) */}
           {upcomingMatches.length > 0 && (
-            <div className="season-matches">
+            <div className="season-matches fade-in" style={{ marginTop: '1rem' }}>
               <div className="season-matches-label">
                 Kommende Spiele ({upcomingMatches.length})
               </div>

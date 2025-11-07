@@ -1200,7 +1200,13 @@ const Results = () => {
                     }}
                   >
                     <div style={{ fontWeight: '600', color: '#1f2937' }}>{player.name}</div>
-                    {player.current_lk && <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>LK {player.current_lk}</div>}
+                    {player.current_lk && (
+                      <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                        {player.current_lk?.toLowerCase().startsWith('lk')
+                          ? player.current_lk
+                          : `LK ${player.current_lk}`}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

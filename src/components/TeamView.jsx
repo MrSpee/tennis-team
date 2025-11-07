@@ -74,6 +74,8 @@ const TeamView = ({
     switch ((status || '').toLowerCase()) {
       case 'finished':
         return 'Beendet';
+      case 'completed':
+        return 'Beendet';
       case 'live':
         return 'Live';
       case 'cancelled':
@@ -86,6 +88,7 @@ const TeamView = ({
   const getStatusClass = (status) => {
     switch ((status || '').toLowerCase()) {
       case 'finished':
+      case 'completed':
         return 'finished';
       case 'live':
         return 'live';
@@ -96,11 +99,41 @@ const TeamView = ({
     }
   };
 
+  const determineDerivedStatus = (match, matchDate) => {
+    const baseStatus = (match.status || '').toLowerCase();
+    const completedMatches = match.completedMatches || 0;
+    const expectedMatches = match.expectedMatches || 0;
+    const hasMatchPoints = (match.homeMatchPoints ?? null) !== null || (match.awayMatchPoints ?? null) !== null;
+    const scoredMatches = (match.homeMatchPoints || 0) + (match.awayMatchPoints || 0);
+
+    if (baseStatus === 'cancelled') {
+      return 'cancelled';
+    }
+
+    if (baseStatus === 'finished' || baseStatus === 'completed') {
+      return 'finished';
+    }
+
+    if (completedMatches > 0 && expectedMatches > 0 && completedMatches >= expectedMatches && scoredMatches > 0) {
+      return 'finished';
+    }
+
+    if (scoredMatches > 0 && completedMatches > 0) {
+      return 'live';
+    }
+
+    if (hasMatchPoints && scoredMatches > 0 && matchDate && matchDate < new Date()) {
+      return 'finished';
+    }
+
+    return baseStatus || 'scheduled';
+  };
+
   const renderMatchCard = (match) => {
     const matchDate = match.date instanceof Date ? match.date : (match.date ? new Date(match.date) : null);
-    const highlight = match.involvesPlayerTeam || playerTeamIdSet.has(match.home_team_id) || playerTeamIdSet.has(match.away_team_id);
-    const statusClass = getStatusClass(match.status);
-    const statusLabel = getStatusLabel(match.status);
+    const derivedStatus = determineDerivedStatus(match, matchDate);
+    const statusClass = getStatusClass(derivedStatus);
+    const statusLabel = getStatusLabel(derivedStatus);
     const timeLabel = formatMatchTime(match.start_time);
     const scoreLabel = match.displayScore || '–:–';
     const subScoreLabel = (match.homeSets || match.awaySets) ? `Sätze ${match.homeSets}:${match.awaySets}` : null;
@@ -111,8 +144,9 @@ const TeamView = ({
 
     const homeName = match.homeTeam?.displayName || 'Heimteam';
     const awayName = match.awayTeam?.displayName || 'Gastteam';
+    const highlight = Boolean(match.involvesPlayerTeam);
 
-    const showParticipationCTA = match.isPlayerHomeTeam || match.isPlayerAwayTeam;
+    const showParticipationCTA = (match.isPlayerHomeTeam || match.isPlayerAwayTeam) && (statusClass === 'upcoming' || statusClass === 'live');
 
     return (
       <div
@@ -288,9 +322,10 @@ const TeamView = ({
       const { data, error } = await supabase
         .from('team_memberships')
         .select(`
-          position,
-          is_captain,
-          players_unified!team_memberships_player_id_fkey(
+          player_id,
+          role,
+          is_primary,
+          players_unified:players_unified!team_memberships_player_id_fkey(
             id,
             name,
             current_lk,
@@ -301,29 +336,41 @@ const TeamView = ({
         `)
         .eq('team_id', tid)
         .eq('is_active', true)
-        .order('position', { ascending: true });
+        .order('name', { foreignTable: 'players_unified', ascending: true });
       
       if (error) throw error;
       
       const playerIds = data?.map(d => d.players_unified?.id).filter(Boolean) || [];
       
-      const { data: teamCounts } = await supabase
-        .from('team_memberships')
-        .select('player_id')
-        .in('player_id', playerIds)
-        .eq('is_active', true);
-      
+      const { data: teamCounts } = playerIds.length > 0
+        ? await supabase
+            .from('team_memberships')
+            .select('player_id')
+            .in('player_id', playerIds)
+            .eq('is_active', true)
+        : { data: [] };
+
       const teamCountMap = {};
-      teamCounts?.forEach(tc => {
+      (teamCounts || []).forEach((tc) => {
+        if (!tc || !tc.player_id) return;
         teamCountMap[tc.player_id] = (teamCountMap[tc.player_id] || 0) + 1;
       });
       
-      const players = data?.map(d => ({
-        ...d.players_unified,
-        position: d.position,
-        is_captain: d.is_captain,
-        team_count: teamCountMap[d.players_unified?.id] || 1
-      })).filter(p => p.id) || [];
+      const players = (data || []).map((d, index) => {
+        const profile = d.players_unified || {};
+        const explicitPosition = typeof d.position === 'number' ? d.position : null;
+        const derivedPosition = explicitPosition ?? index + 1;
+        const playerId = profile.id || d.player_id;
+
+        return {
+          ...profile,
+          id: playerId,
+          position: derivedPosition,
+          is_captain: d.role === 'captain',
+          role: d.role || 'player',
+          team_count: playerId ? (teamCountMap[playerId] || 1) : 1
+        };
+      }).filter(p => p.id);
       
       setTeamPlayers(players);
     } catch (error) {
@@ -634,7 +681,7 @@ const TeamView = ({
                         {p.is_captain && ' 👑'}
                       </div>
                       <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-                        LK {p.current_lk || p.season_start_lk || '?'}
+                        {p.current_lk ? `LK ${p.current_lk}` : p.season_start_lk ? `LK ${p.season_start_lk}` : 'LK ?'}
                         {p.team_count > 1 && ` • ${p.team_count} Teams`}
                       </div>
                     </div>
