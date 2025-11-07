@@ -349,6 +349,24 @@
   background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
   border: 1px solid var(--border);
   border-radius: 12px;
+  box-shadow: 0 16px 32px rgba(244, 114, 94, 0.15);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.next-match-card.clickable {
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.next-match-card.clickable:hover,
+.next-match-card.clickable:focus {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 36px rgba(244, 114, 94, 0.22);
+}
+
+.next-match-card.clickable:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.35);
+  outline-offset: 3px;
 }
 
 .next-match-card.empty {
@@ -372,10 +390,74 @@
   margin-bottom: 8px;
 }
 
-.next-match-opponent {
+.team-status-card {
+  margin-top: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(226, 232, 240, 0.28);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.team-status-card.open {
+  border-color: rgba(251, 191, 36, 0.35);
+  background: rgba(253, 230, 138, 0.2);
+}
+
+.team-status-card.complete {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(187, 247, 208, 0.2);
+}
+
+.team-status-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.team-status-card.open .team-status-heading {
+  color: #92400e;
+}
+
+.team-status-card.complete .team-status-heading {
+  color: #047857;
+}
+
+.team-status-icon {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.team-status-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+.team-status-message {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  color: #475569;
+  font-style: italic;
+}
+
+.team-status-card.open .team-status-message {
+  color: #92400e;
+}
+
+.team-status-card.complete .team-status-message {
+  color: #065f46;
+}
+
+.opponent-summary {
+  margin-top: 1rem;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0.4rem;
 }
 
 .opponent-label {
@@ -385,9 +467,30 @@
 }
 
 .opponent-name {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--text);
+}
+
+.opponent-standing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.opponent-standing.with-data {
+  color: #0f172a;
+}
+
+.opponent-standing.unknown {
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.standing-icon {
+  font-size: 1rem;
 }
 
 /* Motivationsspruch */
@@ -397,41 +500,52 @@
   font-weight: 600;
   font-style: italic;
   padding: 10px;
-  background: rgba(5, 150, 105, 0.1);
-  border-radius: 8px;
-  border-left: 3px solid #059669;
-  margin: 8px 0;
+  background: rgba(5, 150, 105, 0.08);
+  border-radius: 10px;
+  margin-top: 12px;
 }
 
-/* Verfügbare Spieler */
+/* Spieler-Liste bei Spielen < 7 Tage */
 .available-players {
-  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
 }
 
 .player-badges {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 6px;
 }
 
 .player-badge-small {
-  display: inline-block;
-  padding: 4px 10px;
-  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-  color: #1e40af;
-  border: 1px solid #93c5fd;
-  border-radius: 8px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  background: #e0f2fe;
+  color: #0c4a6e;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid #bae6fd;
+  transition: transform 0.2s ease, background 0.2s ease;
 }
 
 .player-badge-small:hover {
-  background: linear-gradient(135deg, #bfdbfe 0%, #93c5fd 100%);
   transform: translateY(-1px);
-  box-shadow: 0 2px 6px rgba(30, 64, 175, 0.2);
+  background: #bae6fd;
+}
+
+.next-match-cta {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1d4ed8;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 /* Teilnahme Button */

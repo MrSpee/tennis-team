@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import { useAuth } from './AuthContext';
+import computeStandings, { buildTeamLabel } from '../utils/standings';
 
 const DataContext = createContext();
 
@@ -14,9 +15,16 @@ export function DataProvider({ children }) {
   const [matches, setMatches] = useState([]);
   const [players, setPlayers] = useState([]);
   const [leagueStandings, setLeagueStandings] = useState([]);
+  const [leagueMatches, setLeagueMatches] = useState([]);
+  const [leagueMeta, setLeagueMeta] = useState(null);
   const [teamInfo, setTeamInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   
+  const parseIntSafe = (value) => {
+    const parsed = parseInt(value, 10);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  };
+
   // Multi-Team Support
   const [playerTeams, setPlayerTeams] = useState([]);
   const [selectedTeamId, setSelectedTeamId] = useState(null);
@@ -116,7 +124,6 @@ export function DataProvider({ children }) {
       // Rest parallel laden
       await Promise.all([
         loadPlayers(),
-        loadLeagueStandings(),
         loadTeamInfo()
       ]);
     } catch (error) {
@@ -536,10 +543,357 @@ export function DataProvider({ children }) {
     setPlayers(data);
   };
 
-  // Lade Tabelle (DEAKTIVIERT - Tabelle existiert nicht)
-  const loadLeagueStandings = async () => {
-    // console.log('⚠️ League standings loading deactivated - table does not exist');
-    setLeagueStandings([]);
+  // Lade Tabelle auf Basis der aktuellen Liga/Gruppe des Spieler-Teams
+  const loadLeagueStandings = async (teamsOverride = null) => {
+    try {
+      const teamsSource = (teamsOverride && teamsOverride.length > 0)
+        ? teamsOverride
+        : playerTeams;
+
+      if (!teamsSource || teamsSource.length === 0) {
+        setLeagueStandings([]);
+        setLeagueMatches([]);
+        setLeagueMeta(null);
+        return;
+      }
+
+      const referenceTeam = teamsSource.find(t => t.is_primary) || teamsSource[0];
+
+      if (!referenceTeam) {
+        setLeagueStandings([]);
+        setLeagueMatches([]);
+        setLeagueMeta(null);
+        return;
+      }
+
+      let seasonLabel = referenceTeam.season;
+      if (!seasonLabel) {
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+
+        if (currentMonth >= 4 && currentMonth <= 7) {
+          seasonLabel = `Sommer ${currentYear}`;
+        } else if (currentMonth >= 8) {
+          const nextYear = currentYear + 1;
+          seasonLabel = `Winter ${currentYear}/${String(nextYear).slice(-2)}`;
+        } else {
+          const prevYear = currentYear - 1;
+          seasonLabel = `Winter ${prevYear}/${String(currentYear).slice(-2)}`;
+        }
+      }
+
+      if (!referenceTeam.league || !referenceTeam.group_name) {
+        console.warn('⚠️ league/group_name fehlen für Standings-Berechnung');
+        setLeagueStandings([]);
+        setLeagueMatches([]);
+        setLeagueMeta({
+          league: referenceTeam.league,
+          group: referenceTeam.group_name,
+          season: seasonLabel
+        });
+        return;
+      }
+
+      const { data: leagueTeamSeasons, error: teamsError } = await supabase
+        .from('team_seasons')
+        .select(`
+          team_id,
+          team_info!team_seasons_team_id_fkey(id, team_name, club_name)
+        `)
+        .eq('league', referenceTeam.league)
+        .eq('group_name', referenceTeam.group_name)
+        .eq('season', seasonLabel)
+        .eq('is_active', true);
+
+      if (teamsError) {
+        throw teamsError;
+      }
+
+      let leagueTeams = (leagueTeamSeasons || [])
+        .map((ts) => ts?.team_info)
+        .filter(Boolean);
+
+      let fallbackTeamIds = new Set();
+
+      if (!leagueTeams || leagueTeams.length <= 1) {
+        const { data: ownMatchesRaw, error: ownMatchesError } = await supabase
+          .from('matchdays')
+          .select(`
+            id,
+            match_date,
+            start_time,
+            home_team_id,
+            away_team_id,
+            venue,
+            season,
+            status,
+            home_score,
+            away_score
+          `)
+          .or(`home_team_id.eq.${referenceTeam.id},away_team_id.eq.${referenceTeam.id}`);
+
+        if (ownMatchesError) {
+          throw ownMatchesError;
+        }
+
+        ownMatchesRaw?.forEach(match => {
+          if (match.home_team_id) fallbackTeamIds.add(match.home_team_id);
+          if (match.away_team_id) fallbackTeamIds.add(match.away_team_id);
+        });
+        fallbackTeamIds.add(referenceTeam.id);
+
+        const fallbackTeamIdArray = Array.from(fallbackTeamIds);
+
+        if (fallbackTeamIdArray.length > 0) {
+          const { data: fallbackTeams, error: fallbackTeamsError } = await supabase
+            .from('team_info')
+            .select('id, team_name, club_name')
+            .in('id', fallbackTeamIdArray);
+
+          if (fallbackTeamsError) {
+            throw fallbackTeamsError;
+          }
+
+          leagueTeams = (fallbackTeams || []).filter(Boolean);
+        }
+      }
+
+      if (!leagueTeams || leagueTeams.length === 0) {
+        console.warn('⚠️ Keine Teams für Liga/Gruppe gefunden');
+        setLeagueStandings([]);
+        setLeagueMatches([]);
+        setLeagueMeta({
+          league: referenceTeam.league,
+          group: referenceTeam.group_name,
+          season: seasonLabel
+        });
+        return;
+      }
+
+      const teamIdSet = new Set(leagueTeams.map(team => team.id).filter(Boolean));
+
+      if (fallbackTeamIds.size > 0) {
+        fallbackTeamIds.forEach(id => teamIdSet.add(id));
+      }
+
+      const teamIds = Array.from(teamIdSet);
+
+      if (teamIds.length === 0) {
+        setLeagueStandings([]);
+        setLeagueMatches([]);
+        setLeagueMeta({
+          league: referenceTeam.league,
+          group: referenceTeam.group_name,
+          season: seasonLabel
+        });
+        return;
+      }
+
+      const idList = teamIds.join(',');
+
+      const { data: leagueMatchesRaw, error: matchesError } = await supabase
+        .from('matchdays')
+        .select(`
+          id,
+          match_date,
+          start_time,
+          season,
+          status,
+          venue,
+          home_team_id,
+          away_team_id,
+          home_score,
+          away_score
+        `)
+        .or(`home_team_id.in.(${idList}),away_team_id.in.(${idList})`);
+
+      if (matchesError) {
+        throw matchesError;
+      }
+
+      const filteredMatchesRaw = (leagueMatchesRaw || []).filter(match => {
+        return teamIdSet.has(match.home_team_id) && teamIdSet.has(match.away_team_id);
+      });
+
+      let resultsData = [];
+      const matchIds = (filteredMatchesRaw || []).map((match) => match.id).filter(Boolean);
+
+      if (matchIds.length > 0) {
+        const { data: results, error: resultsError } = await supabase
+          .from('match_results')
+          .select('*')
+          .in('matchday_id', matchIds);
+
+        if (resultsError) {
+          throw resultsError;
+        }
+
+        resultsData = results || [];
+      }
+
+      const standingsRaw = computeStandings(leagueTeams, filteredMatchesRaw || [], resultsData);
+      const playerTeamIdSet = new Set(teamsSource.map(team => team.id));
+
+      const standingsWithFlags = standingsRaw.map(entry => ({
+        ...entry,
+        is_own_team: playerTeamIdSet.has(entry.team_id)
+      }));
+
+      const resultsByMatchId = resultsData.reduce((acc, result) => {
+        if (!result || !result.matchday_id) return acc;
+        if (!acc[result.matchday_id]) {
+          acc[result.matchday_id] = [];
+        }
+        acc[result.matchday_id].push(result);
+        return acc;
+      }, {});
+
+      const teamLookup = leagueTeams.reduce((acc, team) => {
+        if (team && team.id) {
+          acc[team.id] = team;
+        }
+        return acc;
+      }, {});
+
+      const leagueMatchDetails = (filteredMatchesRaw || []).map((match) => {
+        const matchDate = match.match_date ? new Date(match.match_date) : null;
+        const resultsForMatch = resultsByMatchId[match.id] || [];
+
+        let homeMatchPoints = 0;
+        let awayMatchPoints = 0;
+        let homeSets = 0;
+        let awaySets = 0;
+        let homeGames = 0;
+        let awayGames = 0;
+        let completedMatches = 0;
+
+        resultsForMatch.forEach((result) => {
+          if (!result || result.status !== 'completed' || !result.winner) return;
+
+          completedMatches += 1;
+
+          if (result.winner === 'home') {
+            homeMatchPoints += 1;
+          } else if (result.winner === 'guest' || result.winner === 'away') {
+            awayMatchPoints += 1;
+          }
+
+          const set1Home = parseIntSafe(result.set1_home);
+          const set1Guest = parseIntSafe(result.set1_guest);
+          const set2Home = parseIntSafe(result.set2_home);
+          const set2Guest = parseIntSafe(result.set2_guest);
+          const set3Home = parseIntSafe(result.set3_home);
+          const set3Guest = parseIntSafe(result.set3_guest);
+
+          if (set1Home > set1Guest) homeSets += 1;
+          else if (set1Guest > set1Home) awaySets += 1;
+          homeGames += set1Home;
+          awayGames += set1Guest;
+
+          if (set2Home > set2Guest) homeSets += 1;
+          else if (set2Guest > set2Home) awaySets += 1;
+          homeGames += set2Home;
+          awayGames += set2Guest;
+
+          if (set3Home > 0 || set3Guest > 0) {
+            if (set3Home > set3Guest) homeSets += 1;
+            else if (set3Guest > set3Home) awaySets += 1;
+
+            const isChampionsTiebreak = set3Home >= 10 || set3Guest >= 10;
+            if (isChampionsTiebreak) {
+              if (set3Home > set3Guest) {
+                homeGames += 1;
+              } else if (set3Guest > set3Home) {
+                awayGames += 1;
+              }
+            } else {
+              homeGames += set3Home;
+              awayGames += set3Guest;
+            }
+          }
+        });
+
+        const expectedMatches = (match.season || '').toLowerCase().includes('sommer') || (match.season || '').toLowerCase().includes('summer') ? 9 : 6;
+
+        let winner = null;
+        if (homeMatchPoints > awayMatchPoints) {
+          winner = 'home';
+        } else if (awayMatchPoints > homeMatchPoints) {
+          winner = 'away';
+        } else if ((match.status === 'finished') && (homeMatchPoints + awayMatchPoints > 0)) {
+          winner = 'draw';
+        }
+
+        const displayScore = (homeMatchPoints + awayMatchPoints) > 0
+          ? `${homeMatchPoints}:${awayMatchPoints}`
+          : (match.home_score != null || match.away_score != null)
+            ? `${match.home_score ?? 0}:${match.away_score ?? 0}`
+            : '–:–';
+
+        const homeTeam = teamLookup[match.home_team_id];
+        const awayTeam = teamLookup[match.away_team_id];
+
+        const isPlayerHomeTeam = playerTeamIdSet.has(match.home_team_id);
+        const isPlayerAwayTeam = playerTeamIdSet.has(match.away_team_id);
+        const involvesPlayerTeam = isPlayerHomeTeam || isPlayerAwayTeam;
+
+        return {
+          id: match.id,
+          date: matchDate,
+          start_time: match.start_time || null,
+          season: match.season,
+          status: match.status,
+          venue: match.venue,
+          home_team_id: match.home_team_id,
+          away_team_id: match.away_team_id,
+          homeTeam: {
+            id: match.home_team_id,
+            displayName: buildTeamLabel(homeTeam),
+            club_name: homeTeam?.club_name || null,
+            team_name: homeTeam?.team_name || null,
+            isPlayerTeam: isPlayerHomeTeam
+          },
+          awayTeam: {
+            id: match.away_team_id,
+            displayName: buildTeamLabel(awayTeam),
+            club_name: awayTeam?.club_name || null,
+            team_name: awayTeam?.team_name || null,
+            isPlayerTeam: isPlayerAwayTeam
+          },
+          homeMatchPoints,
+          awayMatchPoints,
+          homeSets,
+          awaySets,
+          homeGames,
+          awayGames,
+          completedMatches,
+          expectedMatches,
+          displayScore,
+          winner,
+          involvesPlayerTeam,
+          isPlayerHomeTeam,
+          isPlayerAwayTeam
+        };
+      }).sort((a, b) => {
+        const aTime = a.date ? a.date.getTime() : 0;
+        const bTime = b.date ? b.date.getTime() : 0;
+        return aTime - bTime;
+      });
+
+      setLeagueStandings(standingsWithFlags);
+      setLeagueMatches(leagueMatchDetails);
+      setLeagueMeta({
+        league: referenceTeam.league,
+        group: referenceTeam.group_name,
+        season: seasonLabel
+      });
+    } catch (error) {
+      console.error('Error loading league standings:', error);
+      setLeagueStandings([]);
+      setLeagueMatches([]);
+      setLeagueMeta(null);
+    }
   };
 
   // Lade Team Info (mit Team-Filter Support)
@@ -1169,10 +1523,34 @@ export function DataProvider({ children }) {
     }
   };
 
+  useEffect(() => {
+    if (!configured) return;
+
+    if (playerTeams.length === 0) {
+      setLeagueStandings([]);
+      setLeagueMatches([]);
+      setLeagueMeta(null);
+      return;
+    }
+
+    const selectedTeam = selectedTeamId
+      ? playerTeams.find(team => team.id === selectedTeamId)
+      : null;
+
+    if (selectedTeam) {
+      loadLeagueStandings([selectedTeam]);
+    } else {
+      loadLeagueStandings(playerTeams);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configured, selectedTeamId, playerTeams]);
+
   const value = {
     matches,
     players,
     leagueStandings,
+    leagueMatches,
+    leagueMeta,
     teamInfo,
     loading,
     configured,

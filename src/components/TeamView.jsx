@@ -1,16 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { format } from 'date-fns';
+import { de } from 'date-fns/locale';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import computeStandings from '../utils/standings';
 import './Dashboard.css';
 import './Results.css';
 
 const TeamView = ({ 
   teamId, 
-  matches, 
-  matchScores, 
-  display,
-  getMatchStatus,
-  calculatePlayerPerspectiveScore
+  matches = [], 
+  leagueMatches = [],
+  leagueMeta,
+  playerTeamIds = [],
+  display = ''
 }) => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('spiele');
@@ -18,6 +21,155 @@ const TeamView = ({
   const [teamPlayers, setTeamPlayers] = useState([]);
   const [loadingStandings, setLoadingStandings] = useState(false);
   const [loadingPlayers, setLoadingPlayers] = useState(false);
+
+  const playerTeamIdSet = useMemo(() => new Set(playerTeamIds), [playerTeamIds]);
+
+  const sortedLeagueMatches = useMemo(() => {
+    if (!leagueMatches || leagueMatches.length === 0) return [];
+    return [...leagueMatches].sort((a, b) => {
+      const aTime = a.date instanceof Date ? a.date.getTime() : (a.date ? new Date(a.date).getTime() : 0);
+      const bTime = b.date instanceof Date ? b.date.getTime() : (b.date ? new Date(b.date).getTime() : 0);
+      return aTime - bTime;
+    });
+  }, [leagueMatches]);
+
+  const ownLeagueMatches = useMemo(
+    () => sortedLeagueMatches.filter(match => match.involvesPlayerTeam),
+    [sortedLeagueMatches]
+  );
+
+  const otherLeagueMatches = useMemo(
+    () => sortedLeagueMatches.filter(match => !match.involvesPlayerTeam),
+    [sortedLeagueMatches]
+  );
+
+  const leagueSubtitle = useMemo(() => {
+    if (leagueMeta && (leagueMeta.league || leagueMeta.group || leagueMeta.season)) {
+      return [leagueMeta.league, leagueMeta.group, leagueMeta.season].filter(Boolean).join(' • ');
+    }
+    return display || 'Liga-Spielplan';
+  }, [leagueMeta, display]);
+
+  const hasLeagueMatches = sortedLeagueMatches.length > 0;
+
+  const formatMatchDate = (date) => {
+    if (!date) return 'Termin offen';
+    const safeDate = date instanceof Date ? date : new Date(date);
+    return format(safeDate, 'EEE, dd. MMM', { locale: de });
+  };
+
+  const formatMatchTime = (time) => {
+    if (!time) return null;
+    if (typeof time === 'string') {
+      const parts = time.split(':');
+      if (parts.length >= 2) {
+        return `${parts[0]}:${parts[1]} Uhr`;
+      }
+      return `${time} Uhr`;
+    }
+    return null;
+  };
+
+  const getStatusLabel = (status) => {
+    switch ((status || '').toLowerCase()) {
+      case 'finished':
+        return 'Beendet';
+      case 'live':
+        return 'Live';
+      case 'cancelled':
+        return 'Abgesagt';
+      default:
+        return 'Geplant';
+    }
+  };
+
+  const getStatusClass = (status) => {
+    switch ((status || '').toLowerCase()) {
+      case 'finished':
+        return 'finished';
+      case 'live':
+        return 'live';
+      case 'cancelled':
+        return 'cancelled';
+      default:
+        return 'upcoming';
+    }
+  };
+
+  const renderMatchCard = (match) => {
+    const matchDate = match.date instanceof Date ? match.date : (match.date ? new Date(match.date) : null);
+    const highlight = match.involvesPlayerTeam || playerTeamIdSet.has(match.home_team_id) || playerTeamIdSet.has(match.away_team_id);
+    const statusClass = getStatusClass(match.status);
+    const statusLabel = getStatusLabel(match.status);
+    const timeLabel = formatMatchTime(match.start_time);
+    const scoreLabel = match.displayScore || '–:–';
+    const subScoreLabel = (match.homeSets || match.awaySets) ? `Sätze ${match.homeSets}:${match.awaySets}` : null;
+    const gamesLabel = (match.homeGames || match.awayGames) ? `Games ${match.homeGames}:${match.awayGames}` : null;
+    const progressLabel = match.completedMatches > 0 && match.expectedMatches
+      ? `${match.completedMatches}/${match.expectedMatches} Matches`
+      : null;
+
+    const homeName = match.homeTeam?.displayName || 'Heimteam';
+    const awayName = match.awayTeam?.displayName || 'Gastteam';
+
+    const showParticipationCTA = match.isPlayerHomeTeam || match.isPlayerAwayTeam;
+
+    return (
+      <div
+        key={match.id}
+        className={`league-match-card ${statusClass} ${highlight ? 'highlight' : ''}`}
+      >
+        <div className="league-match-header">
+          <div className="league-match-date">{formatMatchDate(matchDate)}</div>
+          <div className={`league-match-status ${statusClass}`}>{statusLabel}</div>
+        </div>
+
+        <div className="league-match-teams">
+          <span className={`league-team ${match.isPlayerHomeTeam ? 'player-team' : ''}`}>{homeName}</span>
+          <span className="league-match-score">{scoreLabel}</span>
+          <span className={`league-team ${match.isPlayerAwayTeam ? 'player-team' : ''}`}>{awayName}</span>
+        </div>
+
+        {(timeLabel || match.venue) && (
+          <div className="league-match-meta">
+            {timeLabel && <span>🕒 {timeLabel}</span>}
+            {match.venue && <span>📍 {match.venue}</span>}
+          </div>
+        )}
+
+        {(subScoreLabel || gamesLabel) && (
+          <div className="league-match-subscore">
+            {[subScoreLabel, gamesLabel].filter(Boolean).join(' • ')}
+          </div>
+        )}
+
+        {progressLabel && (
+          <div className="league-match-progress">
+            📊 {progressLabel}
+          </div>
+        )}
+
+        <div className="league-match-actions">
+          <button
+            type="button"
+            className="league-match-button"
+            onClick={() => navigate(`/ergebnisse/${match.id}`)}
+          >
+            Details
+          </button>
+          {showParticipationCTA && (
+            <button
+              type="button"
+              className="league-match-button secondary"
+              onClick={() => navigate(`/matches?match=${match.id}`)}
+            >
+              Teilnahme
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   // Lade Tabelle
   const loadStandings = async (tid) => {
@@ -110,183 +262,14 @@ const TeamView = ({
       
       console.log('📊 Found match results:', allResults?.length || 0);
       
-      // 5. Berechne Statistiken für jedes Team
-      const teamStats = {};
+      const standings = computeStandings(
+        leagueTeams,
+        allMatches || [],
+        allResults || []
+      );
       
-      leagueTeams.forEach(team => {
-        teamStats[team.id] = {
-          team_id: team.id,
-          team_name: `${team.club_name} ${team.team_name}`,
-          played: 0,        // Begegnungen
-          won: 0,           // Siege
-          draw: 0,          // Unentschieden
-          lost: 0,          // Niederlagen
-          tab_points: 0,    // Tabellenpunkte (2:1:0)
-          match_points_for: 0,    // Gewonnene Einzelspiele
-          match_points_against: 0, // Verlorene Einzelspiele
-          sets_for: 0,      // Gewonnene Sätze
-          sets_against: 0,  // Verlorene Sätze
-          games_for: 0,     // Gewonnene Games
-          games_against: 0, // Verlorene Games
-          is_own_team: team.id === tid
-        };
-      });
-      
-      // 6. Verarbeite jedes Match
-      (allMatches || []).forEach(match => {
-        const homeTeamId = match.home_team_id;
-        const awayTeamId = match.away_team_id;
-        
-        // Nur Matches zwischen Teams in dieser Liga zählen
-        if (!teamStats[homeTeamId] || !teamStats[awayTeamId]) return;
-        
-        // Hole alle Ergebnisse für dieses Match
-        const matchResults = (allResults || []).filter(r => r.matchday_id === match.id);
-        
-        if (matchResults.length === 0) return; // Match noch nicht gespielt
-        
-        // Zähle gewonnene Einzelspiele
-        let homeMatchPoints = 0;
-        let awayMatchPoints = 0;
-        let homeSets = 0;
-        let awaySets = 0;
-        let homeGames = 0;
-        let awayGames = 0;
-        
-        matchResults.forEach(result => {
-          if (result.status !== 'completed' || !result.winner) return;
-          
-          // Matchpunkte
-          if (result.winner === 'home') {
-            homeMatchPoints++;
-          } else if (result.winner === 'guest') {
-            awayMatchPoints++;
-          }
-          
-          // Sätze zählen
-          const set1Home = parseInt(result.set1_home) || 0;
-          const set1Guest = parseInt(result.set1_guest) || 0;
-          const set2Home = parseInt(result.set2_home) || 0;
-          const set2Guest = parseInt(result.set2_guest) || 0;
-          const set3Home = parseInt(result.set3_home) || 0;
-          const set3Guest = parseInt(result.set3_guest) || 0;
-          
-          // Set 1
-          if (set1Home > set1Guest) homeSets++;
-          else if (set1Guest > set1Home) awaySets++;
-          homeGames += set1Home;
-          awayGames += set1Guest;
-          
-          // Set 2
-          if (set2Home > set2Guest) homeSets++;
-          else if (set2Guest > set2Home) awaySets++;
-          homeGames += set2Home;
-          awayGames += set2Guest;
-          
-          // Set 3 (falls gespielt)
-          if (set3Home > 0 || set3Guest > 0) {
-            if (set3Home > set3Guest) homeSets++;
-            else if (set3Guest > set3Home) awaySets++;
-            
-            // ✅ CHAMPIONS TIE-BREAK: Nur 1:0 Games für Gewinner (wenn >= 10 Punkte bei einem der beiden)
-            const isChampionsTiebreak = set3Home >= 10 || set3Guest >= 10;
-            
-            if (isChampionsTiebreak) {
-              // Tie-Break: Gewinner bekommt 1 Game, Verlierer 0
-              // Beispiele: 10:8 → 1:0, 12:10 → 1:0, 7:10 → 0:1, 12:14 → 0:1
-              if (set3Home > set3Guest) {
-                homeGames += 1;  // Home gewinnt
-                awayGames += 0;  // Away verliert
-              } else if (set3Guest > set3Home) {
-                homeGames += 0;  // Home verliert
-                awayGames += 1;  // Away gewinnt
-              }
-              // Bei Gleichstand (sollte nicht vorkommen) werden keine Games gezählt
-            } else {
-              // Normaler 3. Satz: Games wie üblich zählen (z.B. 6:4)
-              homeGames += set3Home;
-              awayGames += set3Guest;
-            }
-          }
-        });
-        
-        // Nur wenn mindestens ein Ergebnis vorhanden
-        if (homeMatchPoints + awayMatchPoints === 0) return;
-        
-        // Aktualisiere Team-Statistiken
-        teamStats[homeTeamId].played++;
-        teamStats[awayTeamId].played++;
-        
-        teamStats[homeTeamId].match_points_for += homeMatchPoints;
-        teamStats[homeTeamId].match_points_against += awayMatchPoints;
-        teamStats[awayTeamId].match_points_for += awayMatchPoints;
-        teamStats[awayTeamId].match_points_against += homeMatchPoints;
-        
-        teamStats[homeTeamId].sets_for += homeSets;
-        teamStats[homeTeamId].sets_against += awaySets;
-        teamStats[awayTeamId].sets_for += awaySets;
-        teamStats[awayTeamId].sets_against += homeSets;
-        
-        teamStats[homeTeamId].games_for += homeGames;
-        teamStats[homeTeamId].games_against += awayGames;
-        teamStats[awayTeamId].games_for += awayGames;
-        teamStats[awayTeamId].games_against += homeGames;
-        
-        // Bestimme Sieger der Begegnung (wer mehr Matchpunkte hat)
-        if (homeMatchPoints > awayMatchPoints) {
-          teamStats[homeTeamId].won++;
-          teamStats[homeTeamId].tab_points += 2;
-          teamStats[awayTeamId].lost++;
-        } else if (awayMatchPoints > homeMatchPoints) {
-          teamStats[awayTeamId].won++;
-          teamStats[awayTeamId].tab_points += 2;
-          teamStats[homeTeamId].lost++;
-        } else {
-          // Unentschieden
-          teamStats[homeTeamId].draw++;
-          teamStats[homeTeamId].tab_points += 1;
-          teamStats[awayTeamId].draw++;
-          teamStats[awayTeamId].tab_points += 1;
-        }
-      });
-      
-      // 7. Sortiere nach Tabellenpunkten (dann Matchpunkte, dann Sätze, dann Games)
-      const sortedStandings = Object.values(teamStats)
-        .sort((a, b) => {
-          // Primär: Tabellenpunkte
-          if (b.tab_points !== a.tab_points) return b.tab_points - a.tab_points;
-          
-          // Sekundär: Matchpunkte-Differenz
-          const aMatchDiff = a.match_points_for - a.match_points_against;
-          const bMatchDiff = b.match_points_for - b.match_points_against;
-          if (bMatchDiff !== aMatchDiff) return bMatchDiff - aMatchDiff;
-          
-          // Tertiär: Satz-Differenz
-          const aSetDiff = a.sets_for - a.sets_against;
-          const bSetDiff = b.sets_for - b.sets_against;
-          if (bSetDiff !== aSetDiff) return bSetDiff - aSetDiff;
-          
-          // Quartär: Game-Differenz
-          const aGameDiff = a.games_for - a.games_against;
-          const bGameDiff = b.games_for - b.games_against;
-          return bGameDiff - aGameDiff;
-        })
-        .map((team, index) => ({
-          position: index + 1,
-          team_name: team.team_name,
-          played: team.played,
-          won: team.won,
-          draw: team.draw,
-          lost: team.lost,
-          tab_points: team.tab_points,
-          match_points: `${team.match_points_for}:${team.match_points_against}`,
-          sets: `${team.sets_for}:${team.sets_against}`,
-          games: `${team.games_for}:${team.games_against}`,
-          is_own_team: team.is_own_team
-        }));
-      
-      console.log('✅ Standings calculated:', sortedStandings);
-      setStandings(sortedStandings);
+      console.log('✅ Standings calculated:', standings);
+      setStandings(standings);
       
     } catch (error) {
       console.error('Error loading standings:', error);
@@ -436,22 +419,44 @@ const TeamView = ({
       {activeTab === 'spiele' && (
         <div className="fade-in lk-card-full">
           <div className="formkurve-header">
-            <div className="formkurve-title">Alle Spiele</div>
+            <div className="formkurve-title">Liga-Spielplan</div>
             <div className="match-count-badge">
-              {matches.length} {matches.length === 1 ? 'Spiel' : 'Spiele'}
+              {hasLeagueMatches ? `${sortedLeagueMatches.length} Begegnung${sortedLeagueMatches.length === 1 ? '' : 'en'}` : 'Keine Daten'}
             </div>
           </div>
           <div className="season-content">
-            {matches.length === 0 ? (
+            <div className="league-meta-banner">
+              {leagueSubtitle}
+            </div>
+
+            {!hasLeagueMatches ? (
               <div className="no-results">
-                <div style={{ fontSize: '3rem' }}>🎾</div>
-                <h3>Keine Spiele gefunden</h3>
-                <p>Für die aktuelle Saison {display} sind noch keine Spiele geplant.</p>
+                <div style={{ fontSize: '3rem' }}>📅</div>
+                <h3>Keine Liga-Spiele gefunden</h3>
+                <p>
+                  Für diese Liga wurden noch keine Begegnungen geladen. Prüfe später erneut
+                  oder kontaktiere deinen Captain.
+                </p>
               </div>
             ) : (
-              <div>
-                {/* Matches würden hier angezeigt */}
-                <p>Spiele-Liste wird hier angezeigt...</p>
+              <div className="league-match-sections">
+                {ownLeagueMatches.length > 0 && (
+                  <div className="league-match-section">
+                    <h3>Unsere Begegnungen</h3>
+                    <div className="league-match-grid">
+                      {ownLeagueMatches.map(renderMatchCard)}
+                    </div>
+                  </div>
+                )}
+
+                {otherLeagueMatches.length > 0 && (
+                  <div className="league-match-section">
+                    <h3>Weitere Begegnungen in der Liga</h3>
+                    <div className="league-match-grid">
+                      {otherLeagueMatches.map(renderMatchCard)}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -462,7 +467,7 @@ const TeamView = ({
       {activeTab === 'tabelle' && (
         <div className="fade-in lk-card-full">
           <div className="formkurve-header">
-            <div className="formkurve-title">Tabelle - Saison {display}</div>
+            <div className="formkurve-title">Tabelle - Saison {leagueMeta?.season}</div>
             {standings.find(s => s.is_own_team) && (
               <div className="improvement-badge-top neutral" style={{
                 background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',

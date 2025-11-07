@@ -18,7 +18,9 @@ const Results = () => {
     selectedTeamId, 
     setSelectedTeamId,
     matches: dataContextMatches,
-    loading: dataContextLoading
+    loading: dataContextLoading,
+    leagueMatches,
+    leagueMeta
   } = useData();
   
   const [matchScores, setMatchScores] = useState({});
@@ -1436,213 +1438,14 @@ const Results = () => {
           });
           
           return (
-            <>
-              {/* ✅ NEUES TAB-DESIGN (TEST) */}
-              <TeamView 
-                teamId={selectedClubTeamId || selectedTeamId}
-                matches={filteredMatches}
-                matchScores={matchScores}
-                display={display}
-                getMatchStatus={getMatchStatus}
-                calculatePlayerPerspectiveScore={calculatePlayerPerspectiveScore}
-              />
-              
-              {/* ALTE ANSICHT (zum Vergleich - kann später entfernt werden) */}
-              <div style={{ marginTop: '2rem', padding: '1rem', background: '#fef3c7', borderRadius: '12px', border: '2px solid #f59e0b' }}>
-                <p style={{ margin: 0, fontSize: '0.875rem', color: '#92400e', fontWeight: '600' }}>
-                  ⚠️ Alte Ansicht (zum Vergleich) - wird später entfernt
-                </p>
-              </div>
-            <div className="fade-in lk-card-full">
-              <div className="formkurve-header">
-                <div className="formkurve-title">Alle Spiele</div>
-                <div className="match-count-badge">
-                  {filteredMatches.length} {filteredMatches.length === 1 ? 'Spiel' : 'Spiele'}
-                </div>
-              </div>
-              
-              <div className="season-content">
-              {filteredMatches.length === 0 ? (
-                <div className="no-results">
-                  <div style={{ fontSize: '3rem' }}>🎾</div>
-                  <h3>Keine Spiele gefunden</h3>
-                  <p>Für die aktuelle Saison {display} {selectedTeamId && playerTeams.length > 1 ? 'und das gewählte Team' : ''} sind noch keine Spiele geplant.</p>
-                </div>
-              ) : (
-                <div className="season-matches">
-                  {filteredMatches.map((match) => {
-              const rawScore = matchScores[match.id];
-              const status = getMatchStatus(match);
-              
-              // Berechne Score aus Spieler-Perspektive
-              const playerScore = calculatePlayerPerspectiveScore(rawScore);
-              
-              // Prüfe ob das Medenspiel komplett abgeschlossen ist (alle 6 bzw. 9 Spiele)
-              const expectedTotal = match.season === 'summer' ? 9 : 6;
-              const isMedenspieleCompleted = rawScore && rawScore.completed >= expectedTotal;
-              
-              // Outcome basierend auf Spieler-Perspektive
-              let outcome, outcomeLabel;
-              
-              if (!rawScore || rawScore.completed === 0) {
-                // Keine Ergebnisse
-                outcome = status === 'live' ? 'live' : 'upcoming';
-                outcomeLabel = '';
-              } else if (isMedenspieleCompleted) {
-                // ALLE Spiele abgeschlossen → Finaler Sieger aus Spieler-Perspektive
-                if (playerScore.playerScore > playerScore.opponentScore) {
-                  outcome = 'win';
-                  outcomeLabel = '🏆 Sieg';
-                } else if (playerScore.playerScore < playerScore.opponentScore) {
-                  outcome = 'loss';
-                  outcomeLabel = '😢 Niederlage';
-                } else {
-                  outcome = 'draw';
-                  outcomeLabel = '🤝 Remis';
-                }
-              } else {
-                // Spiel läuft noch - aus Spieler-Perspektive
-                if (playerScore.playerScore > playerScore.opponentScore) {
-                  outcome = 'leading';
-                  outcomeLabel = '📈 Wir führen';
-                } else if (playerScore.playerScore < playerScore.opponentScore) {
-                  outcome = 'trailing';
-                  outcomeLabel = '📉 Gegner führt';
-                } else {
-                  outcome = 'tied';
-                  outcomeLabel = '⚖️ Unentschieden';
-                }
-              }
-
-              return (
-                <div 
-                  key={match.id} 
-                  className="match-result-card"
-                  onClick={() => navigate(`/ergebnisse/${match.id}`)}
-                  style={{ cursor: 'pointer' }}
-                >
-                  {/* Match Description - Ganz oben - Nur bei abgeschlossenen Spielen */}
-                  {isMedenspieleCompleted && match.teamInfo && (
-                    <div style={{
-                      padding: '0.75rem 1rem',
-                      background: outcome === 'win' 
-                        ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(5, 150, 105, 0.1) 100%)'
-                        : outcome === 'loss'
-                        ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(220, 38, 38, 0.1) 100%)'
-                        : 'linear-gradient(135deg, rgba(107, 114, 128, 0.15) 0%, rgba(75, 85, 99, 0.1) 100%)',
-                      borderBottom: '1px solid rgba(0, 0, 0, 0.05)',
-                      fontSize: '0.85rem',
-                      color: '#1f2937',
-                      lineHeight: '1.5',
-                      textAlign: 'center',
-                      fontWeight: '500'
-                    }}>
-                      {outcome === 'win' && (
-                        <span>
-                          <strong style={{ color: '#059669' }}>{match.teamInfo.clubName}</strong> gewinnt <strong style={{ color: '#059669' }}>{playerScore.playerScore}:{playerScore.opponentScore}</strong> gegen {match.opponent}
-                        </span>
-                      )}
-                      {outcome === 'loss' && (
-                        <span>
-                          <strong style={{ color: '#dc2626' }}>{match.teamInfo.clubName}</strong> verliert <strong style={{ color: '#dc2626' }}>{playerScore.playerScore}:{playerScore.opponentScore}</strong> gegen {match.opponent}
-                        </span>
-                      )}
-                      {outcome === 'draw' && (
-                        <span>
-                          <strong style={{ color: '#6b7280' }}>{match.teamInfo.clubName}</strong> spielt <strong style={{ color: '#6b7280' }}>{playerScore.playerScore}:{playerScore.opponentScore}</strong> remis gegen {match.opponent}
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Match Header - Kompakt ohne Badge */}
-                  <div className="match-header">
-                    <div className="match-info">
-                      <span className="match-opponent-name">{match.opponent}</span>
-                    </div>
-                  </div>
-
-                  {/* Match Info Compact */}
-                  <div className="results-match-compact">
-                    {/* Datum + Zeit Row */}
-                    <div className="results-match-row">
-                      <span className="results-info-label">
-                        📅 {match.date.toLocaleDateString('de-DE', {
-                          weekday: 'short',
-                          day: '2-digit',
-                          month: '2-digit'
-                        })}
-                      </span>
-                      <span className="results-info-value">
-                        {match.date.toLocaleTimeString('de-DE', {
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })} Uhr
-                      </span>
-                    </div>
-
-                    {/* Heim/Auswärts Row */}
-                    <div className="results-match-row">
-                      <span className="results-info-label">
-                        {match.location === 'Home' ? '🏠' : '✈️'}
-                      </span>
-                      <span className="results-info-value">
-                        {match.location === 'Home' ? 'Heimspiel' : 'Auswärtsspiel'}
-                      </span>
-                    </div>
-
-                    {/* Score Compact - Aus Spieler-Perspektive */}
-                    {rawScore && rawScore.completed > 0 ? (
-                      <div className="results-score-compact">
-                        <span className={`score-digit ${playerScore.playerScore > playerScore.opponentScore ? 'winner' : ''}`}>
-                          {playerScore.playerScore}
-                        </span>
-                        <span className="score-sep">:</span>
-                        <span className={`score-digit ${playerScore.opponentScore > playerScore.playerScore ? 'winner' : ''}`}>
-                          {playerScore.opponentScore}
-                        </span>
-                        {rawScore.completed < rawScore.total && (
-                          <span className="score-progress">({rawScore.completed}/{rawScore.total})</span>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="results-score-compact">
-                        <span className="score-digit">-</span>
-                        <span className="score-sep">:</span>
-                        <span className="score-digit">-</span>
-                      </div>
-                    )}
-
-                    {/* Outcome Badge */}
-                    {isMedenspieleCompleted && (
-                      <div className={`outcome-badge ${outcome}`}>
-                        {outcome === 'win' && '🏆 Sieg'}
-                        {outcome === 'loss' && '😢 Niederlage'}
-                        {outcome === 'draw' && '🤝 Remis'}
-                      </div>
-                    )}
-                    {!isMedenspieleCompleted && rawScore && rawScore.completed > 0 && (
-                      <div className="outcome-badge in-progress">
-                        {outcomeLabel}
-                      </div>
-                    )}
-
-                  </div>
-
-                  {/* Details Link */}
-                  <div className="results-match-footer">
-                    <span className="view-details-link">
-                      Details ansehen <ChevronRight size={16} />
-                    </span>
-                  </div>
-                </div>
-              );
-                  })}
-                </div>
-              )}
-              </div>
-            </div>
-            </>
+            <TeamView 
+              teamId={selectedClubTeamId || selectedTeamId}
+              matches={filteredMatches}
+              leagueMatches={leagueMatches}
+              leagueMeta={leagueMeta}
+              playerTeamIds={playerTeams.map(team => team.id)}
+              display={display}
+            />
           );
         })()
       ) : (

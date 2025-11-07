@@ -16,7 +16,8 @@ function Dashboard() {
   const { 
     matches, 
     teamInfo, 
-    playerTeams
+    playerTeams,
+    leagueStandings
   } = useData();
   
   // Debug: Prüfe was geladen wurde (nur bei signifikanten Änderungen)
@@ -467,6 +468,136 @@ function Dashboard() {
     }
   };
 
+  // Stabiler Zufallsgenerator basierend auf Match-ID (ändert sich nicht bei Reload)
+  const getStableRandomIndex = (matchId, arrayLength) => {
+    if (!matchId) return 0;
+    // Erzeuge Hash aus Match-ID
+    let hash = 0;
+    const idString = matchId.toString();
+    for (let i = 0; i < idString.length; i++) {
+      hash = ((hash << 5) - hash) + idString.charCodeAt(i);
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return Math.abs(hash) % arrayLength;
+  };
+
+  // Team-Status mit humorvollen Sprüchen
+  const getTeamStatusMessage = (match) => {
+    if (!match) return null;
+    
+    // Zähle verfügbare Spieler
+    const availableCount = Object.values(match.availability || {})
+      .filter(a => a.status === 'available')
+      .length;
+    
+    // Bestimme benötigte Spieleranzahl (Winter: 4, Sommer: 6)
+    const requiredPlayers = match.playersNeeded
+      ? match.playersNeeded
+      : (match.season?.toLowerCase().includes('sommer') || 
+         match.season?.toLowerCase().includes('summer') ? 6 : 4);
+    
+    const missing = requiredPlayers - availableCount;
+    
+    // Sprüche für verschiedene Situationen
+    const completeMessages = [
+      '🎉 Team ist komplett! Zeit für die Taktikbesprechung!',
+      '✅ Wir sind startklar! Alle Mann an Bord!',
+      '💪 Das Dream-Team steht! Let\'s gooo!',
+      '🔥 Volle Mannschaft voraus! Bereit für den Sieg!',
+      '⭐ Team komplett - jetzt kann nichts mehr schiefgehen!',
+      '🚀 Aufstellung perfekt! Die Gegner zittern schon!',
+      '🎾 Alle dabei! Das wird legendär!',
+      '👥 Komplettes Team = Doppelte Power!'
+    ];
+    
+    const overfilledMessages = [
+      `🤩 ${availableCount} Zusagen! Wir haben die Qual der Wahl!`,
+      `💎 ${availableCount} motivierte Spieler! Captain, entscheide weise!`,
+      `🌟 ${availableCount} wollen spielen! Luxusproblem!`,
+      `🎯 ${availableCount} Zusagen - so viel Enthusiasmus!`,
+      `🔥 ${availableCount} Spieler ready! Das nennt man Teamspirit!`,
+      `⚡ ${availableCount} sind dabei - welch eine Auswahl!`
+    ];
+    
+    const oneMissingMessages = [
+      '🤔 Noch 1 Spieler fehlt! Wer traut sich?',
+      '🎾 Fast komplett! Ein mutiger Held wird gesucht!',
+      '⚡ 1 Platz frei! Greif zu, bevor es zu spät ist!',
+      '🔔 Einer fehlt noch! Deine Chance zu glänzen!',
+      '🌟 Ein Plätzchen frei! Perfect Match für dich?',
+      '💪 Noch 1 Krieger gesucht! Bist du bereit?',
+      '🚀 Ein Ticket übrig! All aboard!',
+      '🎯 Der letzte Platz wartet auf dich!'
+    ];
+    
+    const twoMissingMessages = [
+      '🤝 Noch 2 Plätze frei – wer schnappt sie sich?',
+      '🎾 Fast vollzählig! Zwei Zusagen fehlen noch.',
+      '⚡ Zwei fehlende Zusagen – meldet euch jetzt!',
+      '💪 Zwei freie Spots für Matchhelden!',
+      '🌟 Noch zwei Spieler gesucht – jetzt zusagen!',
+      '🚀 Zwei Tickets offen – wer kommt mit?',
+      '📢 Zwei Zusagen fehlen – Team braucht euch!',
+      '🔥 Nur noch zwei Plätze bis zum Dream-Team!'
+    ];
+    
+    const multipleMissingMessages = [
+      `😅 Noch ${missing} Spieler fehlen! Wer hat Bock?`,
+      `🆘 ${missing} Plätze frei! Team, wo seid ihr?`,
+      `📢 ${missing} gesucht! Zeit für Engagement!`,
+      `🎾 ${missing} fehlen noch! Meldet euch zahlreich!`,
+      `💪 ${missing} Helden gebraucht! Los geht's!`,
+      `⚡ ${missing} Spots verfügbar! Greift zu!`,
+      `🔔 Alarm: Noch ${missing} benötigt!`,
+      `🚨 ${missing} fehlen! Captain braucht Verstärkung!`
+    ];
+    
+    const emptyMessages = [
+      `🤯 Noch ${requiredPlayers} Zusagen nötig! Wer macht den Anfang?`,
+      `📣 Das Team wartet auf dich! Sei der Erste!`,
+      `🎾 Leere Spielerliste! Zeit, das zu ändern!`,
+      `⚡ Jemand muss anfangen! Trau dich!`,
+      `💪 ${requiredPlayers} mutige Spieler gesucht! Macht mit!`,
+      `🌟 Die Bühne ist leer! Wer betritt sie zuerst?`,
+      `🔥 Noch niemand dabei? Das ändern wir jetzt!`,
+      `🚀 ${requiredPlayers} Plätze warten auf Helden!`
+    ];
+    
+    // Wähle passende Nachricht basierend auf Status
+    let messages;
+    let icon = '👥';
+    
+    if (availableCount === 0) {
+      messages = emptyMessages;
+      icon = '📣';
+    } else if (availableCount >= requiredPlayers) {
+      messages = availableCount > requiredPlayers ? overfilledMessages : completeMessages;
+      icon = '✅';
+    } else if (missing === 1) {
+      messages = oneMissingMessages;
+      icon = '🎯';
+    } else if (missing === 2) {
+      messages = twoMissingMessages;
+      icon = '👥';
+    } else {
+      messages = multipleMissingMessages;
+      icon = '🆘';
+    }
+    
+    // Stabiler Zufallsindex basierend auf Match-ID
+    const randomIndex = getStableRandomIndex(match.id, messages.length);
+    const message = messages[randomIndex];
+    
+    return {
+      icon,
+      count: availableCount,
+      required: requiredPlayers,
+      missing: Math.max(0, missing),
+      message,
+      isComplete: availableCount >= requiredPlayers
+    };
+  };
+
   // Motivationsspruch basierend auf Countdown (nur für ZUKÜNFTIGE Spiele)
   // 🔧 Nutzt gleiche 06:00 Uhr Logik wie getNextMatchCountdown
   const getMotivationQuote = () => {
@@ -516,6 +647,44 @@ function Dashboard() {
 
   // Debug Player Data (reduziert)
   // console.log('🔍 Dashboard Player Data:', { hasCurrentLK: !!player?.current_lk, currentLK: player?.current_lk });
+
+  const normalizeTeamName = (name = '') => {
+    return name
+      ?.toString()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]/g, '')
+      .trim();
+  };
+
+  const getOpponentStanding = (match) => {
+    if (!match || !leagueStandings || leagueStandings.length === 0) {
+      return null;
+    }
+
+    const target = normalizeTeamName(match.opponent);
+    if (!target) return null;
+
+    const directHit = leagueStandings.find((entry) => normalizeTeamName(entry.team) === target);
+    if (directHit) return directHit;
+
+    const partialHit = leagueStandings.find((entry) => {
+      const normalized = normalizeTeamName(entry.team);
+      return normalized.includes(target) || target.includes(normalized);
+    });
+
+    return partialHit || null;
+  };
+
+  const formatStandingText = (standing) => {
+    if (!standing?.position) return null;
+    const ordinal = `${standing.position}. Platz`;
+    if (standing.points !== undefined) {
+      return `${ordinal} • ${standing.points} Punkte`;
+    }
+    return ordinal;
+  };
 
   return (
     <div className="dashboard container">
@@ -977,17 +1146,12 @@ function Dashboard() {
           )}
       </div>
 
-          {/* Nächstes Spiel - NUR anzeigen wenn < 24h */}
+          {/* Nächstes Spiel - IMMER anzeigen (Countdown) */}
           {nextMatchAnySeason ? (() => {
             const diffTime = nextMatchAnySeason.date - now;
             const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
             const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
             const isSoon = diffDays <= 7;
-            
-            // 🔧 NUR anzeigen wenn < 24 Stunden
-            if (diffHours >= 24) {
-              return null;
-            }
             
             // Verfügbare Spieler
         const availablePlayers = Object.entries(nextMatchAnySeason.availability || {})
@@ -995,10 +1159,64 @@ function Dashboard() {
           .map(([, data]) => data.playerName)
           .filter(name => name && name !== 'Unbekannt');
 
-        return (
-              <div className="next-match-card">
+            // Team-Status mit humorvoller Nachricht
+            const teamStatus = getTeamStatusMessage(nextMatchAnySeason);
+
+            const opponentStanding = getOpponentStanding(nextMatchAnySeason);
+            const matchLocationLabel = (() => {
+              const loc = (nextMatchAnySeason.location || '').toString().toLowerCase();
+              if (loc === 'home') return '🏠 Heimspiel';
+              if (loc === 'away') return '✈️ Auswärtsspiel';
+              return nextMatchAnySeason.location || null;
+            })();
+
+            return (
+              <div
+                className="next-match-card clickable"
+                role="button"
+                tabIndex={0}
+                onClick={() => navigate(`/matches?match=${nextMatchAnySeason.id}`)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    navigate(`/matches?match=${nextMatchAnySeason.id}`);
+                  }
+                }}
+              >
                 <div className="next-match-label">NÄCHSTES SPIEL</div>
                 <div className="next-match-countdown">{getNextMatchCountdown()}</div>
+                
+                {/* Team-Status mit Zusagen */}
+                {teamStatus && (
+                  <div className={`team-status-card ${teamStatus.isComplete ? 'complete' : 'open'}`}>
+                    <div className="team-status-heading">
+                      <span className="team-status-icon">{teamStatus.icon}</span>
+                      <span className="team-status-text">
+                        {teamStatus.count} / {teamStatus.required} Zusagen
+                      </span>
+                    </div>
+                    <div className="team-status-message">{teamStatus.message}</div>
+                  </div>
+                )}
+                
+                <div className="opponent-summary">
+                  <div className="opponent-label">Gegner</div>
+                  <div className="opponent-name">{nextMatchAnySeason.opponent}</div>
+                  {matchLocationLabel && (
+                    <div className="opponent-location">{matchLocationLabel}</div>
+                  )}
+                  {formatStandingText(opponentStanding) ? (
+                    <div className="opponent-standing with-data">
+                      <span className="standing-icon">📊</span>
+                      <span>{formatStandingText(opponentStanding)}</span>
+                    </div>
+                  ) : (
+                    <div className="opponent-standing unknown">
+                      <span className="standing-icon">📊</span>
+                      <span>Tabellenplatz aktuell unbekannt</span>
+                    </div>
+                  )}
+                </div>
                 
                 {/* Motivationsspruch bei Spielen < 7 Tage */}
                 {isSoon && (
@@ -1006,11 +1224,6 @@ function Dashboard() {
                     {getMotivationQuote()}
               </div>
                 )}
-                
-                <div className="next-match-opponent">
-                  <div className="opponent-label">Gegner:</div>
-                  <div className="opponent-name">{nextMatchAnySeason.opponent}</div>
-                </div>
                 
                 {/* Spieler-Liste bei Spielen < 7 Tage */}
                 {isSoon && availablePlayers.length > 0 && (
@@ -1033,7 +1246,11 @@ function Dashboard() {
                 </div>
               </div>
             )}
+
+                <div className="next-match-cta">
+                  <span>➡️ Verfügbarkeit jetzt aktualisieren</span>
                 </div>
+              </div>
             );
           })() : (
             <div className="next-match-card empty">
