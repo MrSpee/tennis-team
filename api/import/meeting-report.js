@@ -97,11 +97,25 @@ async function determineMeetingId({
         awayTeam: entry.awayTeam || entry.away_team || null
       })) || [];
 
-    throw new Error(
+    const error = new Error(
       `Meeting-ID konnte aus der Gruppenübersicht nicht ermittelt werden (Gruppe ${groupId}). ` +
         `Gesucht: Match "${normalizedMatchNumber}", Heim "${normalizeTeamLabel(searchHome)}", ` +
         `Gast "${normalizeTeamLabel(searchAway)}". Matches: ${JSON.stringify(availableMatches)}`
     );
+    error.code = 'MATCH_ID_NOT_FOUND';
+    error.meta = { groupId, normalizedMatchNumber, searchHome, searchAway };
+    throw error;
+  }
+
+  const similarityThreshold = normalizedMatchNumber ? 8 : 10;
+  if (matchedResult.score < similarityThreshold) {
+    const error = new Error(
+      `Meeting-ID Zuordnung unsicher (Score ${matchedResult.score.toFixed?.(2) || matchedResult.score}). ` +
+        `Gefundenes Spiel: "${matched.homeTeam}" vs. "${matched.awayTeam}" (#${matched.matchNumber || 'n/a'}).`
+    );
+    error.code = 'MATCH_ID_UNCERTAIN';
+    error.meta = { candidate: matched, score: matchedResult.score };
+    throw error;
   }
 
   return {
@@ -358,6 +372,23 @@ const DEFAULT_IMPORTS = {
   }
 };
 
+async function cleanupMatchdayData(matchdayId) {
+  if (!matchdayId) return;
+  try {
+    const supabase = createSupabaseClient(true);
+    const { error: resultsError } = await supabase.from('match_results').delete().eq('matchday_id', matchdayId);
+    if (resultsError) {
+      console.warn('[meeting-report] Cleanup match_results fehlgeschlagen:', resultsError.message);
+    }
+    const { error: matchdayError } = await supabase.from('matchdays').delete().eq('id', matchdayId);
+    if (matchdayError) {
+      console.warn('[meeting-report] Cleanup matchdays fehlgeschlagen:', matchdayError.message);
+    }
+  } catch (cleanupError) {
+    console.error('[meeting-report] Unerwarteter Fehler beim Cleanup:', cleanupError);
+  }
+}
+
 module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     return withCors(res, 200, { ok: true });
@@ -367,6 +398,7 @@ module.exports = async function handler(req, res) {
     return withCors(res, 405, { error: 'Method not allowed. Use POST.' });
   }
 
+  let requestContext = {};
   try {
     const {
       meetingId,
@@ -379,6 +411,7 @@ module.exports = async function handler(req, res) {
       awayTeam,
       apply = false
     } = req.body || {};
+    requestContext = { matchdayId, apply };
 
     const imports = await DEFAULT_IMPORTS.get();
 
@@ -439,6 +472,29 @@ module.exports = async function handler(req, res) {
       meetingUrl: resolvedMeetingUrl
     });
 
+    const normalizeTeam = imports.normalizeTeamLabel || ((value) => (value ? value.toString().toLowerCase().trim() : ''));
+    const metaHome = meetingData.metadata?.homeTeam ? normalizeTeam(meetingData.metadata.homeTeam) : null;
+    const metaAway = meetingData.metadata?.awayTeam ? normalizeTeam(meetingData.metadata.awayTeam) : null;
+    const localHome = homeTeam ? normalizeTeam(homeTeam) : null;
+    const localAway = awayTeam ? normalizeTeam(awayTeam) : null;
+
+    if (metaHome && localHome && metaHome !== localHome) {
+      const error = new Error(
+        `Spielbericht gehört zu "${meetingData.metadata?.homeTeam || 'unbekannt'}" (Heim), nicht zu "${homeTeam}".`
+      );
+      error.code = 'MEETING_TEAM_MISMATCH';
+      error.meta = { type: 'home', expected: homeTeam, actual: meetingData.metadata?.homeTeam };
+      throw error;
+    }
+    if (metaAway && localAway && metaAway !== localAway) {
+      const error = new Error(
+        `Spielbericht gehört zu "${meetingData.metadata?.awayTeam || 'unbekannt'}" (Gast), nicht zu "${awayTeam}".`
+      );
+      error.code = 'MEETING_TEAM_MISMATCH';
+      error.meta = { type: 'away', expected: awayTeam, actual: meetingData.metadata?.awayTeam };
+      throw error;
+    }
+
     let applyResult = null;
     if (apply) {
       if (!matchdayId) {
@@ -469,6 +525,13 @@ module.exports = async function handler(req, res) {
     });
   } catch (error) {
     console.error('[api/import/meeting-report] Fehler:', error);
+    if (
+      requestContext.matchdayId &&
+      ['MATCH_ID_UNCERTAIN', 'MEETING_TEAM_MISMATCH'].includes(error.code)
+    ) {
+      await cleanupMatchdayData(requestContext.matchdayId);
+    }
+
     return withCors(res, 500, {
       success: false,
       error: error.message || 'Unbekannter Fehler beim Meeting-Report-Parser.'
