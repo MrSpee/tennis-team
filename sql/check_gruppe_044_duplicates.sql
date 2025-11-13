@@ -59,3 +59,4 @@ WHERE group_name = 'Gr. 044'
   AND season = 'Winter 2025/26';
 
 
+
