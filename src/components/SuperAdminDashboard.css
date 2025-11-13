@@ -1,0 +1,747 @@
+.super-admin-dashboard {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem;
+}
+
+@media (max-width: 1180px) {
+  .super-admin-dashboard {
+    padding: 1rem;
+  }
+
+  .dashboard-tabs {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .dashboard-tabs button {
+    flex: 1 1 calc(33% - 0.5rem);
+    min-width: 140px;
+  }
+}
+
+.matchday-table-compact {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.matchday-table-compact th,
+.matchday-table-compact td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.85rem;
+}
+
+.matchday-table-compact th {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  color: #475569;
+  background: #f8fafc;
+}
+
+.matchday-row:nth-child(odd) {
+  background: #ffffff;
+}
+
+.matchday-row:nth-child(even) {
+  background: #f9fafb;
+}
+
+.matchday-team-cell {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.matchday-venue-courts {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.matchday-group {
+  font-size: 0.75rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.matchday-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.matchday-score {
+  font-weight: 800;
+  font-size: 0.95rem;
+  color: #111827;
+}
+
+.matchday-parser-cell {
+  text-align: center;
+  vertical-align: middle;
+  white-space: nowrap;
+  width: 120px;
+}
+
+.matchday-parser-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.matchday-parser-cell .matchday-parser-indicator {
+  margin: 0 auto;
+}
+
+.matchday-parser-indicator--ok {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #bbf7d0;
+}
+
+.matchday-parser-indicator--running {
+  background: #e0f2fe;
+  color: #0369a1;
+  border-color: #bae6fd;
+}
+
+.matchday-parser-indicator--error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.matchday-parser-placeholder {
+  display: inline-block;
+  color: #94a3b8;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.matchday-parser-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  border-radius: 10px;
+  padding: 0.7rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.matchday-meeting-section {
+  margin-top: 1.25rem;
+  padding: 1rem 1.2rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.matchday-meeting-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.matchday-meeting-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.matchday-meeting-meta {
+  font-size: 0.8rem;
+  color: #475569;
+  margin-top: 0.15rem;
+}
+
+.matchday-meeting-actions {
+  display: inline-flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.btn-meeting-action {
+  font-size: 0.75rem;
+  padding: 0.35rem 0.85rem;
+  white-space: nowrap;
+}
+
+.matchday-meeting-loading {
+  font-size: 0.82rem;
+  color: #475569;
+}
+
+.matchday-meeting-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.matchday-meeting-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.78rem;
+  color: #475569;
+}
+
+.matchday-meeting-metadata a {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+.meeting-table-wrapper {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.meeting-table-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 0.6rem 0.9rem;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-bottom: 1px solid #e2e8f0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.matchday-meeting-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.matchday-meeting-table th,
+.matchday-meeting-table td {
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.matchday-meeting-table th {
+  background: #f8fafc;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #475569;
+  letter-spacing: 0.05em;
+}
+
+.matchday-meeting-table tr:last-child td {
+  border-bottom: none;
+}
+
+.meeting-player-cell {
+  text-align: left;
+  min-width: 140px;
+  color: #0f172a;
+}
+
+.matchday-meeting-totals {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: #475569;
+}
+
+.matchday-parser-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #fde68a;
+  border-radius: 12px;
+  background: #fefce8;
+  color: #b45309;
+  font-size: 0.85rem;
+}
+
+.matchday-parser-summary-info {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  font-weight: 600;
+}
+
+.matchday-parser-summary-icon {
+  font-size: 1rem;
+}
+
+.matchday-parser-summary-groups {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #475569;
+}
+
+.btn-parser-bulk {
+  font-size: 0.75rem;
+  padding: 0.35rem 0.9rem;
+  white-space: nowrap;
+}
+
+.matchday-parser-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.btn-parser-run {
+  font-size: 0.68rem;
+  padding: 0.25rem 0.65rem;
+  white-space: nowrap;
+}
+
+.matchday-results-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.matchday-results-tag--ok {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #bbf7d0;
+}
+
+.matchday-results-tag--missing {
+  background: #f8fafc;
+  color: #64748b;
+  border-color: #cbd5f5;
+}
+
+.matchday-results-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.parser-feedback {
+  margin-bottom: 1rem;
+  padding: 0.8rem 1rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.parser-feedback--success {
+  background: #ecfdf5;
+  border: 1px solid #bbf7d0;
+  color: #047857;
+}
+
+.parser-feedback--error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+}
+
+.parser-feedback--warning {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #c2410c;
+}
+
+.btn-matchday-details {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+}
+
+.matchday-detail-row td {
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 1.2rem 1.5rem;
+}
+
+.matchday-detail-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.matchday-detail-inline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.matchday-detail-title {
+  font-weight: 800;
+  font-size: 1.02rem;
+  color: #0f172a;
+}
+
+.matchday-detail-meta {
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.matchday-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.85rem 1.25rem;
+}
+
+.detail-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+  margin-bottom: 0.3rem;
+}
+
+/* ------------------------------------------------------------------
+   PLAYER DIRECTORY
+------------------------------------------------------------------- */
+.player-sort-controls {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.player-sort-group {
+  display: inline-flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.player-sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 700;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #475569;
+  background: #e2e8f0;
+  border: 1px solid #cbd5f5;
+  border-radius: 999px;
+  padding: 0.25rem 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.player-sort-button:hover {
+  color: #1d4ed8;
+  border-color: #93c5fd;
+}
+
+.player-sort-button.active {
+  color: #1e3a8a;
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+
+.sort-indicator {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.player-directory-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+}
+
+.player-directory-table th {
+  padding: 0.9rem 1rem;
+  font-size: 0.7rem;
+  color: #475569;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  background: #f8fafc;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.player-directory-row:nth-child(even) td {
+  background: #f9fafb;
+}
+
+.player-directory-row:hover td {
+  background: #eef2ff;
+}
+
+.player-directory-row td {
+  padding: 0.85rem 1rem;
+  font-size: 0.82rem;
+  color: #1f2937;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: middle;
+}
+
+.player-directory-cell-name {
+  width: 28%;
+}
+
+.player-directory-cell-status {
+  width: 14%;
+}
+
+.player-directory-cell-teams {
+  width: 26%;
+}
+
+.player-directory-cell-actions {
+  width: 8%;
+  text-align: right;
+}
+
+.player-directory-person {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.player-directory-person img {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #cbd5f5;
+  background: #f8fafc;
+  box-shadow: 0 0 0 4px rgba(199, 210, 254, 0.35);
+}
+
+.player-directory-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.player-directory-email {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.player-directory-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.28rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.player-tag {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.player-tag.admin {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.player-tag.inactive {
+  background: #f8fafc;
+  color: #94a3b8;
+  border: 1px dashed #cbd5f5;
+}
+
+.player-tag.lk {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.player-tag.linked {
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+.player-directory-teamlist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.player-directory-teamchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #1e3a8a;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.player-directory-empty {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.btn-player-details {
+  padding: 0.35rem 0.9rem;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  background: #f8fafc;
+  border: 1px solid #d1d5db;
+  color: #1e3a8a;
+  border-radius: 999px;
+  transition: all 0.15s ease;
+}
+
+.btn-player-details:hover {
+  background: #e0e7ff;
+  border-color: #a5b4fc;
+  color: #1e40af;
+}
+
+.player-directory-detail-row td {
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+.player-directory-detail {
+  background: linear-gradient(135deg, #f8fafc 0%, #e0f2fe 100%);
+  border: 1px solid #cbd5f5;
+  border-radius: 12px;
+  margin: 0.6rem 0;
+  padding: 1.1rem 1.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.15);
+}
+
+.player-directory-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.player-directory-detail-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #1e40af;
+  margin-bottom: 0.25rem;
+}
+
+.player-directory-detail-meta {
+  font-size: 0.8rem;
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.player-directory-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.player-directory-detail-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+  margin-bottom: 0.2rem;
+}
+
+.player-directory-detail-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1e40af;
+  word-break: break-word;
+}
+
+.btn-player-details + .detail-value {
+  color: #1f2937;
+}
+
+@media (max-width: 768px) {
+  .player-directory-table th,
+  .player-directory-row td {
+    padding: 0.65rem 0.7rem;
+    font-size: 0.74rem;
+  }
+
+  .player-directory-person {
+    gap: 0.6rem;
+  }
+
+  .player-directory-person img {
+    width: 38px;
+    height: 38px;
+  }
+}
+
+@media (max-width: 960px) {
+  .matchday-table-compact th,
+  .matchday-table-compact td {
+    font-size: 0.78rem;
+    padding: 0.5rem;
+  }
+
+  .matchday-detail-inline {
+    gap: 0.75rem;
+  }
+
+  .matchday-detail-grid {
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  }
+}
+

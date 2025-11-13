@@ -1,3581 +1,3111 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback, Fragment } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { 
-  Users, 
-  Building2, 
-  Activity, 
-  CheckCircle, 
-  XCircle, 
-  TrendingUp,
-  Eye,
-  Filter,
+import { calculateSimilarity, normalizeString } from '../services/matchdayImportService';
+import {
+  Users,
+  Building2,
+  Activity,
+  CheckCircle,
   Download,
-  RefreshCw
+  RefreshCw,
+  CalendarDays
 } from 'lucide-react';
 import ImportTab from './ImportTab';
 import './Dashboard.css';
+import './SuperAdminDashboard.css';
+
+const SCRAPER_STATUS = {
+  existing: { icon: '✅', color: '#166534', background: '#bbf7d0', label: 'Im System' },
+  new: { icon: '🆕', color: '#1d4ed8', background: '#bfdbfe', label: 'Neu anlegen' },
+  missing: { icon: '⚠️', color: '#b91c1c', background: '#fecaca', label: 'Keine Zuordnung' },
+  skipped: { icon: '🚫', color: '#92400e', background: '#fde68a', label: 'Import deaktiviert' }
+};
+
+const getDefaultBuildInfo = () => {
+  try {
+    const buildTime = import.meta.env?.VITE_BUILD_TIME || new Date().toISOString();
+    const buildDate = new Date(buildTime);
+    const commitSha = import.meta.env?.VITE_GIT_SHA || '';
+    return {
+      buildTime,
+      buildTimeFormatted: buildDate.toLocaleString('de-DE'),
+      shortCommit: commitSha ? commitSha.slice(0, 7) : 'local'
+    };
+  } catch (error) {
+    const now = new Date();
+    return {
+      buildTime: now.toISOString(),
+      buildTimeFormatted: now.toLocaleString('de-DE'),
+      shortCommit: 'local'
+    };
+  }
+};
+
+const splitTeamLabel = (value = '') => {
+  const trimmed = value.trim();
+  if (!trimmed) return { clubName: '', suffix: null };
+  const match = trimmed.match(/^(.*?)(?:\s+([IVXLCM]+|\d+))$/iu);
+  if (!match) return { clubName: trimmed, suffix: null };
+  return { clubName: (match[1] || '').trim(), suffix: match[2] ? match[2].trim() : null };
+};
+
+const buildTeamKeys = (teamName = '', fallbackClub = '', fallbackSuffix = '') => {
+  const keys = new Set();
+  const base = normalizeString(teamName || '');
+  if (base) keys.add(base);
+  const { clubName, suffix } = splitTeamLabel(teamName);
+  const resolvedClub = fallbackClub || clubName;
+  const resolvedSuffix = fallbackSuffix || suffix;
+  [
+    `${resolvedClub} ${resolvedSuffix || ''}`,
+    `${resolvedClub} ${teamName || ''}`,
+    resolvedClub,
+    resolvedSuffix
+  ].forEach((candidate) => {
+    const key = normalizeString(candidate || '');
+    if (key) keys.add(key);
+  });
+  return Array.from(keys).filter(Boolean);
+};
+
+const inferTeamSize = (label = '') => {
+  if (!label) return 4;
+  const match = label.match(/(\d+)\s*er/i);
+  if (match) {
+    const size = parseInt(match[1], 10);
+    if (!Number.isNaN(size)) return size;
+  }
+  return 4;
+};
+
+const parseScoreComponent = (raw = '', index = 0) => {
+  if (!raw) return null;
+  const parts = raw.split(':');
+  if (!Array.isArray(parts) || !parts[index]) return null;
+  const value = parseInt(parts[index].trim(), 10);
+  return Number.isNaN(value) ? null : value;
+};
+
+const extractScoreValue = (matchPoints, side) => {
+  if (!matchPoints) return null;
+  if (typeof matchPoints === 'string') {
+    return parseScoreComponent(matchPoints, side === 'home' ? 0 : 1);
+  }
+  if (typeof matchPoints?.raw === 'string') {
+    return parseScoreComponent(matchPoints.raw, side === 'home' ? 0 : 1);
+  }
+  const value = matchPoints?.[side];
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const parsed = parseInt(value.trim(), 10);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+};
+
+const normalizeStartTime = (value) => {
+  if (!value) return null;
+  const stringified = value.toString().trim();
+  if (!stringified) return null;
+  return stringified.length > 5 ? stringified.slice(0, 5) : stringified;
+};
+
+const deriveYearLabel = (season, fallbackYear) => {
+  if (fallbackYear) return fallbackYear;
+  if (!season) return null;
+  const seasonMatch = season.match(/\d{4}\/\d{2}/);
+  if (seasonMatch) return seasonMatch[0];
+  const singleYear = season.match(/\d{4}/g);
+  if (singleYear && singleYear.length) return singleYear.pop();
+  return null;
+};
+
+const toIntegerOrNull = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = parseInt(value, 10);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
+const buildSeasonKey = (teamId, season, league, groupName) => {
+  if (!teamId) return null;
+  const seasonPart = season || 'unknown';
+  const leaguePart = league || 'unknown';
+  const groupPart = groupName || 'unknown';
+  return `${teamId}::${seasonPart}::${leaguePart}::${groupPart}`;
+};
+
+const hasScoreData = (match) => {
+  const home = extractScoreValue(match?.matchPoints, 'home');
+  const away = extractScoreValue(match?.matchPoints, 'away');
+  return home != null && away != null;
+};
+
+const formatCourtRange = (start, end) => {
+  if (!start) return '–';
+  if (end && end !== start) return `${start}–${end}`;
+  return `${start}`;
+};
+
+const extractMatchNumber = (notes) => {
+  if (!notes) return null;
+  const match = notes.match(/match\s*#(\d+)/i);
+  return match ? parseInt(match[1], 10) : null;
+};
+
+const extractMeetingMeta = (match) => {
+  const meta = {
+    meetingId: null,
+    meetingUrl: null
+  };
+
+  if (!match) return meta;
+
+  if (match.meetingId) {
+    meta.meetingId = match.meetingId;
+  }
+  if (match.meeting_id) {
+    meta.meetingId = match.meeting_id;
+  }
+  if (match.meetingReportUrl) {
+    meta.meetingUrl = match.meetingReportUrl;
+  }
+  if (match.meeting_report_url) {
+    meta.meetingUrl = match.meeting_report_url;
+  }
+
+  const textSources = [match.notes, match.final_score, match.metadata]
+    .filter(Boolean)
+    .map((value) => value.toString())
+    .join(' ');
+
+  if (!meta.meetingId && textSources) {
+    const idMatch = textSources.match(/meeting#(\d+)/i) || textSources.match(/meeting=(\d+)/i);
+    if (idMatch) {
+      meta.meetingId = idMatch[1];
+    }
+  }
+
+  if (!meta.meetingUrl && textSources) {
+    const urlMatch = textSources.match(/https?:\/\/[^\s]+meeting[^\s"]+/i);
+    if (urlMatch) {
+      meta.meetingUrl = urlMatch[0];
+    }
+  }
+
+  return meta;
+};
+
+const resolveGroupId = (value) => {
+  if (value === null || value === undefined) return null;
+  const str = String(value).trim();
+  if (!str) return null;
+  if (/^\d+$/.test(str)) {
+    const normalized = str.replace(/^0+/, '');
+    return normalized || '0';
+  }
+  const match = str.match(/(\d{1,4})/);
+  if (!match) return null;
+  const normalized = match[1].replace(/^0+/, '');
+  return normalized || '0';
+};
+
+const toDateKey = (value) => {
+  if (!value) return null;
+  try {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toISOString().slice(0, 10);
+  } catch (error) {
+    return null;
+  }
+};
+
+const buildTeamLabel = (team) => {
+  if (!team) return '';
+  const club = team.club_name || '';
+  const suffix = team.team_name ? ` ${team.team_name}` : '';
+  return `${club}${suffix}`.trim();
+};
+
+const getMatchNumberFromRecord = (match) => {
+  if (!match) return null;
+  if (match.match_number) return match.match_number;
+  return extractMatchNumber(match.notes);
+};
+
+const PLAYER_STATUS_STYLES = {
+  app_user: { label: 'App-Nutzer', icon: '📱', color: '#0f766e', background: '#ccfbf1', border: '#99f6e4' },
+  external: { label: 'Externer Spieler', icon: '🌐', color: '#1d4ed8', background: '#dbeafe', border: '#bfdbfe' },
+  opponent: { label: 'Gegner', icon: '🎾', color: '#92400e', background: '#fef3c7', border: '#fde68a' },
+  default: { label: 'Unbekannt', icon: '❔', color: '#475569', background: '#e2e8f0', border: '#cbd5f5' }
+};
+
+const resolvePlayerStatus = (player) => {
+  if (player?.user_id && player?.is_active !== false) {
+    return PLAYER_STATUS_STYLES.app_user;
+  }
+  const type = player?.player_type;
+  if (type && PLAYER_STATUS_STYLES[type]) {
+    return PLAYER_STATUS_STYLES[type];
+  }
+  return PLAYER_STATUS_STYLES.default;
+};
+
+const formatDate = (value) => {
+  if (!value) return '–';
+  try {
+    return new Date(value).toLocaleDateString('de-DE');
+  } catch (error) {
+    return '–';
+  }
+};
+
+const MATCHDAY_STATUS_STYLES = {
+  scheduled: { label: 'Geplant', icon: '🗓️', color: '#1d4ed8', background: '#dbeafe' },
+  completed: { label: 'Beendet', icon: '✅', color: '#16a34a', background: '#dcfce7' },
+  cancelled: { label: 'Abgesagt', icon: '⛔', color: '#b91c1c', background: '#fee2e2' },
+  postponed: { label: 'Verschoben', icon: '🕒', color: '#a16207', background: '#fef3c7' },
+  default: { label: 'Unbekannt', icon: 'ℹ️', color: '#334155', background: '#e2e8f0' }
+};
+
+const isMatchInPast = (match) => {
+  if (!match?.match_date) return false;
+  const matchDate = new Date(match.match_date);
+  if (Number.isNaN(matchDate.getTime())) return false;
+
+  if (match.start_time && matchDate.getHours() === 0 && matchDate.getMinutes() === 0) {
+    const [hoursString, minutesString] = match.start_time.split(':');
+    const hours = Number.parseInt(hoursString, 10);
+    const minutes = Number.parseInt(minutesString, 10);
+    if (!Number.isNaN(hours)) {
+      matchDate.setHours(hours);
+      matchDate.setMinutes(Number.isNaN(minutes) ? 0 : minutes);
+    }
+  }
+
+  return matchDate.getTime() < Date.now();
+};
+
+const needsResultParser = (match) => {
+  if (!match) return false;
+  if (['cancelled', 'postponed'].includes(match.status)) return false;
+
+  const hasNumericScore = match.home_score != null && match.away_score != null;
+  const finalScore =
+    typeof match.final_score === 'string'
+      ? match.final_score.trim()
+      : match.final_score;
+  const hasFinalScore = Boolean(finalScore);
+
+  if (hasNumericScore || hasFinalScore) return false;
+  if (match.status === 'completed') return true;
+
+  return match.status === 'scheduled' && isMatchInPast(match);
+};
 
 function SuperAdminDashboard() {
+  // ---------------------------------------------------------------------------
+  // Allgemeine States
+  // ---------------------------------------------------------------------------
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({});
   const [activityLogs, setActivityLogs] = useState([]);
-  const [pendingClubs, setPendingClubs] = useState([]);
-  const [allClubs, setAllClubs] = useState([]);
-  const [clubPlayerCounts, setClubPlayerCounts] = useState({});
-  const [matches, setMatches] = useState([]);
+  const [clubs, setClubs] = useState([]);
   const [players, setPlayers] = useState([]);
-  const [selectedTab, setSelectedTab] = useState('overview');
-  const [dateFilter, setDateFilter] = useState('all'); // Default: Alle Logs anzeigen
-  const [logsFilter, setLogsFilter] = useState('all');
-  const [clubSearchTerm, setClubSearchTerm] = useState('');
-  const [playerSearchTerm, setPlayerSearchTerm] = useState('');
-  const [playerSortField, setPlayerSortField] = useState('created_at');
-  const [playerSortDirection, setPlayerSortDirection] = useState('desc');
   const [teams, setTeams] = useState([]);
-  const [teamSearchTerm, setTeamSearchTerm] = useState('');
-  const [teamCategoryFilter, setTeamCategoryFilter] = useState('all');
-  const [teamSeasonFilter, setTeamSeasonFilter] = useState('all');
-  const [allMatches, setAllMatches] = useState([]);
-  const [matchView, setMatchView] = useState('upcoming'); // 'upcoming' | 'completed'
-  const [matchSearchTerm, setMatchSearchTerm] = useState('');
-  const [matchStatusFilter, setMatchStatusFilter] = useState('all');
-  const [trainingGroups, setTrainingGroups] = useState([]);
-  const [trainingSearchTerm, setTrainingSearchTerm] = useState('');
+  const [teamSeasons, setTeamSeasons] = useState([]);
+  const [seasonMatchdays, setSeasonMatchdays] = useState([]);
+  const [selectedSeasonMatch, setSelectedSeasonMatch] = useState(null);
+  const [playerSearch, setPlayerSearch] = useState('');
+  const [playerSort, setPlayerSort] = useState({ column: 'name', direction: 'asc' });
+  const [selectedTab, setSelectedTab] = useState('scraper');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [logsFilter, setLogsFilter] = useState('all');
+  const [selectedPlayerRow, setSelectedPlayerRow] = useState(null);
 
-  // State für Sortierung
-  const [teamSortField, setTeamSortField] = useState('club'); // 'club', 'category', 'players', 'season'
-  const [teamSortDirection, setTeamSortDirection] = useState('asc'); // 'asc', 'desc'
-  const [matchSortField, setMatchSortField] = useState('date'); // 'date', 'team', 'status'
-  const [matchSortDirection, setMatchSortDirection] = useState('desc'); // 'asc', 'desc'
+  // ---------------------------------------------------------------------------
+  // Scraper States
+  // ---------------------------------------------------------------------------
+  const [scraperData, setScraperData] = useState(null);
+  const [scraperError, setScraperError] = useState('');
+  const [scraperSuccess, setScraperSuccess] = useState('');
+  const [scraperClubMappings, setScraperClubMappings] = useState({});
+  const [scraperMatchSelections, setScraperMatchSelections] = useState({});
+  const [scraperSelectedGroupId, setScraperSelectedGroupId] = useState(null);
+  const [scraperSelectedMatch, setScraperSelectedMatch] = useState(null);
+  const [scraperImportResult, setScraperImportResult] = useState(null);
+  const [scraperImporting, setScraperImporting] = useState(false);
+  const [matchImporting, setMatchImporting] = useState(false);
+  const [matchImportResult, setMatchImportResult] = useState(null);
+  const [clubSearchQueries, setClubSearchQueries] = useState({});
+  const [clubSearchResults, setClubSearchResults] = useState({});
 
-  // Build-Info für Anzeige (Commit SHA + Build-Zeit)
-  const getBuildInfo = () => {
-    try {
-      const g = (typeof globalThis !== 'undefined') ? globalThis : undefined;
-      const p = g && g.process ? g.process : undefined;
-      const w = g && g.window ? g.window : undefined;
-      
-      // Versuche Commit SHA zu holen
-      let commitSha = '';
-      if (p && p.env && p.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA) commitSha = p.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA;
-      else if (p && p.env && p.env.VERCEL_GIT_COMMIT_SHA) commitSha = p.env.VERCEL_GIT_COMMIT_SHA;
-      else if (w && w.__COMMIT_SHA__) commitSha = w.__COMMIT_SHA__;
-      
-      // Build-Timestamp (aus import.meta oder statisch)
-      const buildTime = import.meta.env?.VITE_BUILD_TIME || new Date().toISOString();
-      const buildDateTime = new Date(buildTime);
-      
-      return {
-        commitSha,
-        buildTime,
-        shortCommit: commitSha ? String(commitSha).substring(0, 7) : null,
-        buildDate: buildDateTime.toLocaleDateString('de-DE', { 
-          day: '2-digit', 
-          month: '2-digit', 
-          year: 'numeric' 
-        }),
-        buildTimeFormatted: buildDateTime.toLocaleTimeString('de-DE', {
-          hour: '2-digit',
-          minute: '2-digit'
-        }),
-        buildDateTime: buildDateTime.toLocaleDateString('de-DE', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric'
-        }) + ' ' + buildDateTime.toLocaleTimeString('de-DE', {
-          hour: '2-digit',
-          minute: '2-digit'
-        })
-      };
-    } catch (_) {
-      const now = new Date();
-      return {
-        commitSha: '',
-        buildTime: now.toISOString(),
-        shortCommit: null,
-        buildDate: now.toLocaleDateString('de-DE'),
-        buildTimeFormatted: now.toLocaleTimeString('de-DE', {
-          hour: '2-digit',
-          minute: '2-digit'
-        }),
-        buildDateTime: now.toLocaleDateString('de-DE') + ' ' + now.toLocaleTimeString('de-DE', {
-          hour: '2-digit',
-          minute: '2-digit'
-        })
-      };
-    }
-  };
-  const buildInfo = getBuildInfo();
+  const [scraperApiLoading, setScraperApiLoading] = useState(false);
+  const [scraperApiGroups, setScraperApiGroups] = useState('');
+  const [scraperApiApplyMode, setScraperApiApplyMode] = useState(false);
+  const [matchParserStates, setMatchParserStates] = useState({});
+  const [parserMessage, setParserMessage] = useState(null);
+  const [parserProcessing, setParserProcessing] = useState(false);
+  const [meetingDetails, setMeetingDetails] = useState({});
 
-  // State für Match-Detail-Modal
-  const [selectedMatch, setSelectedMatch] = useState(null);
-  const [matchDetails, setMatchDetails] = useState(null);
-  const [loadingMatchDetails, setLoadingMatchDetails] = useState(false);
-  const [processingClubId, setProcessingClubId] = useState(null); // Loading State für Club-Aktionen
+  const buildInfo = useMemo(getDefaultBuildInfo, []);
 
-  // Sortier-Helper-Funktionen
-  const toggleTeamSort = (field) => {
-    if (teamSortField === field) {
-      setTeamSortDirection(teamSortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      setTeamSortField(field);
-      setTeamSortDirection('asc');
-    }
-  };
+  useEffect(() => {
+    if (!parserMessage) return undefined;
+    const timer = setTimeout(() => setParserMessage(null), 7000);
+    return () => clearTimeout(timer);
+  }, [parserMessage]);
 
-  const toggleMatchSort = (field) => {
-    if (matchSortField === field) {
-      setMatchSortDirection(matchSortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      setMatchSortField(field);
-      setMatchSortDirection('asc');
-    }
-  };
+  // ---------------------------------------------------------------------------
+  // Grundlagen aus Daten ableiten
+  // ---------------------------------------------------------------------------
+  const existingClubMap = useMemo(() => {
+    const map = new Map();
+    (clubs || []).forEach((club) => club?.id && map.set(club.id, club));
+    return map;
+  }, [clubs]);
 
-  const sortTeams = (teamsToSort) => {
-    return [...teamsToSort].sort((a, b) => {
-      let comparison = 0;
-      
-      switch (teamSortField) {
-        case 'club':
-          comparison = (a.club_name || '').localeCompare(b.club_name || '');
-          break;
-        case 'category':
-          comparison = (a.category || '').localeCompare(b.category || '');
-          break;
-        case 'players':
-          comparison = (a.player_count || 0) - (b.player_count || 0);
-          break;
-        case 'season':
-          comparison = (a.season || '').localeCompare(b.season || '');
-          break;
-        default:
-          comparison = 0;
+  const existingClubsByNormalizedName = useMemo(() => {
+    const map = new Map();
+
+    const addClubForKey = (key, club) => {
+      if (!key) return;
+      if (!map.has(key)) {
+        map.set(key, []);
       }
-      
-      return teamSortDirection === 'asc' ? comparison : -comparison;
+      map.get(key).push(club);
+    };
+
+    (clubs || []).forEach((club) => {
+      const rawValue = club?.normalized_name || club?.name || '';
+      const normalized = normalizeString(rawValue);
+      const normalizedCompact = normalized.replace(/\s+/g, '');
+
+      addClubForKey(normalized, club);
+      addClubForKey(normalizedCompact, club);
+
+      if (rawValue) {
+        const rawCompact = normalizeString(rawValue.replace(/\s+/g, ''));
+        addClubForKey(rawCompact, club);
+      }
     });
-  };
+    return map;
+  }, [clubs]);
 
-  const sortMatches = (matchesToSort) => {
-    return [...matchesToSort].sort((a, b) => {
-      let comparison = 0;
-      
-      switch (matchSortField) {
-        case 'date':
-          comparison = new Date(a.match_date) - new Date(b.match_date);
-          break;
-        case 'team':
-          comparison = (a.home_team || '').localeCompare(b.home_team || '');
-          break;
-        case 'status':
-          comparison = (a.status || '').localeCompare(b.status || '');
-          break;
-        default:
-          comparison = 0;
-      }
-      
-      return matchSortDirection === 'asc' ? comparison : -comparison;
+  const teamsByClubId = useMemo(() => {
+    const map = new Map();
+    (teams || []).forEach((team) => {
+      if (!team?.club_id) return;
+      if (!map.has(team.club_id)) map.set(team.club_id, []);
+      map.get(team.club_id).push(team);
     });
-  };
+    return map;
+  }, [teams]);
 
-  // Lade Match-Details inkl. aller Einzelergebnisse
-  const loadMatchDetails = async (match) => {
-    try {
-      setLoadingMatchDetails(true);
-      setSelectedMatch(match);
+  const teamSeasonsByTeamId = useMemo(() => {
+    const map = new Map();
+    (teamSeasons || []).forEach((ts) => {
+      if (!ts?.team_id) return;
+      if (!map.has(ts.team_id)) map.set(ts.team_id, []);
+      map.get(ts.team_id).push(ts);
+    });
+    return map;
+  }, [teamSeasons]);
 
-      console.log('🔵 Loading match details for:', match.id);
-
-      // Lade alle match_results für dieses Match mit Spieler-Informationen
-      const { data: resultsData, error } = await supabase
-        .from('match_results')
-        .select(`
-          *,
-          home_player:players!match_results_home_player_id_fkey(id, name, current_lk),
-          guest_player:players!match_results_guest_player_id_fkey(id, name, current_lk),
-          home_player1:players!match_results_home_player1_id_fkey(id, name, current_lk),
-          home_player2:players!match_results_home_player2_id_fkey(id, name, current_lk),
-          guest_player1:players!match_results_guest_player1_id_fkey(id, name, current_lk),
-          guest_player2:players!match_results_guest_player2_id_fkey(id, name, current_lk)
-        `)
-        .eq('match_id', match.id)
-        .order('match_number', { ascending: true });
-
-      if (error) {
-        console.error('❌ Error loading match details:', error);
-        return;
-      }
-
-      console.log('✅ Match details loaded:', resultsData?.length || 0, 'results');
-      setMatchDetails(resultsData || []);
-
-    } catch (error) {
-      console.error('Error loading match details:', error);
-    } finally {
-      setLoadingMatchDetails(false);
-    }
-  };
-
-  const closeMatchModal = () => {
-    setSelectedMatch(null);
-    setMatchDetails(null);
-  };
-
-  // Lade alle Admin-Daten
-  useEffect(() => {
-    loadAdminData();
-  }, [dateFilter, logsFilter]);
-
-  // Lazy Loading: Lade Players nur wenn Users-Tab geöffnet wird
-  useEffect(() => {
-    if (selectedTab === 'users' && players.length === 0) {
-      loadPlayers();
-    }
-  }, [selectedTab]);
-
-  // Lazy Loading: Lade Teams nur wenn Teams-Tab geöffnet wird
-  useEffect(() => {
-    if (selectedTab === 'teams' && teams.length === 0) {
-      loadTeams();
-    }
-  }, [selectedTab]);
-
-  // Lazy Loading: Lade Matches nur wenn Matches-Tab geöffnet wird
-  useEffect(() => {
-    if (selectedTab === 'matches' && allMatches.length === 0) {
-      loadMatches();
-    }
-  }, [selectedTab]);
-
-  // Lazy Loading: Lade Trainings nur wenn Trainings-Tab geöffnet wird
-  useEffect(() => {
-    if (selectedTab === 'trainings' && trainingGroups.length === 0) {
-      loadTrainingGroups();
-    }
-  }, [selectedTab]);
-
-  const loadAdminData = async () => {
-    try {
-      setLoading(true);
-      
-      // Lade echte Statistiken aus der Datenbank
-      console.log('🔵 Loading admin statistics...');
-
-      // 1. Zähle aktive Benutzer (NUR registrierte mit user_id!)
-      const { count: activeUsersCount } = await supabase
-        .from('players_unified')
-        .select('id', { count: 'exact', head: true })
-        .eq('is_active', true)
-        .eq('status', 'active')
-        .not('user_id', 'is', null); // Nur registrierte!
-
-      // 2. Zähle alle Vereine
-      const { count: totalClubsCount } = await supabase
-        .from('club_info')
-        .select('id', { count: 'exact', head: true });
-
-      // 3. Zähle ausstehende Vereins-Prüfungen
-      const { count: pendingReviewsCount } = await supabase
-        .from('club_info')
-        .select('id', { count: 'exact', head: true })
-        .eq('is_verified', false);
-
-      // 4. Zähle Spieler die Onboarding abgeschlossen haben (haben mindestens 1 Team)
-      const { data: playersWithTeams } = await supabase
-        .from('team_memberships')
-        .select('player_id')
-        .eq('is_active', true);
-      const onboardingCompletedCount = new Set(playersWithTeams?.map(pt => pt.player_id) || []).size;
-
-      // 5. Zähle alle Teams
-      const { count: totalTeamsCount } = await supabase
-        .from('team_info')
-        .select('id', { count: 'exact', head: true });
-
-      // 6. Zähle alle Matches
-      const { count: totalMatchesCount } = await supabase
-        .from('matches')
-        .select('id', { count: 'exact', head: true });
-
-      // 7. Zähle alle Trainings
-      const { count: totalTrainingsCount } = await supabase
-        .from('training_sessions')
-        .select('id', { count: 'exact', head: true });
-
-      // 8. Zähle Aktivitäten heute
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const { count: dailyActivityCount } = await supabase
-        .from('activity_logs')
-        .select('id', { count: 'exact', head: true })
-        .gte('created_at', today.toISOString());
-
-      // 9. Zähle importierte Spieler (warten auf Registrierung)
-      const { count: importedPlayersCount } = await supabase
-        .from('players_unified')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'pending')
-        .is('user_id', null); // Noch nicht registriert
-
-      console.log('✅ Statistics loaded:', {
-        users: activeUsersCount,
-        clubs: totalClubsCount,
-        pending: pendingReviewsCount,
-        onboarded: onboardingCompletedCount,
-        teams: totalTeamsCount,
-        matches: totalMatchesCount,
-        trainings: totalTrainingsCount,
-        dailyActivity: dailyActivityCount,
-        importedPlayers: importedPlayersCount
+  const existingTeamLookup = useMemo(() => {
+    const lookup = new Map();
+    (teams || []).forEach((team) => {
+      if (!team?.id) return;
+      buildTeamKeys(team.team_name, team.club_name).forEach((key) => {
+        if (!lookup.has(key)) lookup.set(key, team.id);
       });
+    });
+    return lookup;
+  }, [teams]);
 
-      // Setze Stats
-      setStats({
-        totalUsers: activeUsersCount || 0,
-        totalClubs: totalClubsCount || 0,
-        pendingReviews: pendingReviewsCount || 0,
-        onboardingCompleted: onboardingCompletedCount || 0,
-        totalTeams: totalTeamsCount || 0,
-        totalMatches: totalMatchesCount || 0,
-        totalTrainings: totalTrainingsCount || 0,
-        dailyActivity: dailyActivityCount || 0,
-        importedPlayers: importedPlayersCount || 0
-      });
+  const teamById = useMemo(() => {
+    const map = new Map();
+    (teams || []).forEach((team) => {
+      if (!team?.id) return;
+      map.set(team.id, team);
+    });
+    return map;
+  }, [teams]);
 
-      // Lade Activity Logs mit Filter
-      console.log('🔵 Loading activity logs with filter:', logsFilter, 'from:', getDateFilter());
-      
-      let logsQuery = supabase
-        .from('activity_logs')
-        .select('*')
-        .gte('created_at', getDateFilter())
-        .order('created_at', { ascending: false })
-        .limit(100);
+  const existingTeamSeasonLookup = useMemo(() => {
+    const lookup = new Map();
+    (teamSeasons || []).forEach((season) => {
+      if (!season?.team_id) return;
+      const key = buildSeasonKey(season.team_id, season.season, season.league, season.group_name);
+      if (key) lookup.set(key, season);
+    });
+    return lookup;
+  }, [teamSeasons]);
 
-      // Filter nach Aktionstyp
-      if (logsFilter !== 'all') {
-        logsQuery = logsQuery.eq('action', logsFilter);
+  const matchesNeedingParser = useMemo(
+    () => (seasonMatchdays || []).filter((match) => needsResultParser(match)),
+    [seasonMatchdays]
+  );
+
+  const parserGroupsNeedingUpdate = useMemo(() => {
+    const groups = new Set();
+    matchesNeedingParser.forEach((match) => {
+      const groupId = resolveGroupId(match?.group_name);
+      if (groupId) {
+        groups.add(groupId);
       }
+    });
+    return Array.from(groups).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+  }, [matchesNeedingParser]);
 
-      const { data: logsData, error: logsError } = await logsQuery;
-      
-      if (logsError) {
-        console.error('❌ Error loading activity logs:', logsError);
-      } else {
-        console.log('✅ Activity logs loaded:', logsData?.length || 0, 'entries');
+  // ---------------------------------------------------------------------------
+  // Scraper-Auswertungen
+  // ---------------------------------------------------------------------------
+  const findExistingClubByName = useCallback(
+    (rawName = '') => {
+      const trimmed = rawName.trim();
+      if (!trimmed) return null;
+      const normalized = normalizeString(trimmed);
+      if (normalized && existingClubsByNormalizedName.has(normalized)) {
+        return {
+          match: existingClubsByNormalizedName.get(normalized)[0],
+          score: 1,
+          reason: 'normalized'
+        };
       }
-
-      // Lade ausstehende Vereine (DEPRECATED - wird nicht mehr verwendet)
-      const { data: clubsData } = [];
-
-      // Lade alle Vereine
-      const { data: allClubsData } = await supabase
-        .from('club_info')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      // Lade Spieler-Anzahl pro Verein separat
-      const { data: clubPlayerCounts } = await supabase
-        .from('team_memberships')
-        .select(`
-          player_id,
-          team_info!inner(
-            club_name
-          )
-        `)
-        .eq('is_active', true);
-
-      // Erstelle Map: club_name → Anzahl eindeutige Spieler
-      const playerCountMap = {};
-      clubPlayerCounts?.forEach(pt => {
-        const clubName = pt.team_info?.club_name;
-        if (clubName) {
-          if (!playerCountMap[clubName]) {
-            playerCountMap[clubName] = new Set();
-          }
-          playerCountMap[clubName].add(pt.player_id);
+      let best = null;
+      (clubs || []).forEach((club) => {
+        const candidateName = club?.name || '';
+        if (!candidateName) return;
+        const score = calculateSimilarity(trimmed, candidateName);
+        if (!best || score > best.score) {
+          best = { club, score, reason: 'similarity' };
         }
       });
+      return best;
+    },
+    [clubs, existingClubsByNormalizedName]
+  );
 
-      // Konvertiere Sets zu Zahlen
-      Object.keys(playerCountMap).forEach(clubName => {
-        playerCountMap[clubName] = playerCountMap[clubName].size;
-      });
-
-      // Lade Matches für Match-Info in Logs
-      const { data: matchesData } = await supabase
-        .from('matches')
-        .select('id, opponent, match_date, location, venue, season')
-        .order('match_date', { ascending: false });
-
-      // Lade minimale Player-Daten für Activity Log Enrichment
-      const { data: minimalPlayersData, error: playersError } = await supabase
-        .from('players_unified')
-        .select('id, user_id, name, email')
-        .eq('status', 'active');
-
-      if (playersError) {
-        console.error('❌ Error loading players for logs:', playersError);
+  const ensureTeamSeason = useCallback(
+    async (teamId, season, league, groupName, teamSize = 4) => {
+      if (!teamId) return null;
+      const key = buildSeasonKey(teamId, season, league, groupName);
+      if (key && existingTeamSeasonLookup.has(key)) {
+        return existingTeamSeasonLookup.get(key);
       }
 
-      console.log('✅ Minimal players loaded for logs:', minimalPlayersData?.length || 0);
-      console.log('🔍 Sample player data:', minimalPlayersData?.[0]);
+      const payload = {
+        team_id: teamId,
+        season: season || null,
+        league: league || null,
+        group_name: groupName || null,
+        team_size: teamSize || null,
+        is_active: true
+      };
 
-      // 🔧 Enriche Activity Logs mit Player-Daten
-      let enrichedLogs = logsData || [];
-      if (logsData && minimalPlayersData) {
-        // Erstelle eine Map user_id → player für schnelle Zuordnung
-        const userIdToPlayer = {};
-        minimalPlayersData.forEach(p => {
-          if (p.user_id) {
-            userIdToPlayer[p.user_id] = p;
-          }
-        });
-        
-        console.log('🔍 userIdToPlayer Map:', Object.keys(userIdToPlayer).length, 'entries');
-        console.log('🔍 First log entry:', logsData[0]);
-        console.log('🔍 First log user_id:', logsData[0]?.user_id, 'Type:', typeof logsData[0]?.user_id);
-        
-        // Füge player-Daten zu jedem Log hinzu
-        enrichedLogs = logsData.map(log => {
-          // Wenn user_id NULL ist, versuche aus entity_id zu ermitteln
-          let player = null;
+      const { data, error } = await supabase.from('team_seasons').insert(payload).select().maybeSingle();
+
+      if (error?.code === '23505') {
+        const { data: existingSeason, error: fetchError } = await supabase
+          .from('team_seasons')
+          .select('*')
+          .eq('team_id', teamId)
+          .eq('season', season || null)
+          .eq('league', league || null)
+          .eq('group_name', groupName || null)
+          .maybeSingle();
+        if (fetchError) throw fetchError;
+        if (existingSeason) {
+          setTeamSeasons((prev) => {
+            if (prev.some((entry) => entry.id === existingSeason.id)) return prev;
+            return [existingSeason, ...prev];
+          });
+          return existingSeason;
+        }
+        return null;
+      }
+
+      if (error) throw error;
+      if (data) {
+        setTeamSeasons((prev) => [data, ...prev]);
+      }
+      return data;
+    },
+    [existingTeamSeasonLookup, supabase]
+  );
+
+  const scraperClubSummaries = useMemo(() => {
+    if (!scraperData?.groups?.length) return [];
+    const aggregate = new Map();
+
+    scraperData.groups.forEach((group) => {
+      const entries = group.teamsDetailed?.length
+        ? group.teamsDetailed
+        : group.standings?.length
+          ? group.standings
+          : [];
+      entries.forEach((team) => {
+        const teamName = (team.teamName || team.team || '').trim();
+        if (!teamName) return;
+        const { clubName, suffix } = splitTeamLabel(teamName);
+        if (!clubName) return;
+        if (!aggregate.has(clubName)) {
+          aggregate.set(clubName, {
+            clubName,
+            categories: new Set(),
+            leagues: new Set(),
+            groups: new Set(),
+            seasons: new Set(),
+            teams: []
+          });
+        }
+        const entry = aggregate.get(clubName);
+        const normalized = normalizeString(teamName);
+        if (!entry.teams.some((t) => t.normalized === normalized)) {
+          entry.teams.push({
+            original: teamName,
+            normalized,
+            suffix: suffix || team.teamSuffix || '',
+            category: team.category || group.group?.category || '',
+            league: team.league || group.group?.league || '',
+            groupName: team.groupName || group.group?.groupName || '',
+            groupId: team.groupId || group.group?.groupId || '',
+            season: team.season || scraperData.season || ''
+          });
+        }
+        if (team.category || group.group?.category) entry.categories.add(team.category || group.group?.category);
+        if (team.league || group.group?.league) entry.leagues.add(team.league || group.group?.league);
+        if (team.groupName || group.group?.groupName) entry.groups.add(team.groupName || group.group?.groupName);
+        if (team.season || scraperData.season) entry.seasons.add(team.season || scraperData.season);
+      });
+    });
+
+    return Array.from(aggregate.values()).map((entry) => {
+      const categories = Array.from(entry.categories);
+      const leagues = Array.from(entry.leagues);
+      const groups = Array.from(entry.groups);
+      const seasons = Array.from(entry.seasons);
+
+      const scored = clubs
+        .map((club) => ({ club, score: calculateSimilarity(entry.clubName, club.name || '') }))
+        .filter((item) => item.score > 0.5)
+        .sort((a, b) => b.score - a.score);
+
+      const normalizedEntry = normalizeString(entry.clubName);
+      let matchedClub = null;
+      let matchScore = 0;
+      let status = 'new';
+
+      if (normalizedEntry && existingClubsByNormalizedName.has(normalizedEntry)) {
+        matchedClub = existingClubsByNormalizedName.get(normalizedEntry)[0];
+        matchScore = 1;
+        status = 'existing';
+      } else if (scored.length > 0 && scored[0].score >= 0.85) {
+        // Nur als Match akzeptieren wenn Score >= 85%
+        matchedClub = scored[0].club;
+        matchScore = scored[0].score;
+        if (matchScore >= 0.95) status = 'existing';
+        else if (matchScore >= 0.85) status = 'fuzzy';
+      }
+
+      entry.teams.sort((a, b) => a.original.localeCompare(b.original));
+
+      // Team-Matching für diesen Club
+      const teamsWithStatus = entry.teams.map((team) => {
+        let teamMatchStatus = 'new';
+        let existingTeamId = null;
+        let existingTeamSeasonId = null;
+
+        if (matchedClub) {
+          // Suche in team_info
+          const clubTeams = teamsByClubId.get(matchedClub.id) || [];
           
-          if (log.user_id) {
-            player = userIdToPlayer[log.user_id];
-            if (!player) {
-              console.warn('⚠️ No player found for user_id:', log.user_id, 'Action:', log.action);
-            }
-          } else {
-            // user_id ist NULL - versuche aus entity_id abzuleiten
-            // Nur in DEV-Mode loggen (zu viel Noise in Production)
-            if ((typeof globalThis !== 'undefined' && globalThis.process && globalThis.process.env && globalThis.process.env.NODE_ENV) === 'development') {
-              console.warn('⚠️ Log has NULL user_id:', log.action, 'entity_type:', log.entity_type, 'entity_id:', log.entity_id);
+          // Versuche verschiedene Matching-Strategien
+          const matched = clubTeams.find((existing) => {
+            // Strategie 1: Nur team_name vergleichen (z.B. "1" === "1")
+            const normalizedTeamName = normalizeString(existing.team_name || '');
+            const normalizedSuffix = normalizeString(team.suffix || team.original);
+            if (normalizedTeamName === normalizedSuffix) return true;
+            
+            // Strategie 2: Voller Name mit Suffix
+            const existingFullName = `${existing.club_name} ${existing.team_name || ''}`.trim();
+            const teamFullName = `${entry.clubName} ${team.original}`.trim();
+            if (normalizeString(existingFullName) === normalizeString(teamFullName)) return true;
+            
+            // Strategie 3: Kategorie + Suffix Match
+            if (existing.category && team.category) {
+              const sameCategory = normalizeString(existing.category) === normalizeString(team.category);
+              const sameSuffix = normalizeString(existing.team_name || '') === normalizeString(team.suffix || team.original);
+              if (sameCategory && sameSuffix) return true;
             }
             
-            // Wenn entity_type = 'player', ist entity_id wahrscheinlich die player_id
-            if (log.entity_type === 'player' && log.entity_id) {
-              player = minimalPlayersData.find(p => p.id === log.entity_id);
-              if (player && (typeof globalThis !== 'undefined' && globalThis.process && globalThis.process.env && globalThis.process.env.NODE_ENV) === 'development') {
-                console.log('✅ Inferred player from entity_id:', player.name);
-              }
+            return false;
+          });
+
+          if (!matched) {
+            console.log(`⚠️ Kein Team Match: "${team.original}" (Suffix: "${team.suffix}") für Club "${entry.clubName}". Verfügbare Teams:`, clubTeams.map(t => `${t.team_name} (${t.category})`));
+          }
+
+          if (matched) {
+            existingTeamId = matched.id;
+            teamMatchStatus = 'existing';
+            console.log(`✅ Team Match gefunden: "${team.original}" → DB Team-ID ${matched.id} (${matched.club_name} ${matched.team_name})`);
+
+            // Suche in team_seasons für diese Saison
+            const teamSeasons = teamSeasonsByTeamId.get(matched.id) || [];
+            const matchedSeason = teamSeasons.find((ts) => {
+              const sameLeague = !team.league || ts.league === team.league;
+              const sameSeason = !team.season || ts.season === team.season;
+              const sameGroup = !team.groupName || ts.group_name === team.groupName;
+              return sameLeague && sameSeason && sameGroup;
+            });
+
+            if (matchedSeason) {
+              existingTeamSeasonId = matchedSeason.id;
             }
           }
-          
-          return {
-            ...log,
-            player: player || null
-          };
-        });
-        
-        console.log('✅ Logs enriched with player data');
-        console.log('🔍 First enriched log:', enrichedLogs[0]);
-        
-        // 🔧 NEU: Filtere Logs ohne Player (außer System-Actions)
-        const systemActions = ['page_navigation', 'error_occurred'];
-        const filteredLogs = enrichedLogs.filter(log => 
-          log.player !== null || systemActions.includes(log.action)
-        );
-        
-        const removedCount = enrichedLogs.length - filteredLogs.length;
-        if (removedCount > 0) {
-          console.log(`🗑️ Filtered out ${removedCount} logs without player (not system actions)`);
         }
-        
-        console.log('🔍 Logs after filtering:', filteredLogs.length);
-        enrichedLogs = filteredLogs;
-      }
-
-      setActivityLogs(enrichedLogs);
-      setPendingClubs([]); // DEPRECATED - keine ausstehenden Vereine mehr
-      setAllClubs(allClubsData || []);
-      setClubPlayerCounts(playerCountMap);
-      setMatches(matchesData || []);
-
-    } catch (error) {
-      console.error('Error loading admin data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadPlayers = async () => {
-    try {
-      console.log('🔵 Loading full player data for Users tab...');
-      
-      // Schritt 1: Lade ALLE Spieler aus players_unified
-      const { data: allPlayersData, error: playersError } = await supabase
-        .from('players_unified')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (playersError) {
-        console.error('❌ Error loading players:', playersError);
-        return;
-      }
-
-      console.log('✅ Players loaded:', allPlayersData?.length || 0, 'total players');
-
-      // Schritt 2: Lade team_memberships mit team_info für alle Spieler
-      const { data: playerTeamsData, error: teamsError } = await supabase
-        .from('team_memberships')
-        .select(`
-          player_id,
-          role,
-          is_primary,
-          team_info(
-            club_name,
-            team_name,
-            category
-          )
-        `)
-        .eq('is_active', true);
-
-      if (teamsError) {
-        console.error('❌ Error loading player teams:', teamsError);
-      } else {
-        console.log('✅ Player teams loaded:', playerTeamsData?.length || 0, 'team assignments');
-      }
-
-      // Schritt 3: Merge Spieler mit Teams und markiere Status
-      const playersWithTeams = (allPlayersData || []).map(player => {
-        const teams = (playerTeamsData || [])
-          .filter(pt => pt.player_id === player.id)
-          .map(pt => ({
-            role: pt.role,
-            is_primary: pt.is_primary,
-            team_info: pt.team_info
-          }));
-        
-        // Bestimme Status-Badge
-        let status_badge = '✅ Registriert';
-        if (player.status === 'pending') {
-          status_badge = '⏳ Wartet auf Registrierung';
-        } else if (!player.user_id) {
-          status_badge = '🔵 Inaktiv';
-        }
-        
-        return {
-          ...player,
-          player_teams: teams,
-          source: player.user_id ? 'registered' : 'imported',
-          status_badge
-        };
-      });
-
-      console.log('✅ All players processed:', playersWithTeams.length);
-      setPlayers(playersWithTeams);
-
-    } catch (error) {
-      console.error('Error loading players:', error);
-    }
-  };
-
-  const loadTeams = async () => {
-    try {
-      console.log('🔵 Loading teams data for Teams tab...');
-
-      // Lade Teams mit allen relevanten Informationen
-      const { data: teamsData, error: teamsError } = await supabase
-        .from('team_info')
-        .select(`
-          id,
-          team_name,
-          club_name,
-          category,
-          region,
-          tvm_link,
-          club_id,
-          club_info(
-            id,
-            name,
-            city
-          )
-        `)
-        .order('club_name', { ascending: true });
-
-      if (teamsError) {
-        console.error('❌ Error loading teams:', teamsError);
-        return;
-      }
-
-      console.log('✅ Teams loaded:', teamsData?.length || 0, 'teams');
-
-      // Lade team_seasons für alle Teams (nur aktive)
-      const { data: seasonsData, error: seasonsError } = await supabase
-        .from('team_seasons')
-        .select('*')
-        .eq('is_active', true)
-        .order('season', { ascending: false });
-
-      if (seasonsError) {
-        console.error('❌ Error loading team seasons:', seasonsError);
-      } else {
-        console.log('✅ Team seasons loaded:', seasonsData?.length || 0, 'seasons');
-      }
-
-      // Lade Spieler-Anzahl pro Team
-      const { data: playerCountsData, error: countsError } = await supabase
-        .from('team_memberships')
-        .select('team_id, player_id')
-        .eq('is_active', true);
-
-      if (countsError) {
-        console.error('❌ Error loading player counts:', countsError);
-      } else {
-        console.log('✅ Player counts loaded');
-      }
-
-      // Merge alle Daten
-      const teamsWithDetails = teamsData.map(team => {
-        // Finde alle Saisons für dieses Team
-        const teamSeasons = (seasonsData || []).filter(s => s.team_id === team.id);
-        
-        // Zähle eindeutige Spieler für dieses Team
-        const playerCount = (playerCountsData || [])
-          .filter(pt => pt.team_id === team.id)
-          .length;
-
-        // Nimm die neueste Saison als Haupt-Saison
-        const latestSeason = teamSeasons[0] || {};
-
-        // Extrahiere Jahr aus Season-String (z.B. "Winter 2025/26" → 2025)
-        const seasonYear = latestSeason.season ? 
-          parseInt(latestSeason.season.match(/\d{4}/)?.[0] || new Date().getFullYear()) : 
-          new Date().getFullYear();
 
         return {
           ...team,
-          season: latestSeason.season || 'Keine Saison',
-          season_year: seasonYear,
-          league: latestSeason.league || '-',
-          group_name: latestSeason.group_name || '-',
-          team_size: latestSeason.team_size || 6,
-          player_count: playerCount,
-          all_seasons: teamSeasons,
-          has_season: teamSeasons.length > 0
+          teamMatchStatus,
+          existingTeamId,
+          existingTeamSeasonId
         };
       });
 
-      console.log('✅ Teams with details merged:', teamsWithDetails.length);
-      console.log('🔍 First team sample:', teamsWithDetails[0]);
-      setTeams(teamsWithDetails);
+      return {
+        ...entry,
+        categories,
+        leagues,
+        groups,
+        seasons,
+        matchStatus: status,
+        matchScore,
+        matchedClub,
+        matchAlternatives: scored
+          .filter((candidate) => !matchedClub || candidate.club.id !== matchedClub.id)
+          .slice(0, 3),
+        teams: teamsWithStatus
+      };
+    }).sort((a, b) => a.clubName.localeCompare(b.clubName));
+  }, [scraperData, clubs, existingClubsByNormalizedName, teamsByClubId, teamSeasonsByTeamId]);
 
-    } catch (error) {
-      console.error('Error loading teams:', error);
+  const scraperStats = useMemo(() => {
+    const totalClubs = scraperClubSummaries.length;
+    const existingClubs = scraperClubSummaries.filter((s) => s.matchStatus === 'existing').length;
+    const newClubs = totalClubs - existingClubs;
+
+    const allTeams = scraperClubSummaries.flatMap((s) => s.teams);
+    const totalTeams = allTeams.length;
+    const existingTeams = allTeams.filter((t) => t.teamMatchStatus === 'existing').length;
+    const newTeams = totalTeams - existingTeams;
+
+    const existingSeasons = allTeams.filter((t) => t.existingTeamSeasonId).length;
+    const missingSeasons = existingTeams - existingSeasons;
+
+    return {
+      totalClubs,
+      existingClubs,
+      newClubs,
+      totalTeams,
+      existingTeams,
+      newTeams,
+      existingSeasons,
+      missingSeasons
+    };
+  }, [scraperClubSummaries]);
+
+  const scraperTeamStatusLookup = useMemo(() => {
+    const map = new Map();
+    Object.entries(scraperClubMappings).forEach(([clubName, mapping]) => {
+      const resolvedClub =
+        mapping.mode === 'existing' && mapping.existingClubId && existingClubMap.get(mapping.existingClubId)?.name
+          ? existingClubMap.get(mapping.existingClubId).name
+          : mapping.newClub?.name || clubName;
+      Object.entries(mapping.teams || {}).forEach(([key, team]) => {
+        const status = team.import === false ? 'skipped' : team.existingTeamId ? 'existing' : 'new';
+        const keys = buildTeamKeys(team.teamName, resolvedClub, team.teamSuffix);
+        keys.forEach((lookupKey) => {
+          map.set(lookupKey, {
+            state: status,
+            teamId: team.existingTeamId || null,
+            clubName: resolvedClub
+          });
+        });
+      });
+    });
+    return map;
+  }, [scraperClubMappings, existingClubMap]);
+
+  const resolveTeamStatus = useCallback((teamName = '', fallbackClub = '', fallbackSuffix = '') => {
+    const keys = buildTeamKeys(teamName, fallbackClub, fallbackSuffix);
+    for (const key of keys) {
+      if (scraperTeamStatusLookup.has(key)) {
+        return scraperTeamStatusLookup.get(key);
+      }
     }
-  };
+    for (const key of keys) {
+      if (existingTeamLookup.has(key)) {
+        return { state: 'existing', teamId: existingTeamLookup.get(key), clubName: fallbackClub };
+      }
+    }
+    return { state: 'missing', teamId: null, clubName: fallbackClub };
+  }, [scraperTeamStatusLookup, existingTeamLookup]);
 
-  const loadTrainingGroups = async () => {
+  const scraperMatchStatus = useCallback((match) => {
+    if (!match) return { recommended: false, label: '–' };
+    const home = resolveTeamStatus(match.homeTeam);
+    const away = resolveTeamStatus(match.awayTeam);
+    if (home.state === 'missing' || away.state === 'missing') {
+      return { recommended: false, label: '⚠️ Teams nicht erkannt' };
+    }
+    if (home.state === 'skipped' || away.state === 'skipped') {
+      return { recommended: false, label: '🚫 Team-Import deaktiviert' };
+    }
+    if (home.state === 'new' || away.state === 'new') {
+      return { recommended: true, label: '🆕 Team wird angelegt' };
+    }
+    return { recommended: true, label: '✅ Teams im System' };
+  }, [resolveTeamStatus]);
+
+  // ---------------------------------------------------------------------------
+  // Daten laden
+  // ---------------------------------------------------------------------------
+  const loadDashboardData = useCallback(async () => {
     try {
-      console.log('🔵 Loading training groups for Trainings tab...');
+      setLoading(true);
+      const now = new Date();
+      const dateLowerBound = (() => {
+        switch (dateFilter) {
+          case 'today':
+            return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+          case 'week':
+            return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+          case 'month':
+            return new Date(now.getFullYear(), now.getMonth() - 1, now.getDate()).toISOString();
+          default:
+            return new Date(0).toISOString();
+        }
+      })();
 
-      // Lade alle Trainings gruppiert nach title
-      const { data: trainingsData, error: trainingsError } = await supabase
-        .from('training_sessions')
-        .select(`
-          id,
-          title,
-          type,
-          organizer_id,
-          team_id,
-          is_public,
-          max_players,
-          target_players,
-          location,
-          venue,
-          created_at,
-          team_info(
-            club_name,
-            team_name,
-            category
-          )
-        `)
-        .order('created_at', { ascending: false });
+      const [statsRes, logsRes, clubsRes, playersRes, teamsRes, teamSeasonsRes, matchdaysRes] = await Promise.all([
+        supabase.rpc('get_dashboard_stats'),
+        supabase
+          .from('activity_logs')
+          .select('*')
+          .gte('created_at', dateLowerBound)
+          .order('created_at', { ascending: false })
+          .limit(200),
+        supabase.from('club_info').select('*').order('name', { ascending: true }),
+        supabase
+          .from('players_unified')
+          .select('*, player_teams:team_memberships!team_memberships_player_id_fkey(team_info(id, club_name, team_name))')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('team_info')
+          .select('*, club_info(id, name)')
+          .order('club_name', { ascending: true }),
+        supabase
+          .from('team_seasons')
+          .select('*')
+          .order('season', { ascending: true }),
+        supabase
+          .from('matchdays')
+          .select('*, match_results(count)')
+          .eq('season', 'Winter 2025/26')
+          .order('match_date', { ascending: true })
+          .order('start_time', { ascending: true })
+      ]);
 
-      if (trainingsError) {
-        console.error('❌ Error loading trainings:', trainingsError);
-        return;
+      if (statsRes.error) {
+        if (statsRes.error.code === 'PGRST202') {
+          console.warn('⚠️ RPC get_dashboard_stats nicht gefunden – fallback auf leere Werte.');
+          setStats({});
+        } else {
+          throw statsRes.error;
+        }
+      } else {
+        setStats(statsRes.data || {});
       }
 
-      console.log('✅ Trainings loaded:', trainingsData?.length || 0, 'sessions');
+      if (logsRes.error) throw logsRes.error;
+      if (clubsRes.error) throw clubsRes.error;
+      if (playersRes.error) throw playersRes.error;
+      if (teamsRes.error) throw teamsRes.error;
+      if (teamSeasonsRes.error) throw teamSeasonsRes.error;
+      if (matchdaysRes.error) throw matchdaysRes.error;
 
-      // Lade Organisator-Namen
-      const organizerIds = [...new Set(trainingsData.map(t => t.organizer_id))];
-      const { data: organizersData, error: orgError } = await supabase
-        .from('players_unified')
-        .select('id, name')
-        .in('id', organizerIds)
-        .eq('status', 'active');
+      setActivityLogs(
+        logsFilter === 'all'
+          ? logsRes.data || []
+          : (logsRes.data || []).filter((log) => log.action === logsFilter)
+      );
+      setClubs(clubsRes.data || []);
+      setPlayers(playersRes.data || []);
+      setTeams(teamsRes.data || []);
+      setTeamSeasons(teamSeasonsRes.data || []);
+      const matchdaysWithCounts = (matchdaysRes.data || []).map((match) => {
+        const matchResultsCount =
+          Array.isArray(match.match_results) && match.match_results.length
+            ? match.match_results[0]?.count || 0
+            : 0;
+        const { match_results, ...rest } = match;
+        return {
+          ...rest,
+          match_results_count: matchResultsCount
+        };
+      });
+      setSeasonMatchdays(matchdaysWithCounts);
+    } catch (error) {
+      console.error('❌ Fehler beim Laden des Dashboards:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [dateFilter, logsFilter, supabase]);
 
-      if (orgError) {
-        console.error('❌ Error loading organizers:', orgError);
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
+
+  // ---------------------------------------------------------------------------
+  // Scraper-Utilities
+  // ---------------------------------------------------------------------------
+  const resetScraper = useCallback(() => {
+    setScraperData(null);
+    setScraperError('');
+    setScraperSuccess('');
+    setScraperClubMappings({});
+    setScraperMatchSelections({});
+    setScraperSelectedGroupId(null);
+    setScraperSelectedMatch(null);
+    setScraperImportResult(null);
+  }, []);
+
+  const handleScraperApiFetch = useCallback(async () => {
+    try {
+      setScraperApiLoading(true);
+      setScraperError('');
+      setScraperSuccess('');
+      setScraperImportResult(null);
+      setMatchImportResult(null);
+
+      const sanitizedGroups = scraperApiGroups
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .join(',');
+
+      const payload = {
+        includeMatches: true
+      };
+
+      if (sanitizedGroups) {
+        payload.groups = sanitizedGroups;
       }
 
-      const organizersMap = {};
-      (organizersData || []).forEach(o => {
-        organizersMap[o.id] = o.name;
+      if (scraperApiApplyMode) {
+        const confirmed = window.confirm(
+          'Direktimport aktiv: Ergebnisse werden in Supabase geschrieben. Möchtest du fortfahren?'
+        );
+        if (!confirmed) {
+          setScraperApiLoading(false);
+          return;
+        }
+      }
+
+      const response = await fetch('/api/import/scrape-nuliga', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
       });
 
-      // Gruppiere nach title + organizer (Trainingsgruppe)
-      const groupsMap = {};
-      trainingsData.forEach(training => {
-        const groupKey = `${training.title}_${training.organizer_id}_${training.type}`;
-        
-        if (!groupsMap[groupKey]) {
-          groupsMap[groupKey] = {
-            title: training.title,
-            type: training.type,
-            organizer_id: training.organizer_id,
-            organizer_name: organizersMap[training.organizer_id] || 'Unbekannt',
-            team_id: training.team_id,
-            team_info: training.team_info,
-            is_public: training.is_public,
-            max_players: training.max_players,
-            target_players: training.target_players,
-            location: training.location,
-            venue: training.venue,
-            sessions: [],
-            session_count: 0,
-            first_session_date: training.created_at,
-            last_session_date: training.created_at
+      const rawText = await response.text();
+      let data;
+      try {
+        data = rawText ? JSON.parse(rawText) : null;
+      } catch (parseError) {
+        throw new Error(
+          response.ok
+            ? 'Antwort des Scraper-Endpunkts konnte nicht gelesen werden.'
+            : rawText || response.statusText || 'Fehler beim Abruf des Scraper-Endpunkts.'
+        );
+      }
+
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || `Scraper-Endpunkt antwortete mit Status ${response.status}.`);
+      }
+
+      const details = Array.isArray(data.details) ? data.details : [];
+      const groupsCount = data.groupsProcessed ?? details.length ?? 0;
+      const matchesCount =
+        data.totals?.matches ?? details.reduce((sum, entry) => sum + (entry.matches?.length || 0), 0);
+
+      if (details.length > 0) {
+        const nextData = {
+          groups: details,
+          totalGroups: groupsCount,
+          totalMatches: matchesCount,
+          season: data.season,
+          groupsIncluded:
+            data.groups?.map((entry) => entry.groupName).filter(Boolean).join(', ') ||
+            details.map((entry) => entry.group?.groupName).filter(Boolean).join(', ')
+        };
+        setScraperData(nextData);
+        setScraperClubMappings({});
+        setScraperMatchSelections({});
+        setScraperSelectedGroupId(null);
+        setScraperSelectedMatch(null);
+      }
+
+      const summary = `${groupsCount} Gruppe${groupsCount === 1 ? '' : 'n'} · ${matchesCount} Match${
+        matchesCount === 1 ? '' : 'es'
+      }`;
+
+      setScraperSuccess(
+        `✅ nuLiga-Live-Daten geladen (${summary})${
+          scraperApiApplyMode ? ' · Ergebnisse wurden direkt in Supabase geschrieben.' : ''
+        }`
+      );
+    } catch (error) {
+      console.error('❌ Fehler beim Live-Scrape:', error);
+      setScraperError(error.message || 'Unbekannter Fehler beim nuLiga-Scraper-Endpunkt.');
+    } finally {
+      setScraperApiLoading(false);
+    }
+  }, [scraperApiApplyMode, scraperApiGroups]);
+
+  const ensureClubMapping = useCallback((summary) => {
+    if (!summary) return null;
+    return {
+      selected: summary.matchStatus !== 'existing',
+      mode: summary.matchStatus === 'existing' && summary.matchedClub ? 'existing' : 'new',
+      existingClubId: summary.matchedClub?.id || null,
+      newClub: {
+        name: summary.clubName,
+        city: '',
+        region: '',
+        federation: '',
+        website: '',
+        postal_code: '',
+        state: '',
+        bundesland: '',
+        data_source: 'tvm_scraper'
+      },
+      teams: summary.teams.reduce((acc, team) => {
+        acc[team.normalized] = {
+          import: team.teamMatchStatus !== 'existing',
+          teamName: team.original,
+          teamSuffix: team.suffix,
+          category: team.category,
+          league: team.league,
+          groupName: team.groupName,
+          groupId: team.groupId,
+          season: team.season,
+          existingTeamId: team.existingTeamId || null,
+          existingTeamSeasonId: team.existingTeamSeasonId || null,
+          teamMatchStatus: team.teamMatchStatus || 'new'
+        };
+        return acc;
+      }, {})
+    };
+  }, []);
+
+  const updateClubMapping = useCallback((clubName, updater) => {
+    setScraperClubMappings((prev) => {
+      const summary = scraperClubSummaries.find((club) => club.clubName === clubName);
+      if (!summary) return prev;
+      const base = prev[clubName] || ensureClubMapping(summary);
+      const next = typeof updater === 'function' ? updater(base) : { ...base, ...updater };
+      return { ...prev, [clubName]: next };
+    });
+  }, [scraperClubSummaries, ensureClubMapping]);
+
+  const updateTeamMapping = useCallback((clubName, normalizedTeam, updater) => {
+    setScraperClubMappings((prev) => {
+      const current = prev[clubName];
+      if (!current) return prev;
+      const team = current.teams?.[normalizedTeam];
+      if (!team) return prev;
+      const nextTeam = typeof updater === 'function' ? updater(team) : { ...team, ...updater };
+      return {
+        ...prev,
+        [clubName]: {
+          ...current,
+          teams: {
+            ...current.teams,
+            [normalizedTeam]: nextTeam
+          }
+        }
+      };
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!scraperData?.groups?.length) {
+      setScraperSelectedGroupId(null);
+      setScraperSelectedMatch(null);
+      setScraperMatchSelections({});
+      return;
+    }
+    const firstGroupId = scraperData.groups[0].group.groupId;
+    setScraperSelectedGroupId((current) =>
+      scraperData.groups.some((g) => g.group.groupId === current) ? current : firstGroupId
+    );
+    setScraperMatchSelections((prev) => {
+      const next = {};
+      scraperData.groups.forEach((group) => {
+        const groupId = group.group.groupId;
+        const previous = prev[groupId] || {};
+        const selections = {};
+        (group.matches || []).forEach((match) => {
+          const recommendation = scraperMatchStatus(match).recommended;
+          selections[match.id] = {
+            import: previous[match.id]?.import ?? recommendation,
+            recommended: recommendation
           };
-        }
-
-        groupsMap[groupKey].sessions.push(training);
-        groupsMap[groupKey].session_count++;
-        
-        // Update first/last session dates
-        if (new Date(training.created_at) < new Date(groupsMap[groupKey].first_session_date)) {
-          groupsMap[groupKey].first_session_date = training.created_at;
-        }
-        if (new Date(training.created_at) > new Date(groupsMap[groupKey].last_session_date)) {
-          groupsMap[groupKey].last_session_date = training.created_at;
-        }
+        });
+        next[groupId] = selections;
       });
+      return next;
+    });
+  }, [scraperData, scraperMatchStatus]);
 
-      const groups = Object.values(groupsMap);
-      console.log('✅ Training groups created:', groups.length, 'groups');
-      setTrainingGroups(groups);
-
-    } catch (error) {
-      console.error('Error loading training groups:', error);
-    }
-  };
-
-  const loadMatches = async () => {
-    try {
-      console.log('🔵 Loading matches data for Matches tab...');
-
-      // Lade alle Matches mit Team-Informationen
-      const { data: matchesData, error: matchesError } = await supabase
-        .from('matches')
-        .select(`
-          id,
-          team_id,
-          opponent,
-          match_date,
-          location,
-          venue,
-          season,
-          players_needed,
-          created_at,
-          team_info(
-            id,
-            team_name,
-            club_name,
-            category
-          )
-        `)
-        .order('match_date', { ascending: false });
-
-      if (matchesError) {
-        console.error('❌ Error loading matches:', matchesError);
-        return;
+  const ensureClubRecord = useCallback(
+    async (summary) => {
+      if (!summary) {
+        return { clubId: null, clubRecord: null, reuseInfo: null };
       }
 
-      console.log('✅ Matches loaded:', matchesData?.length || 0, 'matches');
+      const mapping = scraperClubMappings[summary.clubName] || ensureClubMapping(summary);
+      let clubId = mapping.existingClubId || null;
+      let clubRecord = clubId ? existingClubMap.get(clubId) : null;
+      let reuseInfo = null;
 
-      // Lade Match-Verfügbarkeiten für alle Matches
-      const { data: availabilityData, error: availError } = await supabase
-        .from('match_availability')
-        .select('match_id, status, player_id');
-
-      if (availError) {
-        console.error('❌ Error loading match availability:', availError);
-      } else {
-        console.log('✅ Match availability loaded');
-      }
-
-      // Lade Match-Ergebnisse
-      const { data: resultsData, error: resultsError } = await supabase
-        .from('match_results')
-        .select('match_id, status, winner');
-
-      if (resultsError) {
-        console.error('❌ Error loading match results:', resultsError);
-      } else {
-        console.log('✅ Match results loaded:', resultsData?.length || 0, 'results');
-      }
-
-      // Merge Matches mit Verfügbarkeiten und Ergebnissen
-      const matchesWithDetails = matchesData.map(match => {
-        // Zähle Spieler-Rückmeldungen für dieses Match
-        const availabilities = (availabilityData || []).filter(a => a.match_id === match.id);
-        const confirmedCount = availabilities.filter(a => a.status === 'available').length;
-        const declinedCount = availabilities.filter(a => a.status === 'unavailable').length;
-        const pendingCount = availabilities.filter(a => a.status === 'pending').length;
-
-        // Hole Match-Ergebnis: Nur COMPLETED results zählen
-        const matchResults = (resultsData || []).filter(r => r.match_id === match.id);
-        const completedResults = matchResults.filter(r => r.status === 'completed');
-        const hasResult = completedResults.length > 0;
-        
-        // Zähle Siege
-        // winner: 'home' = Heimmannschaft gewinnt (die in der venue spielt)
-        // winner: 'guest' = Gastmannschaft gewinnt
-        const homeWins = completedResults.filter(r => r.winner === 'home').length;
-        const guestWins = completedResults.filter(r => r.winner === 'guest').length;
-        
-        // Bestimme Heimmannschaft und Gastmannschaft für neutrale Anzeige
-        // location='Away' → team_info ist Guest, opponent ist Home
-        // location='Home' → team_info ist Home, opponent ist Guest
-        const isAwayMatch = match.location === 'Away';
-        const homeTeam = isAwayMatch ? match.opponent : (match.team_info?.club_name + ' ' + match.team_info?.team_name);
-        const guestTeam = isAwayMatch ? (match.team_info?.club_name + ' ' + match.team_info?.team_name) : match.opponent;
-
-        // Debug: Log für Matches mit Ergebnissen
-        if (hasResult) {
-          console.log(`🎾 Match "${homeTeam} vs ${guestTeam}" hat Ergebnis:`, {
-            match_id: match.id,
-            location: match.location,
-            homeTeam,
-            guestTeam,
-            homeWins,
-            guestWins,
-            result: `${homeWins}:${guestWins}`,
-            winner: homeWins > guestWins ? homeTeam : guestTeam
+      if (mapping.mode === 'existing' && clubId && !clubRecord) {
+        const { data, error } = await supabase.from('club_info').select('*').eq('id', clubId).maybeSingle();
+        if (error) throw error;
+        clubRecord = data;
+        if (clubRecord) {
+          setClubs((prev) => {
+            if (prev.some((club) => club.id === clubRecord.id)) return prev;
+            return [clubRecord, ...prev];
           });
         }
+      }
 
-        // Bestimme Status
-        const matchDate = new Date(match.match_date);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        
-        let status = 'upcoming';
-        if (matchDate < today) {
-          status = hasResult ? 'completed' : 'past';
-        } else if (matchDate.toDateString() === today.toDateString()) {
-          status = 'today';
+      if (mapping.mode === 'new' && !clubId) {
+        const desiredName = mapping.newClub.name?.trim() || summary.clubName;
+        const desiredNormalized = normalizeString(desiredName);
+        const desiredNormalizedCompact = desiredNormalized.replace(/\s+/g, '');
+
+        const findExistingByNormalized = (normalizedKey) => {
+          if (!normalizedKey) return null;
+          if (existingClubsByNormalizedName.has(normalizedKey)) {
+            const existingCandidates = existingClubsByNormalizedName.get(normalizedKey);
+            if (existingCandidates?.length) return existingCandidates[0];
+          }
+          return null;
+        };
+
+        const directMatch =
+          findExistingByNormalized(desiredNormalized) || findExistingByNormalized(desiredNormalizedCompact);
+
+        if (directMatch) {
+          clubId = directMatch.id;
+          clubRecord = directMatch;
+          reuseInfo = {
+            reusedExisting: true,
+            reuseReason: 'normalized_name',
+            similarityScore: '1.00'
+          };
+        } else {
+          const fuzzyMatch = findExistingClubByName(desiredName);
+
+          if (fuzzyMatch?.match && (fuzzyMatch.score >= 0.85 || fuzzyMatch.reason === 'normalized')) {
+            clubId = fuzzyMatch.match.id;
+            clubRecord = fuzzyMatch.match;
+            reuseInfo = {
+              reusedExisting: true,
+              reuseReason: fuzzyMatch.reason,
+              similarityScore: fuzzyMatch.score.toFixed(2)
+            };
+          } else {
+            const payload = {
+              name: desiredName,
+              normalized_name: desiredNormalized,
+              city: mapping.newClub.city?.trim() || null,
+              region: mapping.newClub.region?.trim() || null,
+              federation: mapping.newClub.federation?.trim() || null,
+              website: mapping.newClub.website?.trim() || null,
+              postal_code: mapping.newClub.postal_code?.trim() || null,
+              state: mapping.newClub.state?.trim() || null,
+              bundesland: mapping.newClub.bundesland?.trim() || null,
+              data_source: mapping.newClub.data_source?.trim() || 'tvm_scraper',
+              is_verified: false
+            };
+
+            const { data: createdClub, error: createError } = await supabase
+              .from('club_info')
+              .insert(payload, { upsert: false })
+              .select()
+              .maybeSingle();
+
+            if (createError?.code === '23505') {
+              const { data: existingByNormalized, error: fetchExistingError } = await supabase
+                .from('club_info')
+                .select('*')
+                .eq('normalized_name', desiredNormalized)
+                .maybeSingle();
+              if (fetchExistingError) throw fetchExistingError;
+              if (existingByNormalized) {
+                clubId = existingByNormalized.id;
+                clubRecord = existingByNormalized;
+                reuseInfo = {
+                  reusedExisting: true,
+                  reuseReason: 'normalized_conflict',
+                  similarityScore: '1.00'
+                };
+                setClubs((prev) => {
+                  if (prev.some((club) => club.id === existingByNormalized.id)) return prev;
+                  return [existingByNormalized, ...prev];
+                });
+              } else {
+                throw createError;
+              }
+            } else if (createError) {
+              throw createError;
+            } else if (createdClub) {
+              clubId = createdClub.id;
+              clubRecord = createdClub;
+              reuseInfo = { reusedExisting: false, reuseReason: 'created', similarityScore: null };
+              setClubs((prev) => [createdClub, ...prev]);
+            }
+          }
+        }
+      }
+
+      if (clubId) {
+        updateClubMapping(summary.clubName, (current) => ({
+          ...current,
+          existingClubId: clubId,
+          selected: true,
+          mode: 'existing'
+        }));
+      }
+
+      return { clubId, clubRecord, reuseInfo };
+    },
+    [
+      scraperClubMappings,
+      ensureClubMapping,
+      existingClubMap,
+      existingClubsByNormalizedName,
+      findExistingClubByName,
+      setClubs,
+      updateClubMapping,
+      supabase
+    ]
+  );
+
+  const createTeamForSummary = useCallback(
+    async (summary, team) => {
+      const { clubId, clubRecord } = await ensureClubRecord(summary);
+      if (!clubId) {
+        throw new Error(`Verein "${summary.clubName}" konnte nicht erstellt oder gefunden werden.`);
+      }
+
+      const mapping = scraperClubMappings[summary.clubName] || ensureClubMapping(summary);
+      const teamMapping = mapping.teams?.[team.normalized] || {};
+      const preferredTeamName = teamMapping.teamName || team.original;
+      const preferredSuffix = teamMapping.teamSuffix || team.suffix || '';
+      const category = teamMapping.category || team.category || null;
+      const region = clubRecord?.region || mapping.newClub?.region || null;
+
+      const teamNamePayload = preferredSuffix || preferredTeamName || team.original;
+
+      const payload = {
+        club_id: clubId,
+        club_name: clubRecord?.name || summary.clubName,
+        team_name: teamNamePayload,
+        category,
+        region
+      };
+
+      const { data: createdTeam, error: teamError } = await supabase.from('team_info').insert(payload).select().single();
+      if (teamError) throw teamError;
+
+      setTeams((prev) => [createdTeam, ...prev]);
+      updateTeamMapping(summary.clubName, team.normalized, (current) => ({
+        ...current,
+        existingTeamId: createdTeam.id,
+        import: true
+      }));
+
+      const inferredTeamSize = inferTeamSize(preferredTeamName);
+
+      await ensureTeamSeason(
+        createdTeam.id,
+        team.season || scraperData?.season || null,
+        team.league || summary.leagues?.[0] || null,
+        team.groupName || summary.groups?.[0] || null,
+        inferredTeamSize
+      );
+
+      return createdTeam;
+    },
+    [
+      ensureClubRecord,
+      scraperClubMappings,
+      ensureClubMapping,
+      supabase,
+      updateTeamMapping,
+      ensureTeamSeason,
+      setTeams,
+      scraperData
+    ]
+  );
+
+  const handleScraperImport = useCallback(async () => {
+    if (!scraperData) return;
+
+    setScraperImportResult(null);
+    setMatchImportResult(null);
+    setScraperImporting(true);
+    setMatchImporting(true);
+
+    try {
+      const teamIdRegistry = new Map();
+      const clubIssues = [];
+      const matchIssues = [];
+      const scoreWithoutResults = [];
+
+      const registerTeamId = (teamName, clubName, suffix, teamId) => {
+        if (!teamId) return;
+        const keys = buildTeamKeys(teamName, clubName, suffix);
+        keys.forEach((key) => {
+          if (key) teamIdRegistry.set(key, teamId);
+        });
+      };
+
+      for (const summary of scraperClubSummaries) {
+        const mapping = scraperClubMappings[summary.clubName] || ensureClubMapping(summary);
+        if (!mapping) continue;
+
+        const linkedClubId = mapping.existingClubId;
+        if (!linkedClubId) {
+          clubIssues.push({ type: 'club-missing', clubName: summary.clubName });
+          continue;
         }
 
-        // Formatiere Datum
-        const formattedDate = matchDate.toLocaleDateString('de-DE', {
-          weekday: 'short',
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric'
-        });
+        const resolvedClubName =
+          existingClubMap.get(linkedClubId)?.name || mapping.newClub?.name || summary.clubName;
 
-        // Formatiere Uhrzeit
-        const formattedTime = matchDate.toLocaleTimeString('de-DE', {
-          hour: '2-digit',
-          minute: '2-digit'
-        });
+        for (const team of summary.teams) {
+          const teamMapping = mapping.teams?.[team.normalized];
+          if (teamMapping?.import === false) continue;
 
-        return {
-          ...match,
-          status,
-          confirmed_count: confirmedCount,
-          declined_count: declinedCount,
-          pending_count: pendingCount,
-          total_responses: availabilities.length,
-          formatted_date: formattedDate,
-          formatted_time: formattedTime,
-          is_upcoming: status === 'upcoming' || status === 'today',
-          is_completed: status === 'completed' || status === 'past',
-          has_result: hasResult,
-          home_team: homeTeam,       // Heimmannschaft Name
-          guest_team: guestTeam,     // Gastmannschaft Name
-          home_score: homeWins,      // Heimmannschaft Siege
-          away_score: guestWins,     // Gastmannschaft Siege
-          result: hasResult ? `${homeWins}:${guestWins}` : null,
-          total_matches: matchResults.length,
-          completed_matches: completedResults.length
-        };
+          const preferredTeamName = teamMapping?.teamName || team.original;
+          const preferredSuffix = teamMapping?.teamSuffix || team.suffix || '';
+
+          let resolvedTeamId = teamMapping?.existingTeamId || null;
+
+          if (!resolvedTeamId) {
+            const statusProbe = resolveTeamStatus(team.original, resolvedClubName, team.suffix);
+            if (statusProbe?.teamId) {
+              resolvedTeamId = statusProbe.teamId;
+              updateTeamMapping(summary.clubName, team.normalized, (current) => ({
+                ...current,
+                existingTeamId: resolvedTeamId
+              }));
+            } else {
+              const keys = buildTeamKeys(team.original, resolvedClubName, team.suffix);
+              for (const key of keys) {
+                if (existingTeamLookup.has(key)) {
+                  resolvedTeamId = existingTeamLookup.get(key);
+                  updateTeamMapping(summary.clubName, team.normalized, (current) => ({
+                    ...current,
+                    existingTeamId: resolvedTeamId
+                  }));
+                  break;
+                }
+              }
+            }
+          }
+
+          if (resolvedTeamId) {
+            registerTeamId(preferredTeamName, resolvedClubName, preferredSuffix, resolvedTeamId);
+          }
+        }
+      }
+
+      const getTeamIdForMatch = (teamName) => {
+        if (!teamName) return { teamId: null, clubName: '' };
+        
+        // Strategie 1: Direkter Match im Registry
+        const normalizedName = normalizeString(teamName);
+        if (teamIdRegistry.has(normalizedName)) {
+          return { teamId: teamIdRegistry.get(normalizedName), clubName: '' };
+        }
+
+        // Strategie 2: Suche in scraperClubSummaries
+        for (const summary of scraperClubSummaries) {
+          for (const team of summary.teams) {
+            const fullName = `${summary.clubName} ${team.original}`.trim();
+            if (normalizeString(fullName) === normalizedName || normalizeString(team.original) === normalizedName) {
+              if (team.existingTeamId) {
+                console.log(`✅ Match-Import: "${teamName}" → Team-ID ${team.existingTeamId}`);
+                teamIdRegistry.set(normalizedName, team.existingTeamId);
+                return { teamId: team.existingTeamId, clubName: summary.clubName };
+              }
+            }
+          }
+        }
+
+        // Strategie 3: Fallback via splitTeamLabel
+        const { clubName, suffix } = splitTeamLabel(teamName || '');
+        const keys = buildTeamKeys(teamName, clubName, suffix);
+
+        for (const key of keys) {
+          if (existingTeamLookup.has(key)) {
+            const teamId = existingTeamLookup.get(key);
+            console.log(`✅ Match-Import (Fallback): "${teamName}" → Team-ID ${teamId}`);
+            teamIdRegistry.set(normalizedName, teamId);
+            return { teamId, clubName: clubName || '' };
+          }
+        }
+
+        console.error(`❌ Match-Import: Kein Team gefunden für "${teamName}"`);
+        return { teamId: null, clubName: clubName || '' };
+      };
+
+      let totalMatchesInserted = 0;
+      let totalMatchesUpdated = 0;
+      let totalMatchesSkipped = 0;
+
+      for (const group of scraperData.groups || []) {
+        const groupId = group.group?.groupId;
+        const selections = scraperMatchSelections[groupId] || {};
+
+        for (const match of group.matches || []) {
+          const selection = selections[match.id];
+          const shouldImport =
+            selection !== undefined ? selection.import !== false : scraperMatchStatus(match).recommended;
+          if (!shouldImport) continue;
+
+          const homeLookup = getTeamIdForMatch(match.homeTeam);
+          const awayLookup = getTeamIdForMatch(match.awayTeam);
+
+          if (!homeLookup.teamId || !awayLookup.teamId) {
+            matchIssues.push({
+              type: 'missing-team',
+              matchId: match.id,
+              homeTeam: match.homeTeam,
+              awayTeam: match.awayTeam
+            });
+            totalMatchesSkipped += 1;
+            continue;
+          }
+
+          const matchDateIso = match.matchDateIso ? new Date(match.matchDateIso).toISOString() : null;
+          if (!matchDateIso) {
+            matchIssues.push({ type: 'missing-date', matchId: match.id });
+            totalMatchesSkipped += 1;
+            continue;
+          }
+
+          const matchSeason = match.season || group.group?.season || scraperData.season || null;
+          const matchLeague = match.league || group.group?.league || null;
+          const matchGroupName = match.groupName || group.group?.groupName || null;
+          const matchStatus =
+            match.status === 'completed'
+              ? 'completed'
+              : match.status === 'cancelled'
+                ? 'cancelled'
+                : 'scheduled';
+          const homeScore = extractScoreValue(match.matchPoints, 'home');
+          const awayScore = extractScoreValue(match.matchPoints, 'away');
+          const finalScore =
+            matchStatus === 'completed'
+              ? match.matchPoints?.raw ||
+                (homeScore != null && awayScore != null ? `${homeScore}:${awayScore}` : null)
+              : null;
+
+          const noteParts = [];
+          if (match.notes) noteParts.push(match.notes);
+          if (match.meetingId) noteParts.push(`meeting#${match.meetingId}`);
+          if (match.meetingReportUrl) noteParts.push(match.meetingReportUrl);
+
+          const matchPayload = {
+            match_date: matchDateIso,
+            start_time: normalizeStartTime(match.startTime),
+          match_number: match.matchNumber || match.match_number || null,
+            home_team_id: homeLookup.teamId,
+            away_team_id: awayLookup.teamId,
+            venue: match.venue || null,
+            court_number: toIntegerOrNull(match.court_number),
+            court_number_end: toIntegerOrNull(match.court_number_end),
+            location: 'Home',
+            season: matchSeason,
+            year: deriveYearLabel(matchSeason, match.year),
+            league: matchLeague,
+            group_name: matchGroupName,
+            status: matchStatus,
+            home_score: matchStatus === 'completed' ? homeScore : null,
+            away_score: matchStatus === 'completed' ? awayScore : null,
+            final_score: finalScore,
+            notes: noteParts.length ? noteParts.join(' · ') : null
+          };
+
+        const { data: existingMatch, error: fetchExisting } = await supabase
+            .from('matchdays')
+          .select('id, home_score, away_score, final_score, status, match_number, match_results(count)')
+            .eq('match_date', matchPayload.match_date)
+            .eq('home_team_id', matchPayload.home_team_id)
+            .eq('away_team_id', matchPayload.away_team_id)
+            .maybeSingle();
+
+          if (fetchExisting && fetchExisting.code && fetchExisting.code !== 'PGRST116') {
+            throw fetchExisting;
+          }
+
+        if (existingMatch) {
+          const existingHome = existingMatch.home_score;
+          const existingAway = existingMatch.away_score;
+
+          const hasNewScore =
+            matchPayload.home_score != null &&
+            matchPayload.away_score != null &&
+            (existingHome == null ||
+              existingAway == null ||
+              existingHome !== matchPayload.home_score ||
+              existingAway !== matchPayload.away_score);
+
+          const needsMatchNumberUpdate =
+            matchPayload.match_number != null &&
+            String(matchPayload.match_number) !== String(existingMatch.match_number ?? '');
+
+          const shouldUpdate = hasNewScore || needsMatchNumberUpdate;
+
+          if (shouldUpdate) {
+            const updatePayload = {
+              status: matchPayload.status
+            };
+
+            if (hasNewScore) {
+              updatePayload.home_score = matchPayload.home_score;
+              updatePayload.away_score = matchPayload.away_score;
+              updatePayload.final_score = matchPayload.final_score;
+            }
+
+            if (needsMatchNumberUpdate) {
+              updatePayload.match_number = matchPayload.match_number;
+            }
+
+            const { error: updateError } = await supabase
+              .from('matchdays')
+              .update(updatePayload)
+              .eq('id', existingMatch.id);
+
+            if (updateError) throw updateError;
+
+            if (hasNewScore) {
+              totalMatchesUpdated += 1;
+
+              const { data: resultsData, error: resultsError } = await supabase
+                .from('match_results')
+                .select('id')
+                .eq('matchday_id', existingMatch.id)
+                .limit(1);
+
+              if (resultsError) {
+                console.warn('⚠️ Fehler beim Prüfen der Match-Results:', resultsError);
+              } else if (!resultsData || resultsData.length === 0) {
+                scoreWithoutResults.push({
+                  matchId: existingMatch.id,
+                  home: match.homeTeam,
+                  away: match.awayTeam,
+                  score: matchPayload.final_score || `${matchPayload.home_score}:${matchPayload.away_score}`
+                });
+              }
+            } else if (needsMatchNumberUpdate) {
+              totalMatchesUpdated += 1;
+            }
+          } else {
+            totalMatchesSkipped += 1;
+          }
+            continue;
+          }
+
+          const { data: insertedMatch, error: insertError } = await supabase
+            .from('matchdays')
+            .insert(matchPayload)
+            .select()
+            .maybeSingle();
+
+          if (insertError) {
+            if (insertError.code === '23505') {
+              matchIssues.push({
+                type: 'duplicate',
+                matchId: null,
+                payload: matchPayload
+              });
+              totalMatchesSkipped += 1;
+              continue;
+            }
+            throw insertError;
+          }
+
+          if (insertedMatch) {
+            totalMatchesInserted += 1;
+            if (hasScoreData(match)) {
+              scoreWithoutResults.push({
+                matchId: insertedMatch.id,
+                home: match.homeTeam,
+                away: match.awayTeam,
+                score: matchPayload.final_score || `${matchPayload.home_score}:${matchPayload.away_score}`
+              });
+            }
+          }
+        }
+      }
+
+      if (matchIssues.length || clubIssues.length) {
+        console.warn('⚠️ Match-Import Hinweise:', { clubIssues, matchIssues, scoreWithoutResults });
+      }
+
+      const messageParts = [
+        `${totalMatchesInserted} neue Matchdays`,
+        `${totalMatchesUpdated} aktualisierte Scores`,
+        `${totalMatchesSkipped} übersprungen`
+      ];
+
+      if (scoreWithoutResults.length > 0) {
+        messageParts.push(`${scoreWithoutResults.length} Scores ohne Match-Results`);
+      }
+
+      setMatchImportResult({
+        type: matchIssues.length || clubIssues.length ? 'warning' : 'success',
+        message: `Matches verarbeitet: ${messageParts.join(' · ')}.`,
+        meta: {
+          clubIssues,
+          matchIssues,
+          scoreWithoutResults,
+          totalMatchesInserted,
+          totalMatchesUpdated,
+          totalMatchesSkipped
+        }
+      });
+    } catch (error) {
+      console.error('❌ Fehler beim Match-Import:', error);
+      setMatchImportResult({ type: 'error', message: error.message || 'Unbekannter Fehler beim Match-Import.' });
+    } finally {
+      setMatchImporting(false);
+      setScraperImporting(false);
+    }
+  }, [
+    scraperData,
+    scraperClubSummaries,
+    scraperClubMappings,
+    ensureClubMapping,
+    existingClubMap,
+    existingTeamLookup,
+    resolveTeamStatus,
+    updateTeamMapping,
+    scraperMatchSelections,
+    scraperMatchStatus,
+    supabase
+  ]);
+
+  const handleAdoptExistingClub = useCallback(
+    async (summary, clubId) => {
+      if (!clubId) return;
+      updateClubMapping(summary.clubName, (current) => ({
+        ...current,
+        existingClubId: clubId,
+        mode: 'existing'
+      }));
+      try {
+        await ensureClubRecord(summary);
+        setScraperSuccess(`✅ "${summary.clubName}" mit "${summary.matchedClub.name}" verknüpft!`);
+      } catch (error) {
+        setScraperError(`❌ Fehler: ${error.message}`);
+      }
+    },
+    [ensureClubRecord, updateClubMapping]
+  );
+
+  const handleCreateClub = useCallback(
+    async (summary) => {
+      try {
+        const { clubId } = await ensureClubRecord(summary);
+        if (!clubId) {
+          throw new Error(`Verein "${summary.clubName}" konnte nicht erstellt werden.`);
+        }
+        setScraperSuccess(`✅ "${summary.clubName}" erfolgreich angelegt!`);
+      } catch (error) {
+        setScraperError(`❌ Fehler beim Import von "${summary.clubName}": ${error.message}`);
+      }
+    },
+    [ensureClubRecord]
+  );
+
+  const handleCreateTeam = useCallback(
+    async (summary, team) => {
+      try {
+        const created = await createTeamForSummary(summary, team);
+        setScraperSuccess(`✅ "${team.original}" wurde angelegt.`);
+        return created;
+      } catch (error) {
+        setScraperError(`❌ Fehler beim Import von "${team.original}": ${error.message}`);
+        return null;
+      }
+    },
+    [createTeamForSummary]
+  );
+
+  const handleEnsureTeamSeason = useCallback(
+    async (teamId, summary, team) => {
+      if (!teamId) return;
+      try {
+        const seasonRecord = await ensureTeamSeason(
+          teamId,
+          team.season || scraperData?.season || null,
+          team.league || summary.leagues?.[0] || null,
+          team.groupName || summary.groups?.[0] || null,
+          inferTeamSize(team.teamName || team.original)
+        );
+        if (seasonRecord) {
+          setScraperSuccess(`✅ Saison-Verknüpfung für "${team.original}" angelegt.`);
+        }
+      } catch (error) {
+        setScraperError(`❌ Fehler beim Import von "${team.original}": ${error.message}`);
+      }
+    },
+    [ensureTeamSeason, scraperData]
+  );
+
+  // ---------------------------------------------------------------------------
+  // Result Parser
+  // ---------------------------------------------------------------------------
+  const updateMatchParserState = useCallback((matchId, nextState) => {
+    if (!matchId) return;
+    setMatchParserStates((prev) => {
+      const prevEntry = prev[matchId] || null;
+      const resolved = typeof nextState === 'function' ? nextState(prevEntry) : nextState;
+      return { ...prev, [matchId]: resolved };
+    });
+  }, []);
+
+  const fetchGroupSnapshot = useCallback(async (groupId) => {
+    const normalizedGroupId = resolveGroupId(groupId);
+    if (!normalizedGroupId) {
+      throw new Error('Ungültige Gruppen-ID.');
+    }
+    const response = await fetch('/api/import/scrape-nuliga', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        groups: normalizedGroupId,
+        includeMatches: true,
+        apply: false
+      })
+    });
+    const result = await response.json();
+    if (!response.ok || !result?.success) {
+      throw new Error(result?.error || 'Scraper antwortete ohne Erfolg.');
+    }
+    return result;
+  }, []);
+
+  const findScrapedMatchForLocal = useCallback(
+    (localMatch, scrapedMatches = []) => {
+      if (!localMatch || !scrapedMatches.length) {
+        return { match: null, score: 0 };
+      }
+
+      const homeTeam = teamById.get(localMatch.home_team_id);
+      const awayTeam = teamById.get(localMatch.away_team_id);
+
+      const homeLabel = buildTeamLabel(homeTeam);
+      const awayLabel = buildTeamLabel(awayTeam);
+
+      const localDateKey = toDateKey(localMatch.match_date);
+      const localMatchNumber = getMatchNumberFromRecord(localMatch);
+
+      let bestMatch = null;
+      let bestScore = 0;
+
+      scrapedMatches.forEach((candidate) => {
+        if (!candidate) return;
+        const candidateHome = candidate.homeTeam || '';
+        const candidateAway = candidate.awayTeam || '';
+
+        let score = 0;
+
+        if (homeLabel) {
+          score += calculateSimilarity(homeLabel, candidateHome) * 0.45;
+        }
+        if (awayLabel) {
+          score += calculateSimilarity(awayLabel, candidateAway) * 0.45;
+        }
+
+        const candidateDateKey = toDateKey(candidate.matchDateIso);
+        if (localDateKey && candidateDateKey) {
+          score += localDateKey === candidateDateKey ? 0.08 : -0.12;
+        } else {
+          score += 0.02;
+        }
+
+        const candidateMatchNumber = candidate.matchNumber ? candidate.matchNumber.trim() : null;
+        if (localMatchNumber && candidateMatchNumber) {
+          const normalizedLocal = normalizeString(String(localMatchNumber));
+          const normalizedCandidate = normalizeString(candidateMatchNumber);
+          if (normalizedLocal && normalizedLocal === normalizedCandidate) {
+            score += 0.12;
+          }
+        }
+
+        if (candidate.matchPoints?.raw) {
+          score += 0.02;
+        }
+
+        if (score < 0) {
+          score = 0;
+        }
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = candidate;
+        }
       });
 
-      console.log('✅ Matches with details merged:', matchesWithDetails.length);
-      console.log('🔍 First match sample:', matchesWithDetails[0]);
-      setAllMatches(matchesWithDetails);
+      return { match: bestMatch, score: bestScore };
+    },
+    [teamById]
+  );
 
-    } catch (error) {
-      console.error('Error loading matches:', error);
-    }
-  };
+  const updateMatchWithScrapedData = useCallback(
+    async (matchRecord, scrapedMatch, groupMeta) => {
+      if (!matchRecord || !scrapedMatch) return null;
 
-  const getDateFilter = () => {
-    const now = new Date();
-    let filterDate;
-    
-    switch (dateFilter) {
-      case 'today':
-        filterDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        break;
-      case 'week':
-        filterDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        break;
-      case 'month':
-        filterDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
-        break;
-      case 'all':
-        filterDate = new Date(0); // Unix epoch
-        break;
-      default:
-        filterDate = new Date(0);
-    }
-    
-    console.log('📅 Date filter:', dateFilter, '→', filterDate.toISOString());
-    return filterDate.toISOString();
-  };
+      const payload = {
+        status: scrapedMatch.status === 'completed' ? 'completed' : matchRecord.status,
+        home_score: scrapedMatch.matchPoints?.home ?? null,
+        away_score: scrapedMatch.matchPoints?.away ?? null,
+        final_score: scrapedMatch.matchPoints?.raw ?? null,
+        updated_at: new Date().toISOString()
+      };
 
-  const handleClubAction = async (clubId, action, e) => {
-    // Verhindere Event-Bubbling
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
+      if (!matchRecord.match_number && scrapedMatch.matchNumber) {
+        payload.match_number = scrapedMatch.matchNumber;
+      }
+      if ((!matchRecord.start_time || matchRecord.start_time === '') && scrapedMatch.startTime) {
+        payload.start_time = normalizeStartTime(scrapedMatch.startTime);
+      }
+      if ((!matchRecord.venue || matchRecord.venue === '') && scrapedMatch.venue) {
+        payload.venue = scrapedMatch.venue;
+      }
+      if (matchRecord.court_number == null && scrapedMatch.court_number != null) {
+        payload.court_number = scrapedMatch.court_number;
+      }
+      if (matchRecord.court_number_end == null && scrapedMatch.court_number_end != null) {
+        payload.court_number_end = scrapedMatch.court_number_end;
+      }
+      if ((!matchRecord.season || matchRecord.season === '') && groupMeta?.season) {
+        payload.season = groupMeta.season;
+      }
+      if ((!matchRecord.year || matchRecord.year === '') && groupMeta?.year) {
+        payload.year = groupMeta.year;
+      }
+      if ((!matchRecord.league || matchRecord.league === '') && groupMeta?.league) {
+        payload.league = groupMeta.league;
+      }
+      if ((!matchRecord.group_name || matchRecord.group_name === '') && groupMeta?.groupName) {
+        payload.group_name = groupMeta.groupName;
+      }
+      if ((!matchRecord.notes || matchRecord.notes.trim().length === 0) && scrapedMatch.notes) {
+        payload.notes = scrapedMatch.notes;
+      }
 
-    // Verhindere mehrfache Klicks
-    if (processingClubId === clubId) {
-      console.log('⏳ Action already processing for club:', clubId);
+      const { error } = await supabase.from('matchdays').update(payload).eq('id', matchRecord.id);
+      if (error) {
+        throw new Error(error.message || 'Supabase-Update fehlgeschlagen.');
+      }
+      return payload;
+    },
+    []
+  );
+
+  const handleRunResultParser = useCallback(
+    async (match) => {
+      if (!match || parserProcessing) return;
+
+      const groupId = resolveGroupId(match.group_name);
+      if (!groupId) {
+        updateMatchParserState(match.id, { status: 'error', message: 'Keine Gruppen-ID gefunden' });
+        setParserMessage({
+          type: 'error',
+          text: 'Für dieses Match ist keine gültige Gruppen-ID hinterlegt.'
+        });
+        return;
+      }
+
+      updateMatchParserState(match.id, { status: 'running', message: `Gruppe ${groupId}` });
+
+      try {
+        const snapshot = await fetchGroupSnapshot(groupId);
+        const groupDetail = (snapshot?.details || []).find(
+          (entry) => resolveGroupId(entry.group?.groupId || entry.group?.groupName) === groupId
+        );
+
+        if (!groupDetail) {
+          throw new Error(`Keine Parser-Daten für Gruppe ${groupId}.`);
+        }
+
+        const { match: scrapedMatch } = findScrapedMatchForLocal(match, groupDetail.matches || []);
+        if (!scrapedMatch) {
+          throw new Error('Kein passendes Spiel in den nuLiga-Daten gefunden.');
+        }
+
+        if (!hasScoreData(scrapedMatch)) {
+          throw new Error('nuLiga stellt noch keinen finalen Spielstand bereit.');
+        }
+
+        await updateMatchWithScrapedData(match, scrapedMatch, groupDetail.group);
+
+        updateMatchParserState(match.id, {
+          status: 'success',
+          message: scrapedMatch.matchPoints?.raw ? `Ergebnis ${scrapedMatch.matchPoints.raw}` : 'Aktualisiert'
+        });
+
+        setParserMessage({
+          type: 'success',
+          text: `Ergebnis übernommen: ${scrapedMatch.homeTeam} vs. ${scrapedMatch.awayTeam} (${scrapedMatch.matchPoints?.raw || '–'})`
+        });
+
+        await loadDashboardData();
+      } catch (error) {
+        console.error('❌ Fehler beim Result-Parser:', error);
+        updateMatchParserState(match.id, {
+          status: 'error',
+          message: error.message || 'Parser-Fehler'
+        });
+        setParserMessage({
+          type: 'error',
+          text: error.message || 'Parser-Fehler beim Aktualisieren des Match-Ergebnisses.'
+        });
+      }
+    },
+    [
+      fetchGroupSnapshot,
+      findScrapedMatchForLocal,
+      updateMatchWithScrapedData,
+      loadDashboardData,
+      updateMatchParserState,
+      parserProcessing
+    ]
+  );
+
+  const handleRunParserForAll = useCallback(async () => {
+    if (parserProcessing || matchesNeedingParser.length === 0) return;
+
+    const grouped = new Map();
+    matchesNeedingParser.forEach((match) => {
+      const groupId = resolveGroupId(match.group_name);
+      if (!groupId) return;
+      if (!grouped.has(groupId)) {
+        grouped.set(groupId, []);
+      }
+      grouped.get(groupId).push(match);
+    });
+
+    if (grouped.size === 0) {
+      setParserMessage({
+        type: 'error',
+        text: 'Für die offenen Matches konnte keine gültige Gruppen-ID ermittelt werden.'
+      });
       return;
     }
 
-    try {
-      setProcessingClubId(clubId); // Loading State setzen
-      console.log(`🔄 ${action === 'approve' ? 'Genehmige' : 'Lehne ab'} Verein:`, clubId);
-      
-      // Hole User-ID separat
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError) {
-        console.warn('⚠️ Could not get user:', userError);
-      }
+    setParserProcessing(true);
+    setParserMessage(null);
+    setMatchParserStates((prev) => {
+      const next = { ...prev };
+      matchesNeedingParser.forEach((match) => {
+        const groupId = resolveGroupId(match.group_name) || '?';
+        next[match.id] = { status: 'running', message: `Gruppe ${groupId}` };
+      });
+      return next;
+    });
 
-      // Update Club
-      const { error: updateError } = await supabase
-        .from('club_info')
-        .update({
-          is_verified: action === 'approve',
-          admin_reviewed_at: new Date().toISOString(),
-          admin_reviewed_by: user?.id || null
-        })
-        .eq('id', clubId);
+    let updated = 0;
+    let skipped = 0;
+    let failed = 0;
 
-      if (updateError) {
-        console.error(`❌ Error updating club:`, updateError);
-        throw updateError;
-      }
-
-      console.log(`✅ Club ${action === 'approve' ? 'genehmigt' : 'abgelehnt'}`);
-
-      // Log die Aktion (non-blocking)
+    for (const [groupId, groupMatches] of grouped.entries()) {
       try {
-        await supabase.rpc('log_activity', {
-          p_action: `club_${action}`,
-          p_entity_type: 'club',
-          p_entity_id: clubId,
-          p_details: { action }
+        const snapshot = await fetchGroupSnapshot(groupId);
+        const groupDetail = (snapshot?.details || []).find(
+          (entry) => resolveGroupId(entry.group?.groupId || entry.group?.groupName) === groupId
+        );
+
+        if (!groupDetail) {
+          throw new Error(`Keine Parser-Daten für Gruppe ${groupId}.`);
+        }
+
+        for (const match of groupMatches) {
+          const { match: scrapedMatch } = findScrapedMatchForLocal(match, groupDetail.matches || []);
+          if (!scrapedMatch) {
+            skipped += 1;
+            updateMatchParserState(match.id, {
+              status: 'error',
+              message: 'Match nicht gefunden'
+            });
+            continue;
+          }
+          if (!hasScoreData(scrapedMatch)) {
+            skipped += 1;
+            updateMatchParserState(match.id, {
+              status: 'error',
+              message: 'Noch kein Ergebnis'
+            });
+            continue;
+          }
+
+          try {
+            await updateMatchWithScrapedData(match, scrapedMatch, groupDetail.group);
+            updated += 1;
+            updateMatchParserState(match.id, {
+              status: 'success',
+              message: scrapedMatch.matchPoints?.raw ? `Ergebnis ${scrapedMatch.matchPoints.raw}` : 'Aktualisiert'
+            });
+          } catch (error) {
+            failed += 1;
+            console.error('❌ Fehler beim Aktualisieren des Matchdays:', error);
+            updateMatchParserState(match.id, {
+              status: 'error',
+              message: error.message || 'Supabase-Fehler'
+            });
+          }
+        }
+      } catch (error) {
+        failed += groupMatches.length;
+        console.error('❌ Fehler beim Parser für Gruppe', groupId, error);
+        groupMatches.forEach((match) => {
+          updateMatchParserState(match.id, {
+            status: 'error',
+            message: error.message || 'Parser-Fehler'
+          });
         });
-      } catch (logError) {
-        console.warn('⚠️ Could not log activity:', logError);
-        // Nicht kritisch, weiter machen
+      }
+    }
+
+    await loadDashboardData();
+    setParserProcessing(false);
+
+    const messageParts = [
+      `${updated} aktualisiert`,
+      skipped > 0 ? `${skipped} ohne Ergebnis` : null,
+      failed > 0 ? `${failed} Fehler` : null
+    ].filter(Boolean);
+
+    const hasIssues = failed > 0 || skipped > 0;
+
+    setParserMessage({
+      type: hasIssues ? 'warning' : 'success',
+      text: `Parser abgeschlossen: ${messageParts.join(' · ')}`
+    });
+  }, [
+    parserProcessing,
+    matchesNeedingParser,
+    fetchGroupSnapshot,
+    findScrapedMatchForLocal,
+    updateMatchWithScrapedData,
+    updateMatchParserState,
+    loadDashboardData
+  ]);
+
+  const handleLoadMeetingDetails = useCallback(
+    async (match, { homeLabel, awayLabel, applyImport = false } = {}) => {
+      if (!match?.id) return;
+      const recordId = match.id;
+      const existing = meetingDetails[recordId] || {};
+
+      setMeetingDetails((prev) => ({
+        ...prev,
+        [recordId]: {
+          ...prev[recordId],
+          loading: true,
+          importing: applyImport,
+          error: null
+        }
+      }));
+
+      try {
+        const payload = {
+          matchdayId: match.id,
+          groupId: resolveGroupId(match.group_name),
+          matchNumber: match.match_number || extractMatchNumber(match.notes),
+          homeTeam: homeLabel,
+          awayTeam: awayLabel,
+          apply: applyImport
+        };
+
+        const meetingMeta = extractMeetingMeta(match);
+        if (meetingMeta.meetingId) {
+          payload.meetingId = meetingMeta.meetingId;
+        }
+        if (meetingMeta.meetingUrl) {
+          payload.meetingUrl = meetingMeta.meetingUrl;
+        }
+
+        if (existing.meetingId) {
+          payload.meetingId = existing.meetingId;
+        }
+        if (existing.meetingUrl && !payload.meetingUrl) {
+          payload.meetingUrl = existing.meetingUrl;
+        }
+
+        const response = await fetch('/api/import/meeting-report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result?.success) {
+          throw new Error(result?.error || 'Spielbericht konnte nicht geladen werden.');
+        }
+
+        setMeetingDetails((prev) => ({
+          ...prev,
+          [recordId]: {
+            loading: false,
+            importing: false,
+            error: null,
+            data: result,
+            meetingId: result.meetingId,
+            meetingUrl: result.meetingUrl,
+            matchMeta: result.matchMeta || prev[recordId]?.matchMeta || null,
+            lastFetchedAt: new Date().toISOString(),
+            lastAppliedAt: applyImport ? new Date().toISOString() : prev[recordId]?.lastAppliedAt || null,
+            matchResultsCount: applyImport
+              ? result.applyResult?.inserted?.length || prev[recordId]?.matchResultsCount || 0
+              : prev[recordId]?.matchResultsCount || 0
+          }
+        }));
+
+        if (applyImport) {
+          setParserMessage({
+            type: 'success',
+            text: result.applyResult
+              ? `Matchdetails importiert (${result.applyResult.inserted?.length || 0} Einträge)`
+              : 'Matchdetails importiert.'
+          });
+          const nextMatchNumber =
+            result.matchMeta?.matchNumber ||
+            existing.matchMeta?.matchNumber ||
+            match.match_number ||
+            match.matchNumber ||
+            null;
+          if (nextMatchNumber) {
+            await supabase.from('matchdays').update({ match_number: nextMatchNumber }).eq('id', match.id);
+          }
+          const insertedCount = result.applyResult?.inserted?.length ?? existing.matchResultsCount ?? 0;
+          setSeasonMatchdays((prev) =>
+            prev.map((entry) =>
+              entry.id === match.id
+                ? {
+                    ...entry,
+                    match_number: nextMatchNumber || entry.match_number,
+                    match_results_count: insertedCount
+                  }
+                : entry
+            )
+          );
+          await loadDashboardData();
+          if (result.applyResult?.missingPlayers?.length) {
+            setParserMessage({
+              type: 'warning',
+              text: `Warnung: ${result.applyResult.missingPlayers.length} Spieler nicht gefunden (keine Anlage vorgenommen).`
+            });
+          }
+        }
+      } catch (error) {
+        console.error('❌ Fehler beim Laden der Meeting-Details:', error);
+        setMeetingDetails((prev) => ({
+          ...prev,
+          [recordId]: {
+            ...prev[recordId],
+            loading: false,
+            importing: false,
+            error: error.message || 'Spielbericht konnte nicht geladen werden.'
+          }
+        }));
+        setParserMessage({
+          type: 'error',
+          text: error.message || 'Spielbericht konnte nicht geladen werden.'
+        });
+      }
+    },
+    [meetingDetails, resolveGroupId, setParserMessage, supabase, loadDashboardData]
+  );
+
+  const handleClubSearch = useCallback(
+    async (summary, query) => {
+      setClubSearchQueries((prev) => ({ ...prev, [summary.clubName]: query }));
+      if (!query || query.trim().length < 2) {
+        setClubSearchResults((prev) => ({ ...prev, [summary.clubName]: [] }));
+        return;
       }
 
-      // Aktualisiere Daten
-      await loadAdminData();
+      try {
+        const normalizedQuery = query.trim();
+        const { data, error } = await supabase
+          .from('club_info')
+          .select('id, name, city, region, data_source')
+          .ilike('name', `%${normalizedQuery}%`)
+          .limit(15);
 
-      // Erfolg
-      console.log('✅ Daten aktualisiert');
+        if (error) throw error;
 
-    } catch (error) {
-      console.error(`❌ Error ${action}ing club:`, error);
-      alert(`Fehler beim ${action === 'approve' ? 'Genehmigen' : 'Ablehnen'} des Vereins: ${error.message || error}`);
-    } finally {
-      setProcessingClubId(null); // Loading State zurücksetzen
-    }
-  };
+        const scored = (data || []).map((club) => ({
+          club,
+          score: calculateSimilarity(summary.clubName, club.name || '')
+        }));
 
-  const getActionLabel = (action) => {
-    const labelMap = {
-      'club_selected': 'Verein ausgewählt',
-      'team_created': 'Mannschaft erstellt',
-      'profile_updated': 'Profil aktualisiert',
-      'onboarding_completed': 'Onboarding abgeschlossen',
-      'onboarding_started': 'Onboarding gestartet',
-      'onboarding_step': 'Onboarding-Schritt',
-      'onboarding_search': 'Smart-Match Suche',
-      'onboarding_smart_match': 'Smart-Match Auswahl',
-      'onboarding_manual_entry': 'Manuelle Dateneingabe',
-      'onboarding_team_from_db': 'Team aus DB ausgewählt',
-      'onboarding_team_manual': 'Team manuell erstellt',
-      'training_created': 'Training erstellt',
-      'training_confirm': 'Training zugesagt',
-      'training_decline': 'Training abgesagt',
-      'matchday_confirm': 'Medenspiel Verfügbarkeit',
-      'matchday_decline': 'Medenspiel Verfügbarkeit',
-      'matchday_available': 'Medenspiel Verfügbarkeit',
-      'matchday_unavailable': 'Medenspiel Verfügbarkeit',
-      'profile_edited': 'Profil bearbeitet',
-      'lk_changed': 'LK geändert',
-      'match_result_entered': 'Match-Ergebnis eingegeben',
-      'page_navigation': 'Seiten-Navigation',
-      'error_occurred': 'Fehler aufgetreten',
-      'club_approve': 'Verein genehmigt',
-      'club_reject': 'Verein abgelehnt',
-      'ki_import_player': 'KI-Import: Spieler',
-      'ki_import_match': 'KI-Import: Match'
+        scored.sort((a, b) => b.score - a.score || (a.club.name || '').localeCompare(b.club.name || ''));
+
+        setClubSearchResults((prev) => ({
+          ...prev,
+          [summary.clubName]: scored
+        }));
+      } catch (error) {
+        console.error('❌ Fehler bei Club-Suche:', error);
+        setClubSearchResults((prev) => ({ ...prev, [summary.clubName]: [] }));
+        setScraperError(`❌ Fehler beim Import von "${summary.clubName}": ${error.message}`);
+      }
+    },
+    [supabase]
+  );
+
+  // ---------------------------------------------------------------------------
+  // Rendering-Helfer
+  // ---------------------------------------------------------------------------
+  const filteredPlayers = useMemo(() => {
+    const term = playerSearch.toLowerCase();
+    if (!term) return players;
+    return players.filter((player) =>
+      player.name?.toLowerCase().includes(term) || player.email?.toLowerCase().includes(term)
+    );
+  }, [players, playerSearch]);
+
+  const sortedPlayers = useMemo(() => {
+    const deriveClub = (player) => {
+      const team = (player.player_teams || []).find((entry) => entry?.team_info);
+      return team?.team_info?.club_name || '';
     };
-    return labelMap[action] || action.replace(/_/g, ' ');
-  };
 
-  const getActionIcon = (action) => {
-    const iconMap = {
-      'club_selected': '🏢',
-      'team_created': '🏆',
-      'profile_updated': '👤',
-      'onboarding_completed': '✅',
-      'onboarding_started': '🚀',
-      'onboarding_step': '📍',
-      'onboarding_search': '🔍',
-      'onboarding_smart_match': '⚡',
-      'onboarding_manual_entry': '✏️',
-      'onboarding_team_from_db': '🏆',
-      'onboarding_team_manual': '➕',
-      'training_created': '🏃',
-      'training_confirm': '✅',
-      'training_decline': '❌',
-      'matchday_confirm': '📅',
-      'matchday_decline': '📅',
-      'matchday_available': '📅',
-      'matchday_unavailable': '📅',
-      'profile_edited': '✏️',
-      'lk_changed': '📈',
-      'match_result_entered': '🏆',
-      'page_navigation': '🧭',
-      'error_occurred': '⚠️',
-      'club_approve': '✅',
-      'club_reject': '❌',
-      'ki_import_player': '🤖',
-      'ki_import_match': '🤖'
+    const parseLk = (value) => {
+      if (!value) return Number.POSITIVE_INFINITY;
+      const normalized = value.toString().replace(',', '.').replace(/[^0-9.]/g, '');
+      const parsed = parseFloat(normalized);
+      return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
     };
-    return iconMap[action] || '📝';
-  };
 
-  const getActionColor = (action) => {
-    const colorMap = {
-      'club_selected': '#3b82f6',
-      'team_created': '#10b981',
-      'profile_updated': '#8b5cf6',
-      'onboarding_completed': '#10b981',
-      'onboarding_started': '#3b82f6',
-      'onboarding_step': '#6366f1',
-      'onboarding_search': '#f59e0b',
-      'onboarding_smart_match': '#22c55e',
-      'onboarding_manual_entry': '#f97316',
-      'onboarding_team_from_db': '#10b981',
-      'onboarding_team_manual': '#f59e0b',
-      'training_created': '#f59e0b',
-      'training_confirm': '#10b981',
-      'training_decline': '#ef4444',
-      'matchday_confirm': '#10b981',
-      'matchday_decline': '#ef4444',
-      'profile_edited': '#8b5cf6',
-      'lk_changed': '#06b6d4',
-      'match_result_entered': '#f59e0b',
-      'page_navigation': '#6b7280',
-      'error_occurred': '#ef4444',
-      'club_approve': '#10b981',
-      'club_reject': '#ef4444',
-      'ki_import_player': '#8b5cf6',
-      'ki_import_match': '#8b5cf6'
+    const statusPriority = ['app_user', 'external', 'opponent'];
+    const getStatusRank = (player) => {
+      if (player?.user_id && player?.is_active !== false) return 0;
+      const idx = statusPriority.indexOf(player?.player_type || '');
+      return idx === -1 ? statusPriority.length : idx;
     };
-    return colorMap[action] || '#6b7280';
-  };
 
-  const exportLogs = () => {
-    const csvContent = [
-      ['Zeit', 'Benutzer', 'Aktion', 'Entität', 'Details'].join(','),
-      ...activityLogs.map(log => [
-        new Date(log.created_at).toLocaleString('de-DE'),
-        log.user_email || 'Unbekannt',
-        log.action,
-        log.entity_type || '',
-        JSON.stringify(log.details || {})
-      ].join(','))
-    ].join('\n');
+    const arr = [...filteredPlayers];
+    arr.sort((a, b) => {
+      let comparison = 0;
+      switch (playerSort.column) {
+        case 'lk':
+          comparison = parseLk(a.current_lk) - parseLk(b.current_lk);
+          break;
+        case 'club': {
+          const clubA = deriveClub(a).toLowerCase();
+          const clubB = deriveClub(b).toLowerCase();
+          comparison = clubA.localeCompare(clubB);
+          break;
+        }
+        case 'status':
+          comparison = getStatusRank(a) - getStatusRank(b);
+          break;
+        case 'registered':
+          comparison = new Date(a.created_at || 0) - new Date(b.created_at || 0);
+          break;
+        case 'last_login':
+          comparison = new Date(a.last_login_at || 0) - new Date(b.last_login_at || 0);
+          break;
+        case 'name':
+        default:
+          comparison = (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
+          break;
+      }
 
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `activity_logs_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+      if (playerSort.direction === 'desc') {
+        comparison *= -1;
+      }
+      return comparison;
+    });
 
-  if (loading) {
-    return (
-      <div className="dashboard container" style={{ paddingTop: '2rem' }}>
-        <div className="lk-card-full">
-          <div className="formkurve-header">
-            <div className="formkurve-title">⏳ Lade Admin-Daten...</div>
+    return arr;
+  }, [filteredPlayers, playerSort]);
+
+  const handlePlayerSort = useCallback((column) => {
+    setPlayerSort((prev) => {
+      if (prev.column === column) {
+        return { column, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { column, direction: 'asc' };
+    });
+  }, []);
+
+  const renderOverview = () => (
+    <div className="lk-card-full">
+      <div className="formkurve-header">
+        <div>
+          <div className="formkurve-title">System-Übersicht</div>
+          <div className="formkurve-subtitle">Build {buildInfo.shortCommit} · {buildInfo.buildTimeFormatted}</div>
+        </div>
+      </div>
+      <div className="season-content">
+        <div className="overview-grid">
+          <div className="overview-card overview-card-blue">
+            <div className="overview-card-title">Aktive Nutzer</div>
+            <div className="overview-card-value">{stats.totalUsers ?? '–'}</div>
           </div>
+          <div className="overview-card overview-card-green">
+            <div className="overview-card-title">Vereine im System</div>
+            <div className="overview-card-value">{stats.totalClubs ?? '–'}</div>
+          </div>
+          <div className="overview-card overview-card-orange">
+            <div className="overview-card-title">Neue Spieler (7 Tage)</div>
+            <div className="overview-card-value">{stats.newPlayersLast7Days ?? '–'}</div>
+          </div>
+          <div className="overview-card overview-card-purple">
+            <div className="overview-card-title">Matches offen</div>
+            <div className="overview-card-value">{stats.pendingMatches ?? '–'}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderClubs = () => (
+    <div className="lk-card-full">
+      <div className="formkurve-header">
+        <div className="formkurve-title">Vereinsübersicht ({clubs.length})</div>
+      </div>
+      <div className="season-content">
+        <div className="table-responsive">
+          <table className="lk-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Ort</th>
+                <th>Region</th>
+                <th>Webseite</th>
+              </tr>
+            </thead>
+            <tbody>
+              {clubs.map((club) => (
+                <tr key={club.id}>
+                  <td>{club.name}</td>
+                  <td>{club.city || '–'}</td>
+                  <td>{club.region || '–'}</td>
+                  <td>{club.website ? <a href={club.website} target="_blank" rel="noreferrer">Link</a> : '–'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderPlayers = () => {
+    const renderSortButton = (column, label) => {
+      const isActive = playerSort.column === column;
+      const directionIcon = isActive ? (playerSort.direction === 'asc' ? '▲' : '▼') : '↕';
+      return (
+        <button
+          type="button"
+          className={`player-sort-button${isActive ? ' active' : ''}`}
+          onClick={() => handlePlayerSort(column)}
+        >
+          <span>{label}</span>
+          <span className="sort-indicator">{directionIcon}</span>
+        </button>
+      );
+    };
+
+    const deriveTeams = (player) =>
+      (player.player_teams || [])
+        .map((team) => {
+          const info = team?.team_info;
+          if (!info) return null;
+          return `${info.club_name}${info.team_name ? ` • ${info.team_name}` : ''}`;
+        })
+        .filter(Boolean);
+
+    return (
+      <div className="lk-card-full">
+        <div className="formkurve-header">
+          <div>
+            <div className="formkurve-title">Spielerübersicht ({sortedPlayers.length})</div>
+            <div className="formkurve-subtitle">Vereinsmitglieder, App-Nutzer & Gegner im Überblick</div>
+          </div>
+          <div className="formkurve-actions player-sort-controls">
+            <input
+              type="text"
+              placeholder="Spieler suchen (Name oder E-Mail)"
+              value={playerSearch}
+              onChange={(e) => setPlayerSearch(e.target.value)}
+            />
+            <div className="player-sort-group">
+              {renderSortButton('name', 'Name')}
+              {renderSortButton('club', 'Verein')}
+              {renderSortButton('lk', 'Beste LK')}
+              {renderSortButton('status', 'Status')}
+            </div>
+          </div>
+        </div>
+        <div className="season-content">
+          {sortedPlayers.length === 0 ? (
+            <div className="placeholder">Keine Spieler gefunden.</div>
+          ) : (
+            <div className="table-responsive">
+              <table className="lk-table player-directory-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th>Verein / Teams</th>
+                    <th>Leistungsklasse</th>
+                    <th>Registriert</th>
+                    <th>Letzte Anmeldung</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedPlayers.map((player) => {
+                    const status = resolvePlayerStatus(player);
+                    const avatar =
+                      player.profile_image ||
+                      player.avatar_url ||
+                      '/app-icon.jpg';
+                    const teams = deriveTeams(player);
+                    const registered = formatDate(player.created_at);
+                    const resolvedLastLogin =
+                      player.last_login_at ||
+                      player.last_active_at ||
+                      player.last_seen_at ||
+                      player.last_sign_in_at ||
+                      null;
+                    const lastLogin = resolvedLastLogin ? formatDate(resolvedLastLogin) : 'Keine Anmeldung erfasst';
+                    const isExpanded = selectedPlayerRow?.id === player.id;
+
+                    return (
+                      <Fragment key={player.id}>
+                        <tr className="player-directory-row">
+                          <td className="player-directory-cell player-directory-cell-name">
+                            <div className="player-directory-person">
+                              <img src={avatar} alt={player.name || 'Spieler'} />
+                              <div>
+                                <div className="player-directory-name">
+                                  <span>{player.name || 'Unbekannt'}</span>
+                                  {player.is_super_admin && <span className="player-tag admin">Admin</span>}
+                                  {player.is_active === false && <span className="player-tag inactive">Inaktiv</span>}
+                                  {player.user_id && player.is_active !== false && (
+                                    <span className="player-tag linked">App-Nutzer</span>
+                                  )}
+                                </div>
+                                <div className="player-directory-email">{player.email || 'Keine E-Mail hinterlegt'}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="player-directory-cell player-directory-cell-status">
+                            <span
+                              className="player-directory-status"
+                              style={{
+                                color: status.color,
+                                background: status.background,
+                                borderColor: status.border
+                              }}
+                            >
+                              {status.icon} {status.label}
+                            </span>
+                          </td>
+                          <td className="player-directory-cell player-directory-cell-teams">
+                            {teams.length > 0 ? (
+                              <div className="player-directory-teamlist">
+                                {teams.map((label, idx) => (
+                                  <span key={idx} className="player-directory-teamchip">
+                                    {label}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="player-directory-empty">Keinem Team zugeordnet</span>
+                            )}
+                          </td>
+                          <td className="player-directory-cell">{player.current_lk ? `LK ${player.current_lk}` : '–'}</td>
+                          <td className="player-directory-cell">{registered}</td>
+                          <td className="player-directory-cell">{lastLogin}</td>
+                          <td className="player-directory-cell player-directory-cell-actions">
+                            <button
+                              type="button"
+                              className="btn-modern btn-player-details"
+                              onClick={() =>
+                                setSelectedPlayerRow((prev) => (prev?.id === player.id ? null : player))
+                              }
+                            >
+                              {isExpanded ? 'Schließen' : 'Details'}
+                            </button>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr className="player-directory-detail-row">
+                            <td colSpan={7}>
+                              <div className="player-directory-detail">
+                                <div className="player-directory-detail-header">
+                                  <div>
+                                    <div className="player-directory-detail-title">{player.name || 'Unbekannter Spieler'}</div>
+                                    <div className="player-directory-detail-meta">
+                                      Konto angelegt am {registered}
+                                      {player.user_id ? ' · App-Zugang aktiv' : ' · Kein App-Zugang'}
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="btn-modern btn-player-details"
+                                    onClick={() => setSelectedPlayerRow(null)}
+                                  >
+                                    Schließen
+                                  </button>
+                                </div>
+                                <div className="player-directory-detail-grid">
+                                  <div>
+                                    <div className="player-directory-detail-label">E-Mail</div>
+                                    <div className="player-directory-detail-value">
+                                      {player.email || 'Keine E-Mail hinterlegt'}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <div className="player-directory-detail-label">Status</div>
+                                    <div className="player-directory-detail-value">{status.label}</div>
+                                  </div>
+                                  <div>
+                                    <div className="player-directory-detail-label">Letzte Anmeldung</div>
+                                    <div className="player-directory-detail-value">{lastLogin}</div>
+                                  </div>
+                                  <div>
+                                    <div className="player-directory-detail-label">Teams</div>
+                                    <div className="player-directory-detail-value">
+                                      {teams.length > 0 ? teams.join(', ') : 'Keinem Team zugeordnet'}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <div className="player-directory-detail-label">Interne ID</div>
+                                    <div className="player-directory-detail-value">{player.id}</div>
+                                  </div>
+                                  <div>
+                                    <div className="player-directory-detail-label">Zuletzt aktualisiert</div>
+                                    <div className="player-directory-detail-value">
+                                      {player.updated_at ? formatDate(player.updated_at) : 'Keine Daten'}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     );
-  }
+  };
 
-  return (
-    <div className="dashboard container" style={{ paddingTop: '2rem' }}>
-      {/* Header */}
-      <div className="lk-card-full">
-        <div className="formkurve-header">
-          <div className="formkurve-title">
-            👑 Super-Admin Dashboard
-          </div>
-          <div className="formkurve-subtitle" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <span>System-Übersicht & Vereinsverwaltung</span>
-            
-            {/* Build-Info Details (immer sichtbar) */}
-            <div style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: '0.75rem',
-              fontSize: '0.75rem',
-              color: '#6b7280',
-              marginTop: '0.25rem'
-            }}>
-              <div style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.35rem 0.75rem',
-                background: buildInfo.shortCommit ? '#dcfce7' : '#fef3c7',
-                color: buildInfo.shortCommit ? '#15803d' : '#92400e',
-                border: buildInfo.shortCommit ? '1px solid #86efac' : '1px solid #fcd34d',
-                borderRadius: '6px',
-                fontWeight: '600'
-              }}>
-                {buildInfo.shortCommit ? (
-                  <>
-                    <span>🚀</span>
-                    <span>Build #{buildInfo.shortCommit}</span>
-                  </>
-                ) : (
-                  <>
-                    <span>🏠</span>
-                    <span>LOCAL Dev-Mode</span>
-                  </>
-                )}
-              </div>
-              
-              {buildInfo.shortCommit && (
-                <>
-                  <div style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.35rem 0.75rem',
-                    background: '#f3f4f6',
-                    color: '#4b5563',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '6px',
-                    fontWeight: '500'
-                  }}>
-                    <span>📅</span>
-                    <span>{buildInfo.buildDate}</span>
-                  </div>
-                  
-                  <div style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.35rem 0.75rem',
-                    background: '#f3f4f6',
-                    color: '#4b5563',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '6px',
-                    fontWeight: '500'
-                  }}>
-                    <span>🕐</span>
-                    <span>{buildInfo.buildTimeFormatted} Uhr</span>
-                  </div>
-                  
-                  <div style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.35rem 0.75rem',
-                    background: '#eff6ff',
-                    color: '#1e40af',
-                    border: '1px solid #bfdbfe',
-                    borderRadius: '6px',
-                    fontWeight: '500',
-                    fontSize: '0.7rem',
-                    fontFamily: 'monospace'
-                  }}>
-                    <span>🔗</span>
-                    <span>git:{buildInfo.commitSha ? buildInfo.commitSha.substring(0, 10) : 'local'}</span>
-                  </div>
-                </>
-              )}
-            </div>
+  const renderMatchdays = () => (
+    <div className="lk-card-full">
+      <div className="formkurve-header">
+        <div>
+          <div className="formkurve-title">Matchdays · Winter 2025/26</div>
+          <div className="formkurve-subtitle">
+            {seasonMatchdays.length > 0
+              ? `${seasonMatchdays.length} Spiel${seasonMatchdays.length === 1 ? '' : 'e'}`
+              : 'Keine Matchdays gefunden'}
           </div>
         </div>
       </div>
-
-      {/* Navigation Tabs */}
-      <div className="lk-card-full">
-        <div className="season-content">
-          <div style={{ 
-            display: 'flex', 
-            gap: '0.5rem', 
-            marginBottom: '1.5rem',
-            flexWrap: 'wrap'
-          }}>
-            {[
-              { id: 'overview', label: '📊 Übersicht', icon: TrendingUp },
-              { id: 'clubs', label: '🏢 Vereine', icon: Building2 },
-              { id: 'teams', label: '🏆 Teams', icon: Users },
-              { id: 'matches', label: '🎾 Matches', icon: Activity },
-              { id: 'trainings', label: '🏃 Trainings', icon: Activity },
-              { id: 'logs', label: '📝 Aktivitäten', icon: Activity },
-              { id: 'users', label: '👥 Benutzer', icon: Users },
-              { id: 'import', label: '📥 Import', icon: Download }
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setSelectedTab(tab.id)}
-                className={`btn-modern ${selectedTab === tab.id ? 'btn-modern-active' : 'btn-modern-inactive'}`}
-                style={{ minWidth: '120px' }}
-              >
-                <tab.icon size={16} />
-                {tab.label}
-              </button>
-            ))}
+      <div className="season-content">
+        {parserMessage && (
+          <div className={`parser-feedback parser-feedback--${parserMessage.type || 'success'}`}>
+            {parserMessage.text}
           </div>
-
-          {/* Filter Controls */}
-          <div style={{ 
-            display: 'flex', 
-            gap: '1rem', 
-            marginBottom: '1.5rem',
-            flexWrap: 'wrap',
-            alignItems: 'center'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Filter size={16} />
-              <select
-                value={dateFilter}
-                onChange={(e) => setDateFilter(e.target.value)}
-                style={{
-                  padding: '0.5rem',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '6px',
-                  fontSize: '0.875rem'
-                }}
-              >
-                <option value="today">Heute</option>
-                <option value="week">Letzte Woche</option>
-                <option value="month">Letzter Monat</option>
-                <option value="all">Alle</option>
-              </select>
+        )}
+        {matchesNeedingParser.length > 0 && (
+          <div className="matchday-parser-summary">
+            <div className="matchday-parser-summary-info">
+              <span className="matchday-parser-summary-icon">⚠️</span>
+              <span>
+                <strong>{matchesNeedingParser.length}</strong>{' '}
+                {matchesNeedingParser.length === 1 ? 'Spiel ohne Ergebnis' : 'Spiele ohne Ergebnis'}
+              </span>
+              {parserGroupsNeedingUpdate.length > 0 && (
+                <span className="matchday-parser-summary-groups">
+                  Gruppen: {parserGroupsNeedingUpdate.join(', ')}
+                </span>
+              )}
             </div>
-
-            {selectedTab === 'logs' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <select
-                  value={logsFilter}
-                  onChange={(e) => setLogsFilter(e.target.value)}
-                  style={{
-                    padding: '0.5rem',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '6px',
-                    fontSize: '0.875rem'
-                  }}
-                >
-                  <option value="all">Alle Aktionen</option>
-                  <optgroup label="📋 Onboarding">
-                    <option value="onboarding_started">🚀 Onboarding gestartet</option>
-                    <option value="onboarding_step">📍 Onboarding-Schritt</option>
-                    <option value="onboarding_search">🔍 Smart-Match Suche</option>
-                    <option value="onboarding_smart_match">⚡ Smart-Match Auswahl</option>
-                    <option value="onboarding_manual_entry">✏️ Manuelle Dateneingabe</option>
-                    <option value="onboarding_team_from_db">🏆 Team aus DB</option>
-                    <option value="onboarding_team_manual">➕ Team manuell</option>
-                    <option value="onboarding_completed">✅ Onboarding abgeschlossen</option>
-                  </optgroup>
-                  <optgroup label="🎾 Aktivitäten">
-                    <option value="club_selected">Vereinsauswahl</option>
-                    <option value="team_created">Team erstellt</option>
-                    <option value="profile_updated">Profil aktualisiert</option>
-                    <option value="training_created">Training erstellt</option>
-                    <option value="training_confirm">Training zugesagt</option>
-                    <option value="training_decline">Training abgesagt</option>
-                    <option value="matchday_confirm">Matchday zugesagt</option>
-                    <option value="matchday_decline">Matchday abgesagt</option>
-                    <option value="profile_edited">Profil bearbeitet</option>
-                    <option value="lk_changed">LK geändert</option>
-                    <option value="match_result_entered">Match-Ergebnis eingegeben</option>
-                  </optgroup>
-                  <optgroup label="🔧 System">
-                    <option value="page_navigation">Seiten-Navigation</option>
-                    <option value="error_occurred">Fehler aufgetreten</option>
-                  </optgroup>
-                </select>
-              </div>
-            )}
-
             <button
-              onClick={loadAdminData}
-              className="btn-modern btn-modern-inactive"
-              style={{ padding: '0.5rem' }}
+              type="button"
+              className="btn-modern btn-modern-inactive btn-parser-bulk"
+              onClick={handleRunParserForAll}
+              disabled={parserProcessing}
             >
-              <RefreshCw size={16} />
+              {parserProcessing ? 'Parser läuft…' : 'Alle aktualisieren'}
             </button>
           </div>
-        </div>
-      </div>
+        )}
+        {seasonMatchdays.length === 0 ? (
+          <div className="placeholder">Für diese Saison wurden keine Matchdays gefunden.</div>
+        ) : (
+          <div className="table-responsive">
+            <table className="lk-table matchday-table matchday-table-compact">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Datum</th>
+                  <th>Start</th>
+                  <th>Match-Nr.</th>
+                  <th>Heimteam</th>
+                  <th>Gastteam</th>
+                  <th>Austragungsort</th>
+                  <th>Liga · Gruppe</th>
+                  <th>Status</th>
+                  <th>Ergebnis</th>
+                  <th className="matchday-parser-cell">Parser</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {seasonMatchdays.map((match, index) => {
+                  const homeTeam = teamById.get(match.home_team_id);
+                  const awayTeam = teamById.get(match.away_team_id);
+                  const matchResultsCount = match.match_results_count || 0;
+                  const dateObj = match.match_date ? new Date(match.match_date) : null;
+                  const dateWeekday = dateObj
+                    ? dateObj.toLocaleDateString('de-DE', { weekday: 'short' })
+                    : '–';
+                  const dateValue = dateObj
+                    ? dateObj.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                    : '–';
+                  const startLabel = match.start_time ? match.start_time.slice(0, 5) : '–';
+                  const matchNumber = match.match_number ?? extractMatchNumber(match.notes);
+                  const homeLabel = homeTeam
+                    ? `${homeTeam.club_name}${homeTeam.team_name ? ` ${homeTeam.team_name}` : ''}`
+                    : 'Unbekannt';
+                  const awayLabel = awayTeam
+                    ? `${awayTeam.club_name}${awayTeam.team_name ? ` ${awayTeam.team_name}` : ''}`
+                    : 'Unbekannt';
+                  const scoreLabel =
+                    match.final_score ||
+                    (match.home_score != null && match.away_score != null
+                      ? `${match.home_score}:${match.away_score}`
+                      : '–');
+                  const statusConfig = MATCHDAY_STATUS_STYLES[match.status] || MATCHDAY_STATUS_STYLES.default;
+                  const shouldTriggerParser = needsResultParser(match);
+                  const parserState = matchParserStates[match.id];
+                  const parserStatus = parserState?.status;
+                  const isParserRunning = parserStatus === 'running';
+                  const meetingInfo = meetingDetails[match.id] || {};
+                  const meetingData = meetingInfo.data;
+                  const meetingLoading = meetingInfo.loading;
+                  const meetingError = meetingInfo.error;
+                  const meetingImporting = meetingInfo.importing;
 
-      {/* Tab Content */}
-      {selectedTab === 'overview' && (
-        <div className="lk-card-full">
-          <div className="formkurve-header">
-            <div className="formkurve-title">📊 System-Übersicht</div>
-          </div>
-          <div className="season-content">
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
-              gap: '1rem' 
-            }}>
-              {/* Aktive Benutzer → Users Tab */}
-              <div 
-                className="personality-card"
-                onClick={() => setSelectedTab('users')}
-                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-4px)';
-                  e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.1)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = '';
-                }}
-              >
-                <div className="personality-icon">👥</div>
-                <div className="personality-content">
-                  <h4>Aktive Benutzer</h4>
-                  <p style={{ fontSize: '1.5rem', fontWeight: '700', margin: 0 }}>
-                    {stats.totalUsers || 0}
-                  </p>
-                  {stats.importedPlayers > 0 && (
-                    <p style={{ fontSize: '0.75rem', color: '#f59e0b', marginTop: '0.25rem' }}>
-                      ⏳ {stats.importedPlayers} warten auf Registrierung
-                    </p>
-                  )}
-                  <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                    Klicken für Details →
-                  </p>
-                </div>
-              </div>
+                  const isExpanded = selectedSeasonMatch?.id === match.id;
 
-              {/* Vereine → Clubs Tab */}
-              <div 
-                className="personality-card"
-                onClick={() => setSelectedTab('clubs')}
-                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-4px)';
-                  e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.1)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = '';
-                }}
-              >
-                <div className="personality-icon">🏢</div>
-                <div className="personality-content">
-                  <h4>Vereine</h4>
-                  <p style={{ fontSize: '1.5rem', fontWeight: '700', margin: 0 }}>
-                    {stats.totalClubs || 0}
-                  </p>
-                  <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                    Klicken für Details →
-                  </p>
-                </div>
-              </div>
+                  const renderParserIndicator = () => {
+                    if (isParserRunning) {
+                      return (
+                        <span className="matchday-parser-indicator matchday-parser-indicator--running">
+                          ⏳ Parser läuft…
+                        </span>
+                      );
+                    }
+                    if (parserStatus === 'success') {
+                      return (
+                        <span className="matchday-parser-indicator matchday-parser-indicator--ok">
+                          {parserState?.message || '✅ Aktualisiert'}
+                        </span>
+                      );
+                    }
+                    if (parserStatus === 'error') {
+                      return (
+                        <span
+                          className="matchday-parser-indicator matchday-parser-indicator--error"
+                          title={parserState?.message || 'Parser-Fehler'}
+                        >
+                          ⚠️ {parserState?.message || 'Fehler'}
+                        </span>
+                      );
+                    }
+                    if (shouldTriggerParser) {
+                      return (
+                        <span
+                          className="matchday-parser-indicator"
+                          title="Match abgeschlossen, Ergebnis fehlt – Parser starten"
+                        >
+                          ⚠️ Ergebnis fehlt
+                        </span>
+                      );
+                    }
+                    if (match.status === 'completed') {
+                      return (
+                        <span className="matchday-parser-indicator matchday-parser-indicator--ok">
+                          ✅ vollständig
+                        </span>
+                      );
+                    }
+                    return <span className="matchday-parser-placeholder">–</span>;
+                  };
 
-              {/* Ausstehende Prüfungen → Clubs Tab */}
-              <div 
-                className="personality-card"
-                onClick={() => setSelectedTab('clubs')}
-                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-4px)';
-                  e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.1)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = '';
-                }}
-              >
-                <div className="personality-icon">⏳</div>
-                <div className="personality-content">
-                  <h4>Ausstehende Prüfungen</h4>
-                  <p style={{ fontSize: '1.5rem', fontWeight: '700', margin: 0, color: '#f59e0b' }}>
-                    {stats.pendingReviews || 0}
-                  </p>
-                  <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                    Klicken für Details →
-                  </p>
-                </div>
-              </div>
-
-              {/* Onboarding abgeschlossen → Users Tab */}
-              <div 
-                className="personality-card"
-                onClick={() => setSelectedTab('users')}
-                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-4px)';
-                  e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.1)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = '';
-                }}
-              >
-                <div className="personality-icon">✅</div>
-                <div className="personality-content">
-                  <h4>Onboarding abgeschlossen</h4>
-                  <p style={{ fontSize: '1.5rem', fontWeight: '700', margin: 0 }}>
-                    {stats.onboardingCompleted || 0}
-                  </p>
-                  <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                    Klicken für Details →
-                  </p>
-                </div>
-              </div>
-
-              {/* Mannschaften → Teams Tab (neu) */}
-              <div 
-                className="personality-card"
-                onClick={() => setSelectedTab('teams')}
-                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-4px)';
-                  e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.1)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = '';
-                }}
-              >
-                <div className="personality-icon">🏆</div>
-                <div className="personality-content">
-                  <h4>Mannschaften</h4>
-                  <p style={{ fontSize: '1.5rem', fontWeight: '700', margin: 0 }}>
-                    {stats.totalTeams || 0}
-                  </p>
-                  <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                    Klicken für Details →
-                  </p>
-                </div>
-              </div>
-
-              {/* Matches → Matches Tab (neu) */}
-              <div 
-                className="personality-card"
-                onClick={() => setSelectedTab('matches')}
-                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-4px)';
-                  e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.1)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = '';
-                }}
-              >
-                <div className="personality-icon">🎾</div>
-                <div className="personality-content">
-                  <h4>Matches</h4>
-                  <p style={{ fontSize: '1.5rem', fontWeight: '700', margin: 0 }}>
-                    {stats.totalMatches || 0}
-                  </p>
-                  <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                    Klicken für Details →
-                  </p>
-                </div>
-              </div>
-
-              {/* Trainings → Trainings Tab */}
-              <div 
-                className="personality-card"
-                onClick={() => setSelectedTab('trainings')}
-                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-4px)';
-                  e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.1)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = '';
-                }}
-              >
-                <div className="personality-icon">🏃</div>
-                <div className="personality-content">
-                  <h4>Training-Sessions</h4>
-                  <p style={{ fontSize: '1.5rem', fontWeight: '700', margin: 0 }}>
-                    {stats.totalTrainings || 0}
-                  </p>
-                  <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                    Klicken für Details →
-                  </p>
-                </div>
-              </div>
-
-              {/* Aktivitäten heute → Logs Tab */}
-              <div 
-                className="personality-card"
-                onClick={() => setSelectedTab('logs')}
-                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-4px)';
-                  e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.1)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = '';
-                }}
-              >
-                <div className="personality-icon">📈</div>
-                <div className="personality-content">
-                  <h4>Aktivitäten heute</h4>
-                  <p style={{ fontSize: '1.5rem', fontWeight: '700', margin: 0 }}>
-                    {stats.dailyActivity || 0}
-                  </p>
-                  <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                    Klicken für Details →
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {selectedTab === 'clubs' && (
-        <div>
-          {/* Alle Vereine - Tabellen-Ansicht */}
-          <div className="lk-card-full">
-            <div className="formkurve-header">
-              <div className="formkurve-title">🏢 Alle Vereine</div>
-              <div className="formkurve-subtitle">
-                {allClubs.length} Vereine im System
-              </div>
-            </div>
-            <div className="season-content">
-              {/* Suchfeld */}
-              <div style={{ marginBottom: '1rem' }}>
-                <input
-                  type="text"
-                  placeholder="🔍 Verein suchen..."
-                  value={clubSearchTerm}
-                  onChange={(e) => setClubSearchTerm(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '0.75rem',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '8px',
-                    fontSize: '0.875rem',
-                    outline: 'none',
-                    transition: 'border-color 0.2s'
-                  }}
-                  onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                  onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
-                />
-              </div>
-
-              {allClubs.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '2rem', color: '#6b7280' }}>
-                  <Building2 size={48} style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
-                  <p>Keine Vereine gefunden</p>
-                </div>
-              ) : (() => {
-                // Filter und Sortierung
-                const filteredClubs = allClubs
-                  .filter(club => {
-                    if (!clubSearchTerm) return true;
-                    const searchLower = clubSearchTerm.toLowerCase();
-                    return (
-                      club.name?.toLowerCase().includes(searchLower) ||
-                      club.city?.toLowerCase().includes(searchLower) ||
-                      club.federation?.toLowerCase().includes(searchLower)
-                    );
-                  })
-                  .sort((a, b) => {
-                    // Sortiere nach Spieler-Anzahl (absteigend)
-                    const countA = clubPlayerCounts[a.name] || 0;
-                    const countB = clubPlayerCounts[b.name] || 0;
-                    return countB - countA;
-                  });
-
-                if (filteredClubs.length === 0) {
                   return (
-                    <div style={{ textAlign: 'center', padding: '2rem', color: '#6b7280' }}>
-                      <Building2 size={48} style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
-                      <p>Keine Vereine gefunden für "{clubSearchTerm}"</p>
-                    </div>
-                  );
-                }
+                    <Fragment key={match.id}>
+                    <tr className="matchday-row">
+                      <td>{index + 1}</td>
+                      <td>{dateWeekday}<br />{dateValue}</td>
+                      <td>{startLabel}</td>
+                      <td>{matchNumber ?? '–'}</td>
+                      <td className="matchday-team-cell">{homeLabel}</td>
+                      <td className="matchday-team-cell">{awayLabel}</td>
+                      <td>
+                        <div>{match.venue || '–'}</div>
+                        {match.court_number && (
+                          <div className="matchday-venue-courts">Platz {formatCourtRange(match.court_number, match.court_number_end)}</div>
+                        )}
+                      </td>
+                      <td>
+                        <div>{match.league || '–'}</div>
+                        <div className="matchday-group">{match.group_name || '–'}</div>
+                      </td>
+                      <td>
+                        <span
+                          className="matchday-status-badge"
+                          style={{ color: statusConfig.color, background: statusConfig.background }}
+                        >
+                          {statusConfig.icon} {statusConfig.label}
+                        </span>
+                      </td>
+                      <td className="matchday-score">{scoreLabel}</td>
+                      <td className="matchday-parser-cell">
+                        <div className="matchday-parser-actions">
+                          {renderParserIndicator()}
+                          {(shouldTriggerParser || parserStatus === 'error') && (
+                            <button
+                              type="button"
+                              className="btn-modern btn-modern-inactive btn-parser-run"
+                              onClick={() => handleRunResultParser(match)}
+                              disabled={parserProcessing || isParserRunning}
+                            >
+                              {isParserRunning ? 'Läuft…' : 'Parser'}
+                            </button>
+                          )}
+                          <div className="matchday-results-status">
+                            <span
+                              className={`matchday-results-tag ${
+                                matchResultsCount > 0 ? 'matchday-results-tag--ok' : 'matchday-results-tag--missing'
+                              }`}
+                              title={
+                                matchResultsCount > 0
+                                  ? `${matchResultsCount} Einzelergebnisse gespeichert`
+                                  : 'Noch keine Einzelergebnisse importiert'
+                              }
+                            >
+                              {matchResultsCount > 0 ? `Ergebnisse (${matchResultsCount})` : 'Ergebnisse fehlen'}
+                            </span>
+                            {meetingData?.applyResult?.missingPlayers?.length > 0 && (
+                              <button
+                                type="button"
+                                className="btn-modern btn-modern-inactive btn-meeting-action"
+                                onClick={() => {
+                                  const missing = meetingData.applyResult.missingPlayers
+                                    .map((entry) => `• ${entry.name} (${entry.occurrences}x)`)
+                                    .join('\n');
+                                  alert(
+                                    `Es fehlen Spieler-Zuordnungen für:\n\n${missing}\n\nBitte in Supabase anlegen oder Alias ergänzen.`
+                                  );
+                                }}
+                              >
+                                Spieler fehlen
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn-modern btn-modern-inactive btn-matchday-details"
+                          onClick={() =>
+                            setSelectedSeasonMatch((prev) =>
+                              prev?.id === match.id ? null : { ...match, __listIndex: index + 1 }
+                            )
+                          }
+                        >
+                          {isExpanded ? 'Schließen' : 'Details'}
+                        </button>
+                      </td>
+                    </tr>
+                    {isExpanded && (() => {
+                      const selectedHomeTeam = homeTeam;
+                      const selectedAwayTeam = awayTeam;
+                      const selectedHomeLabel = selectedHomeTeam
+                        ? `${selectedHomeTeam.club_name}${selectedHomeTeam.team_name ? ` ${selectedHomeTeam.team_name}` : ''}`
+                        : 'Unbekannt';
+                      const selectedAwayLabel = selectedAwayTeam
+                        ? `${selectedAwayTeam.club_name}${selectedAwayTeam.team_name ? ` ${selectedAwayTeam.team_name}` : ''}`
+                        : 'Unbekannt';
+                      const renderPlayersCell = (players = []) => {
+                        if (!players || players.length === 0) return '–';
+                        return players.map((player, idx) => (
+                          <Fragment key={`${player.name || player.raw || idx}`}>
+                            {player.name || player.raw}
+                            {player.meta ? ` (${player.meta})` : ''}
+                            {idx < players.length - 1 && <br />}
+                          </Fragment>
+                        ));
+                      };
 
-                return (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ 
-                    width: '100%', 
-                    borderCollapse: 'collapse',
-                    fontSize: '0.875rem'
-                  }}>
-                    <thead>
-                      <tr style={{ 
-                        borderBottom: '2px solid #e2e8f0',
-                        background: '#f8fafc'
-                      }}>
-                        <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600' }}>Verein</th>
-                        <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600' }}>Stadt</th>
-                        <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600' }}>Verband</th>
-                        <th style={{ padding: '0.75rem', textAlign: 'center', fontWeight: '600' }}>Spieler</th>
-                        <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600' }}>Homepage</th>
-                        <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600' }}>Erstellt</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredClubs.map((club, index) => {
-                        // Hole Spieler-Anzahl aus der Map
-                        const playerCount = clubPlayerCounts[club.name] || 0;
-
+                      const renderMeetingTable = (title, entries) => {
+                        if (!entries || !entries.length) return null;
                         return (
-                          <tr key={club.id} style={{ 
-                            borderBottom: '1px solid #e2e8f0',
-                            background: index % 2 === 0 ? 'white' : '#f9fafb'
-                          }}>
-                            <td style={{ padding: '0.75rem' }}>
-                              <strong>{club.name}</strong>
-                            </td>
-                            <td style={{ padding: '0.75rem', color: '#6b7280' }}>
-                              {club.city || '-'}
-                            </td>
-                            <td style={{ padding: '0.75rem', color: '#6b7280' }}>
-                              {club.federation || 'TVM'}
-                            </td>
-                            <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                              <div style={{ 
-                                padding: '0.25rem 0.5rem',
-                                borderRadius: '6px',
-                                background: playerCount > 0 ? '#e0e7ff' : '#f1f5f9',
-                                color: playerCount > 0 ? '#4338ca' : '#6b7280',
-                                fontWeight: '600',
-                                fontSize: '0.75rem',
-                                display: 'inline-block'
-                              }}>
-                                {playerCount} {playerCount === 1 ? 'Spieler' : 'Spieler'}
-                              </div>
-                            </td>
-                            <td style={{ padding: '0.75rem' }}>
-                              {club.website ? (
-                                <a 
-                                  href={club.website}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  style={{ 
-                                    color: '#3b82f6',
-                                    textDecoration: 'none',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.25rem',
-                                    fontSize: '0.8rem'
-                                  }}
-                                >
-                                  🔗 Website
-                                  <Eye size={12} />
-                                </a>
-                              ) : (
-                                <span style={{ color: '#9ca3af', fontSize: '0.8rem' }}>-</span>
-                              )}
-                            </td>
-                            <td style={{ padding: '0.75rem', color: '#6b7280', fontSize: '0.8rem' }}>
-                              {new Date(club.created_at).toLocaleDateString('de-DE')}
-                            </td>
-                          </tr>
+                          <div className="meeting-table-wrapper">
+                            <div className="meeting-table-title">{title}</div>
+                            <table className="matchday-meeting-table">
+                              <thead>
+                                <tr>
+                                  <th>#</th>
+                                  <th>Heim</th>
+                                  <th>Gast</th>
+                                  <th>1. Satz</th>
+                                  <th>2. Satz</th>
+                                  <th>3. Satz</th>
+                                  <th>Matchpunkte</th>
+                                  <th>Sätze</th>
+                                  <th>Spiele</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {entries.map((entry, idx) => (
+                                  <tr key={`${title}-${idx}`}>
+                                    <td>{entry.matchNumber || idx + 1}</td>
+                                    <td className="meeting-player-cell">{renderPlayersCell(entry.homePlayers)}</td>
+                                    <td className="meeting-player-cell">{renderPlayersCell(entry.awayPlayers)}</td>
+                                    <td>{entry.setScores?.[0]?.raw || '–'}</td>
+                                    <td>{entry.setScores?.[1]?.raw || '–'}</td>
+                                    <td>{entry.setScores?.[2]?.raw || '–'}</td>
+                                    <td>{entry.matchPoints?.raw || '–'}</td>
+                                    <td>{entry.sets?.raw || '–'}</td>
+                                    <td>{entry.games?.raw || '–'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                );
-              })()}
-            </div>
-          </div>
-        </div>
-      )}
+                      };
 
-      {selectedTab === 'logs' && (
-        <div className="lk-card-full">
-          <div className="formkurve-header">
-            <div className="formkurve-title">📝 Aktivitäts-Log</div>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <button
-                onClick={exportLogs}
-                className="btn-modern btn-modern-inactive"
-                style={{ fontSize: '0.8rem', padding: '0.5rem 1rem' }}
-              >
-                <Download size={14} />
-                Export CSV
-              </button>
-            </div>
-          </div>
-          <div className="season-content">
-            <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
-              {activityLogs.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '2rem', color: '#6b7280' }}>
-                  <Activity size={48} style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
-                  <p>Keine Aktivitäten gefunden</p>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  {activityLogs.map(log => (
-                    <div key={log.id} style={{
-                      padding: '0.75rem',
-                      background: '#f8fafc',
-                      border: `1px solid ${getActionColor(log.action)}20`,
-                      borderRadius: '8px',
-                      fontSize: '0.875rem',
-                      borderLeft: `4px solid ${getActionColor(log.action)}`
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <span style={{ fontSize: '1rem' }}>{getActionIcon(log.action)}</span>
-                          <strong style={{ color: getActionColor(log.action) }}>
-                            {getActionLabel(log.action)}
-                          </strong>
-                        </div>
-                        <div style={{ color: '#6b7280', fontSize: '0.75rem' }}>
-                          {new Date(log.created_at).toLocaleString('de-DE')}
-                        </div>
-                      </div>
-                      <div style={{ 
-                        display: 'flex', 
-                        flexDirection: 'column',
-                        gap: '0.5rem', 
-                        marginTop: '0.5rem', 
-                        fontSize: '0.8rem',
-                        color: '#6b7280' 
-                      }}>
-                        {/* Erste Zeile: Spieler-Name, Verein, Response */}
-                        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                          {(() => {
-                            // Nutze JOIN-Daten aus log.player ODER Fallback zu players array
-                            const player = log.player || players.find(p => 
-                              p.user_id === log.user_id || 
-                              p.id === log.details?.player_id ||
-                              p.email === log.user_email
-                            );
-                            
-                            if (player) {
-                              const teamInfo = player.player_teams?.[0]?.team_info;
-                              return (
-                                <>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    👤 <strong>{player.name}</strong>
-                                    {player.current_lk && (
-                                      <span style={{ 
-                                        fontSize: '0.7rem',
-                                        padding: '0.125rem 0.375rem',
-                                        background: '#e0e7ff',
-                                        color: '#4338ca',
-                                        borderRadius: '4px',
-                                        fontWeight: '600'
-                                      }}>
-                                        {player.current_lk}
-                                      </span>
+                      return (
+                        <tr className="matchday-detail-row">
+                          <td colSpan={12}>
+                            <div className="matchday-detail-inline">
+                              <div className="matchday-detail-inline-header">
+                                <div>
+                                  <div className="matchday-detail-title">
+                                    {selectedHomeLabel} vs. {selectedAwayLabel}
+                                  </div>
+                                  <div className="matchday-detail-meta">
+                                    {match.match_date
+                                      ? new Date(match.match_date).toLocaleString('de-DE', {
+                                          weekday: 'long',
+                                          day: '2-digit',
+                                          month: '2-digit',
+                                          year: 'numeric',
+                                          hour: '2-digit',
+                                          minute: '2-digit'
+                                        })
+                                      : 'Datum unbekannt'}
+                                    {selectedSeasonMatch.__listIndex && ` · Spiel #${selectedSeasonMatch.__listIndex}`}
+                                    {matchNumber && ` · Match ${matchNumber}`}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn-modern btn-modern-inactive"
+                                  onClick={() => setSelectedSeasonMatch(null)}
+                                >
+                                  Schließen
+                                </button>
+                              </div>
+                              {shouldTriggerParser && (
+                                <div className="matchday-parser-hint">
+                                  ⚠️ Ergebnisse fehlen – Parser starten, um Satz- und Spielstände nachzuladen.
+                                </div>
+                              )}
+                              <div className="matchday-detail-grid">
+                                <div>
+                                  <div className="detail-label">Liga</div>
+                                  <div>{match.league || '–'}</div>
+                                </div>
+                                <div>
+                                  <div className="detail-label">Gruppe</div>
+                                  <div>{match.group_name || '–'}</div>
+                                </div>
+                                <div>
+                                  <div className="detail-label">Status</div>
+                                  <div>{statusConfig.label}</div>
+                                </div>
+                                <div>
+                                  <div className="detail-label">Einzelergebnisse</div>
+                                  <div>
+                                    {matchResultsCount > 0
+                                      ? `${matchResultsCount} ${
+                                          matchResultsCount === 1 ? 'Match' : 'Matches'
+                                        } importiert`
+                                      : 'Keine Einzelergebnisse'}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="detail-label">Ergebnis</div>
+                                  <div>
+                                    {match.final_score ||
+                                      (match.home_score != null && match.away_score != null
+                                        ? `${match.home_score}:${match.away_score}`
+                                        : '–')}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="detail-label">Austragungsort</div>
+                                  <div>{match.venue || '–'}</div>
+                                </div>
+                                <div>
+                                  <div className="detail-label">Plätze</div>
+                                  <div>
+                                    {match.court_number
+                                      ? `Platz ${formatCourtRange(match.court_number, match.court_number_end)}`
+                                      : '–'}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="detail-label">Notizen</div>
+                                  <div>{match.notes || '–'}</div>
+                                </div>
+                              </div>
+                              <div className="matchday-meeting-section">
+                                <div className="matchday-meeting-header">
+                                  <div>
+                                    <div className="matchday-meeting-title">Spielbericht (nuLiga)</div>
+                                    {meetingData?.metadata?.matchDateLabel && (
+                                      <div className="matchday-meeting-meta">{meetingData.metadata.matchDateLabel}</div>
                                     )}
                                   </div>
-                                  {teamInfo && (
-                                    <div style={{ 
-                                      fontSize: '0.75rem',
-                                      color: '#6b7280',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '0.25rem'
-                                    }}>
-                                      🏢 {teamInfo.club_name}
-                                      {teamInfo.team_name && (
-                                        <span style={{ color: '#9ca3af' }}>
-                                          • {teamInfo.team_name}
-                                        </span>
+                                  <div className="matchday-meeting-actions">
+                                    <button
+                                      type="button"
+                                      className="btn-modern btn-modern-inactive btn-meeting-action"
+                                      onClick={() =>
+                                        handleLoadMeetingDetails(match, {
+                                          homeLabel: selectedHomeLabel,
+                                          awayLabel: selectedAwayLabel,
+                                          applyImport: false
+                                        })
+                                      }
+                                      disabled={meetingLoading && !meetingData}
+                                    >
+                                      {meetingLoading && !meetingData ? 'Lade…' : 'Details laden'}
+                                    </button>
+                                    {meetingData && (
+                                      <button
+                                        type="button"
+                                        className="btn-modern btn-modern-inactive btn-meeting-action"
+                                        onClick={() =>
+                                          handleLoadMeetingDetails(match, {
+                                            homeLabel: selectedHomeLabel,
+                                            awayLabel: selectedAwayLabel,
+                                            applyImport: true
+                                          })
+                                        }
+                                        disabled={meetingLoading || meetingImporting}
+                                      >
+                                        {meetingImporting ? 'Importiere…' : 'In DB übernehmen'}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                                {meetingError && (
+                                  <div className="parser-feedback parser-feedback--error">{meetingError}</div>
+                                )}
+                                {meetingLoading && !meetingData && (
+                                  <div className="matchday-meeting-loading">Lade Spielbericht…</div>
+                                )}
+                                {meetingData && (
+                                  <div className="matchday-meeting-content">
+                                    <div className="matchday-meeting-metadata">
+                                      {meetingData.metadata?.completedOn && (
+                                        <div>Abgeschlossen: {meetingData.metadata.completedOn}</div>
+                                      )}
+                                      {meetingData.metadata?.referee && (
+                                        <div>Oberschiedsrichter: {meetingData.metadata.referee}</div>
+                                      )}
+                                      {meetingData.meetingUrl && (
+                                        <a href={meetingData.meetingUrl} target="_blank" rel="noreferrer">
+                                          nuLiga-Link
+                                        </a>
                                       )}
                                     </div>
-                                  )}
-                                </>
-                              );
-                            }
-                            return (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                👤 <strong>{log.user_email || 'Unbekannt'}</strong>
-                              </div>
-                            );
-                          })()}
-                          {log.details?.response && (
-                            <div style={{ 
-                              padding: '0.125rem 0.5rem',
-                              borderRadius: '4px',
-                              fontSize: '0.75rem',
-                              fontWeight: '600',
-                              background: (log.details.response === 'available' || log.details.response === 'confirm' || log.details.response === 'confirmed') ? '#dcfce7' : '#fee2e2',
-                              color: (log.details.response === 'available' || log.details.response === 'confirm' || log.details.response === 'confirmed') ? '#15803d' : '#991b1b'
-                            }}>
-                              {log.details.response === 'available' || log.details.response === 'confirm' || log.details.response === 'confirmed' ? '✅ Verfügbar' : '❌ Nicht verfügbar'}
-                            </div>
-                          )}
-                        </div>
-                        {/* Zweite Zeile: Match Info (falls matchday action) */}
-                        {(log.action.includes('matchday') && log.entity_id) && (() => {
-                          const match = matches.find(m => m.id === log.entity_id);
-                          if (match) {
-                            const matchDate = new Date(match.match_date).toLocaleDateString('de-DE', {
-                              day: '2-digit',
-                              month: '2-digit',
-                              year: 'numeric'
-                            });
-                            return (
-                              <div style={{ 
-                                padding: '0.5rem',
-                                background: '#f0f9ff',
-                                borderRadius: '6px',
-                                borderLeft: '3px solid #3b82f6',
-                                fontSize: '0.75rem',
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                flexWrap: 'wrap',
-                                gap: '0.5rem'
-                              }}>
-                                <div>
-                                  <strong>🎾 {match.opponent}</strong>
-                                  <span style={{ marginLeft: '0.5rem', color: '#6b7280' }}>
-                                    • {matchDate}
-                                  </span>
-                                </div>
-                                <div style={{ fontSize: '0.7rem', color: '#6b7280' }}>
-                                  {match.location === 'Home' ? '🏠 Heimspiel' : '✈️ Auswärtsspiel'}
-                                  {match.venue && ` • ${match.venue}`}
-                                </div>
-                              </div>
-                            );
-                          }
-                          return null;
-                        })()}
-                      </div>
-                      {log.details && Object.keys(log.details).length > 0 && (
-                        <details style={{ marginTop: '0.5rem' }}>
-                          <summary style={{ 
-                            cursor: 'pointer', 
-                            fontSize: '0.75rem', 
-                            color: '#6b7280',
-                            userSelect: 'none'
-                          }}>
-                            Details anzeigen
-                          </summary>
-                          <div style={{ 
-                            marginTop: '0.5rem', 
-                            padding: '0.5rem', 
-                            background: '#f1f5f9', 
-                            borderRadius: '4px',
-                            fontSize: '0.75rem'
-                          }}>
-                            {/* Profil-Änderungen (profile_edited) */}
-                            {log.action === 'profile_edited' && log.details.changes && (
-                              <div>
-                                <strong style={{ color: '#1f2937', marginBottom: '0.5rem', display: 'block' }}>
-                                  📝 Geänderte Felder ({log.details.field_count || Object.keys(log.details.changes).length}):
-                                </strong>
-                                {Object.keys(log.details.changes).map(field => {
-                                  const change = log.details.changes[field];
-                                  const fieldLabels = {
-                                    name: 'Name',
-                                    phone: 'Telefon',
-                                    email: 'E-Mail',
-                                    current_lk: 'Aktuelle LK',
-                                    tennis_motto: 'Tennis-Motto',
-                                    favorite_shot: 'Lieblingsschlag',
-                                    birth_date: 'Geburtsdatum',
-                                    address: 'Adresse',
-                                    emergency_contact: 'Notfallkontakt',
-                                    emergency_phone: 'Notfall-Telefon'
-                                  };
-                                  return (
-                                    <div key={field} style={{ 
-                                      marginBottom: '0.5rem', 
-                                      padding: '0.5rem',
-                                      background: 'white',
-                                      borderRadius: '4px',
-                                      borderLeft: '3px solid #3b82f6'
-                                    }}>
-                                      <div style={{ fontWeight: '600', color: '#1f2937', marginBottom: '0.25rem' }}>
-                                        {fieldLabels[field] || field}
+                                    {renderMeetingTable('Einzel', meetingData.singles)}
+                                    {renderMeetingTable('Doppel', meetingData.doubles)}
+                                    {(meetingData.totals?.singles ||
+                                      meetingData.totals?.doubles ||
+                                      meetingData.totals?.overall) && (
+                                      <div className="matchday-meeting-totals">
+                                        {meetingData.totals?.singles && (
+                                          <span>
+                                            Einzel: {meetingData.totals.singles.matchPoints?.raw || '–'} ·{' '}
+                                            {meetingData.totals.singles.sets?.raw || '–'} Sätze ·{' '}
+                                            {meetingData.totals.singles.games?.raw || '–'} Spiele
+                                          </span>
+                                        )}
+                                        {meetingData.totals?.doubles && (
+                                          <span>
+                                            Doppel: {meetingData.totals.doubles.matchPoints?.raw || '–'} ·{' '}
+                                            {meetingData.totals.doubles.sets?.raw || '–'} Sätze ·{' '}
+                                            {meetingData.totals.doubles.games?.raw || '–'} Spiele
+                                          </span>
+                                        )}
+                                        {meetingData.totals?.overall && (
+                                          <span>
+                                            Gesamt: {meetingData.totals.overall.matchPoints?.raw || '–'} ·{' '}
+                                            {meetingData.totals.overall.sets?.raw || '–'} Sätze ·{' '}
+                                            {meetingData.totals.overall.games?.raw || '–'} Spiele
+                                          </span>
+                                        )}
                                       </div>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.7rem' }}>
-                                        <span style={{ 
-                                          padding: '0.25rem 0.5rem',
-                                          background: '#fee2e2',
-                                          color: '#991b1b',
-                                          borderRadius: '4px',
-                                          textDecoration: 'line-through'
-                                        }}>
-                                          {change.old || '(leer)'}
-                                        </span>
-                                        <span style={{ color: '#6b7280' }}>→</span>
-                                        <span style={{ 
-                                          padding: '0.25rem 0.5rem',
-                                          background: '#dcfce7',
-                                          color: '#15803d',
-                                          borderRadius: '4px',
-                                          fontWeight: '600'
-                                        }}>
-                                          {change.new || '(leer)'}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-                            
-                            {/* Andere Details */}
-                            {log.details.player_id && (
-                              <div style={{ marginBottom: '0.25rem' }}>
-                                <strong>Spieler-ID:</strong> {log.details.player_id.substring(0, 8)}...
-                              </div>
-                            )}
-                            {log.details.url && (
-                              <div style={{ marginBottom: '0.25rem' }}>
-                                <strong>URL:</strong> {log.details.url}
-                              </div>
-                            )}
-                            {log.details.userAgent && (
-                              <div style={{ marginBottom: '0.25rem' }}>
-                                <strong>Gerät:</strong> {
-                                  log.details.userAgent.includes('iPhone') ? '📱 iPhone' :
-                                  log.details.userAgent.includes('Android') ? '📱 Android' :
-                                  log.details.userAgent.includes('Mac') ? '💻 Mac' :
-                                  log.details.userAgent.includes('Windows') ? '💻 Windows' :
-                                  '🖥️ Desktop'
-                                }
-                              </div>
-                            )}
-                            {log.details.timestamp && (
-                              <div style={{ marginBottom: '0.25rem' }}>
-                                <strong>Timestamp:</strong> {new Date(log.details.timestamp).toLocaleString('de-DE')}
-                              </div>
-                            )}
-                          </div>
-                        </details>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {selectedTab === 'users' && (
-        <div className="lk-card-full">
-          <div className="formkurve-header">
-            <div className="formkurve-title">👥 Benutzer-Verwaltung</div>
-            <div className="formkurve-subtitle">
-              {players.filter(p => p.source === 'registered' && p.is_active).length} Aktiv · 
-              {players.filter(p => p.source === 'imported').length} Wartet auf Registrierung · 
-              {players.length} Gesamt
-            </div>
-          </div>
-          <div className="season-content">
-            {/* Suchfeld */}
-            <div style={{ marginBottom: '1rem' }}>
-              <input
-                type="text"
-                placeholder="🔍 Spieler suchen (Name, Email, Telefon, LK, Verein)..."
-                value={playerSearchTerm}
-                onChange={(e) => setPlayerSearchTerm(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  fontSize: '0.875rem',
-                  outline: 'none',
-                  transition: 'border-color 0.2s'
-                }}
-                onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
-              />
-            </div>
-
-            {players.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '2rem', color: '#6b7280' }}>
-                <Users size={48} style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
-                <p>Keine Spieler gefunden</p>
-              </div>
-            ) : (() => {
-              // Filter Spieler basierend auf Suchterm
-              const filteredPlayers = players.filter(player => {
-                if (!playerSearchTerm) return true;
-                
-                const searchLower = playerSearchTerm.toLowerCase();
-                const teams = player.player_teams || [];
-                
-                return (
-                  player.name?.toLowerCase().includes(searchLower) ||
-                  player.email?.toLowerCase().includes(searchLower) ||
-                  player.phone?.toLowerCase().includes(searchLower) ||
-                  player.current_lk?.toLowerCase().includes(searchLower) ||
-                  teams.some(pt => 
-                    pt.team_info?.club_name?.toLowerCase().includes(searchLower) ||
-                    pt.team_info?.team_name?.toLowerCase().includes(searchLower)
-                  )
-                );
-              });
-
-              // Sortiere Spieler
-              const sortedPlayers = [...filteredPlayers].sort((a, b) => {
-                let aValue, bValue;
-
-                switch (playerSortField) {
-                  case 'name':
-                    aValue = a.name || '';
-                    bValue = b.name || '';
-                    break;
-                  case 'email':
-                    aValue = a.email || '';
-                    bValue = b.email || '';
-                    break;
-                  case 'phone':
-                    aValue = a.phone || '';
-                    bValue = b.phone || '';
-                    break;
-                  case 'current_lk':
-                    aValue = a.current_lk || '';
-                    bValue = b.current_lk || '';
-                    break;
-                  case 'created_at':
-                    aValue = new Date(a.created_at || 0);
-                    bValue = new Date(b.created_at || 0);
-                    break;
-                  case 'is_super_admin':
-                    aValue = a.is_super_admin ? 1 : 0;
-                    bValue = b.is_super_admin ? 1 : 0;
-                    break;
-                  case 'role':
-                    const aIsCaptain = (a.player_teams || []).some(pt => pt.role === 'captain');
-                    const bIsCaptain = (b.player_teams || []).some(pt => pt.role === 'captain');
-                    aValue = aIsCaptain ? 1 : 0;
-                    bValue = bIsCaptain ? 1 : 0;
-                    break;
-                  case 'status':
-                    aValue = (a.player_teams || []).length;
-                    bValue = (b.player_teams || []).length;
-                    break;
-                  default:
-                    return 0;
-                }
-
-                // Vergleich
-                let comparison = 0;
-                if (aValue < bValue) comparison = -1;
-                if (aValue > bValue) comparison = 1;
-
-                return playerSortDirection === 'asc' ? comparison : -comparison;
-              });
-
-              if (filteredPlayers.length === 0) {
-                return (
-                  <div style={{ textAlign: 'center', padding: '2rem', color: '#6b7280' }}>
-                    <Users size={48} style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
-                    <p>Keine Spieler gefunden für "{playerSearchTerm}"</p>
-                  </div>
-                );
-              }
-
-              return (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ 
-                  width: '100%', 
-                  borderCollapse: 'collapse',
-                  fontSize: '0.875rem'
-                }}>
-                  <thead>
-                    <tr style={{ 
-                      borderBottom: '2px solid #e2e8f0',
-                      background: '#f8fafc'
-                    }}>
-                      <th 
-                        onClick={() => {
-                          if (playerSortField === 'name') {
-                            setPlayerSortDirection(playerSortDirection === 'asc' ? 'desc' : 'asc');
-                          } else {
-                            setPlayerSortField('name');
-                            setPlayerSortDirection('asc');
-                          }
-                        }}
-                        style={{ 
-                          padding: '0.75rem', 
-                          textAlign: 'left', 
-                          fontWeight: '600',
-                          cursor: 'pointer',
-                          userSelect: 'none',
-                          transition: 'background 0.2s'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                      >
-                        Spieler {playerSortField === 'name' && (playerSortDirection === 'asc' ? '↑' : '↓')}
-                      </th>
-                      <th 
-                        onClick={() => {
-                          if (playerSortField === 'email') {
-                            setPlayerSortDirection(playerSortDirection === 'asc' ? 'desc' : 'asc');
-                          } else {
-                            setPlayerSortField('email');
-                            setPlayerSortDirection('asc');
-                          }
-                        }}
-                        style={{ 
-                          padding: '0.75rem', 
-                          textAlign: 'left', 
-                          fontWeight: '600',
-                          cursor: 'pointer',
-                          userSelect: 'none',
-                          transition: 'background 0.2s'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                      >
-                        Email {playerSortField === 'email' && (playerSortDirection === 'asc' ? '↑' : '↓')}
-                      </th>
-                      <th 
-                        onClick={() => {
-                          if (playerSortField === 'phone') {
-                            setPlayerSortDirection(playerSortDirection === 'asc' ? 'desc' : 'asc');
-                          } else {
-                            setPlayerSortField('phone');
-                            setPlayerSortDirection('asc');
-                          }
-                        }}
-                        style={{ 
-                          padding: '0.75rem', 
-                          textAlign: 'center', 
-                          fontWeight: '600',
-                          cursor: 'pointer',
-                          userSelect: 'none',
-                          transition: 'background 0.2s'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                      >
-                        Telefon {playerSortField === 'phone' && (playerSortDirection === 'asc' ? '↑' : '↓')}
-                      </th>
-                      <th 
-                        onClick={() => {
-                          if (playerSortField === 'current_lk') {
-                            setPlayerSortDirection(playerSortDirection === 'asc' ? 'desc' : 'asc');
-                          } else {
-                            setPlayerSortField('current_lk');
-                            setPlayerSortDirection('asc');
-                          }
-                        }}
-                        style={{ 
-                          padding: '0.75rem', 
-                          textAlign: 'center', 
-                          fontWeight: '600',
-                          cursor: 'pointer',
-                          userSelect: 'none',
-                          transition: 'background 0.2s'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                      >
-                        LK {playerSortField === 'current_lk' && (playerSortDirection === 'asc' ? '↑' : '↓')}
-                      </th>
-                      <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600' }}>Verein(e)</th>
-                      <th 
-                        onClick={() => {
-                          if (playerSortField === 'role') {
-                            setPlayerSortDirection(playerSortDirection === 'asc' ? 'desc' : 'asc');
-                          } else {
-                            setPlayerSortField('role');
-                            setPlayerSortDirection('desc');
-                          }
-                        }}
-                        style={{ 
-                          padding: '0.75rem', 
-                          textAlign: 'center', 
-                          fontWeight: '600',
-                          cursor: 'pointer',
-                          userSelect: 'none',
-                          transition: 'background 0.2s'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                      >
-                        Rolle {playerSortField === 'role' && (playerSortDirection === 'asc' ? '↑' : '↓')}
-                      </th>
-                      <th 
-                        onClick={() => {
-                          if (playerSortField === 'created_at') {
-                            setPlayerSortDirection(playerSortDirection === 'asc' ? 'desc' : 'asc');
-                          } else {
-                            setPlayerSortField('created_at');
-                            setPlayerSortDirection('desc');
-                          }
-                        }}
-                        style={{ 
-                          padding: '0.75rem', 
-                          textAlign: 'left', 
-                          fontWeight: '600',
-                          cursor: 'pointer',
-                          userSelect: 'none',
-                          transition: 'background 0.2s'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                      >
-                        Registriert {playerSortField === 'created_at' && (playerSortDirection === 'asc' ? '↑' : '↓')}
-                      </th>
-                      <th 
-                        onClick={() => {
-                          if (playerSortField === 'status') {
-                            setPlayerSortDirection(playerSortDirection === 'asc' ? 'desc' : 'asc');
-                          } else {
-                            setPlayerSortField('status');
-                            setPlayerSortDirection('desc');
-                          }
-                        }}
-                        style={{ 
-                          padding: '0.75rem', 
-                          textAlign: 'center', 
-                          fontWeight: '600',
-                          cursor: 'pointer',
-                          userSelect: 'none',
-                          transition: 'background 0.2s'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                      >
-                        Status {playerSortField === 'status' && (playerSortDirection === 'asc' ? '↑' : '↓')}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedPlayers.map((player, index) => {
-                        const teams = player.player_teams || [];
-                        const isCaptain = teams.some(pt => pt.role === 'captain');
-                        
-                        return (
-                          <tr key={player.id} style={{ 
-                            borderBottom: '1px solid #e2e8f0',
-                            background: index % 2 === 0 ? 'white' : '#f9fafb'
-                          }}>
-                            {/* Spieler Name */}
-                            <td style={{ padding: '0.75rem' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                <strong>{player.name || 'Unbekannt'}</strong>
-                                
-                                {/* Status-Badge: Registriert vs. Importiert */}
-                                {player.source === 'imported' && (
-                                  <span style={{ 
-                                    fontSize: '0.7rem',
-                                    padding: '0.125rem 0.375rem',
-                                    background: '#fef3c7',
-                                    color: '#92400e',
-                                    borderRadius: '4px',
-                                    fontWeight: '600'
-                                  }}>
-                                    ⏳ Import
-                                  </span>
-                                )}
-                                
-                                {player.is_super_admin && (
-                                  <span style={{ 
-                                    fontSize: '0.7rem',
-                                    padding: '0.125rem 0.375rem',
-                                    background: '#fef3c7',
-                                    color: '#92400e',
-                                    borderRadius: '4px',
-                                    fontWeight: '600'
-                                  }}>
-                                    👑 Admin
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                            
-                            {/* Email */}
-                            <td style={{ padding: '0.75rem', color: '#6b7280', fontSize: '0.8rem' }}>
-                              {player.email || (player.source === 'imported' ? <span style={{ fontStyle: 'italic', color: '#9ca3af' }}>Wartet auf Registrierung</span> : '-')}
-                            </td>
-                            
-                            {/* Telefon */}
-                            <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                              {player.phone ? (
-                                <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                                  {player.phone}
-                                </div>
-                              ) : (
-                                <span style={{ color: '#9ca3af', fontSize: '0.8rem' }}>-</span>
-                              )}
-                            </td>
-                            
-                            {/* LK */}
-                            <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                              {player.current_lk ? (
-                                <div style={{ 
-                                  padding: '0.25rem 0.5rem',
-                                  borderRadius: '6px',
-                                  background: '#e0e7ff',
-                                  color: '#4338ca',
-                                  fontWeight: '600',
-                                  fontSize: '0.75rem',
-                                  display: 'inline-block'
-                                }}>
-                                  {player.current_lk}
-                                </div>
-                              ) : (
-                                <span style={{ color: '#9ca3af', fontSize: '0.8rem' }}>-</span>
-                              )}
-                            </td>
-                            
-                            {/* Verein(e) */}
-                            <td style={{ padding: '0.75rem' }}>
-                              {teams.length > 0 ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                  {teams.map((pt, idx) => (
-                                    <div key={idx} style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                                      🏢 {pt.team_info?.club_name || 'Unbekannt'}
-                                      {pt.team_info?.team_name && (
-                                        <span style={{ color: '#9ca3af' }}>
-                                          {' • '}{pt.team_info.team_name}
-                                        </span>
-                                      )}
-                                      {pt.is_primary && (
-                                        <span style={{ 
-                                          marginLeft: '0.25rem',
-                                          fontSize: '0.7rem',
-                                          padding: '0.125rem 0.25rem',
-                                          background: '#dbeafe',
-                                          color: '#1e40af',
-                                          borderRadius: '3px',
-                                          fontWeight: '600'
-                                        }}>
-                                          Hauptteam
-                                        </span>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <span style={{ color: '#9ca3af', fontSize: '0.8rem' }}>Kein Verein</span>
-                              )}
-                            </td>
-                            
-                            {/* Rolle */}
-                            <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                              {isCaptain ? (
-                                <div style={{ 
-                                  padding: '0.25rem 0.5rem',
-                                  borderRadius: '6px',
-                                  background: '#dcfce7',
-                                  color: '#15803d',
-                                  fontWeight: '600',
-                                  fontSize: '0.7rem',
-                                  display: 'inline-block'
-                                }}>
-                                  🎯 MF
-                                </div>
-                              ) : (
-                                <span style={{ color: '#6b7280', fontSize: '0.75rem' }}>Spieler</span>
-                              )}
-                            </td>
-                            
-                            {/* Registriert */}
-                            <td style={{ padding: '0.75rem', color: '#6b7280', fontSize: '0.8rem' }}>
-                              {new Date(player.created_at).toLocaleDateString('de-DE')}
-                            </td>
-                            
-                            {/* Status */}
-                            <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                              <div style={{ 
-                                padding: '0.25rem 0.5rem',
-                                borderRadius: '6px',
-                                background: player.source === 'imported' 
-                                  ? '#fef3c7'  // Orange für Importiert
-                                  : (player.is_active && teams.length > 0) 
-                                    ? '#dcfce7'  // Grün für Aktiv
-                                    : '#fee2e2', // Rot für Inaktiv
-                                color: player.source === 'imported'
-                                  ? '#92400e'
-                                  : (player.is_active && teams.length > 0)
-                                    ? '#15803d'
-                                    : '#991b1b',
-                                fontWeight: '600',
-                                fontSize: '0.7rem',
-                                display: 'inline-block'
-                              }}>
-                                {player.source === 'imported' 
-                                  ? '⏳ Wartet auf Registrierung'
-                                  : (player.is_active && teams.length > 0)
-                                    ? '✅ Aktiv'
-                                    : '⚠️ Inaktiv / Kein Team'
-                                }
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                  </tbody>
-                </table>
-              </div>
-              );
-            })()}
-          </div>
-        </div>
-      )}
-
-      {/* Teams Tab - IMPLEMENTIERT */}
-      {selectedTab === 'teams' && (
-        <div className="lk-card-full">
-          <div className="formkurve-header">
-            <div className="formkurve-title">🏆 Teams-Verwaltung</div>
-            <div className="formkurve-subtitle">
-              {teams.length} Mannschaften in {new Set(teams.map(t => t.club_name)).size} Vereinen
-            </div>
-          </div>
-          <div className="season-content">
-            {/* Suche & Filter */}
-            <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-              {/* Suchfeld */}
-              <input
-                type="text"
-                placeholder="🔍 Suche nach Verein, Team, Liga..."
-                value={teamSearchTerm}
-                onChange={(e) => setTeamSearchTerm(e.target.value)}
-                style={{
-                  flex: '1 1 300px',
-                  padding: '0.75rem',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  fontSize: '0.875rem',
-                  outline: 'none'
-                }}
-                onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
-              />
-              
-              {/* Kategorie-Filter */}
-              <select
-                value={teamCategoryFilter}
-                onChange={(e) => setTeamCategoryFilter(e.target.value)}
-                style={{
-                  padding: '0.75rem',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  fontSize: '0.875rem',
-                  minWidth: '150px'
-                }}
-              >
-                <option value="all">Alle Kategorien</option>
-                {Array.from(new Set(teams.map(t => t.category))).sort().map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
-                ))}
-              </select>
-
-              {/* Saison-Filter */}
-              <select
-                value={teamSeasonFilter}
-                onChange={(e) => setTeamSeasonFilter(e.target.value)}
-                style={{
-                  padding: '0.75rem',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  fontSize: '0.875rem',
-                  minWidth: '150px'
-                }}
-              >
-                <option value="all">Alle Saisons</option>
-                {Array.from(new Set(teams.map(t => t.season))).sort().reverse().map(season => (
-                  <option key={season} value={season}>{season}</option>
-                ))}
-              </select>
-
-              {/* Sortier-Buttons */}
-              <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
-                <button
-                  onClick={() => toggleTeamSort('club')}
-                  style={{
-                    padding: '0.5rem 0.75rem',
-                    border: teamSortField === 'club' ? '2px solid #3b82f6' : '1px solid #e2e8f0',
-                    borderRadius: '6px',
-                    background: teamSortField === 'club' ? '#eff6ff' : 'white',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                    fontWeight: teamSortField === 'club' ? '600' : '400',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.25rem'
-                  }}
-                >
-                  Verein {teamSortField === 'club' && (teamSortDirection === 'asc' ? '↑' : '↓')}
-                </button>
-                <button
-                  onClick={() => toggleTeamSort('category')}
-                  style={{
-                    padding: '0.5rem 0.75rem',
-                    border: teamSortField === 'category' ? '2px solid #3b82f6' : '1px solid #e2e8f0',
-                    borderRadius: '6px',
-                    background: teamSortField === 'category' ? '#eff6ff' : 'white',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                    fontWeight: teamSortField === 'category' ? '600' : '400',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.25rem'
-                  }}
-                >
-                  Kategorie {teamSortField === 'category' && (teamSortDirection === 'asc' ? '↑' : '↓')}
-                </button>
-                <button
-                  onClick={() => toggleTeamSort('players')}
-                  style={{
-                    padding: '0.5rem 0.75rem',
-                    border: teamSortField === 'players' ? '2px solid #3b82f6' : '1px solid #e2e8f0',
-                    borderRadius: '6px',
-                    background: teamSortField === 'players' ? '#eff6ff' : 'white',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                    fontWeight: teamSortField === 'players' ? '600' : '400',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.25rem'
-                  }}
-                >
-                  Spieler {teamSortField === 'players' && (teamSortDirection === 'asc' ? '↑' : '↓')}
-                </button>
-                <button
-                  onClick={() => toggleTeamSort('season')}
-                  style={{
-                    padding: '0.5rem 0.75rem',
-                    border: teamSortField === 'season' ? '2px solid #3b82f6' : '1px solid #e2e8f0',
-                    borderRadius: '6px',
-                    background: teamSortField === 'season' ? '#eff6ff' : 'white',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                    fontWeight: teamSortField === 'season' ? '600' : '400',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.25rem'
-                  }}
-                >
-                  Saison {teamSortField === 'season' && (teamSortDirection === 'asc' ? '↑' : '↓')}
-                </button>
-              </div>
-            </div>
-
-            {teams.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '2rem', color: '#6b7280' }}>
-                <Building2 size={48} style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
-                <p>Keine Teams gefunden</p>
-              </div>
-            ) : (() => {
-              // Filter Teams
-              let filteredTeams = teams.filter(team => {
-                const matchesSearch = !teamSearchTerm || 
-                  team.club_name?.toLowerCase().includes(teamSearchTerm.toLowerCase()) ||
-                  team.team_name?.toLowerCase().includes(teamSearchTerm.toLowerCase()) ||
-                  team.category?.toLowerCase().includes(teamSearchTerm.toLowerCase()) ||
-                  team.league?.toLowerCase().includes(teamSearchTerm.toLowerCase()) ||
-                  team.group_name?.toLowerCase().includes(teamSearchTerm.toLowerCase());
-                
-                const matchesCategory = teamCategoryFilter === 'all' || team.category === teamCategoryFilter;
-                const matchesSeason = teamSeasonFilter === 'all' || team.season === teamSeasonFilter;
-                
-                return matchesSearch && matchesCategory && matchesSeason;
-              });
-
-              // Sortiere Teams
-              filteredTeams = sortTeams(filteredTeams);
-
-              // Gruppiere nach Verein
-              const teamsByClub = filteredTeams.reduce((acc, team) => {
-                const clubName = team.club_name || 'Unbekannter Verein';
-                if (!acc[clubName]) {
-                  acc[clubName] = [];
-                }
-                acc[clubName].push(team);
-                return acc;
-              }, {});
-
-              const clubNames = Object.keys(teamsByClub).sort();
-
-              if (filteredTeams.length === 0) {
-                return (
-                  <div style={{ textAlign: 'center', padding: '2rem', color: '#6b7280' }}>
-                    <Building2 size={48} style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
-                    <p>Keine Teams gefunden für die gewählten Filter</p>
-                  </div>
-                );
-              }
-
-              return (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                  {clubNames.map((clubName, clubIndex) => {
-                    const clubTeams = teamsByClub[clubName];
-                    const totalPlayers = clubTeams.reduce((sum, t) => sum + t.player_count, 0);
-                    
-                    return (
-                      <div key={clubName} style={{
-                        border: '1px solid #e2e8f0',
-                        borderRadius: '12px',
-                        overflow: 'hidden',
-                        background: 'white',
-                        boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-                      }}>
-                        {/* Club Header */}
-                        <div style={{
-                          padding: '1rem 1.5rem',
-                          background: `linear-gradient(135deg, ${['#667eea', '#f093fb', '#4facfe', '#43e97b'][clubIndex % 4]} 0%, ${['#764ba2', '#f5576c', '#00f2fe', '#38f9d7'][clubIndex % 4]} 100%)`,
-                          color: 'white'
-                        }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                            <div>
-                              <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '700' }}>
-                                🏢 {clubName}
-                              </h3>
-                              <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.875rem', opacity: 0.9 }}>
-                                {clubTeams.length} Team{clubTeams.length !== 1 ? 's' : ''} • {totalPlayers} Spieler
-                              </p>
-                            </div>
-                            <div style={{ 
-                              padding: '0.5rem 1rem', 
-                              background: 'rgba(255,255,255,0.2)', 
-                              borderRadius: '8px',
-                              fontSize: '0.875rem',
-                              fontWeight: '600'
-                            }}>
-                              {clubTeams[0]?.region || 'Region unbekannt'}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Teams Grid */}
-                        <div style={{ padding: '1.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
-                          {clubTeams.map((team) => (
-                            <div key={team.id} style={{
-                              padding: '1rem',
-                              border: '2px solid #e2e8f0',
-                              borderRadius: '8px',
-                              background: team.has_season ? 'white' : '#fef3c7',
-                              transition: 'all 0.2s',
-                              cursor: 'pointer'
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.borderColor = '#3b82f6';
-                              e.currentTarget.style.transform = 'translateY(-2px)';
-                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.borderColor = '#e2e8f0';
-                              e.currentTarget.style.transform = 'translateY(0)';
-                              e.currentTarget.style.boxShadow = 'none';
-                            }}>
-                              {/* Team Name & Category */}
-                              <div style={{ marginBottom: '0.75rem' }}>
-                                <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: '700', color: '#1e293b' }}>
-                                  {team.team_name}
-                                </h4>
-                                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
-                                  {team.category}
-                                </div>
-                              </div>
-
-                              {/* Season Info */}
-                              {team.has_season ? (
-                                <div style={{ 
-                                  padding: '0.5rem', 
-                                  background: '#f8fafc', 
-                                  borderRadius: '6px',
-                                  marginBottom: '0.75rem'
-                                }}>
-                                  <div style={{ fontSize: '0.75rem', color: '#475569', marginBottom: '0.25rem' }}>
-                                    <strong>📅 {team.season}</strong>
+                                    )}
                                   </div>
-                                  <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
-                                    🏆 {team.league}
-                                    {team.group_name !== '-' && ` • ${team.group_name}`}
-                                  </div>
-                                </div>
-                              ) : (
-                                <div style={{ 
-                                  padding: '0.5rem', 
-                                  background: '#fef3c7', 
-                                  borderRadius: '6px',
-                                  marginBottom: '0.75rem',
-                                  border: '1px dashed #f59e0b'
-                                }}>
-                                  <div style={{ fontSize: '0.75rem', color: '#92400e' }}>
-                                    ⚠️ Keine Saison-Daten
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Stats */}
-                              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                <div style={{ 
-                                  padding: '0.25rem 0.5rem', 
-                                  background: '#e0e7ff', 
-                                  color: '#4338ca',
-                                  borderRadius: '4px',
-                                  fontSize: '0.7rem',
-                                  fontWeight: '600'
-                                }}>
-                                  👥 {team.player_count} / {team.team_size} Spieler
-                                </div>
-                                {team.tvm_link && (
-                                  <a
-                                    href={team.tvm_link}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    onClick={(e) => e.stopPropagation()}
-                                    style={{
-                                      padding: '0.25rem 0.5rem',
-                                      background: '#dcfce7',
-                                      color: '#15803d',
-                                      borderRadius: '4px',
-                                      fontSize: '0.7rem',
-                                      fontWeight: '600',
-                                      textDecoration: 'none',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '0.25rem'
-                                    }}
-                                  >
-                                    🔗 TVM
-                                  </a>
                                 )}
                               </div>
                             </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-      )}
-
-      {/* Matches Tab */}
-      {selectedTab === 'matches' && (
-        <div className="lk-card-full">
-          <div className="formkurve-header">
-            <div className="formkurve-title">🎾 Match-Verwaltung</div>
-            <div className="formkurve-subtitle">
-              Alle Matches im System • {allMatches.length} gesamt
-            </div>
-          </div>
-          <div className="season-content">
-            {/* Controls */}
-            <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
-              {/* View Toggle */}
-              <div style={{ display: 'flex', gap: '0.5rem', background: '#f1f5f9', padding: '0.25rem', borderRadius: '8px' }}>
-                <button
-                  onClick={() => setMatchView('upcoming')}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    border: 'none',
-                    borderRadius: '6px',
-                    background: matchView === 'upcoming' ? '#3b82f6' : 'transparent',
-                    color: matchView === 'upcoming' ? 'white' : '#64748b',
-                    fontWeight: '600',
-                    fontSize: '0.875rem',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  📅 Bevorstehend
-                </button>
-                <button
-                  onClick={() => setMatchView('completed')}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    border: 'none',
-                    borderRadius: '6px',
-                    background: matchView === 'completed' ? '#10b981' : 'transparent',
-                    color: matchView === 'completed' ? 'white' : '#64748b',
-                    fontWeight: '600',
-                    fontSize: '0.875rem',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  ✅ Abgeschlossen
-                </button>
-                <button
-                  onClick={() => setMatchView('all')}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    border: 'none',
-                    borderRadius: '6px',
-                    background: matchView === 'all' ? '#6366f1' : 'transparent',
-                    color: matchView === 'all' ? 'white' : '#64748b',
-                    fontWeight: '600',
-                    fontSize: '0.875rem',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  📋 Alle
-                </button>
-              </div>
-
-              {/* Search */}
-              <input
-                type="text"
-                placeholder="🔍 Suche nach Team, Gegner, Ort..."
-                value={matchSearchTerm}
-                onChange={(e) => setMatchSearchTerm(e.target.value)}
-                style={{
-                  flex: '1',
-                  minWidth: '250px',
-                  padding: '0.5rem 1rem',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  fontSize: '0.875rem'
-                }}
-              />
-
-              {/* Status Filter */}
-              <select
-                value={matchStatusFilter}
-                onChange={(e) => setMatchStatusFilter(e.target.value)}
-                style={{
-                  padding: '0.5rem 1rem',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  fontSize: '0.875rem',
-                  background: 'white',
-                  cursor: 'pointer'
-                }}
-              >
-                <option value="all">Alle Status</option>
-                <option value="upcoming">Bevorstehend</option>
-                <option value="today">Heute</option>
-                <option value="completed">Abgeschlossen</option>
-                <option value="past">Vergangen (ohne Ergebnis)</option>
-              </select>
-
-              {/* Sortier-Buttons */}
-              <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
-                <button
-                  onClick={() => toggleMatchSort('date')}
-                  style={{
-                    padding: '0.5rem 0.75rem',
-                    border: matchSortField === 'date' ? '2px solid #3b82f6' : '1px solid #e2e8f0',
-                    borderRadius: '6px',
-                    background: matchSortField === 'date' ? '#eff6ff' : 'white',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                    fontWeight: matchSortField === 'date' ? '600' : '400',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.25rem'
-                  }}
-                >
-                  Datum {matchSortField === 'date' && (matchSortDirection === 'asc' ? '↑' : '↓')}
-                </button>
-                <button
-                  onClick={() => toggleMatchSort('team')}
-                  style={{
-                    padding: '0.5rem 0.75rem',
-                    border: matchSortField === 'team' ? '2px solid #3b82f6' : '1px solid #e2e8f0',
-                    borderRadius: '6px',
-                    background: matchSortField === 'team' ? '#eff6ff' : 'white',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                    fontWeight: matchSortField === 'team' ? '600' : '400',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.25rem'
-                  }}
-                >
-                  Team {matchSortField === 'team' && (matchSortDirection === 'asc' ? '↑' : '↓')}
-                </button>
-                <button
-                  onClick={() => toggleMatchSort('status')}
-                  style={{
-                    padding: '0.5rem 0.75rem',
-                    border: matchSortField === 'status' ? '2px solid #3b82f6' : '1px solid #e2e8f0',
-                    borderRadius: '6px',
-                    background: matchSortField === 'status' ? '#eff6ff' : 'white',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                    fontWeight: matchSortField === 'status' ? '600' : '400',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.25rem'
-                  }}
-                >
-                  Status {matchSortField === 'status' && (matchSortDirection === 'asc' ? '↑' : '↓')}
-                </button>
-              </div>
-            </div>
-
-            {/* Matches Display */}
-            {(() => {
-              // Filter matches
-              let filteredMatches = allMatches;
-
-              // View filter
-              if (matchView === 'upcoming') {
-                filteredMatches = filteredMatches.filter(m => m.is_upcoming);
-              } else if (matchView === 'completed') {
-                filteredMatches = filteredMatches.filter(m => m.is_completed);
-              }
-
-              // Status filter
-              if (matchStatusFilter !== 'all') {
-                filteredMatches = filteredMatches.filter(m => m.status === matchStatusFilter);
-              }
-
-              // Search filter
-              if (matchSearchTerm.trim()) {
-                const searchLower = matchSearchTerm.toLowerCase();
-                filteredMatches = filteredMatches.filter(m =>
-                  m.opponent?.toLowerCase().includes(searchLower) ||
-                  m.team_info?.team_name?.toLowerCase().includes(searchLower) ||
-                  m.team_info?.club_name?.toLowerCase().includes(searchLower) ||
-                  m.venue?.toLowerCase().includes(searchLower) ||
-                  m.location?.toLowerCase().includes(searchLower)
-                );
-              }
-
-              // Sortiere Matches
-              filteredMatches = sortMatches(filteredMatches);
-
-              if (filteredMatches.length === 0) {
-                return (
-                  <div style={{ textAlign: 'center', padding: '3rem', color: '#9ca3af' }}>
-                    <Activity size={48} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
-                    <p>Keine Matches gefunden</p>
-                  </div>
-                );
-              }
-
-              return (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  {filteredMatches.map(match => {
-                    const statusColors = {
-                      upcoming: { bg: '#dbeafe', border: '#3b82f6', text: '#1e40af' },
-                      today: { bg: '#fef3c7', border: '#f59e0b', text: '#92400e' },
-                      completed: { bg: '#d1fae5', border: '#10b981', text: '#065f46' },
-                      past: { bg: '#f1f5f9', border: '#94a3b8', text: '#475569' }
-                    };
-                    const colors = statusColors[match.status] || statusColors.upcoming;
-
-                    return (
-                      <div
-                        key={match.id}
-                        onClick={() => loadMatchDetails(match)}
-                        style={{
-                          padding: '1.25rem',
-                          border: `2px solid ${colors.border}`,
-                          borderRadius: '12px',
-                          background: 'white',
-                          transition: 'transform 0.2s, box-shadow 0.2s',
-                          cursor: 'pointer'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.transform = 'translateY(-2px)';
-                          e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.1)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.transform = 'translateY(0)';
-                          e.currentTarget.style.boxShadow = 'none';
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
-                          {/* Left: Match Info */}
-                          <div style={{ flex: 1 }}>
-                            {/* Status Badge */}
-                            <div style={{ marginBottom: '0.5rem' }}>
-                              <span style={{
-                                padding: '0.25rem 0.75rem',
-                                background: colors.bg,
-                                color: colors.text,
-                                borderRadius: '6px',
-                                fontSize: '0.75rem',
-                                fontWeight: '700',
-                                textTransform: 'uppercase'
-                              }}>
-                                {match.status === 'upcoming' && '📅 Bevorstehend'}
-                                {match.status === 'today' && '🔥 Heute'}
-                                {match.status === 'completed' && '✅ Abgeschlossen'}
-                                {match.status === 'past' && '⏳ Vergangen'}
-                              </span>
-                            </div>
-
-                            {/* Teams - Neutral anzeigen: Home vs Guest */}
-                            <div style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.5rem', color: '#1f2937' }}>
-                              {match.home_team}
-                              <span style={{ margin: '0 0.75rem', color: '#6b7280', fontWeight: '400' }}>vs</span>
-                              {match.guest_team}
-                            </div>
-
-                            {/* Date & Time */}
-                            <div style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.5rem' }}>
-                              🗓️ {match.formatted_date} • 🕐 {match.formatted_time}
-                            </div>
-
-                            {/* Location */}
-                            <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-                              📍 {match.location} • {match.venue}
-                            </div>
-                          </div>
-
-                          {/* Right: Stats */}
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'flex-end' }}>
-                            {/* Result (if completed) */}
-                            {match.has_result && (
-                              <div style={{
-                                padding: '0.75rem 1.25rem',
-                                background: colors.bg,
-                                borderRadius: '8px',
-                                textAlign: 'center',
-                                minWidth: '100px'
-                              }}>
-                                <div style={{ fontSize: '0.7rem', color: colors.text, fontWeight: '600', marginBottom: '0.25rem' }}>
-                                  ERGEBNIS
-                                </div>
-                                <div style={{ fontSize: '1.75rem', fontWeight: '700', color: colors.text }}>
-                                  {match.home_score}:{match.away_score}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Player Responses */}
-                            <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.8rem' }}>
-                              <div style={{
-                                padding: '0.25rem 0.5rem',
-                                background: '#d1fae5',
-                                color: '#065f46',
-                                borderRadius: '4px',
-                                fontWeight: '600'
-                              }}>
-                                ✓ {match.confirmed_count}
-                              </div>
-                              <div style={{
-                                padding: '0.25rem 0.5rem',
-                                background: '#fee2e2',
-                                color: '#991b1b',
-                                borderRadius: '4px',
-                                fontWeight: '600'
-                              }}>
-                                ✗ {match.declined_count}
-                              </div>
-                              <div style={{
-                                padding: '0.25rem 0.5rem',
-                                background: '#fef3c7',
-                                color: '#92400e',
-                                borderRadius: '4px',
-                                fontWeight: '600'
-                              }}>
-                                ? {match.pending_count}
-                              </div>
-                            </div>
-
-                            {/* Players Needed */}
-                            {match.players_needed && (
-                              <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                                👥 {match.players_needed} Spieler benötigt
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Bottom: Additional Info */}
-                        <div style={{
-                          paddingTop: '0.75rem',
-                          borderTop: '1px solid #e5e7eb',
-                          display: 'flex',
-                          gap: '1rem',
-                          fontSize: '0.75rem',
-                          color: '#6b7280'
-                        }}>
-                          <span>🏆 {match.team_info?.category || 'Unbekannt'}</span>
-                          <span>📅 {match.season}</span>
-                          <span>📊 {match.total_responses} Rückmeldungen</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-      )}
-
-      {/* Trainings Tab */}
-      {selectedTab === 'trainings' && (
-        <div className="lk-card-full">
-          <div className="formkurve-header">
-            <div className="formkurve-title">🏃 Trainings-Verwaltung</div>
-            <div className="formkurve-subtitle">
-              {trainingGroups.length} Trainingsgruppen • {stats.totalTrainings || 0} Sessions gesamt
-            </div>
-          </div>
-          <div className="season-content">
-            {/* Suchfeld */}
-            <div style={{ marginBottom: '1.5rem' }}>
-              <input
-                type="text"
-                placeholder="🔍 Suche nach Trainingsgruppe, Organisator, Ort..."
-                value={trainingSearchTerm}
-                onChange={(e) => setTrainingSearchTerm(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  fontSize: '0.875rem'
-                }}
-                onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
-              />
-            </div>
-
-            {trainingGroups.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '3rem', color: '#9ca3af' }}>
-                <Activity size={48} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
-                <p>Keine Trainingsgruppen gefunden</p>
-              </div>
-            ) : (() => {
-              // Filter Trainingsgruppen
-              const filteredGroups = trainingGroups.filter(group => {
-                if (!trainingSearchTerm) return true;
-                const searchLower = trainingSearchTerm.toLowerCase();
-                return (
-                  group.title?.toLowerCase().includes(searchLower) ||
-                  group.organizer_name?.toLowerCase().includes(searchLower) ||
-                  group.location?.toLowerCase().includes(searchLower) ||
-                  group.venue?.toLowerCase().includes(searchLower) ||
-                  group.team_info?.club_name?.toLowerCase().includes(searchLower)
-                );
-              });
-
-              if (filteredGroups.length === 0) {
-                return (
-                  <div style={{ textAlign: 'center', padding: '3rem', color: '#9ca3af' }}>
-                    <Activity size={48} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
-                    <p>Keine Trainingsgruppen gefunden für "{trainingSearchTerm}"</p>
-                  </div>
-                );
-              }
-
-              return (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  {filteredGroups.map((group, index) => {
-                    const typeColors = {
-                      team: { bg: '#dbeafe', border: '#3b82f6', text: '#1e40af', icon: '🏢' },
-                      private: { bg: '#fef3c7', border: '#f59e0b', text: '#92400e', icon: '🔒' }
-                    };
-                    const colors = typeColors[group.type] || typeColors.private;
-
-                    return (
-                      <div
-                        key={index}
-                        style={{
-                          padding: '1.5rem',
-                          border: `2px solid ${colors.border}`,
-                          borderRadius: '12px',
-                          background: 'white',
-                          transition: 'transform 0.2s, box-shadow 0.2s'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.transform = 'translateY(-2px)';
-                          e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.1)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.transform = 'translateY(0)';
-                          e.currentTarget.style.boxShadow = 'none';
-                        }}
-                      >
-                        {/* Header */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
-                          <div style={{ flex: 1 }}>
-                            {/* Type Badge */}
-                            <div style={{ marginBottom: '0.5rem' }}>
-                              <span style={{
-                                padding: '0.25rem 0.75rem',
-                                background: colors.bg,
-                                color: colors.text,
-                                borderRadius: '6px',
-                                fontSize: '0.75rem',
-                                fontWeight: '700',
-                                textTransform: 'uppercase'
-                              }}>
-                                {colors.icon} {group.type === 'team' ? 'Vereinstraining' : 'Privates Training'}
-                              </span>
-                            </div>
-
-                            {/* Title */}
-                            <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem', fontWeight: '700', color: '#1f2937' }}>
-                              {group.title || 'Unbenanntes Training'}
-                            </h3>
-
-                            {/* Organisator */}
-                            <div style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.5rem' }}>
-                              👤 Organisator: <strong>{group.organizer_name}</strong>
-                            </div>
-
-                            {/* Team-Info (falls Vereinstraining) */}
-                            {group.type === 'team' && group.team_info && (
-                              <div style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.5rem' }}>
-                                🏢 {group.team_info.club_name} • {group.team_info.team_name || group.team_info.category}
-                              </div>
-                            )}
-
-                            {/* Location */}
-                            <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-                              📍 {group.location} {group.venue && `• ${group.venue}`}
-                            </div>
-                          </div>
-
-                          {/* Session Count Badge */}
-                          <div style={{
-                            padding: '1rem 1.5rem',
-                            background: colors.bg,
-                            borderRadius: '12px',
-                            textAlign: 'center',
-                            minWidth: '120px'
-                          }}>
-                            <div style={{ fontSize: '0.75rem', color: colors.text, fontWeight: '600', marginBottom: '0.25rem' }}>
-                              EINHEITEN
-                            </div>
-                            <div style={{ fontSize: '2rem', fontWeight: '700', color: colors.text }}>
-                              {group.session_count}
-                            </div>
-                            <div style={{ fontSize: '0.7rem', color: colors.text, marginTop: '0.25rem' }}>
-                              Sessions
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Stats Row */}
-                        <div style={{
-                          paddingTop: '1rem',
-                          borderTop: '1px solid #e5e7eb',
-                          display: 'flex',
-                          gap: '1.5rem',
-                          flexWrap: 'wrap',
-                          fontSize: '0.8rem',
-                          color: '#6b7280'
-                        }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <span style={{
-                              padding: '0.25rem 0.5rem',
-                              background: '#e0e7ff',
-                              color: '#4338ca',
-                              borderRadius: '4px',
-                              fontWeight: '600',
-                              fontSize: '0.75rem'
-                            }}>
-                              👥 {group.target_players}/{group.max_players} Spieler
-                            </span>
-                          </div>
-                          <div>
-                            📅 Erstellt: {new Date(group.first_session_date).toLocaleDateString('de-DE')}
-                          </div>
-                          <div>
-                            🔄 Zuletzt: {new Date(group.last_session_date).toLocaleDateString('de-DE')}
-                          </div>
-                          {group.is_public && (
-                            <div style={{
-                              padding: '0.25rem 0.5rem',
-                              background: '#dcfce7',
-                              color: '#15803d',
-                              borderRadius: '4px',
-                              fontWeight: '600',
-                              fontSize: '0.75rem'
-                            }}>
-                              🌐 Öffentlich
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-      )}
-
-      {/* Import Tab */}
-      {selectedTab === 'import' && (
-        <ImportTab />
-      )}
-
-      {/* Match-Detail-Modal */}
-      {selectedMatch && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999,
-            padding: '1rem'
-          }}
-          onClick={closeMatchModal}
-        >
-          <div
-            style={{
-              background: 'white',
-              borderRadius: '16px',
-              maxWidth: '900px',
-              width: '100%',
-              maxHeight: '90vh',
-              overflow: 'auto',
-              padding: '2rem',
-              position: 'relative'
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '2px solid #e5e7eb' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '1rem' }}>
-                <h2 style={{ fontSize: '1.5rem', fontWeight: '700', margin: 0 }}>
-                  🎾 Match-Details
-                </h2>
-                <button
-                  onClick={closeMatchModal}
-                  style={{
-                    padding: '0.5rem',
-                    border: 'none',
-                    background: '#f3f4f6',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontSize: '1.25rem',
-                    lineHeight: '1',
-                    color: '#6b7280'
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-              
-              {/* Match Info */}
-              <div style={{ fontSize: '1.1rem', fontWeight: '600', color: '#1f2937', marginBottom: '0.5rem' }}>
-                {selectedMatch.home_team}
-                <span style={{ margin: '0 0.75rem', color: '#6b7280', fontWeight: '400' }}>vs</span>
-                {selectedMatch.guest_team}
-              </div>
-              <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-                📅 {selectedMatch.formatted_date} • 🕐 {selectedMatch.formatted_time}
-                <br />
-                📍 {selectedMatch.location} • {selectedMatch.venue}
-              </div>
-              
-              {/* Gesamt-Ergebnis */}
-              {selectedMatch.has_result && (
-                <div style={{
-                  marginTop: '1rem',
-                  padding: '1rem',
-                  background: selectedMatch.home_score > selectedMatch.away_score ? '#d1fae5' : '#fee2e2',
-                  borderRadius: '8px',
-                  textAlign: 'center'
-                }}>
-                  <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.25rem' }}>
-                    ENDERGEBNIS
-                  </div>
-                  <div style={{ fontSize: '2rem', fontWeight: '700', color: '#1f2937' }}>
-                    {selectedMatch.home_score} : {selectedMatch.away_score}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Match Results */}
-            {loadingMatchDetails ? (
-              <div style={{ textAlign: 'center', padding: '3rem', color: '#9ca3af' }}>
-                <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>⏳</div>
-                <p>Lade Spieldetails...</p>
-              </div>
-            ) : matchDetails && matchDetails.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                {matchDetails.map((result, index) => {
-                  const isWinnerHome = result.winner === 'home';
-                  const isCompleted = result.status === 'completed';
-
-                  return (
-                    <div
-                      key={result.id}
-                      style={{
-                        padding: '1rem',
-                        border: isCompleted ? `2px solid ${isWinnerHome ? '#10b981' : '#3b82f6'}` : '2px solid #e5e7eb',
-                        borderRadius: '12px',
-                        background: isCompleted ? (isWinnerHome ? '#f0fdf4' : '#eff6ff') : '#f9fafb'
-                      }}
-                    >
-                      {/* Match Number & Type */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <span style={{
-                            padding: '0.25rem 0.5rem',
-                            background: isCompleted ? (isWinnerHome ? '#10b981' : '#3b82f6') : '#9ca3af',
-                            color: 'white',
-                            borderRadius: '6px',
-                            fontSize: '0.75rem',
-                            fontWeight: '700'
-                          }}>
-                            #{result.match_number}
-                          </span>
-                          <span style={{ fontWeight: '600', fontSize: '0.875rem', color: '#1f2937' }}>
-                            {result.match_type}
-                          </span>
-                        </div>
-                        {isCompleted && (
-                          <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                            ✅ Abgeschlossen
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Spieler */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '1rem', alignItems: 'center' }}>
-                        {/* Home Spieler */}
-                        <div style={{ textAlign: 'left' }}>
-                          {result.match_type === 'Einzel' ? (
-                            <div style={{ fontSize: '0.875rem', color: '#1f2937' }}>
-                              <strong>{result.home_player?.name || 'Unbekannt'}</strong>
-                              {result.home_player?.current_lk && (
-                                <span style={{ fontSize: '0.75rem', color: '#6b7280', marginLeft: '0.5rem' }}>
-                                  ({result.home_player.current_lk})
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <>
-                              <div style={{ fontSize: '0.875rem', color: '#1f2937' }}>
-                                <strong>{result.home_player1?.name || 'Unbekannt'}</strong>
-                                {result.home_player1?.current_lk && (
-                                  <span style={{ fontSize: '0.75rem', color: '#6b7280', marginLeft: '0.5rem' }}>
-                                    ({result.home_player1.current_lk})
-                                  </span>
-                                )}
-                              </div>
-                              <div style={{ fontSize: '0.875rem', color: '#1f2937', marginTop: '0.25rem' }}>
-                                <strong>{result.home_player2?.name || 'Unbekannt'}</strong>
-                                {result.home_player2?.current_lk && (
-                                  <span style={{ fontSize: '0.75rem', color: '#6b7280', marginLeft: '0.5rem' }}>
-                                    ({result.home_player2.current_lk})
-                                  </span>
-                                )}
-                              </div>
-                            </>
-                          )}
-                        </div>
-
-                        {/* Satz-Ergebnisse */}
-                        <div style={{ textAlign: 'center', padding: '0.5rem 1rem', background: '#f3f4f6', borderRadius: '8px' }}>
-                          <div style={{ fontSize: '1.25rem', fontWeight: '700', color: '#1f2937' }}>
-                            {result.set1_home}:{result.set1_guest}
-                            {result.set2_home !== null && (
-                              <> {result.set2_home}:{result.set2_guest}</>
-                            )}
-                            {result.set3_home !== null && (
-                              <> {result.set3_home}:{result.set3_guest}</>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Guest Spieler */}
-                        <div style={{ textAlign: 'right' }}>
-                          {result.match_type === 'Einzel' ? (
-                            <div style={{ fontSize: '0.875rem', color: '#1f2937' }}>
-                              <strong>{result.guest_player?.name || 'Unbekannt'}</strong>
-                              {result.guest_player?.current_lk && (
-                                <span style={{ fontSize: '0.75rem', color: '#6b7280', marginRight: '0.5rem' }}>
-                                  ({result.guest_player.current_lk})
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <>
-                              <div style={{ fontSize: '0.875rem', color: '#1f2937' }}>
-                                <strong>{result.guest_player1?.name || 'Unbekannt'}</strong>
-                                {result.guest_player1?.current_lk && (
-                                  <span style={{ fontSize: '0.75rem', color: '#6b7280', marginRight: '0.5rem' }}>
-                                    ({result.guest_player1.current_lk})
-                                  </span>
-                                )}
-                              </div>
-                              <div style={{ fontSize: '0.875rem', color: '#1f2937', marginTop: '0.25rem' }}>
-                                <strong>{result.guest_player2?.name || 'Unbekannt'}</strong>
-                                {result.guest_player2?.current_lk && (
-                                  <span style={{ fontSize: '0.75rem', color: '#6b7280', marginRight: '0.5rem' }}>
-                                    ({result.guest_player2.current_lk})
-                                  </span>
-                                )}
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                          </td>
+                        </tr>
+                      );
+                    })()}
+                    </Fragment>
                   );
                 })}
-              </div>
-            ) : (
-              <div style={{ textAlign: 'center', padding: '3rem', color: '#9ca3af' }}>
-                <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>📋</div>
-                <p>Keine Einzelergebnisse vorhanden</p>
-              </div>
-            )}
+              </tbody>
+            </table>
           </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderScraper = () => (
+    <div className="lk-card-full scraper-desktop-container">
+      <div className="scraper-compact-header">
+        <div>
+          <div className="formkurve-title">Scraper-Import</div>
+          <div className="formkurve-subtitle">Live-Import (in Arbeit)</div>
+        </div>
+      </div>
+      <div className="placeholder">
+        Die Scraper-Ansicht wird aktuell überarbeitet. Bitte JSON-Datei laden oder später erneut versuchen.
+      </div>
+    </div>
+  );
+
+  // ---------------------------------------------------------------------------
+  // UI Rendering
+  // ---------------------------------------------------------------------------
+  return (
+    <div className="super-admin-dashboard">
+      <div className="dashboard-tabs">
+        <button className={selectedTab === 'overview' ? 'active' : ''} onClick={() => setSelectedTab('overview')}>
+          <CheckCircle size={16} /> Übersicht
+        </button>
+        <button className={selectedTab === 'clubs' ? 'active' : ''} onClick={() => setSelectedTab('clubs')}>
+          <Building2 size={16} /> Vereine
+        </button>
+        <button className={selectedTab === 'players' ? 'active' : ''} onClick={() => setSelectedTab('players')}>
+          <Users size={16} /> Spieler
+        </button>
+        <button className={selectedTab === 'matchdays' ? 'active' : ''} onClick={() => setSelectedTab('matchdays')}>
+          <CalendarDays size={16} /> Matchdays
+        </button>
+        <button className={selectedTab === 'scraper' ? 'active' : ''} onClick={() => setSelectedTab('scraper')}>
+          <Activity size={16} /> Scraper
+        </button>
+        <button className={selectedTab === 'import' ? 'active' : ''} onClick={() => setSelectedTab('import')}>
+          <Download size={16} /> Import-Tools
+        </button>
+      </div>
+
+      <div className="dashboard-toolbar">
+        <div className="toolbar-left">
+          <div className="toolbar-item">
+            <span className="toolbar-label">Zeitraum</span>
+            <select value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}>
+              <option value="today">Heute</option>
+              <option value="week">Letzte Woche</option>
+              <option value="month">Letzter Monat</option>
+              <option value="all">Alle</option>
+            </select>
+          </div>
+          <div className="toolbar-item">
+            <span className="toolbar-label">Log-Filter</span>
+            <select value={logsFilter} onChange={(e) => setLogsFilter(e.target.value)}>
+              <option value="all">Alle</option>
+              <option value="MATCH_IMPORT">Match-Import</option>
+              <option value="TEAM_IMPORT">Team-Import</option>
+              <option value="LOGIN">Logins</option>
+            </select>
+          </div>
+        </div>
+        <button onClick={loadDashboardData} className="btn-modern btn-modern-inactive">
+          <RefreshCw size={16} /> Aktualisieren
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="loading-placeholder">Lade Daten…</div>
+      ) : (
+        <div className="dashboard-content">
+          {selectedTab === 'overview' && renderOverview()}
+          {selectedTab === 'clubs' && renderClubs()}
+          {selectedTab === 'players' && renderPlayers()}
+          {selectedTab === 'matchdays' && renderMatchdays()}
+          {selectedTab === 'scraper' && renderScraper()}
+          {selectedTab === 'import' && <ImportTab />}
         </div>
       )}
     </div>

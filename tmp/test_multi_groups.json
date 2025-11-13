@@ -1,0 +1,77 @@
+{
+  "scrapedAt": "2025-11-09T18:00:00.000Z",
+  "leagueUrl": "https://tvm.liga.nu",
+  "season": "Winter 2025/26",
+  "groupsIncluded": "Gr. 042, Gr. 043, Gr. 044",
+  "groupIds": ["42", "43", "44"],
+  "totalGroups": 3,
+  "totalMatches": 45,
+  "totalTeams": 18,
+  "groups": [
+    {
+      "group": {
+        "league": "2. Bezirksliga",
+        "category": "Herren 40",
+        "groupName": "Gr. 042",
+        "groupId": "42",
+        "season": "Winter 2025/26",
+        "year": "2025/26"
+      },
+      "matches": [],
+      "teamsDetailed": [
+        {
+          "teamName": "TV Dellbrück 1",
+          "clubName": "TV Dellbrück",
+          "teamSuffix": "1"
+        },
+        {
+          "teamName": "TC Ford Köln 1", 
+          "clubName": "TC Ford Köln",
+          "teamSuffix": "1"
+        }
+      ]
+    },
+    {
+      "group": {
+        "league": "2. Bezirksliga",
+        "category": "Herren 40",
+        "groupName": "Gr. 043",
+        "groupId": "43",
+        "season": "Winter 2025/26",
+        "year": "2025/26"
+      },
+      "matches": [],
+      "teamsDetailed": [
+        {
+          "teamName": "TC Porz 1",
+          "clubName": "TC Porz",
+          "teamSuffix": "1"
+        }
+      ]
+    },
+    {
+      "group": {
+        "league": "2. Bezirksliga",
+        "category": "Herren 40",
+        "groupName": "Gr. 044",
+        "groupId": "44",
+        "season": "Winter 2025/26",
+        "year": "2025/26"
+      },
+      "matches": [],
+      "teamsDetailed": [
+        {
+          "teamName": "TC Bayer Dormagen 2",
+          "clubName": "TC Bayer Dormagen",
+          "teamSuffix": "2"
+        },
+        {
+          "teamName": "TC Colonius 2",
+          "clubName": "TC Colonius",
+          "teamSuffix": "2"
+        }
+      ]
+    }
+  ]
+}
+
