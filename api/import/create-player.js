@@ -83,7 +83,13 @@ module.exports = async function handler(req, res) {
 
     const safePlayerType = (playerType || 'opponent').toString().trim().slice(0, 20);
     const safeStatus = (status || 'pending').toString().trim().slice(0, 20);
-    const safeImportSource = (importSource || 'nu_meeting').toString().trim().slice(0, 20);
+
+    const allowedImportSources = ['manual', 'tvm_import', 'ai_import'];
+    let safeImportSource = (importSource || 'meeting_report').toString().trim().toLowerCase();
+    if (!allowedImportSources.includes(safeImportSource)) {
+      safeImportSource = 'manual';
+    }
+    safeImportSource = safeImportSource.slice(0, 20);
     const sanitizedLk = sanitizeLk(lk);
 
     let resolvedTeamId = null;
@@ -108,6 +114,7 @@ module.exports = async function handler(req, res) {
 
     const infoPayload = {
       source: safeImportSource,
+      source_label: (importSource || 'meeting_report').toString().trim(),
       first_name: firstName,
       last_name: lastName,
       lk: sanitizedLk,

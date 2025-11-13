@@ -2094,9 +2094,21 @@ function SuperAdminDashboard() {
           body: JSON.stringify(payload)
         });
 
-        const result = await response.json();
+        const raw = await response.text();
+        let result = null;
+        if (raw) {
+          try {
+            result = JSON.parse(raw);
+          } catch (parseError) {
+            console.warn('⚠️ Meeting-Report Antwort konnte nicht geparst werden:', parseError);
+          }
+        }
+
         if (!response.ok || !result?.success) {
-          throw new Error(result?.error || 'Spielbericht konnte nicht geladen werden.');
+          const message =
+            result?.error ||
+            (raw && raw.trim().length ? raw : `Serverfehler (${response.status}) beim Laden des Spielberichts.`);
+          throw new Error(message);
         }
 
         const missingPlayers = applyImport
