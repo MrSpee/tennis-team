@@ -59,3 +59,4 @@ SELECT
   (SELECT COUNT(*) FROM matchdays WHERE group_name = 'Gr. 044' AND season = 'Winter 2025/26') as matches_gr044,
   (SELECT COUNT(DISTINCT (match_date, home_team_id, away_team_id)) FROM matchdays WHERE group_name = 'Gr. 044' AND season = 'Winter 2025/26') as einzigartige_matches;
 
+

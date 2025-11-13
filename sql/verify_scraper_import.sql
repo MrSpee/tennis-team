@@ -184,3 +184,4 @@ WHERE season = 'Winter 2025/26'
 -- Team-Saisons: 5
 -- Matches: 10
 
+

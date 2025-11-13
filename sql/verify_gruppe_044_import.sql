@@ -110,3 +110,4 @@ WHERE group_name = 'Gr. 044'
   AND season = 'Winter 2025/26'
   AND match_date IS NULL;
 
+

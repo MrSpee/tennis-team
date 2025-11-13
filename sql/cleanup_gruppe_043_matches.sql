@@ -84,3 +84,4 @@ WHERE season = 'Winter 2025/26'
   AND league = '1. Bezirksliga'
   AND group_name = 'Gr. 043';
 
+

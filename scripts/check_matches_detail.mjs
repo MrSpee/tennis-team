@@ -72,3 +72,4 @@ console.log('📋 Beteiligte Teams:');
 
 console.log('\n✨ Analyse abgeschlossen!\n');
 
+
