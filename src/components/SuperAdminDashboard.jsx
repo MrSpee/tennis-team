@@ -348,6 +348,7 @@ function SuperAdminDashboard() {
   const [parserProcessing, setParserProcessing] = useState(false);
   const [meetingDetails, setMeetingDetails] = useState({});
   const [creatingPlayerKey, setCreatingPlayerKey] = useState(null);
+  const [deletingMatchdayId, setDeletingMatchdayId] = useState(null);
 
   const buildInfo = useMemo(getDefaultBuildInfo, []);
 
@@ -2301,6 +2302,59 @@ function SuperAdminDashboard() {
     [creatingPlayerKey, setParserMessage, setMeetingDetails]
   );
 
+  const handleDeleteMatchday = useCallback(
+    async (match) => {
+      if (!match?.id) return;
+      const confirmMessage = `Soll der Matchday vom ${
+        match.match_date ? new Date(match.match_date).toLocaleDateString('de-DE') : 'unbekannten Datum'
+      } (${match.league || 'Liga n/a'}) wirklich gelöscht werden?`;
+      const confirmed = window.confirm(confirmMessage);
+      if (!confirmed) return;
+
+      setDeletingMatchdayId(match.id);
+      try {
+        const response = await fetch('/api/import/meeting-report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ matchdayId: match.id, cleanupOnly: true })
+        });
+
+        const raw = await response.text();
+        let result = null;
+        if (raw) {
+          try {
+            result = JSON.parse(raw);
+          } catch (parseError) {
+            console.warn('⚠️ Cleanup-Antwort konnte nicht geparst werden:', parseError);
+          }
+        }
+
+        if (!response.ok || !result?.success) {
+          const message =
+            result?.error || (raw && raw.trim().length ? raw : `Serverfehler (${response.status}) beim Löschen des Matchdays.`);
+          throw new Error(message);
+        }
+
+        setSeasonMatchdays((prev) => prev.filter((entry) => entry.id !== match.id));
+        setMeetingDetails((prev) => {
+          if (!prev[match.id]) return prev;
+          const next = { ...prev };
+          delete next[match.id];
+          return next;
+        });
+        setSelectedSeasonMatch((prev) => (prev?.id === match.id ? null : prev));
+        setParserMessage({ type: 'success', text: 'Matchday wurde gelöscht.' });
+        await loadDashboardData();
+      } catch (error) {
+        console.error('❌ Matchday löschen fehlgeschlagen:', error);
+        setParserMessage({ type: 'error', text: error.message || 'Matchday konnte nicht gelöscht werden.' });
+      } finally {
+        setDeletingMatchdayId(null);
+      }
+    },
+    [loadDashboardData, setParserMessage, setSeasonMatchdays, setMeetingDetails, setSelectedSeasonMatch]
+  );
+
   const handleClubSearch = useCallback(
     async (summary, query) => {
       setClubSearchQueries((prev) => ({ ...prev, [summary.clubName]: query }));
@@ -3199,6 +3253,14 @@ function SuperAdminDashboard() {
                             {isParserRunning ? 'Läuft…' : 'Parser'}
                           </button>
                         )}
+                        <button
+                          type="button"
+                          className="btn-modern btn-modern-danger btn-matchday-delete"
+                          onClick={() => handleDeleteMatchday(match)}
+                          disabled={deletingMatchdayId === match.id}
+                        >
+                          {deletingMatchdayId === match.id ? 'Lösche…' : 'Matchday löschen'}
+                        </button>
                         <button
                           type="button"
                           className="btn-modern btn-modern-inactive btn-matchday-details"

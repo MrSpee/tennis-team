@@ -616,6 +616,22 @@
   cursor: not-allowed;
 }
 
+.btn-modern-danger {
+  background: linear-gradient(135deg, #f97316, #ef4444);
+  color: #ffffff;
+  border: none;
+}
+
+.btn-modern-danger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-matchday-delete {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+}
+
 .parser-feedback {
   margin-bottom: 1rem;
   padding: 0.8rem 1rem;
