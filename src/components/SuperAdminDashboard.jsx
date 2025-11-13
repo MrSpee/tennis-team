@@ -2108,6 +2108,34 @@ function SuperAdminDashboard() {
           const message =
             result?.error ||
             (raw && raw.trim().length ? raw : `Serverfehler (${response.status}) beim Laden des Spielberichts.`);
+
+          if (
+            match.match_results_count > 0 &&
+            window.confirm(
+              `${message}\n\nSollen die bestehenden Matchday-Daten (inkl. Einzel/Doppel) gelöscht werden?`
+            )
+          ) {
+            try {
+              await fetch('/api/import/meeting-report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ matchdayId: match.id, cleanupOnly: true })
+              });
+              await loadDashboardData();
+              setParserMessage({
+                type: 'success',
+                text: 'Matchday-Daten wurden entfernt. Import bitte erneut versuchen.'
+              });
+            } catch (cleanupError) {
+              console.error('❌ Cleanup fehlgeschlagen:', cleanupError);
+              setParserMessage({
+                type: 'error',
+                text: cleanupError.message || 'Matchday-Daten konnten nicht gelöscht werden.'
+              });
+            }
+            throw new Error(message);
+          }
+
           throw new Error(message);
         }
 

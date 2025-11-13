@@ -409,9 +409,19 @@ module.exports = async function handler(req, res) {
       matchdayId,
       homeTeam,
       awayTeam,
-      apply = false
+      apply = false,
+      cleanupOnly = false
     } = req.body || {};
-    requestContext = { matchdayId, apply };
+    requestContext = { matchdayId, apply, cleanupOnly };
+
+    if (cleanupOnly) {
+      await cleanupMatchdayData(matchdayId);
+      return withCors(res, 200, {
+        success: true,
+        applied: false,
+        cleanedUp: true
+      });
+    }
 
     const imports = await DEFAULT_IMPORTS.get();
 
