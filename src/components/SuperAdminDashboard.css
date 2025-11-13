@@ -353,6 +353,91 @@
   gap: 0.4rem;
 }
 
+.matchday-results-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fed7aa;
+}
+
+.matchday-missing-players {
+  margin-top: 1rem;
+  border: 1px solid #fed7aa;
+  background: #fff7ed;
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.matchday-missing-header {
+  font-weight: 600;
+  color: #9a3412;
+  font-size: 0.85rem;
+}
+
+.matchday-missing-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.matchday-missing-table th,
+.matchday-missing-table td {
+  padding: 0.55rem 0.6rem;
+  vertical-align: top;
+}
+
+.matchday-missing-table thead th {
+  background: #fff1e6;
+  color: #7c2d12;
+  font-weight: 700;
+  border-bottom: 1px solid #fecdd3;
+}
+
+.matchday-missing-table tbody td {
+  border-top: 1px solid #fed7aa;
+}
+
+.matchday-missing-table td:last-child {
+  text-align: right;
+}
+
+.missing-player-name {
+  font-weight: 600;
+}
+
+.missing-player-meta {
+  font-size: 0.72rem;
+  color: #64748b;
+  margin-top: 0.15rem;
+}
+
+.missing-player-context {
+  font-size: 0.72rem;
+  color: #475569;
+}
+
+.btn-modern-primary {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #ffffff;
+  border: none;
+}
+
+.btn-modern-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .parser-feedback {
   margin-bottom: 1rem;
   padding: 0.8rem 1rem;

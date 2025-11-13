@@ -347,6 +347,7 @@ function SuperAdminDashboard() {
   const [parserMessage, setParserMessage] = useState(null);
   const [parserProcessing, setParserProcessing] = useState(false);
   const [meetingDetails, setMeetingDetails] = useState({});
+  const [creatingPlayerKey, setCreatingPlayerKey] = useState(null);
 
   const buildInfo = useMemo(getDefaultBuildInfo, []);
 
@@ -2081,6 +2082,10 @@ function SuperAdminDashboard() {
           throw new Error(result?.error || 'Spielbericht konnte nicht geladen werden.');
         }
 
+        const missingPlayers = applyImport
+          ? result.applyResult?.missingPlayers || []
+          : meetingInfo.missingPlayers || [];
+
         setMeetingDetails((prev) => ({
           ...prev,
           [recordId]: {
@@ -2095,17 +2100,14 @@ function SuperAdminDashboard() {
             lastAppliedAt: applyImport ? new Date().toISOString() : prev[recordId]?.lastAppliedAt || null,
             matchResultsCount: applyImport
               ? result.applyResult?.inserted?.length || prev[recordId]?.matchResultsCount || 0
-              : prev[recordId]?.matchResultsCount || 0
+              : prev[recordId]?.matchResultsCount || 0,
+            missingPlayers
           }
         }));
+        setCreatingPlayerKey(null);
 
         if (applyImport) {
-          setParserMessage({
-            type: 'success',
-            text: result.applyResult
-              ? `Matchdetails importiert (${result.applyResult.inserted?.length || 0} Einträge)`
-              : 'Matchdetails importiert.'
-          });
+          const missingCount = result.applyResult?.missingPlayers?.length || 0;
           const nextMatchNumber =
             result.matchMeta?.matchNumber ||
             existing.matchMeta?.matchNumber ||
@@ -2128,12 +2130,16 @@ function SuperAdminDashboard() {
             )
           );
           await loadDashboardData();
-          if (result.applyResult?.missingPlayers?.length) {
-            setParserMessage({
-              type: 'warning',
-              text: `Warnung: ${result.applyResult.missingPlayers.length} Spieler nicht gefunden (keine Anlage vorgenommen).`
-            });
-          }
+          const successMessage = result.applyResult
+            ? `Matchdetails importiert (${result.applyResult.inserted?.length || 0} Einträge)`
+            : 'Matchdetails importiert.';
+          setParserMessage({
+            type: missingCount > 0 ? 'warning' : 'success',
+            text:
+              missingCount > 0
+                ? `${successMessage} · ${missingCount} Spieler ohne Zuordnung`
+                : successMessage
+          });
         }
       } catch (error) {
         console.error('❌ Fehler beim Laden der Meeting-Details:', error);
@@ -2146,6 +2152,7 @@ function SuperAdminDashboard() {
             error: error.message || 'Spielbericht konnte nicht geladen werden.'
           }
         }));
+        setCreatingPlayerKey(null);
         setParserMessage({
           type: 'error',
           text: error.message || 'Spielbericht konnte nicht geladen werden.'
@@ -2153,6 +2160,86 @@ function SuperAdminDashboard() {
       }
     },
     [meetingDetails, resolveGroupId, setParserMessage, supabase, loadDashboardData]
+  );
+
+  const handleCreateMissingPlayer = useCallback(
+    async (match, playerEntry) => {
+      if (!match?.id || !playerEntry?.name || !playerEntry?.key) return;
+      const entryKey = `${match.id}:${playerEntry.key}`;
+      if (creatingPlayerKey && creatingPlayerKey !== entryKey) {
+        return;
+      }
+
+      setCreatingPlayerKey(entryKey);
+      try {
+        const firstContext = (playerEntry.contexts || [])[0] || {};
+        const teamId =
+          firstContext.side === 'home'
+            ? match.home_team_id
+            : firstContext.side === 'away'
+              ? match.away_team_id
+              : null;
+
+        const response = await fetch('/api/import/create-player', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: playerEntry.name,
+            lk: playerEntry.lk,
+            teamId,
+            playerType: 'opponent',
+            status: 'pending'
+          })
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result?.success) {
+          throw new Error(result?.error || 'Spieler konnte nicht angelegt werden.');
+        }
+
+        setParserMessage({
+          type: 'success',
+          text: `Spieler "${playerEntry.name}" angelegt. Import bitte erneut starten.`
+        });
+
+        setMeetingDetails((prev) => {
+          const current = prev[match.id];
+          if (!current) return prev;
+
+          const currentMissing =
+            current.missingPlayers !== undefined
+              ? current.missingPlayers
+              : current.data?.applyResult?.missingPlayers || [];
+          const filteredMissing = currentMissing.filter((item) => item.key !== playerEntry.key);
+          const nextData = current.data
+            ? {
+                ...current.data,
+                applyResult: current.data.applyResult
+                  ? { ...current.data.applyResult, missingPlayers: filteredMissing }
+                  : current.data.applyResult
+              }
+            : current.data;
+
+          return {
+            ...prev,
+            [match.id]: {
+              ...current,
+              missingPlayers: filteredMissing,
+              data: nextData
+            }
+          };
+        });
+      } catch (error) {
+        console.error('❌ Fehler beim Anlegen des Spielers:', error);
+        setParserMessage({
+          type: 'error',
+          text: error.message || `Spieler "${playerEntry.name}" konnte nicht angelegt werden.`
+        });
+      } finally {
+        setCreatingPlayerKey(null);
+      }
+    },
+    [creatingPlayerKey, setParserMessage, setMeetingDetails]
   );
 
   const handleClubSearch = useCallback(
@@ -2640,6 +2727,10 @@ function SuperAdminDashboard() {
                   const meetingLoading = meetingInfo.loading;
                   const meetingError = meetingInfo.error;
                   const meetingImporting = meetingInfo.importing;
+                  const missingPlayers =
+                    meetingInfo.missingPlayers !== undefined
+                      ? meetingInfo.missingPlayers
+                      : meetingData?.applyResult?.missingPlayers || [];
 
                   const isExpanded = selectedSeasonMatch?.id === match.id;
 
@@ -2742,21 +2833,13 @@ function SuperAdminDashboard() {
                             >
                               {matchResultsCount > 0 ? `Ergebnisse (${matchResultsCount})` : 'Ergebnisse fehlen'}
                             </span>
-                            {meetingData?.applyResult?.missingPlayers?.length > 0 && (
-                              <button
-                                type="button"
-                                className="btn-modern btn-modern-inactive btn-meeting-action"
-                                onClick={() => {
-                                  const missing = meetingData.applyResult.missingPlayers
-                                    .map((entry) => `• ${entry.name} (${entry.occurrences}x)`)
-                                    .join('\n');
-                                  alert(
-                                    `Es fehlen Spieler-Zuordnungen für:\n\n${missing}\n\nBitte in Supabase anlegen oder Alias ergänzen.`
-                                  );
-                                }}
+                            {missingPlayers.length > 0 && (
+                              <span
+                                className="matchday-results-missing"
+                                title="Spieler fehlen in players_unified. Im Detailbereich können sie angelegt werden."
                               >
-                                Spieler fehlen
-                              </button>
+                                ⚠️ {missingPlayers.length} Spieler offen
+                              </span>
                             )}
                           </div>
                         </div>
@@ -2982,6 +3065,63 @@ function SuperAdminDashboard() {
                                         </a>
                                       )}
                                     </div>
+                                    {missingPlayers.length > 0 && (
+                                      <div className="matchday-missing-players">
+                                        <div className="matchday-missing-header">
+                                          ⚠️ {missingPlayers.length}{' '}
+                                          {missingPlayers.length === 1
+                                            ? 'Spieler konnte nicht zugeordnet werden.'
+                                            : 'Spieler konnten nicht zugeordnet werden.'}{' '}
+                                          Bitte anlegen und den Import anschließend erneut starten.
+                                        </div>
+                                        <table className="matchday-missing-table">
+                                          <thead>
+                                            <tr>
+                                              <th>Spieler</th>
+                                              <th>LK</th>
+                                              <th>Vorkommen</th>
+                                              <th>Einsätze</th>
+                                              <th>Aktion</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {missingPlayers.map((player) => {
+                                              const buttonKey = `${match.id}:${player.key}`;
+                                              return (
+                                                <tr key={player.key}>
+                                                  <td>
+                                                    <div className="missing-player-name">{player.name}</div>
+                                                    {player.meta && (
+                                                      <div className="missing-player-meta">{player.meta}</div>
+                                                    )}
+                                                  </td>
+                                                  <td>{player.lk ? `LK ${player.lk}` : '–'}</td>
+                                                  <td>{player.occurrences}</td>
+                                                  <td>
+                                                    {(player.contexts || []).map((ctx, idx) => (
+                                                      <div key={idx} className="missing-player-context">
+                                                        {ctx.matchType || 'Match'} {ctx.matchNumber || '–'} ·{' '}
+                                                        {ctx.teamName || (ctx.side === 'home' ? 'Heim' : 'Gast')}
+                                                      </div>
+                                                    ))}
+                                                  </td>
+                                                  <td>
+                                                    <button
+                                                      type="button"
+                                                      className="btn-modern btn-modern-primary"
+                                                      onClick={() => handleCreateMissingPlayer(match, player)}
+                                                      disabled={creatingPlayerKey === buttonKey}
+                                                    >
+                                                      {creatingPlayerKey === buttonKey ? 'Speichere…' : 'Spieler anlegen'}
+                                                    </button>
+                                                  </td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    )}
                                     {renderMeetingTable('Einzel', meetingData.singles)}
                                     {renderMeetingTable('Doppel', meetingData.doubles)}
                                     {(meetingData.totals?.singles ||

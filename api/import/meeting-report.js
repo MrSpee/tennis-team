@@ -1,4 +1,4 @@
-const { createClient } = require('@supabase/supabase-js');
+const { createSupabaseClient } = require('../_lib/supabaseAdmin');
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -19,34 +19,6 @@ function normalizeString(value) {
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-function createSupabase(applyMode) {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-  const anonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE || process.env.SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl) {
-    throw new Error('Supabase URL fehlt in den Umgebungsvariablen.');
-  }
-
-  if (applyMode) {
-    if (!serviceRoleKey) {
-      throw new Error('Für apply-Modus wird SUPABASE_SERVICE_ROLE_KEY benötigt.');
-    }
-    return createClient(supabaseUrl, serviceRoleKey, {
-      auth: { persistSession: false }
-    });
-  }
-
-  if (!anonKey) {
-    throw new Error('VITE_SUPABASE_ANON_KEY fehlt in den Umgebungsvariablen.');
-  }
-
-  return createClient(supabaseUrl, anonKey, {
-    auth: { persistSession: false }
-  });
 }
 
 async function determineMeetingId({
@@ -153,14 +125,49 @@ function determineMatchWinner(setScores = [], matchPoints = null) {
   return null;
 }
 
-async function applyMeetingResults({ supabase, matchdayId, singles, doubles }) {
+function normalizeLk(value) {
+  if (!value) return null;
+  const text = String(value).trim().replace(',', '.');
+  const match = text.match(/^\d{1,2}(?:\.\d)?$/);
+  return match ? match[0] : null;
+}
+
+async function applyMeetingResults({ supabase, matchdayId, singles, doubles, metadata }) {
   const rows = [];
   let counter = 0;
   const playerCache = new Map();
   const pendingPlayers = new Map();
 
-  const ensurePlayer = async (rawName) => {
-    const name = (rawName || '').trim();
+  const registerMissingPlayer = (player, context) => {
+    if (!player || !player.name) return;
+    const normalizedName = player.name.trim();
+    if (!normalizedName) return;
+    const primaryKey = `${normalizedName.toLowerCase()}|${player.lk || ''}`;
+    const entry =
+      pendingPlayers.get(primaryKey) || {
+        key: primaryKey,
+        name: normalizedName,
+        lk: normalizeLk(player.lk) || normalizeLk(player.meta) || normalizeLk(player.raw),
+        meta: player.meta || null,
+        occurrences: 0,
+        contexts: []
+      };
+    entry.occurrences += 1;
+    entry.contexts.push({
+      matchNumber: context.matchNumber,
+      matchType: context.matchType,
+      side: context.side,
+      teamName: context.teamName,
+      slot: context.slot,
+      raw: player.raw || null,
+      meta: player.meta || null,
+      lk: entry.lk
+    });
+    pendingPlayers.set(primaryKey, entry);
+  };
+
+  const ensurePlayer = async (player, context) => {
+    const name = player?.name?.trim();
     if (!name) return null;
     const cacheKey = name.toLowerCase();
     if (playerCache.has(cacheKey)) return playerCache.get(cacheKey);
@@ -180,25 +187,61 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles }) {
     }
 
     playerCache.set(cacheKey, null);
-    const pending = pendingPlayers.get(name) || { name, occurrences: 0 };
-    pending.occurrences += 1;
-    pendingPlayers.set(name, pending);
+    registerMissingPlayer(player, context);
     return null;
   };
 
-  const resolvePlayersForMatch = async (match, type) => {
+  const resolvePlayersForMatch = async (match, type, matchNumber, teamsMeta) => {
     const result = {};
-    const homePlayers = (match.homePlayers || []).map((player) => player.name?.trim()).filter(Boolean);
-    const awayPlayers = (match.awayPlayers || []).map((player) => player.name?.trim()).filter(Boolean);
+    const homePlayers = match.homePlayers || [];
+    const awayPlayers = match.awayPlayers || [];
+    const homeTeamName = teamsMeta?.homeTeam || 'Heim';
+    const awayTeamName = teamsMeta?.awayTeam || 'Gast';
 
     if (type === 'Einzel') {
-      result.home_player_id = homePlayers[0] ? await ensurePlayer(homePlayers[0]) : null;
-      result.guest_player_id = awayPlayers[0] ? await ensurePlayer(awayPlayers[0]) : null;
+      result.home_player_id = await ensurePlayer(homePlayers[0], {
+        matchNumber,
+        matchType: type,
+        side: 'home',
+        teamName: homeTeamName,
+        slot: 'spieler'
+      });
+      result.guest_player_id = await ensurePlayer(awayPlayers[0], {
+        matchNumber,
+        matchType: type,
+        side: 'away',
+        teamName: awayTeamName,
+        slot: 'spieler'
+      });
     } else {
-      result.home_player1_id = homePlayers[0] ? await ensurePlayer(homePlayers[0]) : null;
-      result.home_player2_id = homePlayers[1] ? await ensurePlayer(homePlayers[1]) : null;
-      result.guest_player1_id = awayPlayers[0] ? await ensurePlayer(awayPlayers[0]) : null;
-      result.guest_player2_id = awayPlayers[1] ? await ensurePlayer(awayPlayers[1]) : null;
+      result.home_player1_id = await ensurePlayer(homePlayers[0], {
+        matchNumber,
+        matchType: type,
+        side: 'home',
+        teamName: homeTeamName,
+        slot: 'spieler1'
+      });
+      result.home_player2_id = await ensurePlayer(homePlayers[1], {
+        matchNumber,
+        matchType: type,
+        side: 'home',
+        teamName: homeTeamName,
+        slot: 'spieler2'
+      });
+      result.guest_player1_id = await ensurePlayer(awayPlayers[0], {
+        matchNumber,
+        matchType: type,
+        side: 'away',
+        teamName: awayTeamName,
+        slot: 'spieler1'
+      });
+      result.guest_player2_id = await ensurePlayer(awayPlayers[1], {
+        matchNumber,
+        matchType: type,
+        side: 'away',
+        teamName: awayTeamName,
+        slot: 'spieler2'
+      });
     }
 
     return result;
@@ -210,7 +253,8 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles }) {
     const matchPoints = match.matchPoints || null;
     const status = matchPoints && matchPoints.home != null && matchPoints.away != null ? 'completed' : 'pending';
     const winner = status === 'completed' ? determineMatchWinner(setScores, matchPoints) : null;
-    const playerAssignments = await resolvePlayersForMatch(match, type);
+    const matchNumberLabel = match.matchNumber || counter;
+    const playerAssignments = await resolvePlayersForMatch(match, type, matchNumberLabel, metadata);
 
     rows.push({
       matchday_id: matchdayId,
@@ -241,10 +285,9 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles }) {
   }
 
   if (!rows.length) {
-    return { inserted: [], deleted: 0 };
+    return { inserted: [], deleted: 0, missingPlayers: [] };
   }
 
-  // Lösche vorhandene Ergebnisse für diesen Matchday, um doppelte Einträge zu vermeiden
   const { error: deleteError } = await supabase.from('match_results').delete().eq('matchday_id', matchdayId);
   if (deleteError) {
     throw deleteError;
@@ -358,12 +401,13 @@ module.exports = async function handler(req, res) {
       if (!matchdayId) {
         throw new Error('matchdayId ist erforderlich, um Daten zu speichern.');
       }
-      const supabase = createSupabase(true);
+      const supabase = createSupabaseClient(true);
       applyResult = await applyMeetingResults({
         supabase,
         matchdayId,
         singles: meetingData.singles,
-        doubles: meetingData.doubles
+        doubles: meetingData.doubles,
+        metadata: meetingData.metadata
       });
     }
 
@@ -389,4 +433,3 @@ module.exports = async function handler(req, res) {
   }
 };
 
-console.log('[meeting-report] service key present:', Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY));
