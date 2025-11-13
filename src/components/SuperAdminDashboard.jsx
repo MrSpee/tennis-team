@@ -318,7 +318,7 @@ function SuperAdminDashboard() {
   const [selectedSeasonMatch, setSelectedSeasonMatch] = useState(null);
   const [playerSearch, setPlayerSearch] = useState('');
   const [playerSort, setPlayerSort] = useState({ column: 'name', direction: 'asc' });
-  const [selectedTab, setSelectedTab] = useState('scraper');
+  const [selectedTab, setSelectedTab] = useState('matchdays');
   const [dateFilter, setDateFilter] = useState('all');
   const [logsFilter, setLogsFilter] = useState('all');
   const [selectedPlayerRow, setSelectedPlayerRow] = useState(null);
@@ -791,8 +791,7 @@ function SuperAdminDashboard() {
         }
       })();
 
-      const [statsRes, logsRes, clubsRes, playersRes, teamsRes, teamSeasonsRes, matchdaysRes] = await Promise.all([
-        supabase.rpc('get_dashboard_stats'),
+      const [logsRes, clubsRes, playersRes, teamsRes, teamSeasonsRes, matchdaysRes] = await Promise.all([
         supabase
           .from('activity_logs')
           .select('*')
@@ -819,17 +818,6 @@ function SuperAdminDashboard() {
           .order('match_date', { ascending: true })
           .order('start_time', { ascending: true })
       ]);
-
-      if (statsRes.error) {
-        if (statsRes.error.code === 'PGRST202') {
-          console.warn('⚠️ RPC get_dashboard_stats nicht gefunden – fallback auf leere Werte.');
-          setStats({});
-        } else {
-          throw statsRes.error;
-        }
-      } else {
-        setStats(statsRes.data || {});
-      }
 
       if (logsRes.error) throw logsRes.error;
       if (clubsRes.error) throw clubsRes.error;
@@ -859,6 +847,34 @@ function SuperAdminDashboard() {
         };
       });
       setSeasonMatchdays(matchdaysWithCounts);
+
+      const derivedStats = (() => {
+        try {
+          const totalClubs = clubsRes.data?.length ?? null;
+          const totalPlayers = playersRes.data ?? [];
+          const totalUsers = totalPlayers.filter((player) => player.user_id).length;
+          const nowDate = new Date();
+          const newPlayersLast7Days = totalPlayers.filter((player) => {
+            if (!player.created_at) return false;
+            const created = new Date(player.created_at);
+            if (Number.isNaN(created.getTime())) return false;
+            const diff = nowDate.getTime() - created.getTime();
+            return diff <= 7 * 24 * 60 * 60 * 1000;
+          }).length;
+          const pendingMatches = matchdaysWithCounts.filter((match) => match.status !== 'completed').length;
+          return {
+            totalClubs,
+            totalUsers,
+            newPlayersLast7Days,
+            pendingMatches
+          };
+        } catch (statError) {
+          console.warn('⚠️ Dashboard-Statistiken konnten nicht abgeleitet werden:', statError);
+          return {};
+        }
+      })();
+
+      setStats(derivedStats);
     } catch (error) {
       console.error('❌ Fehler beim Laden des Dashboards:', error);
     } finally {
@@ -2051,6 +2067,7 @@ function SuperAdminDashboard() {
           matchdayId: match.id,
           groupId: resolveGroupId(match.group_name),
           matchNumber: match.match_number || extractMatchNumber(match.notes),
+          matchDate: match.match_date || match.matchDateIso || null,
           homeTeam: homeLabel,
           awayTeam: awayLabel,
           apply: applyImport
@@ -2084,7 +2101,9 @@ function SuperAdminDashboard() {
 
         const missingPlayers = applyImport
           ? result.applyResult?.missingPlayers || []
-          : meetingInfo.missingPlayers || [];
+          : existing.missingPlayers ||
+            existing.data?.applyResult?.missingPlayers ||
+            [];
 
         setMeetingDetails((prev) => ({
           ...prev,
@@ -2629,222 +2648,517 @@ function SuperAdminDashboard() {
     );
   };
 
-  const renderMatchdays = () => (
-    <div className="lk-card-full">
-      <div className="formkurve-header">
-        <div>
-          <div className="formkurve-title">Matchdays · Winter 2025/26</div>
-          <div className="formkurve-subtitle">
-            {seasonMatchdays.length > 0
-              ? `${seasonMatchdays.length} Spiel${seasonMatchdays.length === 1 ? '' : 'e'}`
-              : 'Keine Matchdays gefunden'}
+  const renderMatchdays = () => {
+    const renderParserIndicator = ({ parserStatus, parserState, isParserRunning, shouldTriggerParser, matchStatus }) => {
+      if (isParserRunning) {
+        return (
+          <span className="matchday-parser-indicator matchday-parser-indicator--running">⏳ Parser läuft…</span>
+        );
+      }
+      if (parserStatus === 'success') {
+        return (
+          <span className="matchday-parser-indicator matchday-parser-indicator--ok">
+            {parserState?.message || '✅ Aktualisiert'}
+          </span>
+        );
+      }
+      if (parserStatus === 'error') {
+        return (
+          <span
+            className="matchday-parser-indicator matchday-parser-indicator--error"
+            title={parserState?.message || 'Parser-Fehler'}
+          >
+            ⚠️ {parserState?.message || 'Fehler'}
+          </span>
+        );
+      }
+      if (shouldTriggerParser) {
+        return (
+          <span className="matchday-parser-indicator" title="Match abgeschlossen, Ergebnis fehlt – Parser starten">
+            ⚠️ Ergebnis fehlt
+          </span>
+        );
+      }
+      if (matchStatus === 'completed') {
+        return <span className="matchday-parser-indicator matchday-parser-indicator--ok">✅ vollständig</span>;
+      }
+      return <span className="matchday-parser-placeholder">–</span>;
+    };
+
+    return (
+      <div className="lk-card-full matchday-board">
+        <div className="formkurve-header">
+          <div>
+            <div className="formkurve-title">Matchdays · Winter 2025/26</div>
+            <div className="formkurve-subtitle">
+              {seasonMatchdays.length > 0
+                ? `${seasonMatchdays.length} Spiel${seasonMatchdays.length === 1 ? '' : 'e'}`
+                : 'Keine Matchdays gefunden'}
+            </div>
           </div>
         </div>
-      </div>
-      <div className="season-content">
-        {parserMessage && (
-          <div className={`parser-feedback parser-feedback--${parserMessage.type || 'success'}`}>
-            {parserMessage.text}
-          </div>
-        )}
-        {matchesNeedingParser.length > 0 && (
-          <div className="matchday-parser-summary">
-            <div className="matchday-parser-summary-info">
-              <span className="matchday-parser-summary-icon">⚠️</span>
-              <span>
-                <strong>{matchesNeedingParser.length}</strong>{' '}
-                {matchesNeedingParser.length === 1 ? 'Spiel ohne Ergebnis' : 'Spiele ohne Ergebnis'}
-              </span>
-              {parserGroupsNeedingUpdate.length > 0 && (
-                <span className="matchday-parser-summary-groups">
-                  Gruppen: {parserGroupsNeedingUpdate.join(', ')}
-                </span>
-              )}
+        <div className="season-content">
+          {parserMessage && (
+            <div className={`parser-feedback parser-feedback--${parserMessage.type || 'success'}`}>
+              {parserMessage.text}
             </div>
-            <button
-              type="button"
-              className="btn-modern btn-modern-inactive btn-parser-bulk"
-              onClick={handleRunParserForAll}
-              disabled={parserProcessing}
-            >
-              {parserProcessing ? 'Parser läuft…' : 'Alle aktualisieren'}
-            </button>
-          </div>
-        )}
-        {seasonMatchdays.length === 0 ? (
-          <div className="placeholder">Für diese Saison wurden keine Matchdays gefunden.</div>
-        ) : (
-          <div className="table-responsive">
-            <table className="lk-table matchday-table matchday-table-compact">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Datum</th>
-                  <th>Start</th>
-                  <th>Match-Nr.</th>
-                  <th>Heimteam</th>
-                  <th>Gastteam</th>
-                  <th>Austragungsort</th>
-                  <th>Liga · Gruppe</th>
-                  <th>Status</th>
-                  <th>Ergebnis</th>
-                  <th className="matchday-parser-cell">Parser</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {seasonMatchdays.map((match, index) => {
-                  const homeTeam = teamById.get(match.home_team_id);
-                  const awayTeam = teamById.get(match.away_team_id);
-                  const matchResultsCount = match.match_results_count || 0;
-                  const dateObj = match.match_date ? new Date(match.match_date) : null;
-                  const dateWeekday = dateObj
-                    ? dateObj.toLocaleDateString('de-DE', { weekday: 'short' })
-                    : '–';
-                  const dateValue = dateObj
-                    ? dateObj.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
-                    : '–';
-                  const startLabel = match.start_time ? match.start_time.slice(0, 5) : '–';
-                  const matchNumber = match.match_number ?? extractMatchNumber(match.notes);
-                  const homeLabel = homeTeam
-                    ? `${homeTeam.club_name}${homeTeam.team_name ? ` ${homeTeam.team_name}` : ''}`
-                    : 'Unbekannt';
-                  const awayLabel = awayTeam
-                    ? `${awayTeam.club_name}${awayTeam.team_name ? ` ${awayTeam.team_name}` : ''}`
-                    : 'Unbekannt';
-                  const scoreLabel =
-                    match.final_score ||
-                    (match.home_score != null && match.away_score != null
-                      ? `${match.home_score}:${match.away_score}`
-                      : '–');
-                  const statusConfig = MATCHDAY_STATUS_STYLES[match.status] || MATCHDAY_STATUS_STYLES.default;
-                  const shouldTriggerParser = needsResultParser(match);
-                  const parserState = matchParserStates[match.id];
-                  const parserStatus = parserState?.status;
-                  const isParserRunning = parserStatus === 'running';
-                  const meetingInfo = meetingDetails[match.id] || {};
-                  const meetingData = meetingInfo.data;
-                  const meetingLoading = meetingInfo.loading;
-                  const meetingError = meetingInfo.error;
-                  const meetingImporting = meetingInfo.importing;
-                  const missingPlayers =
-                    meetingInfo.missingPlayers !== undefined
-                      ? meetingInfo.missingPlayers
-                      : meetingData?.applyResult?.missingPlayers || [];
+          )}
+          {matchesNeedingParser.length > 0 && (
+            <div className="matchday-parser-summary">
+              <div className="matchday-parser-summary-info">
+                <span className="matchday-parser-summary-icon">⚠️</span>
+                <span>
+                  <strong>{matchesNeedingParser.length}</strong>{' '}
+                  {matchesNeedingParser.length === 1 ? 'Spiel ohne Ergebnis' : 'Spiele ohne Ergebnis'}
+                </span>
+                {parserGroupsNeedingUpdate.length > 0 && (
+                  <span className="matchday-parser-summary-groups">
+                    Gruppen: {parserGroupsNeedingUpdate.join(', ')}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                className="btn-modern btn-modern-inactive btn-parser-bulk"
+                onClick={handleRunParserForAll}
+                disabled={parserProcessing}
+              >
+                {parserProcessing ? 'Parser läuft…' : 'Alle aktualisieren'}
+              </button>
+            </div>
+          )}
+          {seasonMatchdays.length === 0 ? (
+            <div className="placeholder">Für diese Saison wurden keine Matchdays gefunden.</div>
+          ) : (
+            <div className="matchday-card-grid">
+              {seasonMatchdays.map((match, index) => {
+                const homeTeam = teamById.get(match.home_team_id);
+                const awayTeam = teamById.get(match.away_team_id);
+                const matchResultsCount = match.match_results_count || 0;
+                const dateObj = match.match_date
+                  ? new Date(match.match_date)
+                  : match.matchDateIso
+                    ? new Date(match.matchDateIso)
+                    : null;
+                const dateWeekday = dateObj ? dateObj.toLocaleDateString('de-DE', { weekday: 'short' }) : '–';
+                const dateValue = dateObj
+                  ? dateObj.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                  : '–';
+                const startLabel = (match.start_time || match.startTime || '').slice(0, 5) || '–';
+                const matchNumber = match.match_number ?? extractMatchNumber(match.notes);
+                const homeLabel = homeTeam
+                  ? `${homeTeam.club_name}${homeTeam.team_name ? ` ${homeTeam.team_name}` : ''}`
+                  : 'Unbekannt';
+                const awayLabel = awayTeam
+                  ? `${awayTeam.club_name}${awayTeam.team_name ? ` ${awayTeam.team_name}` : ''}`
+                  : 'Unbekannt';
+                const scoreLabel =
+                  match.final_score ||
+                  (match.home_score != null && match.away_score != null
+                    ? `${match.home_score}:${match.away_score}`
+                    : '–');
+                const statusConfig = MATCHDAY_STATUS_STYLES[match.status] || MATCHDAY_STATUS_STYLES.default;
+                const shouldTriggerParser = needsResultParser(match);
+                const parserState = matchParserStates[match.id];
+                const parserStatus = parserState?.status;
+                const isParserRunning = parserStatus === 'running';
+                const meetingInfo = meetingDetails[match.id] || {};
+                const meetingData = meetingInfo.data;
+                const meetingLoading = meetingInfo.loading;
+                const meetingError = meetingInfo.error;
+                const meetingImporting = meetingInfo.importing;
+                const missingPlayers =
+                  meetingInfo.missingPlayers !== undefined
+                    ? meetingInfo.missingPlayers
+                    : meetingData?.applyResult?.missingPlayers || [];
+                const isExpanded = selectedSeasonMatch?.id === match.id;
 
-                  const isExpanded = selectedSeasonMatch?.id === match.id;
+                const renderDetailContent = () => {
+                  const selectedHomeTeam = homeTeam;
+                  const selectedAwayTeam = awayTeam;
+                  const selectedHomeLabel = selectedHomeTeam
+                    ? `${selectedHomeTeam.club_name}${selectedHomeTeam.team_name ? ` ${selectedHomeTeam.team_name}` : ''}`
+                    : 'Unbekannt';
+                  const selectedAwayLabel = selectedAwayTeam
+                    ? `${selectedAwayTeam.club_name}${selectedAwayTeam.team_name ? ` ${selectedAwayTeam.team_name}` : ''}`
+                    : 'Unbekannt';
 
-                  const renderParserIndicator = () => {
-                    if (isParserRunning) {
-                      return (
-                        <span className="matchday-parser-indicator matchday-parser-indicator--running">
-                          ⏳ Parser läuft…
-                        </span>
-                      );
-                    }
-                    if (parserStatus === 'success') {
-                      return (
-                        <span className="matchday-parser-indicator matchday-parser-indicator--ok">
-                          {parserState?.message || '✅ Aktualisiert'}
-                        </span>
-                      );
-                    }
-                    if (parserStatus === 'error') {
-                      return (
-                        <span
-                          className="matchday-parser-indicator matchday-parser-indicator--error"
-                          title={parserState?.message || 'Parser-Fehler'}
-                        >
-                          ⚠️ {parserState?.message || 'Fehler'}
-                        </span>
-                      );
-                    }
-                    if (shouldTriggerParser) {
-                      return (
-                        <span
-                          className="matchday-parser-indicator"
-                          title="Match abgeschlossen, Ergebnis fehlt – Parser starten"
-                        >
-                          ⚠️ Ergebnis fehlt
-                        </span>
-                      );
-                    }
-                    if (match.status === 'completed') {
-                      return (
-                        <span className="matchday-parser-indicator matchday-parser-indicator--ok">
-                          ✅ vollständig
-                        </span>
-                      );
-                    }
-                    return <span className="matchday-parser-placeholder">–</span>;
+                  const renderPlayersCell = (players = []) => {
+                    if (!players || players.length === 0) return '–';
+                    return players.map((player, idx) => (
+                      <Fragment key={`${player.name || player.raw || idx}`}>
+                        {player.name || player.raw}
+                        {player.meta ? ` (${player.meta})` : ''}
+                        {idx < players.length - 1 && <br />}
+                      </Fragment>
+                    ));
+                  };
+
+                  const renderMeetingTable = (title, entries) => {
+                    if (!entries || !entries.length) return null;
+                    return (
+                      <div className="meeting-table-wrapper">
+                        <div className="meeting-table-title">{title}</div>
+                        <table className="matchday-meeting-table">
+                          <thead>
+                            <tr>
+                              <th>#</th>
+                              <th>Heim</th>
+                              <th>Gast</th>
+                              <th>1. Satz</th>
+                              <th>2. Satz</th>
+                              <th>3. Satz</th>
+                              <th>Matchpunkte</th>
+                              <th>Sätze</th>
+                              <th>Spiele</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {entries.map((entry, idx) => (
+                              <tr key={`${title}-${idx}`}>
+                                <td>{entry.matchNumber || idx + 1}</td>
+                                <td className="meeting-player-cell">{renderPlayersCell(entry.homePlayers)}</td>
+                                <td className="meeting-player-cell">{renderPlayersCell(entry.awayPlayers)}</td>
+                                <td>{entry.setScores?.[0]?.raw || '–'}</td>
+                                <td>{entry.setScores?.[1]?.raw || '–'}</td>
+                                <td>{entry.setScores?.[2]?.raw || '–'}</td>
+                                <td>{entry.matchPoints?.raw || '–'}</td>
+                                <td>{entry.sets?.raw || '–'}</td>
+                                <td>{entry.games?.raw || '–'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
                   };
 
                   return (
-                    <Fragment key={match.id}>
-                    <tr className="matchday-row">
-                      <td>{index + 1}</td>
-                      <td>{dateWeekday}<br />{dateValue}</td>
-                      <td>{startLabel}</td>
-                      <td>{matchNumber ?? '–'}</td>
-                      <td className="matchday-team-cell">{homeLabel}</td>
-                      <td className="matchday-team-cell">{awayLabel}</td>
-                      <td>
-                        <div>{match.venue || '–'}</div>
-                        {match.court_number && (
-                          <div className="matchday-venue-courts">Platz {formatCourtRange(match.court_number, match.court_number_end)}</div>
+                    <div className="matchday-card-detail">
+                      <div className="matchday-detail-inline">
+                        <div className="matchday-detail-inline-header">
+                          <div>
+                            <div className="matchday-detail-title">
+                              {selectedHomeLabel} vs. {selectedAwayLabel}
+                            </div>
+                            <div className="matchday-detail-meta">
+                              {match.match_date
+                                ? new Date(match.match_date).toLocaleString('de-DE', {
+                                    weekday: 'long',
+                                    day: '2-digit',
+                                    month: '2-digit',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })
+                                : 'Datum unbekannt'}
+                              {selectedSeasonMatch.__listIndex && ` · Spiel #${selectedSeasonMatch.__listIndex}`}
+                              {matchNumber && ` · Match ${matchNumber}`}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn-modern btn-modern-inactive"
+                            onClick={() => setSelectedSeasonMatch(null)}
+                          >
+                            Schließen
+                          </button>
+                        </div>
+                        {shouldTriggerParser && (
+                          <div className="matchday-parser-hint">
+                            ⚠️ Ergebnisse fehlen – Parser starten, um Satz- und Spielstände nachzuladen.
+                          </div>
                         )}
-                      </td>
-                      <td>
-                        <div>{match.league || '–'}</div>
-                        <div className="matchday-group">{match.group_name || '–'}</div>
-                      </td>
-                      <td>
+                        <div className="matchday-detail-grid">
+                          <div>
+                            <div className="detail-label">Liga</div>
+                            <div>{match.league || '–'}</div>
+                          </div>
+                          <div>
+                            <div className="detail-label">Gruppe</div>
+                            <div>{match.group_name || '–'}</div>
+                          </div>
+                          <div>
+                            <div className="detail-label">Status</div>
+                            <div>{statusConfig.label}</div>
+                          </div>
+                          <div>
+                            <div className="detail-label">Einzelergebnisse</div>
+                            <div>
+                              {matchResultsCount > 0
+                                ? `${matchResultsCount} ${matchResultsCount === 1 ? 'Match' : 'Matches'} importiert`
+                                : 'Keine Einzelergebnisse'}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="detail-label">Ergebnis</div>
+                            <div>
+                              {match.final_score ||
+                                (match.home_score != null && match.away_score != null
+                                  ? `${match.home_score}:${match.away_score}`
+                                  : '–')}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="detail-label">Austragungsort</div>
+                            <div>{match.venue || '–'}</div>
+                          </div>
+                          <div>
+                            <div className="detail-label">Plätze</div>
+                            <div>
+                              {match.court_number
+                                ? `Platz ${formatCourtRange(match.court_number, match.court_number_end)}`
+                                : '–'}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="detail-label">Notizen</div>
+                            <div>{match.notes || '–'}</div>
+                          </div>
+                        </div>
+                        <div className="matchday-meeting-section">
+                          <div className="matchday-meeting-header">
+                            <div>
+                              <div className="matchday-meeting-title">Spielbericht (nuLiga)</div>
+                              {meetingData?.metadata?.matchDateLabel && (
+                                <div className="matchday-meeting-meta">{meetingData.metadata.matchDateLabel}</div>
+                              )}
+                            </div>
+                            <div className="matchday-meeting-actions">
+                              <button
+                                type="button"
+                                className="btn-modern btn-modern-inactive btn-meeting-action"
+                                onClick={() =>
+                                  handleLoadMeetingDetails(match, {
+                                    homeLabel: selectedHomeLabel,
+                                    awayLabel: selectedAwayLabel,
+                                    applyImport: false
+                                  })
+                                }
+                                disabled={meetingLoading && !meetingData}
+                              >
+                                {meetingLoading && !meetingData ? 'Lade…' : 'Details laden'}
+                              </button>
+                              {meetingData && (
+                                <button
+                                  type="button"
+                                  className="btn-modern btn-modern-inactive btn-meeting-action"
+                                  onClick={() =>
+                                    handleLoadMeetingDetails(match, {
+                                      homeLabel: selectedHomeLabel,
+                                      awayLabel: selectedAwayLabel,
+                                      applyImport: true
+                                    })
+                                  }
+                                  disabled={meetingLoading || meetingImporting}
+                                >
+                                  {meetingImporting ? 'Importiere…' : 'In DB übernehmen'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          {meetingError && (
+                            <div className="parser-feedback parser-feedback--error">{meetingError}</div>
+                          )}
+                          {meetingLoading && !meetingData && (
+                            <div className="matchday-meeting-loading">Lade Spielbericht…</div>
+                          )}
+                          {meetingData && (
+                            <div className="matchday-meeting-content">
+                              <div className="matchday-meeting-metadata">
+                                {meetingData.metadata?.completedOn && (
+                                  <div>Abgeschlossen: {meetingData.metadata.completedOn}</div>
+                                )}
+                                {meetingData.metadata?.referee && (
+                                  <div>Oberschiedsrichter: {meetingData.metadata.referee}</div>
+                                )}
+                                {meetingData.meetingUrl && (
+                                  <a href={meetingData.meetingUrl} target="_blank" rel="noreferrer">
+                                    nuLiga-Link
+                                  </a>
+                                )}
+                              </div>
+                              {missingPlayers.length > 0 && (
+                                <div className="matchday-missing-players">
+                                  <div className="matchday-missing-header">
+                                    ⚠️ {missingPlayers.length}{' '}
+                                    {missingPlayers.length === 1
+                                      ? 'Spieler konnte nicht zugeordnet werden.'
+                                      : 'Spieler konnten nicht zugeordnet werden.'}{' '}
+                                    Bitte anlegen und den Import anschließend erneut starten.
+                                  </div>
+                                  <table className="matchday-missing-table">
+                                    <thead>
+                                      <tr>
+                                        <th>Spieler</th>
+                                        <th>LK</th>
+                                        <th>Vorkommen</th>
+                                        <th>Einsätze</th>
+                                        <th>Aktion</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {missingPlayers.map((player) => {
+                                        const buttonKey = `${match.id}:${player.key}`;
+                                      return (
+                                          <tr key={player.key}>
+                                            <td>
+                                              <div className="missing-player-name">{player.name}</div>
+                                              {player.meta && <div className="missing-player-meta">{player.meta}</div>}
+                                            </td>
+                                            <td>{player.lk ? `LK ${player.lk}` : '–'}</td>
+                                            <td>{player.occurrences}</td>
+                                            <td>
+                                              {(player.contexts || []).map((ctx, idx) => (
+                                                <div key={idx} className="missing-player-context">
+                                                  {ctx.matchType || 'Match'} {ctx.matchNumber || '–'} ·{' '}
+                                                  {ctx.teamName || (ctx.side === 'home' ? 'Heim' : 'Gast')}
+                                                </div>
+                                              ))}
+                                            </td>
+                                            <td>
+                                              <button
+                                                type="button"
+                                                className="btn-modern btn-modern-primary"
+                                                onClick={() => handleCreateMissingPlayer(match, player)}
+                                                disabled={creatingPlayerKey === buttonKey}
+                                              >
+                                                {creatingPlayerKey === buttonKey ? 'Speichere…' : 'Spieler anlegen'}
+                                              </button>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                              {renderMeetingTable('Einzel', meetingData.singles)}
+                              {renderMeetingTable('Doppel', meetingData.doubles)}
+                              {(meetingData.totals?.singles ||
+                                meetingData.totals?.doubles ||
+                                meetingData.totals?.overall) && (
+                                <div className="matchday-meeting-totals">
+                                  {meetingData.totals?.singles && (
+                                    <span>
+                                      Einzel: {meetingData.totals.singles.matchPoints?.raw || '–'} ·{' '}
+                                      {meetingData.totals.singles.sets?.raw || '–'} Sätze ·{' '}
+                                      {meetingData.totals.singles.games?.raw || '–'} Spiele
+                                    </span>
+                                  )}
+                                  {meetingData.totals?.doubles && (
+                                    <span>
+                                      Doppel: {meetingData.totals.doubles.matchPoints?.raw || '–'} ·{' '}
+                                      {meetingData.totals.doubles.sets?.raw || '–'} Sätze ·{' '}
+                                      {meetingData.totals.doubles.games?.raw || '–'} Spiele
+                                    </span>
+                                  )}
+                                  {meetingData.totals?.overall && (
+                                    <span>
+                                      Gesamt: {meetingData.totals.overall.matchPoints?.raw || '–'} ·{' '}
+                                      {meetingData.totals.overall.sets?.raw || '–'} Sätze ·{' '}
+                                      {meetingData.totals.overall.games?.raw || '–'} Spiele
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                };
+
+                return (
+                  <div
+                    key={match.id}
+                    className={`matchday-card${isExpanded ? ' matchday-card--expanded' : ''}`}
+                  >
+                    <div className="matchday-card-header">
+                      <div className="matchday-card-header-left">
+                        <span className="matchday-card-chip">#{index + 1}</span>
+                        <div className="matchday-card-date">
+                          <span className="matchday-card-date-weekday">{dateWeekday}</span>
+                          <span className="matchday-card-date-value">{dateValue}</span>
+                        </div>
+                      </div>
+                      <div className="matchday-card-header-right">
                         <span
                           className="matchday-status-badge"
                           style={{ color: statusConfig.color, background: statusConfig.background }}
                         >
                           {statusConfig.icon} {statusConfig.label}
                         </span>
-                      </td>
-                      <td className="matchday-score">{scoreLabel}</td>
-                      <td className="matchday-parser-cell">
-                        <div className="matchday-parser-actions">
-                          {renderParserIndicator()}
-                          {(shouldTriggerParser || parserStatus === 'error') && (
-                            <button
-                              type="button"
-                              className="btn-modern btn-modern-inactive btn-parser-run"
-                              onClick={() => handleRunResultParser(match)}
-                              disabled={parserProcessing || isParserRunning}
-                            >
-                              {isParserRunning ? 'Läuft…' : 'Parser'}
-                            </button>
-                          )}
-                          <div className="matchday-results-status">
-                            <span
-                              className={`matchday-results-tag ${
-                                matchResultsCount > 0 ? 'matchday-results-tag--ok' : 'matchday-results-tag--missing'
-                              }`}
-                              title={
-                                matchResultsCount > 0
-                                  ? `${matchResultsCount} Einzelergebnisse gespeichert`
-                                  : 'Noch keine Einzelergebnisse importiert'
-                              }
-                            >
-                              {matchResultsCount > 0 ? `Ergebnisse (${matchResultsCount})` : 'Ergebnisse fehlen'}
-                            </span>
-                            {missingPlayers.length > 0 && (
-                              <span
-                                className="matchday-results-missing"
-                                title="Spieler fehlen in players_unified. Im Detailbereich können sie angelegt werden."
-                              >
-                                ⚠️ {missingPlayers.length} Spieler offen
-                              </span>
-                            )}
+                      </div>
+                    </div>
+                    <div className="matchday-card-body">
+                      <div className="matchday-card-teams">
+                        <div className="matchday-card-team">
+                          <span className="matchday-card-team-role">Heim</span>
+                          <span className="matchday-card-team-name">{homeLabel}</span>
+                        </div>
+                        <div className="matchday-card-score-wrap">
+                          <div className="matchday-card-score">{scoreLabel}</div>
+                          <div className="matchday-card-start">
+                            {startLabel} · Match {matchNumber ?? '–'}
                           </div>
                         </div>
-                      </td>
-                      <td>
+                        <div className="matchday-card-team">
+                          <span className="matchday-card-team-role">Gast</span>
+                          <span className="matchday-card-team-name">{awayLabel}</span>
+                        </div>
+                      </div>
+                      <div className="matchday-card-meta">
+                        <div>{match.league || '–'}</div>
+                        <div className="matchday-card-meta-group">{match.group_name || '–'}</div>
+                        <div>{match.venue || 'Austragung offen'}</div>
+                        {match.court_number && (
+                          <div>Platz {formatCourtRange(match.court_number, match.court_number_end)}</div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="matchday-card-footer">
+                      <div className="matchday-card-tags">
+                        <span
+                          className={`matchday-results-tag ${
+                            matchResultsCount > 0 ? 'matchday-results-tag--ok' : 'matchday-results-tag--missing'
+                          }`}
+                          title={
+                            matchResultsCount > 0
+                              ? `${matchResultsCount} Einzelergebnisse gespeichert`
+                              : 'Noch keine Einzelergebnisse importiert'
+                          }
+                        >
+                          {matchResultsCount > 0 ? `Ergebnisse (${matchResultsCount})` : 'Ergebnisse fehlen'}
+                        </span>
+                        {missingPlayers.length > 0 && (
+                          <span
+                            className="matchday-results-missing"
+                            title="Spieler fehlen in players_unified. Im Detailbereich können sie angelegt werden."
+                          >
+                            ⚠️ {missingPlayers.length} Spieler offen
+                          </span>
+                        )}
+                      </div>
+                      <div className="matchday-card-actions">
+                        {renderParserIndicator({
+                          parserStatus,
+                          parserState,
+                          isParserRunning,
+                          shouldTriggerParser,
+                          matchStatus: match.status
+                        })}
+                        {(shouldTriggerParser || parserStatus === 'error') && (
+                          <button
+                            type="button"
+                            className="btn-modern btn-modern-inactive btn-parser-run"
+                            onClick={() => handleRunResultParser(match)}
+                            disabled={parserProcessing || isParserRunning}
+                          >
+                            {isParserRunning ? 'Läuft…' : 'Parser'}
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="btn-modern btn-modern-inactive btn-matchday-details"
@@ -2856,319 +3170,18 @@ function SuperAdminDashboard() {
                         >
                           {isExpanded ? 'Schließen' : 'Details'}
                         </button>
-                      </td>
-                    </tr>
-                    {isExpanded && (() => {
-                      const selectedHomeTeam = homeTeam;
-                      const selectedAwayTeam = awayTeam;
-                      const selectedHomeLabel = selectedHomeTeam
-                        ? `${selectedHomeTeam.club_name}${selectedHomeTeam.team_name ? ` ${selectedHomeTeam.team_name}` : ''}`
-                        : 'Unbekannt';
-                      const selectedAwayLabel = selectedAwayTeam
-                        ? `${selectedAwayTeam.club_name}${selectedAwayTeam.team_name ? ` ${selectedAwayTeam.team_name}` : ''}`
-                        : 'Unbekannt';
-                      const renderPlayersCell = (players = []) => {
-                        if (!players || players.length === 0) return '–';
-                        return players.map((player, idx) => (
-                          <Fragment key={`${player.name || player.raw || idx}`}>
-                            {player.name || player.raw}
-                            {player.meta ? ` (${player.meta})` : ''}
-                            {idx < players.length - 1 && <br />}
-                          </Fragment>
-                        ));
-                      };
-
-                      const renderMeetingTable = (title, entries) => {
-                        if (!entries || !entries.length) return null;
-                        return (
-                          <div className="meeting-table-wrapper">
-                            <div className="meeting-table-title">{title}</div>
-                            <table className="matchday-meeting-table">
-                              <thead>
-                                <tr>
-                                  <th>#</th>
-                                  <th>Heim</th>
-                                  <th>Gast</th>
-                                  <th>1. Satz</th>
-                                  <th>2. Satz</th>
-                                  <th>3. Satz</th>
-                                  <th>Matchpunkte</th>
-                                  <th>Sätze</th>
-                                  <th>Spiele</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {entries.map((entry, idx) => (
-                                  <tr key={`${title}-${idx}`}>
-                                    <td>{entry.matchNumber || idx + 1}</td>
-                                    <td className="meeting-player-cell">{renderPlayersCell(entry.homePlayers)}</td>
-                                    <td className="meeting-player-cell">{renderPlayersCell(entry.awayPlayers)}</td>
-                                    <td>{entry.setScores?.[0]?.raw || '–'}</td>
-                                    <td>{entry.setScores?.[1]?.raw || '–'}</td>
-                                    <td>{entry.setScores?.[2]?.raw || '–'}</td>
-                                    <td>{entry.matchPoints?.raw || '–'}</td>
-                                    <td>{entry.sets?.raw || '–'}</td>
-                                    <td>{entry.games?.raw || '–'}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        );
-                      };
-
-                      return (
-                        <tr className="matchday-detail-row">
-                          <td colSpan={12}>
-                            <div className="matchday-detail-inline">
-                              <div className="matchday-detail-inline-header">
-                                <div>
-                                  <div className="matchday-detail-title">
-                                    {selectedHomeLabel} vs. {selectedAwayLabel}
-                                  </div>
-                                  <div className="matchday-detail-meta">
-                                    {match.match_date
-                                      ? new Date(match.match_date).toLocaleString('de-DE', {
-                                          weekday: 'long',
-                                          day: '2-digit',
-                                          month: '2-digit',
-                                          year: 'numeric',
-                                          hour: '2-digit',
-                                          minute: '2-digit'
-                                        })
-                                      : 'Datum unbekannt'}
-                                    {selectedSeasonMatch.__listIndex && ` · Spiel #${selectedSeasonMatch.__listIndex}`}
-                                    {matchNumber && ` · Match ${matchNumber}`}
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  className="btn-modern btn-modern-inactive"
-                                  onClick={() => setSelectedSeasonMatch(null)}
-                                >
-                                  Schließen
-                                </button>
-                              </div>
-                              {shouldTriggerParser && (
-                                <div className="matchday-parser-hint">
-                                  ⚠️ Ergebnisse fehlen – Parser starten, um Satz- und Spielstände nachzuladen.
-                                </div>
-                              )}
-                              <div className="matchday-detail-grid">
-                                <div>
-                                  <div className="detail-label">Liga</div>
-                                  <div>{match.league || '–'}</div>
-                                </div>
-                                <div>
-                                  <div className="detail-label">Gruppe</div>
-                                  <div>{match.group_name || '–'}</div>
-                                </div>
-                                <div>
-                                  <div className="detail-label">Status</div>
-                                  <div>{statusConfig.label}</div>
-                                </div>
-                                <div>
-                                  <div className="detail-label">Einzelergebnisse</div>
-                                  <div>
-                                    {matchResultsCount > 0
-                                      ? `${matchResultsCount} ${
-                                          matchResultsCount === 1 ? 'Match' : 'Matches'
-                                        } importiert`
-                                      : 'Keine Einzelergebnisse'}
-                                  </div>
-                                </div>
-                                <div>
-                                  <div className="detail-label">Ergebnis</div>
-                                  <div>
-                                    {match.final_score ||
-                                      (match.home_score != null && match.away_score != null
-                                        ? `${match.home_score}:${match.away_score}`
-                                        : '–')}
-                                  </div>
-                                </div>
-                                <div>
-                                  <div className="detail-label">Austragungsort</div>
-                                  <div>{match.venue || '–'}</div>
-                                </div>
-                                <div>
-                                  <div className="detail-label">Plätze</div>
-                                  <div>
-                                    {match.court_number
-                                      ? `Platz ${formatCourtRange(match.court_number, match.court_number_end)}`
-                                      : '–'}
-                                  </div>
-                                </div>
-                                <div>
-                                  <div className="detail-label">Notizen</div>
-                                  <div>{match.notes || '–'}</div>
-                                </div>
-                              </div>
-                              <div className="matchday-meeting-section">
-                                <div className="matchday-meeting-header">
-                                  <div>
-                                    <div className="matchday-meeting-title">Spielbericht (nuLiga)</div>
-                                    {meetingData?.metadata?.matchDateLabel && (
-                                      <div className="matchday-meeting-meta">{meetingData.metadata.matchDateLabel}</div>
-                                    )}
-                                  </div>
-                                  <div className="matchday-meeting-actions">
-                                    <button
-                                      type="button"
-                                      className="btn-modern btn-modern-inactive btn-meeting-action"
-                                      onClick={() =>
-                                        handleLoadMeetingDetails(match, {
-                                          homeLabel: selectedHomeLabel,
-                                          awayLabel: selectedAwayLabel,
-                                          applyImport: false
-                                        })
-                                      }
-                                      disabled={meetingLoading && !meetingData}
-                                    >
-                                      {meetingLoading && !meetingData ? 'Lade…' : 'Details laden'}
-                                    </button>
-                                    {meetingData && (
-                                      <button
-                                        type="button"
-                                        className="btn-modern btn-modern-inactive btn-meeting-action"
-                                        onClick={() =>
-                                          handleLoadMeetingDetails(match, {
-                                            homeLabel: selectedHomeLabel,
-                                            awayLabel: selectedAwayLabel,
-                                            applyImport: true
-                                          })
-                                        }
-                                        disabled={meetingLoading || meetingImporting}
-                                      >
-                                        {meetingImporting ? 'Importiere…' : 'In DB übernehmen'}
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                                {meetingError && (
-                                  <div className="parser-feedback parser-feedback--error">{meetingError}</div>
-                                )}
-                                {meetingLoading && !meetingData && (
-                                  <div className="matchday-meeting-loading">Lade Spielbericht…</div>
-                                )}
-                                {meetingData && (
-                                  <div className="matchday-meeting-content">
-                                    <div className="matchday-meeting-metadata">
-                                      {meetingData.metadata?.completedOn && (
-                                        <div>Abgeschlossen: {meetingData.metadata.completedOn}</div>
-                                      )}
-                                      {meetingData.metadata?.referee && (
-                                        <div>Oberschiedsrichter: {meetingData.metadata.referee}</div>
-                                      )}
-                                      {meetingData.meetingUrl && (
-                                        <a href={meetingData.meetingUrl} target="_blank" rel="noreferrer">
-                                          nuLiga-Link
-                                        </a>
-                                      )}
-                                    </div>
-                                    {missingPlayers.length > 0 && (
-                                      <div className="matchday-missing-players">
-                                        <div className="matchday-missing-header">
-                                          ⚠️ {missingPlayers.length}{' '}
-                                          {missingPlayers.length === 1
-                                            ? 'Spieler konnte nicht zugeordnet werden.'
-                                            : 'Spieler konnten nicht zugeordnet werden.'}{' '}
-                                          Bitte anlegen und den Import anschließend erneut starten.
-                                        </div>
-                                        <table className="matchday-missing-table">
-                                          <thead>
-                                            <tr>
-                                              <th>Spieler</th>
-                                              <th>LK</th>
-                                              <th>Vorkommen</th>
-                                              <th>Einsätze</th>
-                                              <th>Aktion</th>
-                                            </tr>
-                                          </thead>
-                                          <tbody>
-                                            {missingPlayers.map((player) => {
-                                              const buttonKey = `${match.id}:${player.key}`;
-                                              return (
-                                                <tr key={player.key}>
-                                                  <td>
-                                                    <div className="missing-player-name">{player.name}</div>
-                                                    {player.meta && (
-                                                      <div className="missing-player-meta">{player.meta}</div>
-                                                    )}
-                                                  </td>
-                                                  <td>{player.lk ? `LK ${player.lk}` : '–'}</td>
-                                                  <td>{player.occurrences}</td>
-                                                  <td>
-                                                    {(player.contexts || []).map((ctx, idx) => (
-                                                      <div key={idx} className="missing-player-context">
-                                                        {ctx.matchType || 'Match'} {ctx.matchNumber || '–'} ·{' '}
-                                                        {ctx.teamName || (ctx.side === 'home' ? 'Heim' : 'Gast')}
-                                                      </div>
-                                                    ))}
-                                                  </td>
-                                                  <td>
-                                                    <button
-                                                      type="button"
-                                                      className="btn-modern btn-modern-primary"
-                                                      onClick={() => handleCreateMissingPlayer(match, player)}
-                                                      disabled={creatingPlayerKey === buttonKey}
-                                                    >
-                                                      {creatingPlayerKey === buttonKey ? 'Speichere…' : 'Spieler anlegen'}
-                                                    </button>
-                                                  </td>
-                                                </tr>
-                                              );
-                                            })}
-                                          </tbody>
-                                        </table>
-                                      </div>
-                                    )}
-                                    {renderMeetingTable('Einzel', meetingData.singles)}
-                                    {renderMeetingTable('Doppel', meetingData.doubles)}
-                                    {(meetingData.totals?.singles ||
-                                      meetingData.totals?.doubles ||
-                                      meetingData.totals?.overall) && (
-                                      <div className="matchday-meeting-totals">
-                                        {meetingData.totals?.singles && (
-                                          <span>
-                                            Einzel: {meetingData.totals.singles.matchPoints?.raw || '–'} ·{' '}
-                                            {meetingData.totals.singles.sets?.raw || '–'} Sätze ·{' '}
-                                            {meetingData.totals.singles.games?.raw || '–'} Spiele
-                                          </span>
-                                        )}
-                                        {meetingData.totals?.doubles && (
-                                          <span>
-                                            Doppel: {meetingData.totals.doubles.matchPoints?.raw || '–'} ·{' '}
-                                            {meetingData.totals.doubles.sets?.raw || '–'} Sätze ·{' '}
-                                            {meetingData.totals.doubles.games?.raw || '–'} Spiele
-                                          </span>
-                                        )}
-                                        {meetingData.totals?.overall && (
-                                          <span>
-                                            Gesamt: {meetingData.totals.overall.matchPoints?.raw || '–'} ·{' '}
-                                            {meetingData.totals.overall.sets?.raw || '–'} Sätze ·{' '}
-                                            {meetingData.totals.overall.games?.raw || '–'} Spiele
-                                          </span>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })()}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                      </div>
+                    </div>
+                    {isExpanded && renderDetailContent()}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderScraper = () => (
     <div className="lk-card-full scraper-desktop-container">

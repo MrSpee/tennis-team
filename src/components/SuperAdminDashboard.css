@@ -40,6 +40,184 @@
   background: #f8fafc;
 }
 
+.matchday-board .season-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.matchday-card-grid {
+  display: grid;
+  gap: 1.2rem;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+}
+
+.matchday-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 1.1rem 1.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  box-shadow: 0 10px 24px -16px rgba(15, 23, 42, 0.35);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.matchday-card--expanded {
+  border-color: #1d4ed8;
+  box-shadow: 0 18px 40px -18px rgba(29, 78, 216, 0.45);
+  transform: translateY(-2px);
+}
+
+.matchday-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.matchday-card-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.matchday-card-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid #bfdbfe;
+}
+
+.matchday-card-date {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.matchday-card-date-weekday {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.matchday-card-date-value {
+  font-size: 0.96rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.matchday-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.matchday-card-teams {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.matchday-card-team {
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  flex: 1 1 auto;
+  max-width: 42%;
+}
+
+.matchday-card-team-role {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.matchday-card-team-name {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.25;
+}
+
+.matchday-card-score-wrap {
+  min-width: 110px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.matchday-card-score {
+  font-size: 1.45rem;
+  font-weight: 800;
+  color: #111827;
+}
+
+.matchday-card-start {
+  font-size: 0.75rem;
+  color: #475569;
+}
+
+.matchday-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 1.1rem;
+  font-size: 0.78rem;
+  color: #475569;
+}
+
+.matchday-card-meta-group {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
+.matchday-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.matchday-card-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.matchday-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.matchday-card-detail {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e2e8f0;
+}
+
 .matchday-row:nth-child(odd) {
   background: #ffffff;
 }

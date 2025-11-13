@@ -13,23 +13,22 @@ function withCors(res, status, payload) {
   res.status(status).json(payload);
 }
 
-function normalizeString(value) {
-  if (!value) return '';
-  return value
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 async function determineMeetingId({
   leagueUrl,
   groupId,
   matchNumber,
   homeTeam,
-  awayTeam
+  awayTeam,
+  matchDate = null,
+  meetingId: preferredMeetingId = null
 }) {
   const imports = await DEFAULT_IMPORTS.get();
-  const { scrapeNuLiga: scrape } = imports;
+  const {
+    scrapeNuLiga: scrape,
+    findMatchInGroup,
+    normalizeMatchNumber,
+    normalizeTeamLabel
+  } = imports;
   const normalizedGroupId = groupId ? String(parseInt(groupId, 10)) : null;
   const { results } = await scrape({
     leagueUrl: leagueUrl || imports.DEFAULT_LEAGUE_URL,
@@ -55,30 +54,69 @@ async function determineMeetingId({
   }
 
   const normalizedMatchNumber = matchNumber ? String(matchNumber).trim() : null;
-  const normalizedHome = normalizeString(homeTeam);
-  const normalizedAway = normalizeString(awayTeam);
+  const searchHome = homeTeam || null;
+  const searchAway = awayTeam || null;
 
-  const matched = targetGroup.matches?.find((match) => {
-    if (match.meetingId) {
-      if (normalizedMatchNumber && match.matchNumber && normalizeString(match.matchNumber) === normalizedMatchNumber) {
-        return true;
-      }
-      const matchHome = normalizeString(match.homeTeam);
-      const matchAway = normalizeString(match.awayTeam);
-      return matchHome === normalizedHome && matchAway === normalizedAway;
-    }
-    return false;
-  });
+  let matchedResult = { match: null, score: 0 };
+
+  if (preferredMeetingId) {
+    matchedResult = findMatchInGroup(targetGroup.matches || [], {
+      meetingId: preferredMeetingId,
+      matchNumber: normalizedMatchNumber,
+      homeTeam: searchHome,
+      awayTeam: searchAway,
+      matchDate
+    });
+  }
+
+  if (!matchedResult.match) {
+    matchedResult = findMatchInGroup(targetGroup.matches || [], {
+      matchNumber: normalizedMatchNumber,
+      homeTeam: searchHome,
+      awayTeam: searchAway,
+      matchDate
+    });
+  }
+
+  if (!matchedResult.match && normalizedMatchNumber) {
+    matchedResult.match =
+      targetGroup.matches?.find(
+        (entry) => normalizeMatchNumber(entry.matchNumber || entry.match_number) === normalizeMatchNumber(normalizedMatchNumber)
+      ) || null;
+    matchedResult.score = matchedResult.match ? 1 : 0;
+  }
+
+  const matched = matchedResult.match;
 
   if (!matched || !matched.meetingId) {
-    throw new Error('Meeting-ID konnte aus der Gruppenübersicht nicht ermittelt werden.');
+    const availableMatches =
+      targetGroup.matches?.map((entry) => ({
+        matchNumber: entry.matchNumber || entry.match_number || null,
+        meetingId: entry.meetingId || entry.meeting_id || null,
+        homeTeam: entry.homeTeam || entry.home_team || null,
+        awayTeam: entry.awayTeam || entry.away_team || null
+      })) || [];
+
+    throw new Error(
+      `Meeting-ID konnte aus der Gruppenübersicht nicht ermittelt werden (Gruppe ${groupId}). ` +
+        `Gesucht: Match "${normalizedMatchNumber}", Heim "${normalizeTeamLabel(searchHome)}", ` +
+        `Gast "${normalizeTeamLabel(searchAway)}". Matches: ${JSON.stringify(availableMatches)}`
+    );
   }
 
   return {
     meetingId: matched.meetingId,
     meetingReportUrl: matched.meetingReportUrl || null,
     groupMeta: targetGroup.group,
-    matchMeta: matched
+    matchMeta: {
+      ...matched,
+      _matching: {
+        score: matchedResult.score,
+        matchNumber: normalizeMatchNumber(matched.matchNumber || matched.match_number),
+        normalizedHome: normalizeTeamLabel(matched.homeTeam || matched.home_team),
+        normalizedAway: normalizeTeamLabel(matched.awayTeam || matched.away_team)
+      }
+    }
   };
 }
 
@@ -335,13 +373,14 @@ module.exports = async function handler(req, res) {
       meetingUrl,
       groupId,
       matchNumber,
+      matchDate,
       matchdayId,
       homeTeam,
       awayTeam,
       apply = false
     } = req.body || {};
 
-  const imports = await DEFAULT_IMPORTS.get();
+    const imports = await DEFAULT_IMPORTS.get();
 
     let resolvedMeetingId = meetingId || null;
     let groupMeta = null;
@@ -357,7 +396,9 @@ module.exports = async function handler(req, res) {
         groupId,
         matchNumber,
         homeTeam,
-        awayTeam
+        awayTeam,
+        matchDate,
+        meetingId: meetingId || null
       });
       resolvedMeetingId = result.meetingId;
       resolvedMeetingUrl = result.meetingReportUrl || resolvedMeetingUrl;
@@ -372,7 +413,9 @@ module.exports = async function handler(req, res) {
           groupId,
           matchNumber,
           homeTeam,
-          awayTeam
+          awayTeam,
+          matchDate,
+          meetingId: resolvedMeetingId
         });
         groupMeta = metaResult.groupMeta || groupMeta;
         matchMeta = metaResult.matchMeta || matchMeta;
