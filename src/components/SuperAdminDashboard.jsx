@@ -354,6 +354,7 @@ function SuperAdminDashboard() {
   const [meetingDetails, setMeetingDetails] = useState({});
   const [creatingPlayerKey, setCreatingPlayerKey] = useState(null);
   const [deletingMatchdayId, setDeletingMatchdayId] = useState(null);
+  const [matchResultsData, setMatchResultsData] = useState({});
 
   const buildInfo = useMemo(getDefaultBuildInfo, []);
 
@@ -1933,6 +1934,128 @@ function SuperAdminDashboard() {
     ]
   );
 
+  const loadMatchResults = useCallback(
+    async (matchdayId) => {
+      if (!matchdayId) return;
+      
+      // Prüfe ob bereits geladen (verwende setState mit updater function)
+      let shouldLoad = true;
+      setMatchResultsData((prev) => {
+        if (prev[matchdayId]?.loaded) {
+          shouldLoad = false;
+          return prev;
+        }
+        return prev;
+      });
+      
+      if (!shouldLoad) return;
+
+      try {
+        const { data: results, error: resultsError } = await supabase
+          .from('match_results')
+          .select('*')
+          .eq('matchday_id', matchdayId)
+          .order('match_number', { ascending: true });
+
+        if (resultsError) throw resultsError;
+
+        if (!results || results.length === 0) {
+          setMatchResultsData((prev) => ({ ...prev, [matchdayId]: { singles: [], doubles: [] } }));
+          return;
+        }
+
+        // Lade Spielernamen
+        const playerIds = new Set();
+        results.forEach((result) => {
+          if (result.home_player_id) playerIds.add(result.home_player_id);
+          if (result.guest_player_id) playerIds.add(result.guest_player_id);
+          if (result.home_player1_id) playerIds.add(result.home_player1_id);
+          if (result.home_player2_id) playerIds.add(result.home_player2_id);
+          if (result.guest_player1_id) playerIds.add(result.guest_player1_id);
+          if (result.guest_player2_id) playerIds.add(result.guest_player2_id);
+        });
+
+        const playerIdArray = Array.from(playerIds);
+        const playerMap = new Map();
+
+        if (playerIdArray.length > 0) {
+          const { data: playerData, error: playerError } = await supabase
+            .from('players_unified')
+            .select('id, name')
+            .in('id', playerIdArray);
+
+          if (!playerError && playerData) {
+            playerData.forEach((player) => {
+              playerMap.set(player.id, player.name);
+            });
+          }
+        }
+
+        // Trenne Einzel und Doppel
+        const singles = [];
+        const doubles = [];
+
+        results.forEach((result) => {
+          const entry = {
+            matchNumber: result.match_number || null,
+            homePlayers: [],
+            awayPlayers: [],
+            setScores: [
+              result.set1_home != null && result.set1_guest != null
+                ? { raw: `${result.set1_home}:${result.set1_guest}`, home: result.set1_home, away: result.set1_guest }
+                : null,
+              result.set2_home != null && result.set2_guest != null
+                ? { raw: `${result.set2_home}:${result.set2_guest}`, home: result.set2_home, away: result.set2_guest }
+                : null,
+              result.set3_home != null && result.set3_guest != null
+                ? { raw: `${result.set3_home}:${result.set3_guest}`, home: result.set3_home, away: result.set3_guest }
+                : null
+            ].filter(Boolean),
+            matchPoints:
+              result.home_score != null && result.away_score != null
+                ? { raw: `${result.home_score}:${result.away_score}`, home: result.home_score, away: result.away_score }
+                : null,
+            sets: null,
+            games: null
+          };
+
+          if (result.match_type === 'Einzel') {
+            if (result.home_player_id) {
+              entry.homePlayers.push({ name: playerMap.get(result.home_player_id) || 'Unbekannt' });
+            }
+            if (result.guest_player_id) {
+              entry.awayPlayers.push({ name: playerMap.get(result.guest_player_id) || 'Unbekannt' });
+            }
+            singles.push(entry);
+          } else if (result.match_type === 'Doppel') {
+            if (result.home_player1_id) {
+              entry.homePlayers.push({ name: playerMap.get(result.home_player1_id) || 'Unbekannt' });
+            }
+            if (result.home_player2_id) {
+              entry.homePlayers.push({ name: playerMap.get(result.home_player2_id) || 'Unbekannt' });
+            }
+            if (result.guest_player1_id) {
+              entry.awayPlayers.push({ name: playerMap.get(result.guest_player1_id) || 'Unbekannt' });
+            }
+            if (result.guest_player2_id) {
+              entry.awayPlayers.push({ name: playerMap.get(result.guest_player2_id) || 'Unbekannt' });
+            }
+            doubles.push(entry);
+          }
+        });
+
+        setMatchResultsData((prev) => ({
+          ...prev,
+          [matchdayId]: { singles, doubles, loaded: true }
+        }));
+      } catch (error) {
+        console.error('❌ Fehler beim Laden der Match-Results:', error);
+        setMatchResultsData((prev) => ({ ...prev, [matchdayId]: { singles: [], doubles: [], error: error.message, loaded: true } }));
+      }
+    },
+    [supabase]
+  );
+
   const handleRunParserForAll = useCallback(async () => {
     if (parserProcessing || matchesNeedingParser.length === 0) return;
 
@@ -2195,6 +2318,17 @@ function SuperAdminDashboard() {
             )
           );
           await loadDashboardData();
+          // Lade Match-Results neu, wenn importiert wurde
+          if (applyImport && match.id) {
+            setMatchResultsData((prev) => {
+              const next = { ...prev };
+              delete next[match.id]; // Force reload
+              return next;
+            });
+            setTimeout(() => {
+              loadMatchResults(match.id);
+            }, 500);
+          }
           const successMessage = result.applyResult
             ? `Matchdetails importiert (${result.applyResult.inserted?.length || 0} Einträge)`
             : 'Matchdetails importiert.';
@@ -2224,7 +2358,7 @@ function SuperAdminDashboard() {
         });
       }
     },
-    [meetingDetails, resolveGroupId, setParserMessage, supabase, loadDashboardData]
+    [meetingDetails, resolveGroupId, setParserMessage, supabase, loadDashboardData, loadMatchResults]
   );
 
   const handleCreateMissingPlayer = useCallback(
@@ -2347,6 +2481,12 @@ function SuperAdminDashboard() {
           delete next[match.id];
           return next;
         });
+        setMatchResultsData((prev) => {
+          if (!prev[match.id]) return prev;
+          const next = { ...prev };
+          delete next[match.id];
+          return next;
+        });
         setSelectedSeasonMatch((prev) => (prev?.id === match.id ? null : prev));
         setParserMessage({ type: 'success', text: 'Matchday wurde gelöscht.' });
         await loadDashboardData();
@@ -2357,7 +2497,7 @@ function SuperAdminDashboard() {
         setDeletingMatchdayId(null);
       }
     },
-    [loadDashboardData, setParserMessage, setSeasonMatchdays, setMeetingDetails, setSelectedSeasonMatch]
+    [loadDashboardData, setParserMessage, setSeasonMatchdays, setMeetingDetails, setMatchResultsData, setSelectedSeasonMatch]
   );
 
   const handleClubSearch = useCallback(
@@ -2504,6 +2644,8 @@ function SuperAdminDashboard() {
       setSelectedSeasonMatch={setSelectedSeasonMatch}
       deletingMatchdayId={deletingMatchdayId}
       teamById={teamById}
+      matchResultsData={matchResultsData}
+      loadMatchResults={loadMatchResults}
       handleRunParserForAll={handleRunParserForAll}
       handleRunResultParser={handleRunResultParser}
       handleDeleteMatchday={handleDeleteMatchday}

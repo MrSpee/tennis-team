@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, useEffect } from 'react';
 
 const formatCourtRange = (start, end) => {
   if (!start) return '–';
@@ -18,6 +18,8 @@ function MatchdayDetailCard({
   missingPlayers,
   homeTeam,
   awayTeam,
+  matchResultsData,
+  loadMatchResults,
   handleLoadMeetingDetails,
   handleCreateMissingPlayer,
   selectedSeasonMatch,
@@ -31,6 +33,13 @@ function MatchdayDetailCard({
   const selectedAwayLabel = awayTeam
     ? `${awayTeam.club_name}${awayTeam.team_name ? ` ${awayTeam.team_name}` : ''}`
     : 'Unbekannt';
+
+  // Lade Match-Results aus DB, wenn Matchday geöffnet wird
+  useEffect(() => {
+    if (match?.id && matchResultsCount > 0 && !matchResultsData) {
+      loadMatchResults(match.id);
+    }
+  }, [match?.id, matchResultsCount, matchResultsData, loadMatchResults]);
 
   const renderPlayersCell = (players = []) => {
     if (!players || players.length === 0) return '–';
@@ -154,6 +163,22 @@ function MatchdayDetailCard({
           <div>{match.notes || '–'}</div>
         </div>
       </div>
+      {matchResultsData && (matchResultsData.singles?.length > 0 || matchResultsData.doubles?.length > 0) && (
+        <div className="matchday-meeting-section">
+          <div className="matchday-meeting-header">
+            <div>
+              <div className="matchday-meeting-title">Gespeicherte Ergebnisse (Datenbank)</div>
+              <div className="matchday-meeting-meta">
+                {matchResultsData.singles?.length || 0} Einzel · {matchResultsData.doubles?.length || 0} Doppel
+              </div>
+            </div>
+          </div>
+          <div className="matchday-meeting-content">
+            {renderMeetingTable('Einzel', matchResultsData.singles)}
+            {renderMeetingTable('Doppel', matchResultsData.doubles)}
+          </div>
+        </div>
+      )}
       <div className="matchday-meeting-section">
         <div className="matchday-meeting-header">
           <div>
