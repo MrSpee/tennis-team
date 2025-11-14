@@ -189,6 +189,7 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
   let counter = 0;
   const playerCache = new Map();
   const pendingPlayers = new Map();
+  const positionUpdates = []; // Sammle Position-Updates für team_memberships
 
   const registerMissingPlayer = (player, context) => {
     if (!player || !player.name) return;
@@ -414,6 +415,9 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
         teamName: awayTeamName,
         slot: 'spieler'
       });
+      // Speichere Positionen für später (werden in team_memberships gespeichert)
+      result._home_player_position = homePlayers[0]?.position || null;
+      result._guest_player_position = awayPlayers[0]?.position || null;
     } else {
       result.home_player1_id = await ensurePlayer(homePlayers[0], {
         matchNumber,
@@ -443,6 +447,11 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
         teamName: awayTeamName,
         slot: 'spieler2'
       });
+      // Speichere Positionen für später (werden in team_memberships gespeichert)
+      result._home_player1_position = homePlayers[0]?.position || null;
+      result._home_player2_position = homePlayers[1]?.position || null;
+      result._guest_player1_position = awayPlayers[0]?.position || null;
+      result._guest_player2_position = awayPlayers[1]?.position || null;
     }
 
     return result;
@@ -456,6 +465,64 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
     const winner = status === 'completed' ? determineMatchWinner(setScores, matchPoints) : null;
     const matchNumberLabel = match.matchNumber || counter;
     const playerAssignments = await resolvePlayersForMatch(match, type, matchNumberLabel, metadata);
+
+    // Entferne temporäre Position-Felder (werden später in team_memberships gespeichert)
+    const {
+      _home_player_position,
+      _guest_player_position,
+      _home_player1_position,
+      _home_player2_position,
+      _guest_player1_position,
+      _guest_player2_position,
+      ...cleanAssignments
+    } = playerAssignments;
+
+    // Speichere Positionen für später (werden nach dem DB-Insert in team_memberships gespeichert)
+    if (type === 'Einzel') {
+      if (playerAssignments.home_player_id && _home_player_position) {
+        positionUpdates.push({
+          playerId: playerAssignments.home_player_id,
+          position: _home_player_position,
+          side: 'home'
+        });
+      }
+      if (playerAssignments.guest_player_id && _guest_player_position) {
+        positionUpdates.push({
+          playerId: playerAssignments.guest_player_id,
+          position: _guest_player_position,
+          side: 'away'
+        });
+      }
+    } else {
+      if (playerAssignments.home_player1_id && _home_player1_position) {
+        positionUpdates.push({
+          playerId: playerAssignments.home_player1_id,
+          position: _home_player1_position,
+          side: 'home'
+        });
+      }
+      if (playerAssignments.home_player2_id && _home_player2_position) {
+        positionUpdates.push({
+          playerId: playerAssignments.home_player2_id,
+          position: _home_player2_position,
+          side: 'home'
+        });
+      }
+      if (playerAssignments.guest_player1_id && _guest_player1_position) {
+        positionUpdates.push({
+          playerId: playerAssignments.guest_player1_id,
+          position: _guest_player1_position,
+          side: 'away'
+        });
+      }
+      if (playerAssignments.guest_player2_id && _guest_player2_position) {
+        positionUpdates.push({
+          playerId: playerAssignments.guest_player2_id,
+          position: _guest_player2_position,
+          side: 'away'
+        });
+      }
+    }
 
     rows.push({
       matchday_id: matchdayId,
@@ -474,7 +541,7 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
       winner,
       completed_at: status === 'completed' ? new Date().toISOString() : null,
       entered_at: new Date().toISOString(),
-      ...playerAssignments
+      ...cleanAssignments
     });
   };
 
@@ -502,6 +569,96 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
     .select();
   if (error) {
     throw error;
+  }
+
+  // Speichere Positionen in team_memberships (nur für Spieler unseres Teams)
+  if (positionUpdates.length > 0) {
+    try {
+      // Lade matchday Daten, um home_team_id, away_team_id und season zu bekommen
+      const { data: matchdayData, error: matchdayError } = await supabase
+        .from('matchdays')
+        .select('home_team_id, away_team_id, season')
+        .eq('id', matchdayId)
+        .maybeSingle();
+
+      if (!matchdayError && matchdayData) {
+        const { home_team_id, away_team_id, season } = matchdayData;
+
+        // Gruppiere Position-Updates nach Spieler-ID (um Duplikate zu vermeiden)
+        const positionMap = new Map();
+        positionUpdates.forEach((update) => {
+          const teamId = update.side === 'home' ? home_team_id : away_team_id;
+          if (teamId && update.playerId) {
+            const key = `${update.playerId}:${teamId}:${season || ''}`;
+            // Behalte die erste Position (könnte auch die letzte sein, je nach Anforderung)
+            if (!positionMap.has(key)) {
+              positionMap.set(key, {
+                playerId: update.playerId,
+                teamId,
+                season: season || null,
+                position: update.position
+              });
+            }
+          }
+        });
+
+        // Aktualisiere team_memberships mit Positionen
+        for (const { playerId, teamId, season: playerSeason, position } of positionMap.values()) {
+          if (!playerId || !teamId || !position) continue;
+
+          // Prüfe ob team_membership existiert
+          const { data: existingMembership, error: membershipError } = await supabase
+            .from('team_memberships')
+            .select('id')
+            .eq('player_id', playerId)
+            .eq('team_id', teamId)
+            .eq('season', playerSeason || '')
+            .maybeSingle();
+
+          if (membershipError && membershipError.code !== 'PGRST116') {
+            console.warn(`[meeting-report] Fehler beim Laden der team_membership für Spieler ${playerId}:`, membershipError.message);
+            continue;
+          }
+
+          if (existingMembership) {
+            // Update bestehende Membership
+            const { error: updateError } = await supabase
+              .from('team_memberships')
+              .update({ meldeliste_position: position })
+              .eq('id', existingMembership.id);
+
+            if (updateError) {
+              console.warn(`[meeting-report] Fehler beim Update der Position für Spieler ${playerId}:`, updateError.message);
+            } else {
+              console.log(`[meeting-report] ✅ Position ${position} für Spieler ${playerId} in team_memberships gespeichert`);
+            }
+          } else {
+            // Erstelle neue Membership (falls nicht vorhanden)
+            const { error: insertError } = await supabase
+              .from('team_memberships')
+              .insert({
+                player_id: playerId,
+                team_id: teamId,
+                season: playerSeason || null,
+                meldeliste_position: position,
+                role: 'player',
+                is_active: true
+              });
+
+            if (insertError) {
+              console.warn(`[meeting-report] Fehler beim Erstellen der team_membership für Spieler ${playerId}:`, insertError.message);
+            } else {
+              console.log(`[meeting-report] ✅ Team-Membership mit Position ${position} für Spieler ${playerId} erstellt`);
+            }
+          }
+        }
+      } else if (matchdayError) {
+        console.warn('[meeting-report] Fehler beim Laden der matchday-Daten für Position-Updates:', matchdayError.message);
+      }
+    } catch (positionError) {
+      // Nicht kritisch - Position-Updates sind optional
+      console.warn('[meeting-report] Fehler beim Speichern der Positionen in team_memberships:', positionError.message);
+    }
   }
 
   return {
