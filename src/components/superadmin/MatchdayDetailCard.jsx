@@ -50,14 +50,48 @@ function MatchdayDetailCard({
   }, [match?.id, match.home_team_id, match.away_team_id, homeTeam?.id, awayTeam?.id]);
 
   const teamOptions = useMemo(() => {
-    if (!Array.isArray(allTeams)) return [];
-    return [...allTeams]
-      .map((team) => ({
-        id: team.id,
-        label: `${team.club_name}${team.team_name ? ` ${team.team_name}` : ''}`.trim() || 'Unbenanntes Team'
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [allTeams]);
+    const options = [];
+    
+    // Füge alle Teams aus der Datenbank hinzu
+    if (Array.isArray(allTeams)) {
+      allTeams.forEach((team) => {
+        options.push({
+          id: team.id,
+          label: `${team.club_name}${team.team_name ? ` ${team.team_name}` : ''}`.trim() || 'Unbenanntes Team',
+          isVirtual: false,
+          team: team
+        });
+      });
+    }
+    
+    // Füge Teams aus nuLiga-Metadaten hinzu, falls sie noch nicht in der DB existieren
+    if (meetingData?.metadata) {
+      const nuLigaHomeTeam = meetingData.metadata.homeTeam;
+      const nuLigaAwayTeam = meetingData.metadata.awayTeam;
+      
+      const addNuLigaTeam = (teamName) => {
+        if (!teamName) return;
+        
+        // Prüfe ob Team bereits in der Liste ist
+        const exists = options.some((opt) => opt.label === teamName);
+        if (exists) return;
+        
+        // Füge als virtuelle Option hinzu (noch nicht in DB)
+        options.push({
+          id: `virtual:${teamName}`,
+          label: teamName,
+          isVirtual: true,
+          nuLigaTeamName: teamName
+        });
+      };
+      
+      if (nuLigaHomeTeam) addNuLigaTeam(nuLigaHomeTeam);
+      if (nuLigaAwayTeam) addNuLigaTeam(nuLigaAwayTeam);
+    }
+    
+    // Sortiere alphabetisch
+    return options.sort((a, b) => a.label.localeCompare(b.label));
+  }, [allTeams, meetingData?.metadata]);
 
   const resolveTeamLabelById = useCallback(
     (teamId) => {
@@ -272,7 +306,7 @@ function MatchdayDetailCard({
                   <option value="">– Team wählen –</option>
                   {teamOptions.map((option) => (
                     <option key={option.id} value={option.id}>
-                      {option.label}
+                      {option.label}{option.isVirtual ? ' (wird erstellt)' : ''}
                     </option>
                   ))}
                 </select>
@@ -287,7 +321,7 @@ function MatchdayDetailCard({
                   <option value="">– Team wählen –</option>
                   {teamOptions.map((option) => (
                     <option key={option.id} value={option.id}>
-                      {option.label}
+                      {option.label}{option.isVirtual ? ' (wird erstellt)' : ''}
                     </option>
                   ))}
                 </select>

@@ -2535,13 +2535,105 @@ function SuperAdminDashboard() {
         throw new Error('Keine Änderung erkannt. Bitte wähle andere Teams.');
       }
 
+      // Prüfe ob virtuelle Teams erstellt werden müssen
+      let resolvedHomeTeamId = nextHomeTeamId;
+      let resolvedAwayTeamId = nextAwayTeamId;
+
+      // Erstelle virtuelles Heimteam falls nötig
+      if (nextHomeTeamId.startsWith('virtual:')) {
+        const nuLigaTeamName = nextHomeTeamId.replace('virtual:', '');
+        const { clubName, suffix } = splitTeamLabel(nuLigaTeamName);
+        
+        // Suche oder erstelle Club
+        let clubId = null;
+        const existingClub = clubs.find((c) => normalizeString(c.name) === normalizeString(clubName));
+        if (existingClub) {
+          clubId = existingClub.id;
+        } else {
+          // Erstelle neuen Club
+          const { data: newClub, error: clubError } = await supabase
+            .from('club_info')
+            .insert({
+              name: clubName,
+              normalized_name: normalizeString(clubName),
+              data_source: 'tvm_scraper',
+              is_verified: false
+            })
+            .select()
+            .single();
+          if (clubError) throw new Error(`Fehler beim Erstellen des Clubs "${clubName}": ${clubError.message}`);
+          clubId = newClub.id;
+          setClubs((prev) => [newClub, ...prev]);
+        }
+
+        // Erstelle Team
+        const { data: newTeam, error: teamError } = await supabase
+          .from('team_info')
+          .insert({
+            club_id: clubId,
+            club_name: clubName,
+            team_name: suffix || null,
+            category: match.league || null,
+            region: null
+          })
+          .select()
+          .single();
+        if (teamError) throw new Error(`Fehler beim Erstellen des Teams "${nuLigaTeamName}": ${teamError.message}`);
+        resolvedHomeTeamId = newTeam.id;
+        setTeams((prev) => [newTeam, ...prev]);
+      }
+
+      // Erstelle virtuelles Gastteam falls nötig
+      if (nextAwayTeamId.startsWith('virtual:')) {
+        const nuLigaTeamName = nextAwayTeamId.replace('virtual:', '');
+        const { clubName, suffix } = splitTeamLabel(nuLigaTeamName);
+        
+        // Suche oder erstelle Club
+        let clubId = null;
+        const existingClub = clubs.find((c) => normalizeString(c.name) === normalizeString(clubName));
+        if (existingClub) {
+          clubId = existingClub.id;
+        } else {
+          // Erstelle neuen Club
+          const { data: newClub, error: clubError } = await supabase
+            .from('club_info')
+            .insert({
+              name: clubName,
+              normalized_name: normalizeString(clubName),
+              data_source: 'tvm_scraper',
+              is_verified: false
+            })
+            .select()
+            .single();
+          if (clubError) throw new Error(`Fehler beim Erstellen des Clubs "${clubName}": ${clubError.message}`);
+          clubId = newClub.id;
+          setClubs((prev) => [newClub, ...prev]);
+        }
+
+        // Erstelle Team
+        const { data: newTeam, error: teamError } = await supabase
+          .from('team_info')
+          .insert({
+            club_id: clubId,
+            club_name: clubName,
+            team_name: suffix || null,
+            category: match.league || null,
+            region: null
+          })
+          .select()
+          .single();
+        if (teamError) throw new Error(`Fehler beim Erstellen des Teams "${nuLigaTeamName}": ${teamError.message}`);
+        resolvedAwayTeamId = newTeam.id;
+        setTeams((prev) => [newTeam, ...prev]);
+      }
+
       const updatedAt = new Date().toISOString();
 
       const { error } = await supabase
         .from('matchdays')
         .update({
-          home_team_id: nextHomeTeamId,
-          away_team_id: nextAwayTeamId,
+          home_team_id: resolvedHomeTeamId,
+          away_team_id: resolvedAwayTeamId,
           updated_at: updatedAt
         })
         .eq('id', match.id);
@@ -2550,8 +2642,8 @@ function SuperAdminDashboard() {
         throw error;
       }
 
-      const updatedHomeTeam = teamById.get(nextHomeTeamId);
-      const updatedAwayTeam = teamById.get(nextAwayTeamId);
+      const updatedHomeTeam = teamById.get(resolvedHomeTeamId);
+      const updatedAwayTeam = teamById.get(resolvedAwayTeamId);
 
       setSeasonMatchdays((prev) =>
         prev.map((entry) =>
@@ -2590,12 +2682,13 @@ function SuperAdminDashboard() {
         await LoggingService.logActivity('matchday_reassign_teams', 'matchday', match.id, {
           previous_home_team_id: match.home_team_id,
           previous_away_team_id: match.away_team_id,
-          new_home_team_id: nextHomeTeamId,
-          new_away_team_id: nextAwayTeamId,
+          new_home_team_id: resolvedHomeTeamId,
+          new_away_team_id: resolvedAwayTeamId,
           meeting_home_team: context.meetingHomeTeam || null,
           meeting_away_team: context.meetingAwayTeam || null,
           group_name: match.group_name,
-          league: match.league
+          league: match.league,
+          teams_created: nextHomeTeamId.startsWith('virtual:') || nextAwayTeamId.startsWith('virtual:')
         });
       } catch (logError) {
         console.warn('⚠️ Logging failed (non-critical):', logError);
@@ -2606,7 +2699,7 @@ function SuperAdminDashboard() {
         awayTeam: updatedAwayTeam
       };
     },
-    [supabase, teamById, setSeasonMatchdays]
+    [supabase, teamById, setSeasonMatchdays, clubs, setClubs, setTeams]
   );
 
   const handleClubSearch = useCallback(
