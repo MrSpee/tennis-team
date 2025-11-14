@@ -46,6 +46,16 @@ export const computeStandings = (leagueTeams = [], matches = [], matchResults = 
     acc[result.matchday_id].push(result);
     return acc;
   }, {});
+  
+  // Debug: Log resultsByMatchId
+  if (Object.keys(resultsByMatchId).length > 0) {
+    console.log('🔍 [computeStandings] Results grouped by matchday_id:', Object.keys(resultsByMatchId).length, 'matchdays');
+    Object.keys(resultsByMatchId).forEach(matchdayId => {
+      const results = resultsByMatchId[matchdayId];
+      const completed = results.filter(r => r.status === 'completed' && r.winner);
+      console.log(`  Matchday ${matchdayId}: ${results.length} results, ${completed.length} completed with winner`);
+    });
+  }
 
   (matches || []).forEach((match) => {
     if (!match) return;
@@ -60,8 +70,11 @@ export const computeStandings = (leagueTeams = [], matches = [], matchResults = 
     const matchResultsForGame = resultsByMatchId[match.id] || [];
 
     if (matchResultsForGame.length === 0) {
+      console.log(`⚠️ [computeStandings] Match ${match.id} hat keine match_results`);
       return;
     }
+    
+    console.log(`✅ [computeStandings] Match ${match.id} hat ${matchResultsForGame.length} match_results`);
 
     let homeMatchPoints = 0;
     let awayMatchPoints = 0;
@@ -70,8 +83,12 @@ export const computeStandings = (leagueTeams = [], matches = [], matchResults = 
     let homeGames = 0;
     let awayGames = 0;
 
+    let skippedResults = 0;
     matchResultsForGame.forEach((result) => {
-      if (result.status !== 'completed' || !result.winner) return;
+      if (result.status !== 'completed' || !result.winner) {
+        skippedResults++;
+        return;
+      }
 
       if (result.winner === 'home') {
         homeMatchPoints += 1;
@@ -116,8 +133,11 @@ export const computeStandings = (leagueTeams = [], matches = [], matchResults = 
     });
 
     if (homeMatchPoints + awayMatchPoints === 0) {
+      console.log(`⚠️ [computeStandings] Match ${match.id}: Keine Match-Punkte (${skippedResults} results übersprungen)`);
       return;
     }
+    
+    console.log(`✅ [computeStandings] Match ${match.id}: ${homeMatchPoints}:${awayMatchPoints} (${matchResultsForGame.length - skippedResults} results gezählt)`);
 
     const homeStats = teamStats[homeTeamId];
     const awayStats = teamStats[awayTeamId];

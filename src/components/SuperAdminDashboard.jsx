@@ -356,6 +356,7 @@ function SuperAdminDashboard() {
   const [creatingPlayerKey, setCreatingPlayerKey] = useState(null);
   const [deletingMatchdayId, setDeletingMatchdayId] = useState(null);
   const [matchResultsData, setMatchResultsData] = useState({});
+  const [matchdayDuplicates, setMatchdayDuplicates] = useState([]);
 
   const buildInfo = useMemo(getDefaultBuildInfo, []);
 
@@ -868,18 +869,34 @@ function SuperAdminDashboard() {
       
       // Warnung bei Duplikaten
       const duplicates = Array.from(duplicateCheck.values()).filter(matches => matches.length > 1);
+      const duplicateInfo = duplicates.length > 0 ? duplicates.map(dup => {
+        const first = dup[0];
+        const dateStr = first.match_date ? new Date(first.match_date).toLocaleDateString('de-DE') : 'unbekannt';
+        const homeTeam = teamById.get(first.home_team_id);
+        const awayTeam = teamById.get(first.away_team_id);
+        const homeLabel = homeTeam ? `${homeTeam.club_name}${homeTeam.team_name ? ` ${homeTeam.team_name}` : ''}` : 'Unbekannt';
+        const awayLabel = awayTeam ? `${awayTeam.club_name}${awayTeam.team_name ? ` ${awayTeam.team_name}` : ''}` : 'Unbekannt';
+        return {
+          count: dup.length,
+          date: dateStr,
+          matchDate: first.match_date,
+          homeTeam: homeLabel,
+          awayTeam: awayLabel,
+          ids: dup.map(m => m.id),
+          matches: dup
+        };
+      }) : [];
+      
       if (duplicates.length > 0) {
-        console.warn('⚠️ DUPLIKATE IN DATENBANK GEFUNDEN:', duplicates);
-        const duplicateDetails = duplicates.map(dup => {
-          const first = dup[0];
-          const dateStr = first.match_date ? new Date(first.match_date).toLocaleDateString('de-DE') : 'unbekannt';
-          return `${dup.length}x am ${dateStr} (IDs: ${dup.map(m => m.id).join(', ')})`;
-        }).join('; ');
+        console.warn('⚠️ DUPLIKATE IN DATENBANK GEFUNDEN:', duplicateInfo);
+        const duplicateDetails = duplicateInfo.map(dup => 
+          `${dup.count}x am ${dup.date} (${dup.homeTeam} vs ${dup.awayTeam})`
+        ).join('; ');
         console.warn(`⚠️ Duplikate: ${duplicateDetails}`);
-        // Zeige Warnung in UI (optional - könnte auch als Toast/Banner angezeigt werden)
       }
       
       setSeasonMatchdays(matchdaysWithCounts);
+      setMatchdayDuplicates(duplicateInfo);
 
       const derivedStats = (() => {
         try {
@@ -1468,8 +1485,8 @@ function SuperAdminDashboard() {
               if (matchedClubNormalized === searchClubNormalized && 
                   (searchSuffixNormalized === '' || matchedSuffixNormalized === searchSuffixNormalized)) {
                 console.log(`✅ Match-Import (Fallback validiert): "${teamName}" → Team-ID ${teamId}`);
-                teamIdRegistry.set(normalizedName, teamId);
-                return { teamId, clubName: clubName || '' };
+            teamIdRegistry.set(normalizedName, teamId);
+            return { teamId, clubName: clubName || '' };
               }
             }
           }
@@ -1641,12 +1658,81 @@ function SuperAdminDashboard() {
               if (resultsError) {
                 console.warn('⚠️ Fehler beim Prüfen der Match-Results:', resultsError);
               } else if (!resultsData || resultsData.length === 0) {
-                scoreWithoutResults.push({
-                  matchId: existingMatch.id,
-                  home: match.homeTeam,
-                  away: match.awayTeam,
-                  score: matchPayload.final_score || `${matchPayload.home_score}:${matchPayload.away_score}`
-                });
+                // Versuche automatisch match_results zu importieren, wenn meetingId vorhanden ist
+                const meetingId = match.meetingId || match.meeting_id || extractMeetingMeta(match).meetingId;
+                if (meetingId && matchStatus === 'completed') {
+                  try {
+                    console.log(`🔄 Automatischer Import der match_results für Matchday ${existingMatch.id} (meetingId: ${meetingId})`);
+                    const homeTeamLabel = buildTeamLabel(teamById.get(existingMatch.home_team_id));
+                    const awayTeamLabel = buildTeamLabel(teamById.get(existingMatch.away_team_id));
+                    
+                    const meetingResponse = await fetch('/api/import/meeting-report', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        matchdayId: existingMatch.id,
+                        meetingId: meetingId,
+                        groupId: resolveGroupId(matchGroupName),
+                        matchNumber: matchPayload.match_number || existingMatch.match_number,
+                        matchDate: matchDateIso,
+                        homeTeam: homeTeamLabel,
+                        awayTeam: awayTeamLabel,
+                        apply: true
+                      })
+                    });
+
+                    const meetingRaw = await meetingResponse.text();
+                    let meetingResult = null;
+                    if (meetingRaw) {
+                      try {
+                        meetingResult = JSON.parse(meetingRaw);
+                      } catch (parseError) {
+                        console.warn('⚠️ Meeting-Report Antwort konnte nicht geparst werden:', parseError);
+                      }
+                    }
+
+                    if (meetingResponse.ok && meetingResult?.success) {
+                      const insertedCount = meetingResult.applyResult?.inserted?.length || 0;
+                      console.log(`✅ match_results importiert: ${insertedCount} Einträge für Matchday ${existingMatch.id}`);
+                    } else {
+                      const errorMsg = meetingResult?.error || meetingRaw || 'Unbekannter Fehler';
+                      console.warn(`⚠️ Automatischer match_results Import fehlgeschlagen für Matchday ${existingMatch.id}:`, errorMsg);
+                      scoreWithoutResults.push({
+                        matchId: existingMatch.id,
+                        home: match.homeTeam,
+                        away: match.awayTeam,
+                        score: matchPayload.final_score || `${matchPayload.home_score}:${matchPayload.away_score}`
+                      });
+                      matchIssues.push({
+                        type: 'meeting-import-failed',
+                        matchId: existingMatch.id,
+                        meetingId: meetingId,
+                        error: errorMsg
+                      });
+                    }
+                  } catch (meetingError) {
+                    console.warn(`⚠️ Fehler beim automatischen match_results Import für Matchday ${existingMatch.id}:`, meetingError);
+                    scoreWithoutResults.push({
+                      matchId: existingMatch.id,
+                      home: match.homeTeam,
+                      away: match.awayTeam,
+                      score: matchPayload.final_score || `${matchPayload.home_score}:${matchPayload.away_score}`
+                    });
+                    matchIssues.push({
+                      type: 'meeting-import-error',
+                      matchId: existingMatch.id,
+                      meetingId: meetingId,
+                      error: meetingError.message || 'Unbekannter Fehler'
+                    });
+                  }
+                } else {
+                  scoreWithoutResults.push({
+                    matchId: existingMatch.id,
+                    home: match.homeTeam,
+                    away: match.awayTeam,
+                    score: matchPayload.final_score || `${matchPayload.home_score}:${matchPayload.away_score}`
+                  });
+                }
               }
             } else if (needsMatchNumberUpdate) {
               totalMatchesUpdated += 1;
@@ -1678,7 +1764,64 @@ function SuperAdminDashboard() {
 
           if (insertedMatch) {
             totalMatchesInserted += 1;
-            if (hasScoreData(match)) {
+            
+            // Automatischer Import der match_results, wenn meetingId vorhanden ist
+            const meetingId = match.meetingId || match.meeting_id || extractMeetingMeta(match).meetingId;
+            if (meetingId && matchStatus === 'completed') {
+              try {
+                console.log(`🔄 Automatischer Import der match_results für Matchday ${insertedMatch.id} (meetingId: ${meetingId})`);
+                const homeTeamLabel = buildTeamLabel(teamById.get(insertedMatch.home_team_id));
+                const awayTeamLabel = buildTeamLabel(teamById.get(insertedMatch.away_team_id));
+                
+                const meetingResponse = await fetch('/api/import/meeting-report', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    matchdayId: insertedMatch.id,
+                    meetingId: meetingId,
+                    groupId: resolveGroupId(matchGroupName),
+                    matchNumber: matchPayload.match_number,
+                    matchDate: matchDateIso,
+                    homeTeam: homeTeamLabel,
+                    awayTeam: awayTeamLabel,
+                    apply: true
+                  })
+                });
+
+                const meetingRaw = await meetingResponse.text();
+                let meetingResult = null;
+                if (meetingRaw) {
+                  try {
+                    meetingResult = JSON.parse(meetingRaw);
+                  } catch (parseError) {
+                    console.warn('⚠️ Meeting-Report Antwort konnte nicht geparst werden:', parseError);
+                  }
+                }
+
+                if (meetingResponse.ok && meetingResult?.success) {
+                  const insertedCount = meetingResult.applyResult?.inserted?.length || 0;
+                  console.log(`✅ match_results importiert: ${insertedCount} Einträge für Matchday ${insertedMatch.id}`);
+                } else {
+                  const errorMsg = meetingResult?.error || meetingRaw || 'Unbekannter Fehler';
+                  console.warn(`⚠️ Automatischer match_results Import fehlgeschlagen für Matchday ${insertedMatch.id}:`, errorMsg);
+                  // Füge zu matchIssues hinzu, aber stoppe nicht den Import
+                  matchIssues.push({
+                    type: 'meeting-import-failed',
+                    matchId: insertedMatch.id,
+                    meetingId: meetingId,
+                    error: errorMsg
+                  });
+                }
+              } catch (meetingError) {
+                console.warn(`⚠️ Fehler beim automatischen match_results Import für Matchday ${insertedMatch.id}:`, meetingError);
+                matchIssues.push({
+                  type: 'meeting-import-error',
+                  matchId: insertedMatch.id,
+                  meetingId: meetingId,
+                  error: meetingError.message || 'Unbekannter Fehler'
+                });
+              }
+            } else if (hasScoreData(match)) {
               scoreWithoutResults.push({
                 matchId: insertedMatch.id,
                 home: match.homeTeam,
@@ -1704,11 +1847,22 @@ function SuperAdminDashboard() {
         console.warn('⚠️ Match-Import Hinweise:', { clubIssues, matchIssues, scoreWithoutResults });
       }
 
+      // Zähle erfolgreiche match_results Imports
+      const meetingImportIssues = matchIssues.filter(issue => 
+        issue.type === 'meeting-import-failed' || issue.type === 'meeting-import-error'
+      );
+      const totalMeetingImports = totalMatchesInserted + (totalMatchesUpdated > 0 ? 1 : 0);
+      const successfulMeetingImports = totalMeetingImports - meetingImportIssues.length;
+
       const messageParts = [
         `${totalMatchesInserted} neue Matchdays`,
         `${totalMatchesUpdated} aktualisierte Scores`,
         `${totalMatchesSkipped} übersprungen`
       ];
+
+      if (successfulMeetingImports > 0) {
+        messageParts.push(`${successfulMeetingImports} Match-Results automatisch importiert`);
+      }
 
       if (scoreWithoutResults.length > 0) {
         messageParts.push(`${scoreWithoutResults.length} Scores ohne Match-Results`);
@@ -2947,6 +3101,7 @@ function SuperAdminDashboard() {
       handleLoadMeetingDetails={handleLoadMeetingDetails}
       handleCreateMissingPlayer={handleCreateMissingPlayer}
       creatingPlayerKey={creatingPlayerKey}
+      matchdayDuplicates={matchdayDuplicates}
     />
   );
 

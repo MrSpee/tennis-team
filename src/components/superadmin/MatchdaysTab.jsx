@@ -77,7 +77,8 @@ function MatchdaysTab({
   handleDeleteMatchday,
   handleLoadMeetingDetails,
   handleCreateMissingPlayer,
-  creatingPlayerKey
+  creatingPlayerKey,
+  matchdayDuplicates = []
 }) {
   const renderParserIndicator = ({ parserStatus, parserState, isParserRunning, shouldTriggerParser, matchStatus }) => {
     if (isParserRunning) {
@@ -128,6 +129,29 @@ function MatchdaysTab({
         </div>
       </div>
       <div className="season-content">
+        {matchdayDuplicates.length > 0 && (
+          <div className="parser-feedback parser-feedback--error">
+            <div style={{ marginBottom: '0.5rem', fontWeight: 700 }}>
+              ⚠️ Duplikate in der Datenbank gefunden!
+            </div>
+            <div style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+              Die folgenden Matchdays sind mehrfach vorhanden:
+            </div>
+            <ul style={{ margin: '0.5rem 0', paddingLeft: '1.5rem', fontSize: '0.85rem' }}>
+              {matchdayDuplicates.map((dup, idx) => (
+                <li key={idx} style={{ marginBottom: '0.25rem' }}>
+                  <strong>{dup.count}x</strong> am <strong>{dup.date}</strong>: {dup.homeTeam} vs {dup.awayTeam}
+                  <span style={{ color: '#64748b', fontSize: '0.8rem', marginLeft: '0.5rem' }}>
+                    (IDs: {dup.ids.slice(0, 2).join(', ')}{dup.ids.length > 2 ? '...' : ''})
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '0.5rem' }}>
+              Bitte führe <code>sql/CLEANUP_DUPLICATE_MATCHDAYS.sql</code> in Supabase aus, um die Duplikate zu bereinigen.
+            </div>
+          </div>
+        )}
         {parserMessage && (
           <div className={`parser-feedback parser-feedback--${parserMessage.type || 'success'}`}>
             {parserMessage.text}

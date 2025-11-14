@@ -357,29 +357,109 @@ const TeamView = ({
       })));
       
       const teamIds = leagueTeams.map(t => t.id);
+      const teamIdsSet = new Set(teamIds);
       
-      // 3. Lade alle Matches dieser Teams (nur Liga-interne Spiele)
-      const { data: allMatches, error: matchesError } = await supabase
+      // 3. Lade alle Matches dieser Teams (nur Liga-interne Spiele der aktuellen Saison)
+      // WICHTIG: Lade ALLE Matches, bei denen EINES der Teams in der Liga ist
+      // Wir filtern dann später, um nur Matches zu behalten, bei denen BEIDE Teams in der Liga sind
+      const { data: allMatchesRaw, error: matchesError } = await supabase
         .from('matchdays')
-        .select('id, home_team_id, away_team_id, match_date, status')
+        .select('id, home_team_id, away_team_id, match_date, status, season')
         .or(`home_team_id.in.(${teamIds.join(',')}),away_team_id.in.(${teamIds.join(',')})`)
+        .eq('season', teamSeason.season) // WICHTIG: Filtere nach Saison!
         .order('match_date');
       
       if (matchesError) throw matchesError;
       
-      console.log('🎾 Found matches:', allMatches?.length || 0);
+      // Filtere: Nur Matches, bei denen BEIDE Teams in der Liga sind
+      const allMatches = (allMatchesRaw || []).filter(match => 
+        teamIdsSet.has(match.home_team_id) && teamIdsSet.has(match.away_team_id)
+      );
       
-      // 4. Lade alle match_results für diese Matches
+      console.log('🎾 Found matches (raw):', allMatchesRaw?.length || 0);
+      console.log('🎾 Found matches (filtered - beide Teams in Liga):', allMatches?.length || 0);
+      console.log('🔍 Match IDs:', allMatches?.map(m => m.id) || []);
+      
+      // 4. Lade alle match_results für diese Matches (nur completed)
       const matchIds = (allMatches || []).map(m => m.id);
+      
+      if (matchIds.length === 0) {
+        console.warn('⚠️ Keine Matchday-IDs gefunden, setze Standings auf leer');
+        setStandings([]);
+        setLoadingStandings(false);
+        return;
+      }
       
       const { data: allResults, error: resultsError } = await supabase
         .from('match_results')
         .select('*')
-        .in('matchday_id', matchIds);
+        .in('matchday_id', matchIds)
+        .eq('status', 'completed'); // Nur abgeschlossene Ergebnisse zählen
       
       if (resultsError) throw resultsError;
       
+      console.log('🔍 Match IDs für match_results Abfrage:', matchIds);
       console.log('📊 Found match results:', allResults?.length || 0);
+      
+      // Debug: Zeige Details der match_results
+      if (allResults && allResults.length > 0) {
+        console.log('🔍 Match results details:', allResults.map(r => ({
+          matchday_id: r.matchday_id,
+          status: r.status,
+          winner: r.winner,
+          match_type: r.match_type,
+          match_number: r.match_number
+        })));
+        
+        // Gruppiere nach matchday_id
+        const resultsByMatchday = allResults.reduce((acc, r) => {
+          if (!acc[r.matchday_id]) acc[r.matchday_id] = [];
+          acc[r.matchday_id].push(r);
+          return acc;
+        }, {});
+        
+        console.log('🔍 Results grouped by matchday:', Object.keys(resultsByMatchday).map(matchdayId => {
+          const match = allMatches?.find(m => m.id === matchdayId);
+          const homeTeamInLeague = match ? leagueTeams.find(t => t.id === match.home_team_id) : null;
+          const awayTeamInLeague = match ? leagueTeams.find(t => t.id === match.away_team_id) : null;
+          return {
+            matchday_id: matchdayId,
+            count: resultsByMatchday[matchdayId].length,
+            completed: resultsByMatchday[matchdayId].filter(r => r.status === 'completed' && r.winner).length,
+            with_winner: resultsByMatchday[matchdayId].filter(r => r.winner).length,
+            match_found_in_allMatches: !!match,
+            match_home_team_id: match?.home_team_id,
+            match_away_team_id: match?.away_team_id,
+            home_team_in_league: !!homeTeamInLeague,
+            away_team_in_league: !!awayTeamInLeague,
+            home_team_name: homeTeamInLeague ? `${homeTeamInLeague.club_name} ${homeTeamInLeague.team_name}`.trim() : 'NICHT IN LIGA',
+            away_team_name: awayTeamInLeague ? `${awayTeamInLeague.club_name} ${awayTeamInLeague.team_name}`.trim() : 'NICHT IN LIGA'
+          };
+        }));
+        
+        // Prüfe ob alle matchday_ids auch in allMatches sind
+        const matchdayIdsWithResults = Object.keys(resultsByMatchday);
+        const matchIds = (allMatches || []).map(m => m.id);
+        const missingMatches = matchdayIdsWithResults.filter(id => !matchIds.includes(id));
+        if (missingMatches.length > 0) {
+          console.warn('⚠️ Matchdays mit match_results, aber nicht in allMatches gefunden:', missingMatches);
+        }
+        
+        // Prüfe ob alle Matches in allMatches auch Teams in leagueTeams haben
+        allMatches?.forEach(match => {
+          const homeTeamInLeague = leagueTeams.find(t => t.id === match.home_team_id);
+          const awayTeamInLeague = leagueTeams.find(t => t.id === match.away_team_id);
+          if (!homeTeamInLeague || !awayTeamInLeague) {
+            console.warn(`⚠️ Match ${match.id} hat Teams, die nicht in leagueTeams sind:`, {
+              match_id: match.id,
+              home_team_id: match.home_team_id,
+              away_team_id: match.away_team_id,
+              home_in_league: !!homeTeamInLeague,
+              away_in_league: !!awayTeamInLeague
+            });
+          }
+        });
+      }
       
       const standings = computeStandings(
         leagueTeams,

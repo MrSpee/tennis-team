@@ -142,6 +142,14 @@ const Results = () => {
     try {
       console.log('🔍 Global search for:', term);
       
+      // Prüfe ob Benutzer authentifiziert ist
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session) {
+        console.warn('⚠️ Keine gültige Session für globale Suche');
+        setSearchResults(null);
+        return;
+      }
+      
       // Suche nach Vereinen
       const { data: clubs, error: clubError } = await supabase
         .from('club_info')
@@ -149,7 +157,10 @@ const Results = () => {
         .ilike('name', `%${term}%`)
         .limit(5);
       
-      if (clubError) throw clubError;
+      if (clubError) {
+        console.error('❌ Error searching clubs:', clubError);
+        // Ignoriere club_error, aber fahre mit anderen Suchen fort
+      }
       
       // Suche nach Teams
       const { data: teams, error: teamError } = await supabase
@@ -158,7 +169,10 @@ const Results = () => {
         .or(`team_name.ilike.%${term}%,club_name.ilike.%${term}%,category.ilike.%${term}%`)
         .limit(10);
       
-      if (teamError) throw teamError;
+      if (teamError) {
+        console.error('❌ Error searching teams:', teamError);
+        // Ignoriere team_error, aber fahre mit anderen Suchen fort
+      }
       
       // Suche nach Spielern
       const { data: playersList, error: playersError } = await supabase
@@ -168,7 +182,10 @@ const Results = () => {
         .eq('status', 'active')
         .limit(10);
       
-      if (playersError) throw playersError;
+      if (playersError) {
+        console.error('❌ Error searching players:', playersError);
+        // Ignoriere players_error, aber fahre mit anderen Suchen fort
+      }
       
       setSearchResults({
         clubs: clubs || [],
