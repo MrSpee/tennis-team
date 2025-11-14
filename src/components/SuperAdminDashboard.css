@@ -746,16 +746,144 @@
   font-size: 0.85rem;
 }
 
+.matchday-missing-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.matchday-missing-table-wrapper::-webkit-scrollbar {
+  height: 8px;
+}
+
+.matchday-missing-table-wrapper::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+.matchday-missing-table-wrapper::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.matchday-missing-table-wrapper::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
 .matchday-missing-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
+  table-layout: fixed;
+  background: #ffffff;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .matchday-missing-table th,
 .matchday-missing-table td {
-  padding: 0.55rem 0.6rem;
-  vertical-align: top;
+  padding: 0.75rem 1rem;
+  vertical-align: middle;
+  text-align: left;
+  border-bottom: 1px solid #fed7aa;
+}
+
+.matchday-missing-table thead {
+  background: #fff7ed;
+}
+
+.matchday-missing-table thead th {
+  background: #fff1e6;
+  color: #7c2d12;
+  font-weight: 700;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid #fed7aa;
+  padding: 0.85rem 1rem;
+}
+
+.matchday-missing-table tbody tr {
+  transition: background-color 0.15s ease;
+}
+
+.matchday-missing-table tbody tr:hover {
+  background: #fffbf5;
+}
+
+.matchday-missing-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.matchday-missing-table tbody td {
+  border-top: 1px solid #fed7aa;
+  color: #0f172a;
+}
+
+/* Spaltenbreiten */
+.matchday-missing-table th:nth-child(1),
+.matchday-missing-table td:nth-child(1) {
+  width: 30%;
+  min-width: 200px;
+}
+
+.matchday-missing-table th:nth-child(2),
+.matchday-missing-table td:nth-child(2) {
+  width: 12%;
+  min-width: 80px;
+  text-align: center;
+}
+
+.matchday-missing-table th:nth-child(3),
+.matchday-missing-table td:nth-child(3) {
+  width: 10%;
+  min-width: 70px;
+  text-align: center;
+}
+
+.matchday-missing-table th:nth-child(4),
+.matchday-missing-table td:nth-child(4) {
+  width: 28%;
+  min-width: 180px;
+}
+
+.matchday-missing-table th:nth-child(5),
+.matchday-missing-table td:nth-child(5) {
+  width: 20%;
+  min-width: 140px;
+  text-align: right;
+}
+
+.matchday-missing-table td:last-child {
+  text-align: right;
+}
+
+.missing-player-name {
+  font-weight: 600;
+  color: #0f172a;
+  font-size: 0.95rem;
+  margin-bottom: 0.2rem;
+}
+
+.missing-player-meta {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin-top: 0.2rem;
+  line-height: 1.4;
+}
+
+.missing-player-context {
+  font-size: 0.8rem;
+  color: #475569;
+  line-height: 1.5;
+  margin-bottom: 0.25rem;
+}
+
+.missing-player-context:last-child {
+  margin-bottom: 0;
 }
 
 .matchday-team-reassign {
@@ -825,36 +953,6 @@
 
 .matchday-team-reassign-feedback--error {
   color: #b91c1c;
-}
-
-.matchday-missing-table thead th {
-  background: #fff1e6;
-  color: #7c2d12;
-  font-weight: 700;
-  border-bottom: 1px solid #fecdd3;
-}
-
-.matchday-missing-table tbody td {
-  border-top: 1px solid #fed7aa;
-}
-
-.matchday-missing-table td:last-child {
-  text-align: right;
-}
-
-.missing-player-name {
-  font-weight: 600;
-}
-
-.missing-player-meta {
-  font-size: 0.72rem;
-  color: #64748b;
-  margin-top: 0.15rem;
-}
-
-.missing-player-context {
-  font-size: 0.72rem;
-  color: #475569;
 }
 
 .btn-modern-primary {

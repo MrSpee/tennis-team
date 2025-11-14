@@ -344,50 +344,52 @@ function MatchdayDetailCard({
                     : 'Spieler konnten nicht zugeordnet werden.'}{' '}
                   Bitte anlegen und den Import anschließend erneut starten.
                 </div>
-                <table className="matchday-missing-table">
-                  <thead>
-                    <tr>
-                      <th>Spieler</th>
-                      <th>LK</th>
-                      <th>Vorkommen</th>
-                      <th>Einsätze</th>
-                      <th>Aktion</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {missingPlayers.map((player) => {
-                      const buttonKey = `${match.id}:${player.key}`;
-                      return (
-                        <tr key={player.key}>
-                          <td>
-                            <div className="missing-player-name">{player.name}</div>
-                            {player.meta && <div className="missing-player-meta">{player.meta}</div>}
-                          </td>
-                          <td>{player.lk ? `LK ${player.lk}` : '–'}</td>
-                          <td>{player.occurrences}</td>
-                          <td>
-                            {(player.contexts || []).map((ctx, idx) => (
-                              <div key={idx} className="missing-player-context">
-                                {ctx.matchType || 'Match'} {ctx.matchNumber || '–'} ·{' '}
-                                {ctx.teamName || (ctx.side === 'home' ? 'Heim' : 'Gast')}
-                              </div>
-                            ))}
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="btn-modern btn-modern-primary"
-                              onClick={() => handleCreateMissingPlayer(match, player)}
-                              disabled={creatingPlayerKey === buttonKey}
-                            >
-                              {creatingPlayerKey === buttonKey ? 'Speichere…' : 'Spieler anlegen'}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <div className="matchday-missing-table-wrapper">
+                  <table className="matchday-missing-table">
+                    <thead>
+                      <tr>
+                        <th>Spieler</th>
+                        <th>LK</th>
+                        <th>Vorkommen</th>
+                        <th>Einsätze</th>
+                        <th>Aktion</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {missingPlayers.map((player) => {
+                        const buttonKey = `${match.id}:${player.key}`;
+                        return (
+                          <tr key={player.key}>
+                            <td>
+                              <div className="missing-player-name">{player.name}</div>
+                              {player.meta && <div className="missing-player-meta">{player.meta}</div>}
+                            </td>
+                            <td>{player.lk ? `LK ${player.lk}` : '–'}</td>
+                            <td>{player.occurrences}</td>
+                            <td>
+                              {(player.contexts || []).map((ctx, idx) => (
+                                <div key={idx} className="missing-player-context">
+                                  {ctx.matchType || 'Match'} {ctx.matchNumber || '–'} ·{' '}
+                                  {ctx.teamName || (ctx.side === 'home' ? 'Heim' : 'Gast')}
+                                </div>
+                              ))}
+                            </td>
+                            <td>
+                              <button
+                                type="button"
+                                className="btn-modern btn-modern-primary"
+                                onClick={() => handleCreateMissingPlayer(match, player)}
+                                disabled={creatingPlayerKey === buttonKey}
+                              >
+                                {creatingPlayerKey === buttonKey ? 'Speichere…' : 'Spieler anlegen'}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
             <MatchResultsTable title="Einzel" entries={meetingData.singles} />
