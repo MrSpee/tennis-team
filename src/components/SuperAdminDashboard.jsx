@@ -854,6 +854,31 @@ function SuperAdminDashboard() {
           match_results_count: matchResultsCount
         };
       });
+      
+      // Prüfe auf Duplikate beim Laden
+      const duplicateCheck = new Map();
+      matchdaysWithCounts.forEach((match) => {
+        const dateOnly = match.match_date ? new Date(match.match_date).toISOString().split('T')[0] : null;
+        const key = `${dateOnly}|${match.home_team_id}|${match.away_team_id}`;
+        if (!duplicateCheck.has(key)) {
+          duplicateCheck.set(key, []);
+        }
+        duplicateCheck.get(key).push(match);
+      });
+      
+      // Warnung bei Duplikaten
+      const duplicates = Array.from(duplicateCheck.values()).filter(matches => matches.length > 1);
+      if (duplicates.length > 0) {
+        console.warn('⚠️ DUPLIKATE IN DATENBANK GEFUNDEN:', duplicates);
+        const duplicateDetails = duplicates.map(dup => {
+          const first = dup[0];
+          const dateStr = first.match_date ? new Date(first.match_date).toLocaleDateString('de-DE') : 'unbekannt';
+          return `${dup.length}x am ${dateStr} (IDs: ${dup.map(m => m.id).join(', ')})`;
+        }).join('; ');
+        console.warn(`⚠️ Duplikate: ${duplicateDetails}`);
+        // Zeige Warnung in UI (optional - könnte auch als Toast/Banner angezeigt werden)
+      }
+      
       setSeasonMatchdays(matchdaysWithCounts);
 
       const derivedStats = (() => {
@@ -1532,16 +1557,36 @@ function SuperAdminDashboard() {
             notes: noteParts.length ? noteParts.join(' · ') : null
           };
 
-        const { data: existingMatch, error: fetchExisting } = await supabase
+        // Verbesserte Duplikat-Prüfung: Normalisiere Datum (nur Tag, ohne Zeit)
+        const matchDateOnly = matchPayload.match_date ? new Date(matchPayload.match_date).toISOString().split('T')[0] : null;
+        
+        // Suche nach bestehenden Matches mit gleichem Datum und Teams
+        const { data: existingMatches, error: fetchExisting } = await supabase
             .from('matchdays')
-          .select('id, home_score, away_score, final_score, status, match_number, match_results(count)')
-            .eq('match_date', matchPayload.match_date)
+          .select('id, home_score, away_score, final_score, status, match_number, match_results(count), match_date')
             .eq('home_team_id', matchPayload.home_team_id)
             .eq('away_team_id', matchPayload.away_team_id)
-            .maybeSingle();
+            .gte('match_date', matchDateOnly ? `${matchDateOnly}T00:00:00` : null)
+            .lt('match_date', matchDateOnly ? `${matchDateOnly}T23:59:59` : null);
 
           if (fetchExisting && fetchExisting.code && fetchExisting.code !== 'PGRST116') {
             throw fetchExisting;
+          }
+
+          // Prüfe ob es ein Duplikat gibt
+          const existingMatch = existingMatches && existingMatches.length > 0 ? existingMatches[0] : null;
+          
+          // Warnung wenn mehrere Matches gefunden wurden (Duplikate!)
+          if (existingMatches && existingMatches.length > 1) {
+            console.warn(`⚠️ DUPLIKAT ERKANNT: ${existingMatches.length} Matches gefunden für ${match.homeTeam} vs ${match.awayTeam} am ${matchDateOnly}`);
+            matchIssues.push({
+              type: 'duplicate-detected',
+              matchId: existingMatches.map(m => m.id).join(', '),
+              count: existingMatches.length,
+              homeTeam: match.homeTeam,
+              awayTeam: match.awayTeam,
+              matchDate: matchDateOnly
+            });
           }
 
         if (existingMatch) {
@@ -1645,6 +1690,16 @@ function SuperAdminDashboard() {
         }
       }
 
+      // Prüfe auf Duplikat-Warnungen
+      const duplicateWarnings = matchIssues.filter(issue => issue.type === 'duplicate-detected');
+      if (duplicateWarnings.length > 0) {
+        console.warn('⚠️ DUPLIKATE ERKANNT:', duplicateWarnings);
+        const duplicateMessage = duplicateWarnings.map(w => 
+          `${w.count}x ${w.homeTeam} vs ${w.awayTeam} am ${w.matchDate}`
+        ).join('; ');
+        setScraperError(`⚠️ Duplikate erkannt: ${duplicateMessage}. Bitte in der Datenbank prüfen und bereinigen.`);
+      }
+
       if (matchIssues.length || clubIssues.length) {
         console.warn('⚠️ Match-Import Hinweise:', { clubIssues, matchIssues, scoreWithoutResults });
       }
@@ -1659,6 +1714,10 @@ function SuperAdminDashboard() {
         messageParts.push(`${scoreWithoutResults.length} Scores ohne Match-Results`);
       }
 
+      if (duplicateWarnings.length > 0) {
+        messageParts.push(`⚠️ ${duplicateWarnings.length} Duplikat${duplicateWarnings.length > 1 ? 'e' : ''} erkannt`);
+      }
+
       setMatchImportResult({
         type: matchIssues.length || clubIssues.length ? 'warning' : 'success',
         message: `Matches verarbeitet: ${messageParts.join(' · ')}.`,
@@ -1668,7 +1727,8 @@ function SuperAdminDashboard() {
           scoreWithoutResults,
           totalMatchesInserted,
           totalMatchesUpdated,
-          totalMatchesSkipped
+          totalMatchesSkipped,
+          duplicateWarnings
         }
       });
     } catch (error) {

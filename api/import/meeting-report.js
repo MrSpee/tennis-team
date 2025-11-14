@@ -191,10 +191,46 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
   const pendingPlayers = new Map();
   const positionUpdates = []; // Sammle Position-Updates für team_memberships
 
+  /**
+   * Prüft, ob ein Spieler-Name ein "nicht angetreten"-Marker ist
+   * (z.B. "unbekannt / wird nachgenannt k.A.*", "w/o", "walkover", etc.)
+   */
+  const isPlayerNotPlayed = (playerName) => {
+    if (!playerName) return false;
+    const normalized = playerName.toLowerCase().trim();
+    
+    // Liste von Mustern, die "nicht angetreten" bedeuten
+    const notPlayedPatterns = [
+      /^unbekannt/i,
+      /wird nachgenannt/i,
+      /k\.a\./i,
+      /^w\/o\b/i,
+      /^walkover/i,
+      /nicht angetreten/i,
+      /nicht gespielt/i,
+      /abgesagt/i,
+      /verletzt/i,
+      /krank/i,
+      /^–$/,
+      /^---$/,
+      /^n\.a\./i,
+      /^n\/a$/i
+    ];
+    
+    return notPlayedPatterns.some(pattern => pattern.test(normalized));
+  };
+
   const registerMissingPlayer = (player, context) => {
     if (!player || !player.name) return;
     const normalizedName = player.name.trim();
     if (!normalizedName) return;
+    
+    // Prüfe ob es ein "nicht angetreten"-Marker ist
+    if (isPlayerNotPlayed(normalizedName) || isPlayerNotPlayed(player.raw)) {
+      console.log(`[meeting-report] ⏭️  Spieler nicht angetreten, überspringe: "${normalizedName}"`);
+      return; // Ignoriere - kein Spieler angetreten
+    }
+    
     const primaryKey = `${normalizedName.toLowerCase()}|${player.lk || ''}`;
     const entry =
       pendingPlayers.get(primaryKey) || {
@@ -276,6 +312,13 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
   const ensurePlayer = async (player, context) => {
     const name = player?.name?.trim();
     if (!name) return null;
+    
+    // Prüfe ob es ein "nicht angetreten"-Marker ist
+    if (isPlayerNotPlayed(name) || isPlayerNotPlayed(player?.raw)) {
+      console.log(`[meeting-report] ⏭️  Spieler nicht angetreten, überspringe: "${name}"`);
+      return null; // Kein Spieler angetreten - kein Fehler
+    }
+    
     const cacheKey = name.toLowerCase();
     if (playerCache.has(cacheKey)) return playerCache.get(cacheKey);
 
