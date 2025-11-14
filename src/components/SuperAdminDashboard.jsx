@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, Fragment } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { calculateSimilarity, normalizeString } from '../services/matchdayImportService';
+import LoggingService from '../services/activityLogger';
 import {
   Users,
   Building2,
@@ -2516,6 +2517,98 @@ function SuperAdminDashboard() {
     [loadDashboardData, setParserMessage, setSeasonMatchdays, setMeetingDetails, setMatchResultsData, setSelectedSeasonMatch]
   );
 
+  const handleReassignMatchTeams = useCallback(
+    async (match, nextHomeTeamId, nextAwayTeamId, context = {}) => {
+      if (!match?.id) {
+        throw new Error('Matchday nicht gefunden.');
+      }
+      if (!nextHomeTeamId || !nextAwayTeamId) {
+        throw new Error('Bitte wähle sowohl Heim- als auch Gastteam aus.');
+      }
+      if (nextHomeTeamId === nextAwayTeamId) {
+        throw new Error('Heim- und Gastteam dürfen nicht identisch sein.');
+      }
+      if (
+        nextHomeTeamId === match.home_team_id &&
+        nextAwayTeamId === match.away_team_id
+      ) {
+        throw new Error('Keine Änderung erkannt. Bitte wähle andere Teams.');
+      }
+
+      const updatedAt = new Date().toISOString();
+
+      const { error } = await supabase
+        .from('matchdays')
+        .update({
+          home_team_id: nextHomeTeamId,
+          away_team_id: nextAwayTeamId,
+          updated_at: updatedAt
+        })
+        .eq('id', match.id);
+
+      if (error) {
+        throw error;
+      }
+
+      const updatedHomeTeam = teamById.get(nextHomeTeamId);
+      const updatedAwayTeam = teamById.get(nextAwayTeamId);
+
+      setSeasonMatchdays((prev) =>
+        prev.map((entry) =>
+          entry.id === match.id
+            ? {
+                ...entry,
+                home_team_id: nextHomeTeamId,
+                away_team_id: nextAwayTeamId
+              }
+            : entry
+        )
+      );
+
+      setMeetingDetails((prev) => {
+        const next = { ...prev };
+        if (next[match.id]) {
+          next[match.id] = {
+            ...next[match.id],
+            error: null,
+            data: null
+          };
+        }
+        return next;
+      });
+
+      setSelectedSeasonMatch((prev) => {
+        if (!prev || prev.id !== match.id) return prev;
+        return {
+          ...prev,
+          home_team_id: nextHomeTeamId,
+          away_team_id: nextAwayTeamId
+        };
+      });
+
+      try {
+        await LoggingService.logActivity('matchday_reassign_teams', 'matchday', match.id, {
+          previous_home_team_id: match.home_team_id,
+          previous_away_team_id: match.away_team_id,
+          new_home_team_id: nextHomeTeamId,
+          new_away_team_id: nextAwayTeamId,
+          meeting_home_team: context.meetingHomeTeam || null,
+          meeting_away_team: context.meetingAwayTeam || null,
+          group_name: match.group_name,
+          league: match.league
+        });
+      } catch (logError) {
+        console.warn('⚠️ Logging failed (non-critical):', logError);
+      }
+
+      return {
+        homeTeam: updatedHomeTeam,
+        awayTeam: updatedAwayTeam
+      };
+    },
+    [supabase, teamById, setSeasonMatchdays]
+  );
+
   const handleClubSearch = useCallback(
     async (summary, query) => {
       setClubSearchQueries((prev) => ({ ...prev, [summary.clubName]: query }));
@@ -2662,6 +2755,8 @@ function SuperAdminDashboard() {
       teamById={teamById}
       matchResultsData={matchResultsData}
       loadMatchResults={loadMatchResults}
+      allTeams={teams}
+      handleReassignMatchTeams={handleReassignMatchTeams}
       handleRunParserForAll={handleRunParserForAll}
       handleRunResultParser={handleRunResultParser}
       handleDeleteMatchday={handleDeleteMatchday}

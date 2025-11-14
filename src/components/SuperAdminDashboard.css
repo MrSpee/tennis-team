@@ -758,6 +758,75 @@
   vertical-align: top;
 }
 
+.matchday-team-reassign {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.matchday-team-reassign-header {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: #0f172a;
+}
+
+.matchday-team-reassign-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: #475569;
+  margin-bottom: 0.75rem;
+}
+
+.matchday-team-reassign-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-bottom: 0.75rem;
+}
+
+.matchday-team-reassign-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+  font-size: 0.85rem;
+  color: #334155;
+}
+
+.matchday-team-reassign-select {
+  width: 100%;
+  padding: 0.45rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: #ffffff;
+}
+
+.matchday-team-reassign-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 0.25rem;
+}
+
+.matchday-team-reassign-feedback {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.matchday-team-reassign-feedback--success {
+  color: #166534;
+}
+
+.matchday-team-reassign-feedback--error {
+  color: #b91c1c;
+}
+
 .matchday-missing-table thead th {
   background: #fff1e6;
   color: #7c2d12;

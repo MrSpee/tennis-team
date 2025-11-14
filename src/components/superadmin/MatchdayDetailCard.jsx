@@ -1,4 +1,4 @@
-import { Fragment, useEffect } from 'react';
+import { Fragment, useEffect, useState, useMemo, useCallback } from 'react';
 import MatchResultsTable from './MatchResultsTable';
 
 const formatCourtRange = (start, end) => {
@@ -26,7 +26,9 @@ function MatchdayDetailCard({
   selectedSeasonMatch,
   setSelectedSeasonMatch,
   creatingPlayerKey,
-  statusConfig
+  statusConfig,
+  allTeams,
+  handleReassignMatchTeams
 }) {
   const selectedHomeLabel = homeTeam
     ? `${homeTeam.club_name}${homeTeam.team_name ? ` ${homeTeam.team_name}` : ''}`
@@ -34,6 +36,81 @@ function MatchdayDetailCard({
   const selectedAwayLabel = awayTeam
     ? `${awayTeam.club_name}${awayTeam.team_name ? ` ${awayTeam.team_name}` : ''}`
     : 'Unbekannt';
+
+  const [pendingHomeTeamId, setPendingHomeTeamId] = useState(match.home_team_id || homeTeam?.id || '');
+  const [pendingAwayTeamId, setPendingAwayTeamId] = useState(match.away_team_id || awayTeam?.id || '');
+  const [reassignMessage, setReassignMessage] = useState(null);
+  const [isReassignSaving, setIsReassignSaving] = useState(false);
+
+  useEffect(() => {
+    setPendingHomeTeamId(match.home_team_id || homeTeam?.id || '');
+    setPendingAwayTeamId(match.away_team_id || awayTeam?.id || '');
+    setReassignMessage(null);
+    setIsReassignSaving(false);
+  }, [match?.id, match.home_team_id, match.away_team_id, homeTeam?.id, awayTeam?.id]);
+
+  const teamOptions = useMemo(() => {
+    if (!Array.isArray(allTeams)) return [];
+    return [...allTeams]
+      .map((team) => ({
+        id: team.id,
+        label: `${team.club_name}${team.team_name ? ` ${team.team_name}` : ''}`.trim() || 'Unbenanntes Team'
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [allTeams]);
+
+  const resolveTeamLabelById = useCallback(
+    (teamId) => {
+      if (!teamId) return '';
+      const option = teamOptions.find((team) => team.id === teamId);
+      return option?.label || '';
+    },
+    [teamOptions]
+  );
+
+  const handleSwapTeams = () => {
+    setPendingHomeTeamId(pendingAwayTeamId);
+    setPendingAwayTeamId(pendingHomeTeamId);
+  };
+
+  const handleApplyTeamReassign = async () => {
+    if (!handleReassignMatchTeams) return;
+    setReassignMessage(null);
+    try {
+      setIsReassignSaving(true);
+      const result = await handleReassignMatchTeams(match, pendingHomeTeamId, pendingAwayTeamId, {
+        meetingHomeTeam: meetingData?.metadata?.homeTeam,
+        meetingAwayTeam: meetingData?.metadata?.awayTeam
+      });
+
+      const nextHomeLabel =
+        result?.homeTeam?.club_name
+          ? `${result.homeTeam.club_name}${result.homeTeam.team_name ? ` ${result.homeTeam.team_name}` : ''}`
+          : resolveTeamLabelById(pendingHomeTeamId) || selectedHomeLabel;
+      const nextAwayLabel =
+        result?.awayTeam?.club_name
+          ? `${result.awayTeam.club_name}${result.awayTeam.team_name ? ` ${result.awayTeam.team_name}` : ''}`
+          : resolveTeamLabelById(pendingAwayTeamId) || selectedAwayLabel;
+
+      setReassignMessage({
+        type: 'success',
+        text: 'Team-Zuordnung aktualisiert. Spielbericht wird neu geladen …'
+      });
+
+      handleLoadMeetingDetails(match, {
+        homeLabel: nextHomeLabel,
+        awayLabel: nextAwayLabel,
+        applyImport: false
+      });
+    } catch (error) {
+      setReassignMessage({
+        type: 'error',
+        text: error.message || 'Team-Zuordnung konnte nicht gespeichert werden.'
+      });
+    } finally {
+      setIsReassignSaving(false);
+    }
+  };
 
   // Lade Match-Results aus DB, wenn Matchday geöffnet wird
   useEffect(() => {
@@ -173,6 +250,79 @@ function MatchdayDetailCard({
           </div>
         </div>
         {meetingError && <div className="parser-feedback parser-feedback--error">{meetingError}</div>}
+        {meetingError && handleReassignMatchTeams && (
+          <div className="matchday-team-reassign">
+            <div className="matchday-team-reassign-header">Team-Zuordnung korrigieren</div>
+            <div className="matchday-team-reassign-meta">
+              <div>
+                nuLiga Heim: <strong>{meetingData?.metadata?.homeTeam || '–'}</strong>
+              </div>
+              <div>
+                nuLiga Gast: <strong>{meetingData?.metadata?.awayTeam || '–'}</strong>
+              </div>
+            </div>
+            <div className="matchday-team-reassign-grid">
+              <div>
+                <label className="matchday-team-reassign-label">Heimteam (Datenbank)</label>
+                <select
+                  value={pendingHomeTeamId || ''}
+                  onChange={(e) => setPendingHomeTeamId(e.target.value || '')}
+                  className="matchday-team-reassign-select"
+                >
+                  <option value="">– Team wählen –</option>
+                  {teamOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="matchday-team-reassign-label">Gastteam (Datenbank)</label>
+                <select
+                  value={pendingAwayTeamId || ''}
+                  onChange={(e) => setPendingAwayTeamId(e.target.value || '')}
+                  className="matchday-team-reassign-select"
+                >
+                  <option value="">– Team wählen –</option>
+                  {teamOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="matchday-team-reassign-actions">
+              <button
+                type="button"
+                className="btn-modern btn-modern-inactive"
+                onClick={handleSwapTeams}
+                disabled={!pendingHomeTeamId || !pendingAwayTeamId}
+              >
+                Heim/Gast tauschen
+              </button>
+              <button
+                type="button"
+                className="btn-modern btn-modern-primary"
+                onClick={handleApplyTeamReassign}
+                disabled={
+                  isReassignSaving ||
+                  !pendingHomeTeamId ||
+                  !pendingAwayTeamId ||
+                  pendingHomeTeamId === pendingAwayTeamId
+                }
+              >
+                {isReassignSaving ? 'Speichere…' : 'Zuordnung speichern & neu laden'}
+              </button>
+            </div>
+            {reassignMessage && (
+              <div className={`matchday-team-reassign-feedback matchday-team-reassign-feedback--${reassignMessage.type}`}>
+                {reassignMessage.text}
+              </div>
+            )}
+          </div>
+        )}
         {meetingLoading && !meetingData && <div className="matchday-meeting-loading">Lade Spielbericht…</div>}
         {meetingData && (
           <div className="matchday-meeting-content">

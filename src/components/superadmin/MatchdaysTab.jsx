@@ -70,6 +70,8 @@ function MatchdaysTab({
   teamById,
   matchResultsData,
   loadMatchResults,
+  allTeams,
+  handleReassignMatchTeams,
   handleRunParserForAll,
   handleRunResultParser,
   handleDeleteMatchday,
@@ -339,6 +341,8 @@ function MatchdaysTab({
                               awayTeam={awayTeam}
                               matchResultsData={matchResultsData[match.id]}
                               loadMatchResults={loadMatchResults}
+                              allTeams={allTeams}
+                              handleReassignMatchTeams={handleReassignMatchTeams}
                               handleLoadMeetingDetails={handleLoadMeetingDetails}
                               handleCreateMissingPlayer={handleCreateMissingPlayer}
                               selectedSeasonMatch={selectedSeasonMatch}
