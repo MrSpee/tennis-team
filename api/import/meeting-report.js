@@ -483,26 +483,40 @@ module.exports = async function handler(req, res) {
     });
 
     const normalizeTeam = imports.normalizeTeamLabel || ((value) => (value ? value.toString().toLowerCase().trim() : ''));
+    const diceCoefficient = imports.diceCoefficient || (() => 0);
+    const TEAM_SIMILARITY_THRESHOLD = 0.85;
+
     const metaHome = meetingData.metadata?.homeTeam ? normalizeTeam(meetingData.metadata.homeTeam) : null;
     const metaAway = meetingData.metadata?.awayTeam ? normalizeTeam(meetingData.metadata.awayTeam) : null;
     const localHome = homeTeam ? normalizeTeam(homeTeam) : null;
     const localAway = awayTeam ? normalizeTeam(awayTeam) : null;
 
+    // Prüfe Heimteam - nur Fehler werfen wenn nicht ähnlich genug
     if (metaHome && localHome && metaHome !== localHome) {
-      const error = new Error(
-        `Spielbericht gehört zu "${meetingData.metadata?.homeTeam || 'unbekannt'}" (Heim), nicht zu "${homeTeam}".`
-      );
-      error.code = 'MEETING_TEAM_MISMATCH';
-      error.meta = { type: 'home', expected: homeTeam, actual: meetingData.metadata?.homeTeam };
-      throw error;
+      const similarity = diceCoefficient(metaHome, localHome);
+      if (similarity < TEAM_SIMILARITY_THRESHOLD) {
+        const error = new Error(
+          `Spielbericht gehört zu "${meetingData.metadata?.homeTeam || 'unbekannt'}" (Heim), nicht zu "${homeTeam}". Ähnlichkeit: ${(similarity * 100).toFixed(1)}%`
+        );
+        error.code = 'MEETING_TEAM_MISMATCH';
+        error.meta = { type: 'home', expected: homeTeam, actual: meetingData.metadata?.homeTeam, similarity };
+        throw error;
+      }
+      // Wenn ähnlich genug, akzeptieren wir es (z.B. "SV RG Sürth 1" vs "SV Rot-Gelb Sürth 1")
     }
+
+    // Prüfe Gastteam - nur Fehler werfen wenn nicht ähnlich genug
     if (metaAway && localAway && metaAway !== localAway) {
-      const error = new Error(
-        `Spielbericht gehört zu "${meetingData.metadata?.awayTeam || 'unbekannt'}" (Gast), nicht zu "${awayTeam}".`
-      );
-      error.code = 'MEETING_TEAM_MISMATCH';
-      error.meta = { type: 'away', expected: awayTeam, actual: meetingData.metadata?.awayTeam };
-      throw error;
+      const similarity = diceCoefficient(metaAway, localAway);
+      if (similarity < TEAM_SIMILARITY_THRESHOLD) {
+        const error = new Error(
+          `Spielbericht gehört zu "${meetingData.metadata?.awayTeam || 'unbekannt'}" (Gast), nicht zu "${awayTeam}". Ähnlichkeit: ${(similarity * 100).toFixed(1)}%`
+        );
+        error.code = 'MEETING_TEAM_MISMATCH';
+        error.meta = { type: 'away', expected: awayTeam, actual: meetingData.metadata?.awayTeam, similarity };
+        throw error;
+      }
+      // Wenn ähnlich genug, akzeptieren wir es (z.B. "SV RG Sürth 1" vs "SV Rot-Gelb Sürth 1")
     }
 
     let applyResult = null;

@@ -23,16 +23,16 @@
 
 .matchday-table-compact {
   width: 100%;
-  min-width: 1800px;
+  min-width: 1400px;
   border-collapse: collapse;
   table-layout: fixed;
 }
 
 .matchday-table-compact th,
 .matchday-table-compact td {
-  padding: 0.75rem 1rem;
+  padding: 0.6rem 0.7rem;
   border-bottom: 1px solid #e2e8f0;
-  font-size: 0.875rem;
+  font-size: 0.8rem;
   vertical-align: top;
   word-wrap: break-word;
   overflow-wrap: break-word;
@@ -45,83 +45,95 @@
   color: #475569;
   background: #f8fafc;
   white-space: nowrap;
+  font-size: 0.75rem;
 }
 
-/* Spaltenbreiten definieren */
+/* Spaltenbreiten definieren - kompakter */
 .matchday-table-compact th:nth-child(1),
 .matchday-table-compact td:nth-child(1) {
-  width: 50px;
+  width: 40px;
   text-align: center;
+  padding: 0.6rem 0.4rem;
 }
 
 .matchday-table-compact th:nth-child(2),
 .matchday-table-compact td:nth-child(2) {
-  width: 140px;
+  width: 110px;
+  padding: 0.6rem 0.5rem;
 }
 
 .matchday-table-compact th:nth-child(3),
 .matchday-table-compact td:nth-child(3) {
-  width: 100px;
+  width: 70px;
   text-align: center;
+  padding: 0.6rem 0.4rem;
 }
 
 .matchday-table-compact th:nth-child(4),
 .matchday-table-compact td:nth-child(4) {
-  width: 200px;
+  width: 160px;
+  padding: 0.6rem 0.5rem;
 }
 
 .matchday-table-compact th:nth-child(5),
 .matchday-table-compact td:nth-child(5) {
-  width: 200px;
+  width: 160px;
+  padding: 0.6rem 0.5rem;
 }
 
 .matchday-table-compact th:nth-child(6),
 .matchday-table-compact td:nth-child(6) {
-  width: 180px;
+  width: 140px;
+  padding: 0.6rem 0.5rem;
 }
 
 .matchday-table-compact th:nth-child(7),
 .matchday-table-compact td:nth-child(7) {
-  width: 180px;
+  width: 140px;
+  padding: 0.6rem 0.5rem;
 }
 
 .matchday-table-compact th:nth-child(8),
 .matchday-table-compact td:nth-child(8) {
-  width: 130px;
+  width: 100px;
+  padding: 0.6rem 0.4rem;
 }
 
 .matchday-table-compact th:nth-child(9),
 .matchday-table-compact td:nth-child(9) {
-  width: 100px;
+  width: 70px;
   text-align: center;
+  padding: 0.6rem 0.4rem;
 }
 
 .matchday-table-compact th:nth-child(10),
 .matchday-table-compact td:nth-child(10) {
-  width: 200px;
+  width: 160px;
   vertical-align: top;
+  padding: 0.6rem 0.5rem;
 }
 
 .matchday-parser-cell {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.3rem;
   align-items: flex-start;
 }
 
 .matchday-results-status {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.25rem;
   align-items: flex-start;
   width: 100%;
 }
 
 .matchday-table-compact th:nth-child(11),
 .matchday-table-compact td:nth-child(11) {
-  width: 220px;
+  width: 150px;
   text-align: center;
   vertical-align: middle;
+  padding: 0.6rem 0.5rem;
 }
 
 .table-responsive {
@@ -780,15 +792,17 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   width: 100%;
-  min-width: 180px;
+  min-width: 120px;
 }
 
 .matchday-table-actions button {
   width: 100%;
-  max-width: 160px;
+  max-width: 120px;
   white-space: nowrap;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.75rem;
 }
 
 .matchday-detail-row {
@@ -800,7 +814,7 @@
   border-bottom: 1px solid #e2e8f0;
   padding: 1.2rem 1.5rem;
   width: 100% !important;
-  min-width: 1800px;
+  min-width: 1400px;
   max-width: none !important;
 }
 
@@ -817,7 +831,7 @@
 .matchday-table-compact .matchday-detail-row td:nth-child(10),
 .matchday-table-compact .matchday-detail-row td:nth-child(11) {
   width: 100% !important;
-  min-width: 1800px;
+  min-width: 1400px;
 }
 
 .matchday-detail-inline {
