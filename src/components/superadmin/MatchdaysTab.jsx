@@ -263,18 +263,35 @@ function MatchdaysTab({
                               matchStatus: match.status
                             })}
                             <div className="matchday-results-status">
-                              <span
-                                className={`matchday-results-tag ${
-                                  matchResultsCount > 0 ? 'matchday-results-tag--ok' : 'matchday-results-tag--missing'
-                                }`}
-                                title={
-                                  matchResultsCount > 0
-                                    ? `${matchResultsCount} Einzelergebnisse gespeichert`
-                                    : 'Noch keine Einzelergebnisse importiert'
-                                }
-                              >
-                                {matchResultsCount > 0 ? `Ergebnisse (${matchResultsCount})` : 'Ergebnisse fehlen'}
-                              </span>
+                              {matchResultsCount > 0 ? (
+                                <span
+                                  className="matchday-results-tag matchday-results-tag--ok"
+                                  title={`${matchResultsCount} Einzelergebnisse gespeichert`}
+                                >
+                                  Ergebnisse ({matchResultsCount})
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="matchday-results-tag matchday-results-tag--missing matchday-results-tag--button"
+                                  title="Klicken, um Detail-Ergebnisse zu laden"
+                                  onClick={async () => {
+                                    // Öffne Details-Ansicht automatisch
+                                    setSelectedSeasonMatch({ ...match, __listIndex: index + 1 });
+                                    // Lade Meeting-Details und importiere Ergebnisse
+                                    await handleLoadMeetingDetails(match, {
+                                      homeLabel,
+                                      awayLabel,
+                                      applyImport: true
+                                    });
+                                  }}
+                                  disabled={meetingLoading || meetingImporting}
+                                >
+                                  {meetingLoading || meetingImporting
+                                    ? '⏳ Lade Ergebnisse…'
+                                    : 'Ergebnisse laden'}
+                                </button>
+                              )}
                               {missingPlayers.length > 0 && (
                                 <span
                                   className="matchday-results-missing"

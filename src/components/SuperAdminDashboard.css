@@ -708,6 +708,30 @@
   border-color: #cbd5f5;
 }
 
+.matchday-results-tag--button {
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.matchday-results-tag--button:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: #475569;
+  border-color: #94a3b8;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.matchday-results-tag--button:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.matchday-results-tag--button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .matchday-results-status {
   display: inline-flex;
   align-items: center;
