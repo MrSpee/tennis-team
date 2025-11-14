@@ -1406,16 +1406,47 @@ function SuperAdminDashboard() {
           }
         }
 
-        // Strategie 3: Fallback via splitTeamLabel
+        // Strategie 3: Exakte Suche via splitTeamLabel (mit Team-Nummer)
         const { clubName, suffix } = splitTeamLabel(teamName || '');
-        const keys = buildTeamKeys(teamName, clubName, suffix);
-
-        for (const key of keys) {
-          if (existingTeamLookup.has(key)) {
-            const teamId = existingTeamLookup.get(key);
-            console.log(`✅ Match-Import (Fallback): "${teamName}" → Team-ID ${teamId}`);
+        
+        // WICHTIG: Suche zuerst nach exaktem Match (Club + Team-Nummer)
+        if (clubName && suffix) {
+          const exactKey = normalizeString(`${clubName} ${suffix}`);
+          if (existingTeamLookup.has(exactKey)) {
+            const teamId = existingTeamLookup.get(exactKey);
+            console.log(`✅ Match-Import (Exakt): "${teamName}" → Team-ID ${teamId}`);
             teamIdRegistry.set(normalizedName, teamId);
             return { teamId, clubName: clubName || '' };
+          }
+        }
+        
+        // Strategie 4: Fallback mit allen Keys (nur wenn exakte Suche fehlschlägt)
+        const keys = buildTeamKeys(teamName, clubName, suffix);
+        // Entferne den Club-only Key, um falsche Matches zu vermeiden
+        const filteredKeys = keys.filter(key => {
+          const normalizedClub = normalizeString(clubName || '');
+          return key !== normalizedClub; // Ignoriere reine Club-Namen
+        });
+
+        for (const key of filteredKeys) {
+          if (existingTeamLookup.has(key)) {
+            const teamId = existingTeamLookup.get(key);
+            // Zusätzliche Validierung: Prüfe ob Team wirklich passt
+            const matchedTeam = teamById.get(teamId);
+            if (matchedTeam) {
+              const matchedClubNormalized = normalizeString(matchedTeam.club_name || '');
+              const matchedSuffixNormalized = normalizeString(matchedTeam.team_name || '');
+              const searchClubNormalized = normalizeString(clubName || '');
+              const searchSuffixNormalized = normalizeString(suffix || '');
+              
+              // Nur akzeptieren wenn Club UND Team-Nummer übereinstimmen
+              if (matchedClubNormalized === searchClubNormalized && 
+                  (searchSuffixNormalized === '' || matchedSuffixNormalized === searchSuffixNormalized)) {
+                console.log(`✅ Match-Import (Fallback validiert): "${teamName}" → Team-ID ${teamId}`);
+                teamIdRegistry.set(normalizedName, teamId);
+                return { teamId, clubName: clubName || '' };
+              }
+            }
           }
         }
 
