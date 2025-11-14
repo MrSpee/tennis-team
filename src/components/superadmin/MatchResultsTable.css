@@ -1,0 +1,156 @@
+/* Match Results Table - Optimiert für iPad */
+.match-results-table-wrapper {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #ffffff;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+}
+
+.match-results-table-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  padding: 1rem 1.3rem;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  color: #1d4ed8;
+  border-bottom: 2px solid #bfdbfe;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.match-results-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+}
+
+.match-results-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  min-width: 100%;
+}
+
+.match-results-table th,
+.match-results-table td {
+  padding: 1rem 0.9rem;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.95rem;
+  text-align: center;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  vertical-align: middle;
+  line-height: 1.5;
+}
+
+.match-results-table th {
+  background: #f8fafc;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #475569;
+  letter-spacing: 0.06em;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: 1rem 0.9rem;
+  box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1);
+}
+
+.match-results-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.match-results-table tbody tr:hover {
+  background: #f8fafc;
+}
+
+/* Spaltenbreiten für iPad */
+.match-results-col-number {
+  width: 50px;
+  min-width: 50px;
+  max-width: 50px;
+  padding: 0.85rem 0.5rem !important;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.match-results-col-players {
+  width: 220px;
+  min-width: 220px;
+  text-align: left !important;
+  padding: 1rem 1.1rem !important;
+}
+
+.match-results-players-cell {
+  color: #0f172a;
+  line-height: 1.7;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.match-results-col-set {
+  width: 100px;
+  min-width: 100px;
+  padding: 1rem 0.7rem !important;
+  font-weight: 600;
+  font-size: 1rem;
+  color: #334155;
+}
+
+.match-results-col-points {
+  width: 110px;
+  min-width: 110px;
+  padding: 1rem 0.8rem !important;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: #1d4ed8;
+  background: #f0f9ff;
+}
+
+/* Responsive für kleinere iPads */
+@media screen and (max-width: 1024px) {
+  .match-results-table th,
+  .match-results-table td {
+    padding: 0.75rem 0.7rem;
+    font-size: 0.85rem;
+  }
+
+  .match-results-col-players {
+    width: 180px;
+    min-width: 180px;
+  }
+
+  .match-results-col-set {
+    width: 80px;
+    min-width: 80px;
+  }
+
+  .match-results-col-points {
+    width: 90px;
+    min-width: 90px;
+  }
+}
+
+/* Scrollbar Styling für iPad */
+.match-results-table-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.match-results-table-scroll::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+.match-results-table-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.match-results-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+

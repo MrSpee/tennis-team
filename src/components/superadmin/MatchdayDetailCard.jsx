@@ -1,4 +1,5 @@
 import { Fragment, useEffect } from 'react';
+import MatchResultsTable from './MatchResultsTable';
 
 const formatCourtRange = (start, end) => {
   if (!start) return '–';
@@ -41,55 +42,6 @@ function MatchdayDetailCard({
     }
   }, [match?.id, matchResultsCount, matchResultsData, loadMatchResults]);
 
-  const renderPlayersCell = (players = []) => {
-    if (!players || players.length === 0) return '–';
-    return players.map((player, idx) => (
-      <Fragment key={`${player.name || player.raw || idx}`}>
-        {player.name || player.raw}
-        {player.meta ? ` (${player.meta})` : ''}
-        {idx < players.length - 1 && <br />}
-      </Fragment>
-    ));
-  };
-
-  const renderMeetingTable = (title, entries) => {
-    if (!entries || !entries.length) return null;
-    return (
-      <div className="meeting-table-wrapper">
-        <div className="meeting-table-title">{title}</div>
-        <table className="matchday-meeting-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Heim</th>
-              <th>Gast</th>
-              <th>1. Satz</th>
-              <th>2. Satz</th>
-              <th>3. Satz</th>
-              <th>Matchpunkte</th>
-              <th>Sätze</th>
-              <th>Spiele</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry, idx) => (
-              <tr key={`${title}-${idx}`}>
-                <td>{entry.matchNumber || idx + 1}</td>
-                <td className="meeting-player-cell">{renderPlayersCell(entry.homePlayers)}</td>
-                <td className="meeting-player-cell">{renderPlayersCell(entry.awayPlayers)}</td>
-                <td>{entry.setScores?.[0]?.raw || '–'}</td>
-                <td>{entry.setScores?.[1]?.raw || '–'}</td>
-                <td>{entry.setScores?.[2]?.raw || '–'}</td>
-                <td>{entry.matchPoints?.raw || '–'}</td>
-                <td>{entry.sets?.raw || '–'}</td>
-                <td>{entry.games?.raw || '–'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  };
 
   return (
     <div className="matchday-detail-inline">
@@ -174,8 +126,8 @@ function MatchdayDetailCard({
             </div>
           </div>
           <div className="matchday-meeting-content">
-            {renderMeetingTable('Einzel', matchResultsData.singles)}
-            {renderMeetingTable('Doppel', matchResultsData.doubles)}
+            <MatchResultsTable title="Einzel" entries={matchResultsData.singles} />
+            <MatchResultsTable title="Doppel" entries={matchResultsData.doubles} />
           </div>
         </div>
       )}
@@ -288,8 +240,8 @@ function MatchdayDetailCard({
                 </table>
               </div>
             )}
-            {renderMeetingTable('Einzel', meetingData.singles)}
-            {renderMeetingTable('Doppel', meetingData.doubles)}
+            <MatchResultsTable title="Einzel" entries={meetingData.singles} />
+            <MatchResultsTable title="Doppel" entries={meetingData.doubles} />
             {(meetingData.totals?.singles || meetingData.totals?.doubles || meetingData.totals?.overall) && (
               <div className="matchday-meeting-totals">
                 {meetingData.totals?.singles && (
