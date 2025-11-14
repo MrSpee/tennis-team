@@ -3756,6 +3756,10 @@
 .scraper-desktop-container {
   max-width: 1200px;
   margin: 0 auto;
+  margin-top: 0;
+  padding-top: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .scraper-compact-header {

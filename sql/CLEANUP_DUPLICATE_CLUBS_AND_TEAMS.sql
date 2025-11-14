@@ -146,16 +146,79 @@ BEGIN
     RAISE NOTICE 'Bereinige Team-Duplikate: % % (Behalte: %, Lösche: %)', 
       duplicate_record.club_name, duplicate_record.team_name, keep_team_id, delete_team_ids;
     
-    -- Migriere matchdays
+    -- Migriere matchdays (nur wenn keine Duplikate entstehen)
+    -- Zuerst: Lösche match_results für Matchdays, die gelöscht werden
+    DELETE FROM match_results
+    WHERE matchday_id IN (
+      SELECT id FROM matchdays
+      WHERE home_team_id = ANY(delete_team_ids)
+        AND EXISTS (
+          SELECT 1
+          FROM matchdays existing
+          WHERE existing.home_team_id = keep_team_id
+            AND existing.away_team_id = matchdays.away_team_id
+            AND DATE(existing.match_date) = DATE(matchdays.match_date)
+        )
+    );
+    
+    DELETE FROM match_results
+    WHERE matchday_id IN (
+      SELECT id FROM matchdays
+      WHERE away_team_id = ANY(delete_team_ids)
+        AND EXISTS (
+          SELECT 1
+          FROM matchdays existing
+          WHERE existing.away_team_id = keep_team_id
+            AND existing.home_team_id = matchdays.home_team_id
+            AND DATE(existing.match_date) = DATE(matchdays.match_date)
+        )
+    );
+    
+    -- Lösche Matchdays, die zu Duplikaten führen würden (behaltene Matchdays haben Priorität)
+    DELETE FROM matchdays
+    WHERE home_team_id = ANY(delete_team_ids)
+      AND EXISTS (
+        SELECT 1
+        FROM matchdays existing
+        WHERE existing.home_team_id = keep_team_id
+          AND existing.away_team_id = matchdays.away_team_id
+          AND DATE(existing.match_date) = DATE(matchdays.match_date)
+      );
+    
+    DELETE FROM matchdays
+    WHERE away_team_id = ANY(delete_team_ids)
+      AND EXISTS (
+        SELECT 1
+        FROM matchdays existing
+        WHERE existing.away_team_id = keep_team_id
+          AND existing.home_team_id = matchdays.home_team_id
+          AND DATE(existing.match_date) = DATE(matchdays.match_date)
+      );
+    
+    -- Migriere verbleibende Matchdays (home_team_id)
     UPDATE matchdays
     SET home_team_id = keep_team_id
     WHERE home_team_id = ANY(delete_team_ids);
     
+    -- Migriere verbleibende Matchdays (away_team_id)
     UPDATE matchdays
     SET away_team_id = keep_team_id
     WHERE away_team_id = ANY(delete_team_ids);
     
-    -- Migriere team_seasons
+    -- Migriere team_seasons (nur wenn keine Duplikate entstehen)
+    -- Lösche zuerst Season-Einträge, die zu Duplikaten führen würden
+    DELETE FROM team_seasons
+    WHERE team_id = ANY(delete_team_ids)
+      AND EXISTS (
+        SELECT 1
+        FROM team_seasons existing
+        WHERE existing.team_id = keep_team_id
+          AND existing.season = team_seasons.season
+          AND existing.league = team_seasons.league
+          AND existing.group_name = team_seasons.group_name
+      );
+    
+    -- Migriere verbleibende Season-Einträge
     UPDATE team_seasons
     SET team_id = keep_team_id
     WHERE team_id = ANY(delete_team_ids);
@@ -176,6 +239,12 @@ BEGIN
     UPDATE team_memberships
     SET team_id = keep_team_id
     WHERE team_id = ANY(delete_team_ids);
+    
+    -- Migriere primary_team_id in players_unified
+    -- Wenn ein Spieler primary_team_id auf ein gelöschtes Team hat, setze es auf das behaltene Team
+    UPDATE players_unified
+    SET primary_team_id = keep_team_id
+    WHERE primary_team_id = ANY(delete_team_ids);
     
     -- Migriere match_results (falls team_id vorhanden)
     -- Note: match_results hat normalerweise keine team_id, aber für Vollständigkeit

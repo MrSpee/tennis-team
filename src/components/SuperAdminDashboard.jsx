@@ -1485,8 +1485,8 @@ function SuperAdminDashboard() {
               if (matchedClubNormalized === searchClubNormalized && 
                   (searchSuffixNormalized === '' || matchedSuffixNormalized === searchSuffixNormalized)) {
                 console.log(`✅ Match-Import (Fallback validiert): "${teamName}" → Team-ID ${teamId}`);
-                teamIdRegistry.set(normalizedName, teamId);
-                return { teamId, clubName: clubName || '' };
+            teamIdRegistry.set(normalizedName, teamId);
+            return { teamId, clubName: clubName || '' };
               }
             }
           }
@@ -1593,16 +1593,16 @@ function SuperAdminDashboard() {
             // Wenn Match bereits existiert, aktualisiere es (auch ohne Teams)
             if (existingMatchByNumber) {
               console.log(`⚠️ Match ${matchNumber} existiert bereits, aber Teams fehlen. Wird übersprungen (kann manuell korrigiert werden).`);
-              matchIssues.push({
+            matchIssues.push({
                 type: 'missing-team-existing-match',
                 matchId: existingMatchByNumber.id,
                 matchNumber: matchNumber,
-                homeTeam: match.homeTeam,
+              homeTeam: match.homeTeam,
                 awayTeam: match.awayTeam,
                 homeTeamFound: !!homeLookup.teamId,
                 awayTeamFound: !!awayLookup.teamId
-              });
-              totalMatchesSkipped += 1;
+            });
+            totalMatchesSkipped += 1;
               continue; // Überspringe, da Match bereits existiert
             }
             matchIssues.push({
@@ -1630,13 +1630,13 @@ function SuperAdminDashboard() {
             
             // Versuche trotzdem das Match zu speichern, aber mit NULL-Teams
             // Das ermöglicht es, das Match später zu korrigieren
-            const matchDateIso = match.matchDateIso ? new Date(match.matchDateIso).toISOString() : null;
-            if (!matchDateIso) {
-              matchIssues.push({ type: 'missing-date', matchId: match.id });
-              totalMatchesSkipped += 1;
-              continue;
-            }
-            
+          const matchDateIso = match.matchDateIso ? new Date(match.matchDateIso).toISOString() : null;
+          if (!matchDateIso) {
+            matchIssues.push({ type: 'missing-date', matchId: match.id });
+            totalMatchesSkipped += 1;
+            continue;
+          }
+
             // Speichere Match mit NULL-Teams als "placeholder"
             const placeholderPayload = {
               match_date: matchDateIso,
@@ -1723,35 +1723,38 @@ function SuperAdminDashboard() {
         // Verbesserte Duplikat-Prüfung: Normalisiere Datum (nur Tag, ohne Zeit)
         const matchDateOnly = matchPayload.match_date ? new Date(matchPayload.match_date).toISOString().split('T')[0] : null;
         
-        // Suche nach bestehenden Matches mit:
-        // 1. Gleichem Datum UND Teams (wenn beide Teams vorhanden)
-        // 2. Gleichem Datum UND Match-Nummer (wenn Match-Nummer vorhanden)
-        // 3. Gleichem Datum UND einem Team NULL (Placeholder-Matches)
+        // WICHTIG: Prüfe ZUERST nach match_number (Unique Constraint!)
+        // Wenn match_number vorhanden ist, muss es eindeutig sein
         let existingMatches = null;
         let fetchExisting = null;
         
-        if (matchPayload.home_team_id && matchPayload.away_team_id) {
-          // Normale Suche: Beide Teams vorhanden
-          const result = await supabase
-            .from('matchdays')
-            .select('id, home_team_id, away_team_id, home_score, away_score, final_score, status, match_number, match_results(count), match_date')
-            .eq('home_team_id', matchPayload.home_team_id)
-            .eq('away_team_id', matchPayload.away_team_id)
-            .gte('match_date', matchDateOnly ? `${matchDateOnly}T00:00:00` : null)
-            .lt('match_date', matchDateOnly ? `${matchDateOnly}T23:59:59` : null);
-          existingMatches = result.data;
-          fetchExisting = result.error;
-        }
-        
-        // Zusätzlich: Suche nach Match-Nummer (wenn vorhanden)
-        if (matchPayload.match_number && (!existingMatches || existingMatches.length === 0)) {
+        if (matchPayload.match_number) {
           const resultByNumber = await supabase
             .from('matchdays')
-            .select('id, home_team_id, away_team_id, home_score, away_score, final_score, status, match_number, match_results(count), match_date')
-            .eq('match_number', matchPayload.match_number);
+            .select('id, home_team_id, away_team_id, home_score, away_score, final_score, status, match_number, match_results(count), match_date, notes')
+            .eq('match_number', matchPayload.match_number)
+            .limit(10);
+          
           if (resultByNumber.data && resultByNumber.data.length > 0) {
             existingMatches = resultByNumber.data;
             fetchExisting = resultByNumber.error;
+            console.log(`✅ Match mit Nummer ${matchPayload.match_number} bereits gefunden: ${existingMatches.length} Eintrag(e)`);
+          }
+        }
+        
+        // Wenn kein Match per match_number gefunden, suche nach Datum + Teams
+        if (!existingMatches || existingMatches.length === 0) {
+          if (matchPayload.home_team_id && matchPayload.away_team_id) {
+            // Normale Suche: Beide Teams vorhanden
+            const result = await supabase
+              .from('matchdays')
+              .select('id, home_team_id, away_team_id, home_score, away_score, final_score, status, match_number, match_results(count), match_date')
+            .eq('home_team_id', matchPayload.home_team_id)
+            .eq('away_team_id', matchPayload.away_team_id)
+              .gte('match_date', matchDateOnly ? `${matchDateOnly}T00:00:00` : null)
+              .lt('match_date', matchDateOnly ? `${matchDateOnly}T23:59:59` : null);
+            existingMatches = result.data;
+            fetchExisting = result.error;
           }
         }
         
@@ -1776,18 +1779,37 @@ function SuperAdminDashboard() {
           }
 
           // Prüfe ob es ein Duplikat gibt
-          const existingMatch = existingMatches && existingMatches.length > 0 ? existingMatches[0] : null;
+          // WICHTIG: Wenn per match_number gefunden, nimm das erste Match
+          // Wenn per Teams gefunden, nimm das beste Match (meiste match_results, neuestes Datum)
+          let existingMatch = null;
+          if (existingMatches && existingMatches.length > 0) {
+            if (matchPayload.match_number) {
+              // Wenn per match_number gefunden, nimm das erste (sollte nur eins sein)
+              existingMatch = existingMatches[0];
+            } else {
+              // Wenn per Teams gefunden, wähle das beste Match
+              existingMatch = existingMatches.sort((a, b) => {
+                const aResults = Array.isArray(a.match_results) && a.match_results.length ? a.match_results[0]?.count || 0 : 0;
+                const bResults = Array.isArray(b.match_results) && b.match_results.length ? b.match_results[0]?.count || 0 : 0;
+                if (bResults !== aResults) return bResults - aResults;
+                if (a.match_number && !b.match_number) return -1;
+                if (!a.match_number && b.match_number) return 1;
+                return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+              })[0];
+            }
+          }
           
           // Warnung wenn mehrere Matches gefunden wurden (Duplikate!)
           if (existingMatches && existingMatches.length > 1) {
-            console.warn(`⚠️ DUPLIKAT ERKANNT: ${existingMatches.length} Matches gefunden für ${match.homeTeam} vs ${match.awayTeam} am ${matchDateOnly}`);
+            console.warn(`⚠️ DUPLIKAT ERKANNT: ${existingMatches.length} Matches gefunden für ${match.homeTeam} vs ${match.awayTeam} am ${matchDateOnly} (Match-Nr: ${matchPayload.match_number || 'keine'})`);
             matchIssues.push({
               type: 'duplicate-detected',
               matchId: existingMatches.map(m => m.id).join(', '),
               count: existingMatches.length,
               homeTeam: match.homeTeam,
               awayTeam: match.awayTeam,
-              matchDate: matchDateOnly
+              matchDate: matchDateOnly,
+              matchNumber: matchPayload.match_number
             });
           }
 
@@ -1810,7 +1832,7 @@ function SuperAdminDashboard() {
           const needsMatchNumberUpdate =
             matchPayload.match_number != null &&
             String(matchPayload.match_number) !== String(existingMatch.match_number ?? '');
-          
+
           // WICHTIG: Wenn Placeholder-Match und Teams jetzt vorhanden sind, aktualisiere die Teams
           const needsTeamUpdate = isPlaceholder && hasTeams && (
             existingMatch.home_team_id !== matchPayload.home_team_id ||
@@ -1903,12 +1925,12 @@ function SuperAdminDashboard() {
                     } else {
                       const errorMsg = meetingResult?.error || meetingRaw || 'Unbekannter Fehler';
                       console.warn(`⚠️ Automatischer match_results Import fehlgeschlagen für Matchday ${existingMatch.id}:`, errorMsg);
-                      scoreWithoutResults.push({
-                        matchId: existingMatch.id,
-                        home: match.homeTeam,
-                        away: match.awayTeam,
-                        score: matchPayload.final_score || `${matchPayload.home_score}:${matchPayload.away_score}`
-                      });
+                scoreWithoutResults.push({
+                  matchId: existingMatch.id,
+                  home: match.homeTeam,
+                  away: match.awayTeam,
+                  score: matchPayload.final_score || `${matchPayload.home_score}:${matchPayload.away_score}`
+                });
                       matchIssues.push({
                         type: 'meeting-import-failed',
                         matchId: existingMatch.id,
@@ -1957,10 +1979,51 @@ function SuperAdminDashboard() {
 
           if (insertError) {
             if (insertError.code === '23505') {
+              // Unique Constraint verletzt - versuche das bestehende Match zu finden
+              console.warn(`⚠️ Unique Constraint verletzt für Match: ${match.homeTeam} vs ${match.awayTeam} (Match-Nr: ${matchPayload.match_number})`);
+              
+              // Suche nach bestehendem Match (per match_number oder Datum+Teams)
+              let existingMatchByConstraint = null;
+              if (matchPayload.match_number) {
+                const { data: foundByNumber } = await supabase
+                  .from('matchdays')
+                  .select('id, home_team_id, away_team_id, home_score, away_score, final_score, status, match_number, match_date')
+                  .eq('match_number', matchPayload.match_number)
+                  .limit(1)
+                  .maybeSingle();
+                if (foundByNumber) {
+                  existingMatchByConstraint = foundByNumber;
+                }
+              }
+              
+              if (!existingMatchByConstraint && matchPayload.home_team_id && matchPayload.away_team_id && matchDateOnly) {
+                const { data: foundByTeams } = await supabase
+                  .from('matchdays')
+                  .select('id, home_team_id, away_team_id, home_score, away_score, final_score, status, match_number, match_date')
+                  .eq('home_team_id', matchPayload.home_team_id)
+                  .eq('away_team_id', matchPayload.away_team_id)
+                  .gte('match_date', `${matchDateOnly}T00:00:00`)
+                  .lt('match_date', `${matchDateOnly}T23:59:59`)
+                  .limit(1)
+                  .maybeSingle();
+                if (foundByTeams) {
+                  existingMatchByConstraint = foundByTeams;
+                }
+              }
+              
+              if (existingMatchByConstraint) {
+                // Match existiert bereits - behandle wie Update
+                console.log(`✅ Bestehendes Match gefunden (Constraint): ID ${existingMatchByConstraint.id}`);
+                // Überspringe, da bereits in existingMatch-Logik behandelt
+                totalMatchesSkipped += 1;
+                continue;
+              }
+              
               matchIssues.push({
                 type: 'duplicate',
                 matchId: null,
-                payload: matchPayload
+                payload: matchPayload,
+                error: insertError.message
               });
               totalMatchesSkipped += 1;
               continue;
@@ -2062,7 +2125,7 @@ function SuperAdminDashboard() {
 
       // Zähle Matches mit fehlenden Teams
       const missingTeamMatches = matchIssues.filter(issue => issue.type === 'missing-team');
-      
+
       const messageParts = [
         `${totalMatchesInserted} neue Matchdays`,
         `${totalMatchesUpdated} aktualisierte Scores`,
