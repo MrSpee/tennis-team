@@ -1821,6 +1821,17 @@ function SuperAdminDashboard() {
           const isPlaceholder = !existingMatch.home_team_id || !existingMatch.away_team_id;
           const hasTeams = matchPayload.home_team_id && matchPayload.away_team_id;
 
+          // WICHTIG: Wenn match_number bereits existiert und das Match NICHT das gleiche ist, überspringe
+          // (verhindert Unique Constraint Verletzung)
+          if (matchPayload.match_number && 
+              existingMatch.match_number && 
+              String(matchPayload.match_number) === String(existingMatch.match_number) &&
+              existingMatch.id !== match.id) {
+            console.log(`ℹ️ Match mit Nummer ${matchPayload.match_number} existiert bereits (ID: ${existingMatch.id}). Überspringe Import.`);
+            totalMatchesSkipped += 1;
+            continue;
+          }
+
           const hasNewScore =
             matchPayload.home_score != null &&
             matchPayload.away_score != null &&
@@ -1829,9 +1840,26 @@ function SuperAdminDashboard() {
               existingHome !== matchPayload.home_score ||
               existingAway !== matchPayload.away_score);
 
-          const needsMatchNumberUpdate =
-            matchPayload.match_number != null &&
-            String(matchPayload.match_number) !== String(existingMatch.match_number ?? '');
+          // WICHTIG: Prüfe ob match_number Update sicher ist (nur wenn keine andere match_number existiert)
+          let needsMatchNumberUpdate = false;
+          if (matchPayload.match_number != null &&
+              String(matchPayload.match_number) !== String(existingMatch.match_number ?? '')) {
+            // Prüfe ob die neue match_number bereits von einem anderen Match verwendet wird
+            const { data: conflictCheck } = await supabase
+              .from('matchdays')
+              .select('id')
+              .eq('match_number', matchPayload.match_number)
+              .neq('id', existingMatch.id)
+              .limit(1)
+              .maybeSingle();
+            
+            if (conflictCheck) {
+              console.log(`⚠️ Match-Nummer ${matchPayload.match_number} wird bereits von Match ${conflictCheck.id} verwendet. Überspringe Update.`);
+              needsMatchNumberUpdate = false;
+            } else {
+              needsMatchNumberUpdate = true;
+            }
+          }
 
           // WICHTIG: Wenn Placeholder-Match und Teams jetzt vorhanden sind, aktualisiere die Teams
           const needsTeamUpdate = isPlaceholder && hasTeams && (
@@ -2125,12 +2153,17 @@ function SuperAdminDashboard() {
 
       // Zähle Matches mit fehlenden Teams
       const missingTeamMatches = matchIssues.filter(issue => issue.type === 'missing-team');
+      const duplicateMatches = matchIssues.filter(issue => issue.type === 'duplicate' || issue.type === 'duplicate-detected');
 
       const messageParts = [
         `${totalMatchesInserted} neue Matchdays`,
         `${totalMatchesUpdated} aktualisierte Scores`,
         `${totalMatchesSkipped} übersprungen`
       ];
+
+      if (duplicateMatches.length > 0) {
+        messageParts.push(`ℹ️ ${duplicateMatches.length} Match${duplicateMatches.length > 1 ? 'es' : ''} bereits vorhanden (nicht erneut importiert)`);
+      }
 
       if (missingTeamMatches.length > 0) {
         messageParts.push(`⚠️ ${missingTeamMatches.length} Match${missingTeamMatches.length > 1 ? 'es' : ''} mit fehlenden Teams (bitte manuell ergänzen)`);
