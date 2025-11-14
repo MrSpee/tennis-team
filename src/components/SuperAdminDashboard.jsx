@@ -609,12 +609,12 @@ function SuperAdminDashboard() {
         matchedClub = existingClubsByNormalizedName.get(normalizedEntry)[0];
         matchScore = 1;
         status = 'existing';
-      } else if (scored.length > 0 && scored[0].score >= 0.85) {
-        // Nur als Match akzeptieren wenn Score >= 85%
+      } else if (scored.length > 0 && scored[0].score >= 0.90) {
+        // Nur als Match akzeptieren wenn Score >= 90%
         matchedClub = scored[0].club;
         matchScore = scored[0].score;
         if (matchScore >= 0.95) status = 'existing';
-        else if (matchScore >= 0.85) status = 'fuzzy';
+        else if (matchScore >= 0.90) status = 'fuzzy'; // 90-95% = manuelle Bestätigung
       }
 
       entry.teams.sort((a, b) => a.original.localeCompare(b.original));
@@ -1362,6 +1362,22 @@ function SuperAdminDashboard() {
 
           if (resolvedTeamId) {
             registerTeamId(preferredTeamName, resolvedClubName, preferredSuffix, resolvedTeamId);
+            
+            // Stelle sicher, dass team_season existiert (auch für bestehende Teams)
+            if (!teamMapping?.existingTeamSeasonId) {
+              try {
+                await ensureTeamSeason(
+                  resolvedTeamId,
+                  team.season || scraperData?.season || null,
+                  team.league || summary.leagues?.[0] || null,
+                  team.groupName || summary.groups?.[0] || null,
+                  inferTeamSize(preferredTeamName)
+                );
+                console.log(`✅ Team-Season erstellt/aktualisiert für Team-ID ${resolvedTeamId}`);
+              } catch (seasonError) {
+                console.warn(`⚠️ Fehler beim Erstellen der Team-Season für Team-ID ${resolvedTeamId}:`, seasonError);
+              }
+            }
           }
         }
       }
@@ -2656,7 +2672,43 @@ function SuperAdminDashboard() {
   );
 
 
-  const renderScraper = () => <ScraperTab />;
+  const renderScraper = () => (
+    <ScraperTab
+      scraperApiLoading={scraperApiLoading}
+      scraperApiGroups={scraperApiGroups}
+      setScraperApiGroups={setScraperApiGroups}
+      scraperApiApplyMode={scraperApiApplyMode}
+      setScraperApiApplyMode={setScraperApiApplyMode}
+      scraperError={scraperError}
+      scraperSuccess={scraperSuccess}
+      scraperData={scraperData}
+      scraperClubSummaries={scraperClubSummaries}
+      scraperStats={scraperStats}
+      scraperClubMappings={scraperClubMappings}
+      updateClubMapping={updateClubMapping}
+      updateTeamMapping={updateTeamMapping}
+      clubSearchQueries={clubSearchQueries}
+      clubSearchResults={clubSearchResults}
+      handleClubSearch={handleClubSearch}
+      handleScraperApiFetch={handleScraperApiFetch}
+      handleScraperImport={handleScraperImport}
+      handleAdoptExistingClub={handleAdoptExistingClub}
+      handleCreateClub={handleCreateClub}
+      handleCreateTeam={handleCreateTeam}
+      handleEnsureTeamSeason={handleEnsureTeamSeason}
+      scraperImporting={scraperImporting}
+      scraperImportResult={scraperImportResult}
+      matchImportResult={matchImportResult}
+      scraperMatchSelections={scraperMatchSelections}
+      setScraperMatchSelections={setScraperMatchSelections}
+      scraperSelectedGroupId={scraperSelectedGroupId}
+      setScraperSelectedGroupId={setScraperSelectedGroupId}
+      scraperSelectedMatch={scraperSelectedMatch}
+      setScraperSelectedMatch={setScraperSelectedMatch}
+      scraperMatchStatus={scraperMatchStatus}
+      resetScraper={resetScraper}
+    />
+  );
 
   // ---------------------------------------------------------------------------
   // UI Rendering

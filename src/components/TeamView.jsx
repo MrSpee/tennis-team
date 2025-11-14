@@ -246,7 +246,7 @@ const TeamView = ({
       
       console.log('🏆 Team Season Info:', teamSeason);
       
-      // 2. Finde alle Teams in der gleichen Liga/Gruppe (über team_seasons)
+      // 2. Finde alle Teams in der gleichen Liga/Gruppe/Saison (über team_seasons)
       const { data: leagueTeamSeasons, error: teamsError } = await supabase
         .from('team_seasons')
         .select(`
@@ -255,13 +255,94 @@ const TeamView = ({
         `)
         .eq('league', teamSeason.league)
         .eq('group_name', teamSeason.group_name)
+        .eq('season', teamSeason.season)
         .eq('is_active', true);
       
       if (teamsError) throw teamsError;
       
-      const leagueTeams = leagueTeamSeasons
-        ?.map(ts => ts.team_info)
-        .filter(Boolean) || [];
+      console.log('🔍 Raw leagueTeamSeasons:', leagueTeamSeasons?.length || 0, leagueTeamSeasons);
+      
+      // Dedupliziere Teams - es kann mehrere team_seasons Einträge für das gleiche Team geben
+      // ZUSÄTZLICH: Dedupliziere auch nach Team-Name, falls mehrere Teams mit gleichem Namen existieren
+      // BESONDERS: Ignoriere "TC Dellbrück" wenn "TV Dellbrück" existiert (falscher Club-Name)
+      const uniqueTeamsMap = new Map(); // Nach ID
+      const uniqueTeamsByNameMap = new Map(); // Nach normalisiertem Namen
+      const duplicateTeams = [];
+      const duplicateTeamNames = [];
+      const ignoredTeams = [];
+      
+      // Zuerst: Sammle alle Teams und identifiziere "TC Dellbrück" vs "TV Dellbrück"
+      const allTeams = leagueTeamSeasons?.map(ts => ts.team_info).filter(Boolean) || [];
+      const hasTVDellbrueck = allTeams.some(t => 
+        t.club_name && t.club_name.toLowerCase().includes('tv dellbrück')
+      );
+      
+      leagueTeamSeasons?.forEach(ts => {
+        const teamInfo = ts.team_info;
+        if (teamInfo && teamInfo.id) {
+          const teamLabel = `${teamInfo.club_name} ${teamInfo.team_name}`.trim();
+          const normalizedName = teamLabel.toLowerCase().replace(/\s+/g, ' ').trim();
+          
+          // IGNORIERE "TC Dellbrück" wenn "TV Dellbrück" existiert
+          if (hasTVDellbrueck && teamInfo.club_name && teamInfo.club_name.toLowerCase().includes('tc dellbrück')) {
+            ignoredTeams.push({
+              teamId: teamInfo.id,
+              teamName: teamLabel,
+              reason: 'TC Dellbrück wird ignoriert, da TV Dellbrück existiert'
+            });
+            return; // Skip falsches Team
+          }
+          
+          // Prüfe auf Duplikat nach ID
+          if (uniqueTeamsMap.has(teamInfo.id)) {
+            duplicateTeams.push({
+              teamId: teamInfo.id,
+              teamName: teamLabel,
+              existing: uniqueTeamsMap.get(teamInfo.id)
+            });
+            return; // Skip, bereits vorhanden
+          }
+          
+          // Prüfe auf Duplikat nach normalisiertem Namen (ohne TC/TV Unterschied)
+          // Normalisiere "TC" und "TV" zu einem gemeinsamen Präfix
+          const nameForComparison = normalizedName.replace(/^(tc|tv)\s+/i, 'dellbrück ').trim();
+          const existingByNormalizedName = Array.from(uniqueTeamsByNameMap.values()).find(existing => {
+            const existingNormalized = `${existing.club_name} ${existing.team_name}`.toLowerCase().replace(/\s+/g, ' ').trim();
+            const existingForComparison = existingNormalized.replace(/^(tc|tv)\s+/i, 'dellbrück ').trim();
+            return existingForComparison === nameForComparison && 
+                   (existingNormalized.includes('dellbrück') || normalizedName.includes('dellbrück'));
+          });
+          
+          if (existingByNormalizedName) {
+            duplicateTeamNames.push({
+              teamId: teamInfo.id,
+              teamName: teamLabel,
+              existingTeamId: existingByNormalizedName.id,
+              existingTeamName: `${existingByNormalizedName.club_name} ${existingByNormalizedName.team_name}`.trim()
+            });
+            // Verwende das bestehende Team (behalte "TV" statt "TC")
+            return;
+          }
+          
+          // Neues Team - hinzufügen
+          uniqueTeamsMap.set(teamInfo.id, teamInfo);
+          uniqueTeamsByNameMap.set(normalizedName, teamInfo);
+        }
+      });
+      
+      if (duplicateTeams.length > 0) {
+        console.warn('⚠️ Duplicate teams found (same ID):', duplicateTeams);
+      }
+      
+      if (duplicateTeamNames.length > 0) {
+        console.warn('⚠️ Duplicate team names found (different IDs - will use first occurrence):', duplicateTeamNames);
+      }
+      
+      if (ignoredTeams.length > 0) {
+        console.warn('⚠️ Ignored teams (falsche Club-Namen):', ignoredTeams);
+      }
+      
+      const leagueTeams = Array.from(uniqueTeamsMap.values());
       
       if (!leagueTeams || leagueTeams.length === 0) {
         console.warn('No teams found in league');
@@ -269,7 +350,11 @@ const TeamView = ({
         return;
       }
       
-      console.log('👥 Found teams in league:', leagueTeams.length);
+      console.log('👥 Found teams in league:', leagueTeams.length, 'unique teams (deduplicated from', leagueTeamSeasons?.length || 0, 'team_seasons entries)');
+      console.log('👥 Team names with IDs:', leagueTeams.map(t => ({
+        id: t.id,
+        name: `${t.club_name} ${t.team_name}`.trim()
+      })));
       
       const teamIds = leagueTeams.map(t => t.id);
       
@@ -302,8 +387,21 @@ const TeamView = ({
         allResults || []
       );
       
-      console.log('✅ Standings calculated:', standings);
-      setStandings(standings);
+      // Markiere eigenes Team
+      const standingsWithOwnTeam = standings.map(s => ({
+        ...s,
+        is_own_team: s.team_id === tid
+      }));
+      
+      console.log('✅ Standings calculated:', standingsWithOwnTeam.length, 'teams');
+      console.log('✅ Standings details:', standingsWithOwnTeam.map(s => ({
+        position: s.position,
+        team_name: s.team_name,
+        team_id: s.team_id,
+        is_own_team: s.is_own_team
+      })));
+      
+      setStandings(standingsWithOwnTeam);
       
     } catch (error) {
       console.error('Error loading standings:', error);
@@ -560,7 +658,7 @@ const TeamView = ({
                     <tbody>
                       {standings.map((team, idx) => (
                         <tr 
-                          key={idx}
+                          key={team.team_id || team.teamId || `team-${idx}`}
                           className={team.is_own_team ? 'own-team' : ''}
                           style={team.is_own_team ? {
                             background: 'linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)',
