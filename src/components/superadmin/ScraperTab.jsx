@@ -104,90 +104,83 @@ function ScraperTab({
         </div>
       </div>
 
-      {/* Konfiguration */}
-      <div className="scraper-config-section" style={{ marginBottom: '1.5rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px' }}>
-        <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>
-            Import-Modus:
-          </label>
-          <div style={{ display: 'flex', gap: '1rem' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-              <input
-                type="radio"
-                value="selected"
-                checked={importMode === 'selected'}
-                onChange={(e) => setImportMode(e.target.value)}
-              />
-              <span>Einzelne Gruppen (für Tests)</span>
+      {/* Vereinfachte Konfiguration */}
+      <div className="scraper-config-section" style={{ marginBottom: '1.5rem', padding: '1.5rem', background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.9rem', color: '#475569' }}>
+              Gruppen auswählen:
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               <input
-                type="radio"
-                value="all"
-                checked={importMode === 'all'}
-                onChange={(e) => setImportMode(e.target.value)}
+                type="text"
+                value={scraperApiGroups}
+                onChange={(e) => setScraperApiGroups(e.target.value)}
+                placeholder="z.B. 43,44,46 oder leer für alle"
+                style={{
+                  flex: 1,
+                  padding: '0.75rem',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '6px',
+                  fontSize: '0.95rem',
+                  background: 'white'
+                }}
               />
-              <span>Alle Gruppen (automatisch)</span>
+              <button
+                onClick={handleFetchClick}
+                disabled={scraperApiLoading}
+                className="btn-modern"
+                style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.5rem',
+                  padding: '0.75rem 1.25rem',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {scraperApiLoading ? (
+                  <>
+                    <Loader size={16} className="animate-spin" />
+                    Lade...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw size={16} />
+                    Laden
+                  </>
+                )}
+              </button>
+            </div>
+            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
+              Leer lassen = alle Gruppen der Saison
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.9rem', color: '#475569' }}>
+              Import-Modus:
             </label>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', padding: '0.5rem', borderRadius: '6px', background: scraperApiApplyMode ? '#dcfce7' : 'white', border: `1px solid ${scraperApiApplyMode ? '#86efac' : '#cbd5e1'}` }}>
+                <input
+                  type="checkbox"
+                  checked={scraperApiApplyMode}
+                  onChange={(e) => setScraperApiApplyMode(e.target.checked)}
+                  style={{ cursor: 'pointer' }}
+                />
+                <span style={{ fontSize: '0.9rem', fontWeight: scraperApiApplyMode ? 600 : 400 }}>
+                  {scraperApiApplyMode ? '✅ Direktimport aktiv' : 'Vorschau-Modus'}
+                </span>
+              </label>
+            </div>
+            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
+              {scraperApiApplyMode ? 'Daten werden direkt in die Datenbank geschrieben' : 'Nur Vorschau, keine Änderungen'}
+            </div>
           </div>
         </div>
 
-        {importMode === 'selected' && (
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>
-              Gruppen (kommagetrennt, z.B. 43,44,46):
-            </label>
-            <input
-              type="text"
-              value={scraperApiGroups}
-              onChange={(e) => setScraperApiGroups(e.target.value)}
-              placeholder="43,44,46"
-              style={{
-                width: '100%',
-                padding: '0.5rem',
-                border: '1px solid #cbd5e1',
-                borderRadius: '4px',
-                fontSize: '0.9rem'
-              }}
-            />
-          </div>
-        )}
-
-        <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={scraperApiApplyMode}
-              onChange={(e) => setScraperApiApplyMode(e.target.checked)}
-            />
-            <span style={{ fontWeight: 600 }}>Direktimport aktiv (schreibt in Supabase)</span>
-          </label>
-          <div style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '0.25rem', marginLeft: '1.5rem' }}>
-            Wenn aktiviert, werden Teams, Team-Seasons und Matchdays direkt in die Datenbank geschrieben.
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <button
-            onClick={handleFetchClick}
-            disabled={scraperApiLoading}
-            className="btn-modern"
-            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-          >
-            {scraperApiLoading ? (
-              <>
-                <Loader size={16} className="animate-spin" />
-                Lade Daten...
-              </>
-            ) : (
-              <>
-                <RefreshCw size={16} />
-                {importMode === 'all' ? 'Alle Gruppen laden' : 'Gruppen laden'}
-              </>
-            )}
-          </button>
-
-          {scraperData && (
+        {scraperData && (
+          <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '1rem', borderTop: '1px solid #e2e8f0' }}>
             <button
               onClick={handleScraperImport}
               disabled={scraperImporting || clubsNeedingConfirmation.length > 0}
@@ -196,34 +189,35 @@ function ScraperTab({
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.5rem',
-                background: scraperImporting ? '#94a3b8' : '#10b981'
+                background: scraperImporting ? '#94a3b8' : '#10b981',
+                padding: '0.75rem 1.5rem',
+                fontSize: '1rem',
+                fontWeight: 600
               }}
             >
               {scraperImporting ? (
                 <>
-                  <Loader size={16} className="animate-spin" />
-                  Importiere...
+                  <Loader size={18} className="animate-spin" />
+                  Import läuft...
                 </>
               ) : (
                 <>
-                  <Download size={16} />
+                  <Download size={18} />
                   Import starten
                 </>
               )}
             </button>
-          )}
 
-          {scraperData && (
             <button
               onClick={resetScraper}
               className="btn-modern btn-modern-inactive"
-              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1.25rem' }}
             >
               <X size={16} />
               Zurücksetzen
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Status Messages */}
@@ -322,12 +316,30 @@ function ScraperTab({
         </div>
       )}
 
-      {/* Club Summaries */}
+      {/* Club Summaries - Vereinfacht */}
       {scraperClubSummaries && scraperClubSummaries.length > 0 && (
         <div style={{ marginTop: '1.5rem' }}>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '1rem' }}>Vereine & Teams</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 700 }}>Vereine & Teams</h3>
+            <div style={{ fontSize: '0.85rem', color: '#64748b' }}>
+              {scraperClubSummaries.filter(s => {
+                const needsConfirmation = s.matchScore < FUZZY_MATCH_THRESHOLD && s.matchScore > 0;
+                return needsConfirmation || s.matchStatus === 'missing';
+              }).length} benötigen Aufmerksamkeit
+            </div>
+          </div>
+          
+          {/* Zeige zuerst Clubs, die Aufmerksamkeit benötigen */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {scraperClubSummaries.map((summary) => {
+            {scraperClubSummaries
+              .sort((a, b) => {
+                const aNeedsAttention = (a.matchScore < FUZZY_MATCH_THRESHOLD && a.matchScore > 0) || a.matchStatus === 'missing';
+                const bNeedsAttention = (b.matchScore < FUZZY_MATCH_THRESHOLD && b.matchScore > 0) || b.matchStatus === 'missing';
+                if (aNeedsAttention && !bNeedsAttention) return -1;
+                if (!aNeedsAttention && bNeedsAttention) return 1;
+                return a.clubName.localeCompare(b.clubName);
+              })
+              .map((summary) => {
               const mapping = scraperClubMappings[summary.clubName] || {};
               const needsConfirmation = summary.matchScore < FUZZY_MATCH_THRESHOLD && summary.matchScore > 0;
               const status = needsConfirmation
@@ -337,15 +349,19 @@ function ScraperTab({
                   : summary.matchStatus === 'new'
                     ? 'new'
                     : 'missing';
+              
+              const needsAttention = needsConfirmation || status === 'missing';
 
               return (
                 <div
                   key={summary.clubName}
                   style={{
-                    border: '1px solid #e2e8f0',
+                    border: needsAttention ? '2px solid #f59e0b' : '1px solid #e2e8f0',
                     borderRadius: '8px',
-                    padding: '1rem',
-                    background: needsConfirmation ? '#fef3c7' : '#ffffff'
+                    padding: needsAttention ? '1rem' : '0.75rem',
+                    background: needsConfirmation ? '#fef3c7' : status === 'missing' ? '#fee2e2' : status === 'existing' ? '#f0fdf4' : '#ffffff',
+                    opacity: !needsAttention && !expandedClubs.has(summary.clubName) ? 0.7 : 1,
+                    transition: 'all 0.2s'
                   }}
                 >
                   <div
@@ -360,13 +376,17 @@ function ScraperTab({
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1 }}>
                       <span style={{ fontSize: '1.2rem' }}>{SCRAPER_STATUS[status]?.icon || '❓'}</span>
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: '1rem' }}>{summary.clubName}</div>
-                        <div style={{ fontSize: '0.85rem', color: '#64748b' }}>
-                          {summary.teams.length} Team(s) · {summary.leagues.join(', ')}
+                        <div style={{ fontWeight: needsAttention ? 700 : 600, fontSize: needsAttention ? '1.05rem' : '0.95rem' }}>
+                          {summary.clubName}
+                        </div>
+                        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                          {summary.teams.length} Team(s)
+                          {summary.leagues.length > 0 && ` · ${summary.leagues[0]}${summary.leagues.length > 1 ? '...' : ''}`}
+                          {status === 'existing' && ' · ✅ Automatisch zugeordnet'}
                         </div>
                       </div>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                       {needsConfirmation && (
                         <span
                           style={{
@@ -378,7 +398,21 @@ function ScraperTab({
                             color: '#92400e'
                           }}
                         >
-                          {(summary.matchScore * 100).toFixed(1)}% Match
+                          {(summary.matchScore * 100).toFixed(0)}%
+                        </span>
+                      )}
+                      {status === 'missing' && (
+                        <span
+                          style={{
+                            padding: '0.25rem 0.5rem',
+                            background: '#fecaca',
+                            borderRadius: '4px',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            color: '#991b1b'
+                          }}
+                        >
+                          ⚠️ Aktion nötig
                         </span>
                       )}
                       <span style={{ fontSize: '0.85rem', color: '#64748b' }}>
@@ -428,20 +462,22 @@ function ScraperTab({
                         </div>
                       )}
 
-                      {/* Teams */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      {/* Teams - Vereinfacht */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.75rem' }}>
                         {summary.teams.map((team) => {
                           const teamMapping = mapping.teams?.[team.normalized] || {};
                           const isExpanded = expandedTeams.get(summary.clubName)?.has(team.normalized);
+                          const teamNeedsAction = team.teamMatchStatus !== 'existing' || !team.existingTeamSeasonId;
 
                           return (
                             <div
                               key={team.normalized}
                               style={{
-                                padding: '0.75rem',
-                                background: '#f8fafc',
+                                padding: teamNeedsAction ? '0.75rem' : '0.5rem',
+                                background: team.teamMatchStatus === 'existing' ? '#f0fdf4' : '#f8fafc',
                                 borderRadius: '6px',
-                                border: '1px solid #e2e8f0'
+                                border: teamNeedsAction ? '1px solid #cbd5e1' : '1px solid #e2e8f0',
+                                opacity: !teamNeedsAction && !isExpanded ? 0.6 : 1
                               }}
                             >
                               <div
@@ -449,33 +485,44 @@ function ScraperTab({
                                   display: 'flex',
                                   alignItems: 'center',
                                   justifyContent: 'space-between',
-                                  cursor: 'pointer'
+                                  cursor: teamNeedsAction ? 'pointer' : 'default'
                                 }}
-                                onClick={() => toggleTeamExpanded(summary.clubName, team.normalized)}
+                                onClick={() => teamNeedsAction && toggleTeamExpanded(summary.clubName, team.normalized)}
                               >
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                  <span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+                                  <span style={{ fontSize: teamNeedsAction ? '1rem' : '0.9rem' }}>
                                     {team.teamMatchStatus === 'existing' ? '✅' : '🆕'}
                                   </span>
-                                  <span style={{ fontWeight: 500 }}>{team.original}</span>
-                                  <span style={{ fontSize: '0.85rem', color: '#64748b' }}>
-                                    ({team.category})
+                                  <span style={{ fontWeight: teamNeedsAction ? 500 : 400, fontSize: teamNeedsAction ? '0.95rem' : '0.85rem' }}>
+                                    {team.original}
                                   </span>
+                                  {teamNeedsAction && (
+                                    <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                      ({team.category})
+                                    </span>
+                                  )}
+                                  {!teamNeedsAction && (
+                                    <span style={{ fontSize: '0.75rem', color: '#86efac', marginLeft: '0.25rem' }}>
+                                      · Automatisch zugeordnet
+                                    </span>
+                                  )}
                                 </div>
-                                <span style={{ fontSize: '0.85rem', color: '#64748b' }}>
-                                  {isExpanded ? '▼' : '▶'}
-                                </span>
+                                {teamNeedsAction && (
+                                  <span style={{ fontSize: '0.85rem', color: '#64748b' }}>
+                                    {isExpanded ? '▼' : '▶'}
+                                  </span>
+                                )}
                               </div>
 
-                              {isExpanded && (
-                                <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #e2e8f0' }}>
+                              {isExpanded && teamNeedsAction && (
+                                <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                                   {team.teamMatchStatus !== 'existing' && (
                                     <button
                                       onClick={() => handleCreateTeam(summary, team)}
                                       className="btn-modern"
                                       style={{
                                         fontSize: '0.85rem',
-                                        padding: '0.4rem 0.8rem',
+                                        padding: '0.5rem 1rem',
                                         background: '#1d4ed8'
                                       }}
                                     >
@@ -484,15 +531,12 @@ function ScraperTab({
                                   )}
                                   {team.existingTeamId && !team.existingTeamSeasonId && (
                                     <button
-                                      onClick={() =>
-                                        handleEnsureTeamSeason(team.existingTeamId, summary, team)
-                                      }
+                                      onClick={() => handleEnsureTeamSeason(team.existingTeamId, summary, team)}
                                       className="btn-modern"
                                       style={{
                                         fontSize: '0.85rem',
-                                        padding: '0.4rem 0.8rem',
-                                        background: '#10b981',
-                                        marginLeft: '0.5rem'
+                                        padding: '0.5rem 1rem',
+                                        background: '#10b981'
                                       }}
                                     >
                                       📅 Team-Season anlegen
