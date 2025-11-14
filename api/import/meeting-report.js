@@ -218,26 +218,175 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
     pendingPlayers.set(primaryKey, entry);
   };
 
+  const normalizePlayerName = (name) => {
+    if (!name) return '';
+    return name
+      .toString()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/ß/g, 'ss')
+      .replace(/[^a-z0-9]/g, '');
+  };
+
+  const reverseNameOrder = (name) => {
+    if (!name) return name;
+    const trimmed = name.trim();
+    // Prüfe ob Format "Nachname, Vorname" ist
+    const commaMatch = trimmed.match(/^([^,]+),\s*(.+)$/);
+    if (commaMatch) {
+      return `${commaMatch[2].trim()} ${commaMatch[1].trim()}`;
+    }
+    // Prüfe ob Format "Vorname Nachname" ist und konvertiere zu "Nachname, Vorname"
+    const parts = trimmed.split(/\s+/);
+    if (parts.length >= 2) {
+      return `${parts.slice(1).join(' ')}, ${parts[0]}`;
+    }
+    return trimmed;
+  };
+
+  const diceCoefficient = (a, b) => {
+    const aNorm = normalizePlayerName(a);
+    const bNorm = normalizePlayerName(b);
+    if (!aNorm || !bNorm) return 0;
+    if (aNorm === bNorm) return 1;
+
+    const bigrams = (str) => {
+      const grams = new Set();
+      for (let i = 0; i < str.length - 1; i += 1) {
+        grams.add(str.slice(i, i + 2));
+      }
+      return grams;
+    };
+
+    const aBigrams = bigrams(aNorm);
+    const bBigrams = bigrams(bNorm);
+
+    let intersection = 0;
+    aBigrams.forEach((gram) => {
+      if (bBigrams.has(gram)) {
+        intersection += 1;
+      }
+    });
+
+    return (2 * intersection) / (aBigrams.size + bBigrams.size || 1);
+  };
+
   const ensurePlayer = async (player, context) => {
     const name = player?.name?.trim();
     if (!name) return null;
     const cacheKey = name.toLowerCase();
     if (playerCache.has(cacheKey)) return playerCache.get(cacheKey);
 
-    const { data: existing, error: selectError } = await supabase
+    // Lade alle Spieler für erweiterte Suche
+    const { data: allPlayers, error: selectError } = await supabase
       .from('players_unified')
-      .select('id')
-      .ilike('name', name)
-      .limit(1)
-      .maybeSingle();
+      .select('id, name, current_lk')
+      .limit(5000); // Lade alle Spieler für Matching
+
     if (selectError) {
       console.warn('[meeting-report] Spieler-Suche fehlgeschlagen:', selectError.message);
-    }
-    if (existing?.id) {
-      playerCache.set(cacheKey, existing.id);
-      return existing.id;
+      playerCache.set(cacheKey, null);
+      registerMissingPlayer(player, context);
+      return null;
     }
 
+    if (!allPlayers || allPlayers.length === 0) {
+      playerCache.set(cacheKey, null);
+      registerMissingPlayer(player, context);
+      return null;
+    }
+
+    const normalizedSearchName = normalizePlayerName(name);
+    const reversedSearchName = reverseNameOrder(name);
+    const normalizedReversedSearchName = normalizePlayerName(reversedSearchName);
+    const playerLk = normalizeLk(player.lk) || normalizeLk(player.meta) || normalizeLk(player.raw);
+
+    let bestMatch = null;
+    let bestScore = 0;
+    let matchType = null;
+
+    // PRIORITÄT 1: Exakter Match (normalisiert)
+    for (const existing of allPlayers) {
+      const normalizedExisting = normalizePlayerName(existing.name);
+      if (normalizedSearchName === normalizedExisting) {
+        bestMatch = existing;
+        bestScore = 1.0;
+        matchType = 'exact_normalized';
+        break;
+      }
+    }
+
+    // PRIORITÄT 2: Exakter Match mit umgekehrter Namensreihenfolge
+    if (!bestMatch) {
+      for (const existing of allPlayers) {
+        const normalizedExisting = normalizePlayerName(existing.name);
+        if (normalizedReversedSearchName === normalizedExisting) {
+          bestMatch = existing;
+          bestScore = 0.95;
+          matchType = 'exact_reversed';
+          break;
+        }
+      }
+    }
+
+    // PRIORITÄT 3: Exakter Match mit umgekehrter Namensreihenfolge (auch umgekehrt prüfen)
+    if (!bestMatch) {
+      for (const existing of allPlayers) {
+        const reversedExisting = reverseNameOrder(existing.name);
+        const normalizedReversedExisting = normalizePlayerName(reversedExisting);
+        if (normalizedSearchName === normalizedReversedExisting) {
+          bestMatch = existing;
+          bestScore = 0.95;
+          matchType = 'exact_reversed_existing';
+          break;
+        }
+      }
+    }
+
+    // PRIORITÄT 4: Fuzzy-Match mit Dice-Coefficient (Schwellenwert: 0.85)
+    if (!bestMatch) {
+      for (const existing of allPlayers) {
+        const similarity = diceCoefficient(name, existing.name);
+        const reversedSimilarity = diceCoefficient(reversedSearchName, existing.name);
+        const maxSimilarity = Math.max(similarity, reversedSimilarity);
+
+        if (maxSimilarity >= 0.85 && maxSimilarity > bestScore) {
+          bestMatch = existing;
+          bestScore = maxSimilarity;
+          matchType = maxSimilarity === reversedSimilarity ? 'fuzzy_reversed' : 'fuzzy';
+        }
+      }
+    }
+
+    // PRIORITÄT 5: Fuzzy-Match mit LK-Filter (wenn LK vorhanden)
+    if (!bestMatch && playerLk) {
+      for (const existing of allPlayers) {
+        if (existing.current_lk === playerLk) {
+          const similarity = diceCoefficient(name, existing.name);
+          const reversedSimilarity = diceCoefficient(reversedSearchName, existing.name);
+          const maxSimilarity = Math.max(similarity, reversedSimilarity);
+
+          if (maxSimilarity >= 0.75 && maxSimilarity > bestScore) {
+            bestMatch = existing;
+            bestScore = maxSimilarity;
+            matchType = maxSimilarity === reversedSimilarity ? 'fuzzy_lk_reversed' : 'fuzzy_lk';
+          }
+        }
+      }
+    }
+
+    if (bestMatch && bestScore >= 0.75) {
+      console.log(
+        `[meeting-report] ✅ Spieler gefunden: "${name}" → "${bestMatch.name}" (${matchType}, Score: ${(bestScore * 100).toFixed(1)}%)`
+      );
+      playerCache.set(cacheKey, bestMatch.id);
+      return bestMatch.id;
+    }
+
+    console.log(
+      `[meeting-report] ⚠️ Spieler nicht gefunden: "${name}" (bester Score: ${(bestScore * 100).toFixed(1)}%)`
+    );
     playerCache.set(cacheKey, null);
     registerMissingPlayer(player, context);
     return null;

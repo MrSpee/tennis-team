@@ -533,14 +533,17 @@
 .matchday-meeting-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 .matchday-meeting-table th,
 .matchday-meeting-table td {
-  padding: 0.55rem 0.75rem;
+  padding: 0.5rem 0.5rem;
   border-bottom: 1px solid #e2e8f0;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   text-align: center;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .matchday-meeting-table th {
@@ -549,16 +552,75 @@
   text-transform: uppercase;
   color: #475569;
   letter-spacing: 0.05em;
+  font-size: 0.7rem;
+  white-space: nowrap;
 }
 
 .matchday-meeting-table tr:last-child td {
   border-bottom: none;
 }
 
-.meeting-player-cell {
+/* Spaltenbreiten für Einzel/Doppel-Tabellen */
+.matchday-meeting-table th:nth-child(1),
+.matchday-meeting-table td:nth-child(1) {
+  width: 35px;
+  padding: 0.5rem 0.3rem;
+}
+
+.matchday-meeting-table th:nth-child(2),
+.matchday-meeting-table td:nth-child(2) {
+  width: 160px;
   text-align: left;
-  min-width: 140px;
+  padding: 0.5rem 0.6rem;
+}
+
+.matchday-meeting-table th:nth-child(3),
+.matchday-meeting-table td:nth-child(3) {
+  width: 160px;
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+}
+
+.matchday-meeting-table th:nth-child(4),
+.matchday-meeting-table td:nth-child(4) {
+  width: 70px;
+  padding: 0.5rem 0.4rem;
+}
+
+.matchday-meeting-table th:nth-child(5),
+.matchday-meeting-table td:nth-child(5) {
+  width: 70px;
+  padding: 0.5rem 0.4rem;
+}
+
+.matchday-meeting-table th:nth-child(6),
+.matchday-meeting-table td:nth-child(6) {
+  width: 70px;
+  padding: 0.5rem 0.4rem;
+}
+
+.matchday-meeting-table th:nth-child(7),
+.matchday-meeting-table td:nth-child(7) {
+  width: 85px;
+  padding: 0.5rem 0.4rem;
+}
+
+.matchday-meeting-table th:nth-child(8),
+.matchday-meeting-table td:nth-child(8) {
+  width: 60px;
+  padding: 0.5rem 0.3rem;
+}
+
+.matchday-meeting-table th:nth-child(9),
+.matchday-meeting-table td:nth-child(9) {
+  width: 60px;
+  padding: 0.5rem 0.3rem;
+}
+
+.meeting-player-cell {
+  text-align: left !important;
   color: #0f172a;
+  line-height: 1.4;
 }
 
 .matchday-meeting-totals {
