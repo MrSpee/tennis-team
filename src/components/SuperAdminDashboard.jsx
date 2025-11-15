@@ -3462,6 +3462,8 @@ function SuperAdminDashboard() {
       matchdays={seasonMatchdays}
       clubs={clubs}
       players={players}
+      setTeams={setTeams}
+      setClubs={setClubs}
     />
   );
 

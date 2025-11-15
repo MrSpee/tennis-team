@@ -6,7 +6,7 @@ import './GroupsTab.css';
 
 const FINISHED_STATUSES = ['completed', 'retired', 'walkover', 'disqualified', 'defaulted'];
 
-function GroupsTab({ teams, teamSeasons, matchdays, clubs, players }) {
+function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, setClubs }) {
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [groupDetails, setGroupDetails] = useState(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
@@ -570,7 +570,18 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players }) {
       }
     });
 
-    // 2. Team-Vergleich
+    // 2. Team-Vergleich - NUR Teams die in dieser Gruppe sind
+    // Filtere zuerst: Welche Teams sind bereits in dieser Gruppe in der DB?
+    const groupTeamIds = new Set(group.teams.map(t => t.id));
+    const groupTeamsInDb = teams.filter(t => groupTeamIds.has(t.id));
+    
+    // Erstelle Lookup für Teams in dieser Gruppe (mit team_season)
+    const groupTeamsByKey = new Map();
+    groupTeamsInDb.forEach((team) => {
+      const key = `${normalizeString(team.club_name || '')}_${normalizeString(team.team_name || '')}`;
+      groupTeamsByKey.set(key, team);
+    });
+
     comparison.teams.total = scrapedTeams.length;
     
     scrapedTeams.forEach((scrapedTeam) => {
@@ -596,6 +607,7 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players }) {
         comparison.teams.missingItems.push({
           scrapedName: teamName,
           scrapedClub: clubName,
+          scrapedSuffix: teamSuffix,
           confidence: 0.0,
           action: 'create_team',
           requiresClub: true
@@ -603,17 +615,37 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players }) {
         return;
       }
 
-      // Suche Team in DB
-      const dbTeam = teams.find((team) => {
-        if (team.club_id !== dbClub.id) return false;
-        const normalizedDbTeam = normalizeString(team.team_name || '');
-        const normalizedScrapedSuffix = normalizeString(teamSuffix);
-        return normalizedDbTeam === normalizedScrapedSuffix;
-      });
+      // Suche Team in DB - ZUERST in der aktuellen Gruppe
+      const teamKey = `${normalizeString(dbClub.name || '')}_${normalizeString(teamSuffix)}`;
+      let dbTeam = groupTeamsByKey.get(teamKey);
 
-      if (dbTeam) {
+      // Falls nicht in Gruppe gefunden, suche global (aber markiere als "nicht in Gruppe")
+      if (!dbTeam) {
+        dbTeam = teams.find((team) => {
+          if (team.club_id !== dbClub.id) return false;
+          const normalizedDbTeam = normalizeString(team.team_name || '');
+          const normalizedScrapedSuffix = normalizeString(teamSuffix);
+          return normalizedDbTeam === normalizedScrapedSuffix;
+        });
+      }
+
+      if (dbTeam && groupTeamIds.has(dbTeam.id)) {
+        // Team existiert UND ist in dieser Gruppe
         comparison.teams.matched += 1;
+      } else if (dbTeam && !groupTeamIds.has(dbTeam.id)) {
+        // Team existiert, aber NICHT in dieser Gruppe → fehlt team_season
+        comparison.teams.missing += 1;
+        comparison.teams.missingItems.push({
+          scrapedName: teamName,
+          scrapedClub: clubName,
+          scrapedSuffix: teamSuffix,
+          existingTeamId: dbTeam.id,
+          confidence: 0.0,
+          action: 'add_team_season',
+          suggestedClubId: dbClub.id
+        });
       } else {
+        // Team existiert gar nicht
         comparison.teams.missing += 1;
         comparison.teams.missingItems.push({
           scrapedName: teamName,
@@ -725,6 +757,10 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players }) {
           .single();
 
         if (error) throw error;
+        
+        // Aktualisiere clubs-Array
+        setClubs((prev) => [...prev, newClub]);
+        
         alert(`✅ Club "${item.scrapedName}" wurde erstellt!`);
         
         // Lade Vergleich neu
@@ -733,7 +769,51 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players }) {
           setComparisonResult(comparison);
         }
       } else if (type === 'team') {
-        // Erstelle Team
+        // Prüfe ob team_season hinzugefügt werden muss
+        if (item.action === 'add_team_season' && item.existingTeamId) {
+          // Team existiert bereits, füge nur team_season hinzu
+          if (!selectedGroup) {
+            alert('❌ Keine Gruppe ausgewählt!');
+            return;
+          }
+
+          const { error: seasonError } = await supabase
+            .from('team_seasons')
+            .insert({
+              team_id: item.existingTeamId,
+              season: selectedGroup.season,
+              league: selectedGroup.league,
+              group_name: selectedGroup.groupName,
+              team_size: 6,
+              is_active: true
+            });
+
+          if (seasonError) {
+            // Prüfe ob bereits vorhanden (Unique Constraint)
+            if (seasonError.code === '23505') {
+              // Aktualisiere bestehenden Eintrag
+              const { error: updateError } = await supabase
+                .from('team_seasons')
+                .update({ is_active: true })
+                .eq('team_id', item.existingTeamId)
+                .eq('season', selectedGroup.season)
+                .eq('league', selectedGroup.league)
+                .eq('group_name', selectedGroup.groupName);
+
+              if (updateError) throw updateError;
+            } else {
+              throw seasonError;
+            }
+          }
+
+          alert(`✅ Team "${item.scrapedName}" wurde zur Gruppe hinzugefügt!`);
+          
+          // Lade Daten neu
+          window.location.reload(); // Einfachste Lösung für jetzt
+          return;
+        }
+
+        // Erstelle neues Team
         if (!item.suggestedClubId) {
           alert('❌ Club muss zuerst erstellt werden!');
           return;
@@ -745,41 +825,113 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players }) {
           return;
         }
 
-        const { data: newTeam, error } = await supabase
+        if (!selectedGroup) {
+          alert('❌ Keine Gruppe ausgewählt!');
+          return;
+        }
+
+        // Erstelle Team
+        const { data: newTeam, error: teamError } = await supabase
           .from('team_info')
           .insert({
             club_id: item.suggestedClubId,
             club_name: club.name,
             team_name: item.scrapedSuffix || null,
-            category: selectedGroup?.category || null,
+            category: selectedGroup.category || null,
             region: null
           })
           .select()
           .single();
 
-        if (error) throw error;
+        if (teamError) throw teamError;
 
         // Erstelle team_season
-        if (selectedGroup) {
-          await supabase
-            .from('team_seasons')
-            .insert({
-              team_id: newTeam.id,
-              season: selectedGroup.season,
-              league: selectedGroup.league,
-              group_name: selectedGroup.groupName,
-              team_size: 6,
-              is_active: true
-            });
+        const { error: seasonError } = await supabase
+          .from('team_seasons')
+          .insert({
+            team_id: newTeam.id,
+            season: selectedGroup.season,
+            league: selectedGroup.league,
+            group_name: selectedGroup.groupName,
+            team_size: 6,
+            is_active: true
+          });
+
+        if (seasonError && seasonError.code !== '23505') {
+          throw seasonError;
         }
 
-        alert(`✅ Team "${item.scrapedName}" wurde erstellt!`);
+        // Aktualisiere teams-Array
+        setTeams((prev) => [...prev, newTeam]);
+
+        alert(`✅ Team "${item.scrapedName}" wurde erstellt und zur Gruppe hinzugefügt!`);
         
-        // Lade Vergleich neu
-        if (selectedGroup && scraperData) {
-          const comparison = await compareScrapedWithDatabase(selectedGroup, scraperData);
-          setComparisonResult(comparison);
+        // Lade Daten neu
+        window.location.reload(); // Einfachste Lösung für jetzt
+      } else if (type === 'matchday') {
+        // Erstelle Matchday
+        if (!selectedGroup) {
+          alert('❌ Keine Gruppe ausgewählt!');
+          return;
         }
+
+        // Finde Team-IDs für home und away
+        const findTeamId = async (teamName) => {
+          const parts = teamName.split(/\s+/);
+          const clubName = parts.slice(0, -1).join(' ').trim();
+          const teamSuffix = parts[parts.length - 1];
+
+          const dbClub = clubs.find((club) => {
+            const normalizedDb = normalizeString(club.name || '');
+            const normalizedScraped = normalizeString(clubName);
+            return normalizedDb === normalizedScraped || 
+                   calculateSimilarity(clubName, club.name || '') >= 0.90;
+          });
+
+          if (!dbClub) return null;
+
+          const dbTeam = teams.find((team) => {
+            if (team.club_id !== dbClub.id) return false;
+            const normalizedDbTeam = normalizeString(team.team_name || '');
+            const normalizedScrapedSuffix = normalizeString(teamSuffix);
+            return normalizedDbTeam === normalizedScrapedSuffix;
+          });
+
+          return dbTeam?.id || null;
+        };
+
+        const homeTeamId = await findTeamId(item.homeTeam);
+        const awayTeamId = await findTeamId(item.awayTeam);
+
+        if (!homeTeamId || !awayTeamId) {
+          alert(`❌ Teams nicht gefunden: ${item.homeTeam} oder ${item.awayTeam}`);
+          return;
+        }
+
+        const matchDate = item.matchDate ? new Date(item.matchDate).toISOString() : new Date().toISOString();
+
+        const { data: newMatchday, error: matchdayError } = await supabase
+          .from('matchdays')
+          .insert({
+            match_date: matchDate,
+            home_team_id: homeTeamId,
+            away_team_id: awayTeamId,
+            match_number: item.matchNumber || null,
+            season: selectedGroup.season,
+            league: selectedGroup.league,
+            group_name: selectedGroup.groupName,
+            status: 'scheduled',
+            location: 'Home'
+          })
+          .select()
+          .single();
+
+        if (matchdayError) throw matchdayError;
+
+        alert(`✅ Matchday "${item.homeTeam} vs ${item.awayTeam}" wurde erstellt!`);
+        
+        // Lade Daten neu
+        window.location.reload();
       }
     } catch (error) {
       console.error('❌ Fehler beim Erstellen:', error);
@@ -1070,14 +1222,25 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players }) {
                               key={idx} 
                               className={`difference-item ${item.requiresClub ? 'disabled' : 'clickable'}`}
                               onClick={() => !item.requiresClub && handleCreateMissingItem(item, 'team')}
-                              title={item.requiresClub ? 'Club muss zuerst erstellt werden' : 'Klicken zum Erstellen'}
+                              title={
+                                item.requiresClub 
+                                  ? 'Club muss zuerst erstellt werden' 
+                                  : item.action === 'add_team_season'
+                                    ? 'Team existiert bereits, wird zur Gruppe hinzugefügt'
+                                    : 'Klicken zum Erstellen'
+                              }
                             >
                               <div className="difference-item-content">
                                 <span className="difference-name">{item.scrapedName}</span>
                                 {item.requiresClub && (
                                   <span className="difference-warning">⚠️ Club fehlt</span>
                                 )}
-                                {!item.requiresClub && (
+                                {!item.requiresClub && item.action === 'add_team_season' && (
+                                  <span className="difference-action">
+                                    <Plus size={16} /> Zur Gruppe hinzufügen
+                                  </span>
+                                )}
+                                {!item.requiresClub && item.action !== 'add_team_season' && (
                                   <span className="difference-action">
                                     <Plus size={16} /> Erstellen
                                   </span>
@@ -1097,7 +1260,12 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players }) {
                         </h5>
                         <div className="differences-list">
                           {comparisonResult.matchdays.missingItems.map((item, idx) => (
-                            <div key={idx} className="difference-item">
+                            <div 
+                              key={idx} 
+                              className="difference-item clickable"
+                              onClick={() => handleCreateMissingItem(item, 'matchday')}
+                              title="Klicken zum Erstellen"
+                            >
                               <div className="difference-item-content">
                                 <div className="difference-match-info">
                                   <span className="difference-name">
@@ -1112,6 +1280,9 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players }) {
                                     </span>
                                   )}
                                 </div>
+                                <span className="difference-action">
+                                  <Plus size={16} /> Erstellen
+                                </span>
                               </div>
                             </div>
                           ))}
