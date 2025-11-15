@@ -821,11 +821,22 @@ function Training() {
       console.log('🔵 Setting training response:', { sessionId, status, comment });
 
       // Prüfe ob bereits geantwortet
-      const training = trainings.find(t => t.id === sessionId);
-      const existingResponse = training?.myAttendance;
+      // WICHTIG: Suche direkt in der Datenbank, nicht nur in training.myAttendance
+      // (kann sein, dass myAttendance nicht korrekt gesetzt ist)
+      const { data: existingAttendance, error: checkError } = await supabase
+        .from('training_attendance')
+        .select('id, status')
+        .eq('session_id', sessionId)
+        .eq('player_id', player.id)
+        .maybeSingle();
 
-      if (existingResponse) {
-        // Update
+      if (checkError && checkError.code !== 'PGRST116') { // PGRST116 = "not found" (ok)
+        console.error('❌ Error checking existing attendance:', checkError);
+        throw new Error(`Fehler beim Prüfen: ${checkError.message}`);
+      }
+
+      if (existingAttendance) {
+        // Update - WICHTIG: Verwende session_id UND player_id für Sicherheit
         const { error } = await supabase
           .from('training_attendance')
           .update({
@@ -834,12 +845,15 @@ function Training() {
             response_date: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
-          .eq('id', existingResponse.id);
+          .eq('session_id', sessionId)
+          .eq('player_id', player.id);
 
         if (error) {
           console.error('❌ Supabase Update Error:', error);
           throw new Error(`Update fehlgeschlagen: ${error.message}`);
         }
+        
+        console.log(`✅ Updated attendance: ${existingAttendance.id} → status: ${status}`);
       } else {
         // Insert
         const { error } = await supabase
@@ -1659,7 +1673,11 @@ Wir sehen uns auf dem Platz! 🎾`;
             )}
 
             {/* ⏳ FEEDBACK STEHT AUS */}
-            {training.attendance && training.attendance.some(a => !a.status || a.status === 'pending') && (
+            {training.attendance && training.attendance.some(a => {
+              // WICHTIG: Nur echte "pending" Einträge anzeigen - KEINE "declined" oder "confirmed"!
+              const status = a.status;
+              return !status || status === 'pending';
+            }) && (
               <div style={{ marginBottom: '1rem' }}>
                 <h4 style={{ 
                   margin: '0 0 0.5rem 0', 
@@ -1669,11 +1687,23 @@ Wir sehen uns auf dem Platz! 🎾`;
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em'
                 }}>
-                  ⏳ Feedback steht aus ({training.attendance.filter(a => !a.status || a.status === 'pending').length})
+                  ⏳ Feedback steht aus ({training.attendance.filter(a => {
+                    const status = a.status;
+                    // WICHTIG: Nur echte "pending" Einträge zählen - KEINE "declined" oder "confirmed"!
+                    return !status || status === 'pending';
+                  }).length})
                 </h4>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                   {training.attendance
-                    .filter(a => !a.status || a.status === 'pending')
+                    .filter(a => {
+                      const status = a.status;
+                      // WICHTIG: Nur echte "pending" Einträge anzeigen - KEINE "declined" oder "confirmed"!
+                      // Explizit "declined" und "confirmed" ausschließen
+                      if (status === 'declined' || status === 'confirmed') {
+                        return false;
+                      }
+                      return !status || status === 'pending';
+                    })
                     .map(a => {
                       const player = players.find(p => p.id === a.player_id);
                       if (!player) return null;
