@@ -6,7 +6,7 @@ import './GroupsTab.css';
 
 const FINISHED_STATUSES = ['completed', 'retired', 'walkover', 'disqualified', 'defaulted'];
 
-function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, setClubs }) {
+function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, setClubs, setTeamSeasons, loadDashboardData }) {
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [groupDetails, setGroupDetails] = useState(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
@@ -138,79 +138,6 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
     return map;
   }, [groupedData]);
 
-  // Lade Details für eine Gruppe
-  const loadGroupDetails = async (group) => {
-    const groupKey = getGroupKey(group);
-    if (selectedGroup && getGroupKey(selectedGroup) === groupKey) {
-      setSelectedGroup(null);
-      setGroupDetails(null);
-      setShowComparison(false);
-      setComparisonResult(null);
-      setScraperData(null);
-      return;
-    }
-
-    setLoadingDetails(true);
-    setSelectedGroup(group);
-    
-    // Versuche vorhandenen Snapshot zu laden
-    await loadScraperSnapshot(group);
-
-    try {
-      const teamIds = group.teams.map((t) => t.id);
-
-      // Lade alle Matchdays für diese Gruppe
-      const { data: groupMatchdays, error: matchdaysError } = await supabase
-        .from('matchdays')
-        .select(`
-          *,
-          home_team:team_info!matchdays_home_team_id_fkey(id, club_name, team_name, category),
-          away_team:team_info!matchdays_away_team_id_fkey(id, club_name, team_name, category)
-        `)
-        .in('home_team_id', teamIds)
-        .in('away_team_id', teamIds)
-        .eq('season', group.season)
-        .eq('league', group.league)
-        .eq('group_name', group.groupName)
-        .order('match_date', { ascending: true })
-        .order('start_time', { ascending: true });
-
-      if (matchdaysError) throw matchdaysError;
-
-      // Lade Match Results für alle Matchdays
-      const matchdayIds = (groupMatchdays || []).map((m) => m.id);
-      let matchResults = [];
-      if (matchdayIds.length > 0) {
-        const { data: results, error: resultsError } = await supabase
-          .from('match_results')
-          .select('*')
-          .in('matchday_id', matchdayIds);
-
-        if (!resultsError && results) {
-          matchResults = results;
-        }
-      }
-
-      // Berechne Tabelle
-      const standings = calculateStandings(groupMatchdays || [], matchResults, teamIds);
-
-      // Berechne Statistiken
-      const stats = calculateGroupStats(groupMatchdays || [], matchResults, group.teams.length);
-
-      setGroupDetails({
-        matchdays: groupMatchdays || [],
-        matchResults,
-        standings,
-        stats
-      });
-    } catch (error) {
-      console.error('❌ Fehler beim Laden der Gruppendetails:', error);
-      setGroupDetails({ error: error.message });
-    } finally {
-      setLoadingDetails(false);
-    }
-  };
-
   // Berechne Tabelle
   const calculateStandings = (matchdays, matchResults, teamIds) => {
     const teamStats = new Map();
@@ -328,18 +255,40 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
     });
 
     // Konvertiere zu Array und sortiere
-    const standingsArray = Array.from(teamStats.values())
-      .map((stats) => {
-        const team = teams.find((t) => t.id === stats.teamId);
-        return {
+    const standingsMap = new Map(); // Deduplizierung: club_name + team_name + category
+    
+    Array.from(teamStats.values()).forEach((stats) => {
+      const team = teams.find((t) => t.id === stats.teamId);
+      if (!team) return;
+
+      const teamKey = `${team.club_name}::${team.team_name || ''}::${team.category || ''}`;
+      
+      // Wenn Team bereits existiert, merge Statistiken (nimm das Team mit mehr Matches)
+      if (standingsMap.has(teamKey)) {
+        const existing = standingsMap.get(teamKey);
+        if (stats.matches > existing.matches) {
+          // Ersetze mit Team das mehr Matches hat
+          standingsMap.set(teamKey, {
+            ...stats,
+            team,
+            teamName: `${team.club_name} ${team.team_name || ''}`.trim(),
+            setsDiff: stats.setsWon - stats.setsLost,
+            gamesDiff: stats.gamesWon - stats.gamesLost
+          });
+        }
+        // Sonst behalte das bestehende Team
+      } else {
+        standingsMap.set(teamKey, {
           ...stats,
           team,
-          teamName: team ? `${team.club_name} ${team.team_name || ''}`.trim() : 'Unbekannt',
+          teamName: `${team.club_name} ${team.team_name || ''}`.trim(),
           setsDiff: stats.setsWon - stats.setsLost,
           gamesDiff: stats.gamesWon - stats.gamesLost
-        };
-      })
-      .filter((s) => s.team) // Nur Teams die existieren
+        });
+      }
+    });
+
+    const standingsArray = Array.from(standingsMap.values())
       .sort((a, b) => {
         // Sortiere nach Punkten, dann Sets-Diff, dann Games-Diff
         if (b.points !== a.points) return b.points - a.points;
@@ -620,12 +569,20 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
       let dbTeam = groupTeamsByKey.get(teamKey);
 
       // Falls nicht in Gruppe gefunden, suche global (aber markiere als "nicht in Gruppe")
+      // WICHTIG: Prüfe auch auf category, um Duplikate zu vermeiden
       if (!dbTeam) {
         dbTeam = teams.find((team) => {
           if (team.club_id !== dbClub.id) return false;
           const normalizedDbTeam = normalizeString(team.team_name || '');
           const normalizedScrapedSuffix = normalizeString(teamSuffix);
-          return normalizedDbTeam === normalizedScrapedSuffix;
+          const teamNameMatch = normalizedDbTeam === normalizedScrapedSuffix;
+          
+          // Prüfe auch category, falls vorhanden
+          if (teamNameMatch && selectedGroup?.category) {
+            return team.category === selectedGroup.category;
+          }
+          
+          return teamNameMatch;
         });
       }
 
@@ -662,28 +619,96 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
     const scrapedMatches = scrapedData.matches || [];
     comparison.matchdays.total = scrapedMatches.length;
 
+    // Lade ALLE Matchdays für diese Gruppe aus der DB (nicht nur die in groupDetails)
+    let allGroupMatchdays = [];
+    if (groupDetails?.matchdays) {
+      allGroupMatchdays = groupDetails.matchdays;
+    } else {
+      // Falls groupDetails noch nicht geladen, lade direkt aus DB
+      try {
+        const { data: dbMatchdays, error: mdError } = await supabase
+          .from('matchdays')
+          .select('id, match_date, match_number, home_team_id, away_team_id, season, league, group_name')
+          .eq('season', group.season)
+          .eq('league', group.league)
+          .eq('group_name', group.groupName);
+        
+        if (!mdError && dbMatchdays) {
+          allGroupMatchdays = dbMatchdays;
+        }
+      } catch (err) {
+        console.warn('⚠️ Fehler beim Laden der Matchdays für Vergleich:', err);
+      }
+    }
+
     scrapedMatches.forEach((scrapedMatch) => {
       const matchNumber = scrapedMatch.matchNumber || scrapedMatch.match_number;
       const homeTeam = scrapedMatch.homeTeam || '';
       const awayTeam = scrapedMatch.awayTeam || '';
       const matchDate = scrapedMatch.matchDateIso;
 
-      // Suche Match in DB
+      // Suche Match in DB - mehrere Strategien
       let found = false;
       
+      // Strategie 1: Suche nach match_number
       if (matchNumber) {
-        found = groupDetails?.matchdays?.some((match) => 
-          String(match.match_number) === String(matchNumber)
+        found = allGroupMatchdays.some((match) => 
+          match.match_number && String(match.match_number) === String(matchNumber)
         );
       }
 
+      // Strategie 2: Suche nach Datum + Teams (wenn Teams gefunden werden können)
       if (!found && matchDate) {
         const matchDateOnly = matchDate ? new Date(matchDate).toISOString().split('T')[0] : null;
-        found = groupDetails?.matchdays?.some((match) => {
-          if (!match.match_date) return false;
-          const dbDateOnly = new Date(match.match_date).toISOString().split('T')[0];
-          return dbDateOnly === matchDateOnly;
-        });
+        
+        // Versuche Team-IDs zu finden
+        const findTeamIdForMatch = (teamName) => {
+          const parts = teamName.split(/\s+/);
+          const clubName = parts.slice(0, -1).join(' ').trim();
+          const teamSuffix = parts[parts.length - 1];
+
+          const dbClub = clubs.find((club) => {
+            const normalizedDb = normalizeString(club.name || '');
+            const normalizedScraped = normalizeString(clubName);
+            return normalizedDb === normalizedScraped || 
+                   calculateSimilarity(clubName, club.name || '') >= 0.90;
+          });
+
+          if (!dbClub) return null;
+
+          const dbTeam = teams.find((team) => {
+            if (team.club_id !== dbClub.id) return false;
+            const normalizedDbTeam = normalizeString(team.team_name || '');
+            const normalizedScrapedSuffix = normalizeString(teamSuffix);
+            return normalizedDbTeam === normalizedScrapedSuffix;
+          });
+
+          return dbTeam?.id || null;
+        };
+
+        const homeTeamId = findTeamIdForMatch(homeTeam);
+        const awayTeamId = findTeamIdForMatch(awayTeam);
+
+        // Suche nach Datum + Teams
+        if (homeTeamId && awayTeamId && matchDateOnly) {
+          found = allGroupMatchdays.some((match) => {
+            if (!match.match_date) return false;
+            const dbDateOnly = new Date(match.match_date).toISOString().split('T')[0];
+            const sameDate = dbDateOnly === matchDateOnly;
+            const sameTeams = (match.home_team_id === homeTeamId && match.away_team_id === awayTeamId) ||
+                             (match.home_team_id === awayTeamId && match.away_team_id === homeTeamId);
+            return sameDate && sameTeams;
+          });
+        }
+
+        // Fallback: Nur nach Datum suchen (weniger genau)
+        if (!found && matchDateOnly) {
+          found = allGroupMatchdays.some((match) => {
+            if (!match.match_date) return false;
+            const dbDateOnly = new Date(match.match_date).toISOString().split('T')[0];
+            return dbDateOnly === matchDateOnly;
+          });
+        }
       }
 
       if (found) {
@@ -761,9 +786,7 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
         // Aktualisiere clubs-Array
         setClubs((prev) => [...prev, newClub]);
         
-        alert(`✅ Club "${item.scrapedName}" wurde erstellt!`);
-        
-        // Lade Vergleich neu
+        // Lade Vergleich neu (ohne Modal)
         if (selectedGroup && scraperData) {
           const comparison = await compareScrapedWithDatabase(selectedGroup, scraperData);
           setComparisonResult(comparison);
@@ -773,11 +796,11 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
         if (item.action === 'add_team_season' && item.existingTeamId) {
           // Team existiert bereits, füge nur team_season hinzu
           if (!selectedGroup) {
-            alert('❌ Keine Gruppe ausgewählt!');
+            console.error('❌ Keine Gruppe ausgewählt!');
             return;
           }
 
-          const { error: seasonError } = await supabase
+          const { data: newSeason, error: seasonError } = await supabase
             .from('team_seasons')
             .insert({
               team_id: item.existingTeamId,
@@ -786,97 +809,178 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
               group_name: selectedGroup.groupName,
               team_size: 6,
               is_active: true
-            });
+            })
+            .select()
+            .single();
 
           if (seasonError) {
             // Prüfe ob bereits vorhanden (Unique Constraint)
             if (seasonError.code === '23505') {
               // Aktualisiere bestehenden Eintrag
-              const { error: updateError } = await supabase
+              const { data: updatedSeason, error: updateError } = await supabase
                 .from('team_seasons')
                 .update({ is_active: true })
                 .eq('team_id', item.existingTeamId)
                 .eq('season', selectedGroup.season)
                 .eq('league', selectedGroup.league)
-                .eq('group_name', selectedGroup.groupName);
+                .eq('group_name', selectedGroup.groupName)
+                .select()
+                .single();
 
               if (updateError) throw updateError;
+              
+              // Aktualisiere teamSeasons-Array
+              if (updatedSeason && setTeamSeasons) {
+                setTeamSeasons((prev) => {
+                  const filtered = prev.filter(ts => ts.id !== updatedSeason.id);
+                  return [...filtered, updatedSeason];
+                });
+              }
             } else {
               throw seasonError;
             }
+          } else if (newSeason && setTeamSeasons) {
+            // Aktualisiere teamSeasons-Array
+            setTeamSeasons((prev) => [...prev, newSeason]);
           }
 
-          alert(`✅ Team "${item.scrapedName}" wurde zur Gruppe hinzugefügt!`);
+          // Lade Gruppen-Details neu (mit forceReload)
+          if (selectedGroup) {
+            await loadGroupDetails(selectedGroup, true);
+          }
           
-          // Lade Daten neu
-          window.location.reload(); // Einfachste Lösung für jetzt
+          // Lade Vergleich neu
+          if (selectedGroup && scraperData) {
+            const comparison = await compareScrapedWithDatabase(selectedGroup, scraperData);
+            setComparisonResult(comparison);
+          }
+          
           return;
         }
 
         // Erstelle neues Team
         if (!item.suggestedClubId) {
-          alert('❌ Club muss zuerst erstellt werden!');
+          console.error('❌ Club muss zuerst erstellt werden!');
           return;
         }
 
         const club = clubs.find(c => c.id === item.suggestedClubId);
         if (!club) {
-          alert('❌ Club nicht gefunden!');
+          console.error('❌ Club nicht gefunden!');
           return;
         }
 
         if (!selectedGroup) {
-          alert('❌ Keine Gruppe ausgewählt!');
+          console.error('❌ Keine Gruppe ausgewählt!');
           return;
         }
 
-        // Erstelle Team
-        const { data: newTeam, error: teamError } = await supabase
+        // WICHTIG: Prüfe ZUERST ob Team bereits existiert (club_id + team_name + category)
+        const { data: existingTeam, error: checkError } = await supabase
           .from('team_info')
-          .insert({
-            club_id: item.suggestedClubId,
-            club_name: club.name,
-            team_name: item.scrapedSuffix || null,
-            category: selectedGroup.category || null,
-            region: null
-          })
-          .select()
-          .single();
+          .select('id, club_name, team_name, category')
+          .eq('club_id', item.suggestedClubId)
+          .eq('team_name', item.scrapedSuffix || '')
+          .eq('category', selectedGroup.category || '')
+          .maybeSingle();
 
-        if (teamError) throw teamError;
-
-        // Erstelle team_season
-        const { error: seasonError } = await supabase
-          .from('team_seasons')
-          .insert({
-            team_id: newTeam.id,
-            season: selectedGroup.season,
-            league: selectedGroup.league,
-            group_name: selectedGroup.groupName,
-            team_size: 6,
-            is_active: true
-          });
-
-        if (seasonError && seasonError.code !== '23505') {
-          throw seasonError;
+        if (checkError && checkError.code !== 'PGRST116') {
+          console.error('❌ Fehler beim Prüfen auf existierendes Team:', checkError);
         }
 
-        // Aktualisiere teams-Array
-        setTeams((prev) => [...prev, newTeam]);
+        let teamId;
+        if (existingTeam) {
+          // Team existiert bereits - verwende es
+          console.log(`ℹ️ Team existiert bereits (ID: ${existingTeam.id}), verwende es`);
+          teamId = existingTeam.id;
+        } else {
+          // Erstelle neues Team
+          const { data: newTeam, error: teamError } = await supabase
+            .from('team_info')
+            .insert({
+              club_id: item.suggestedClubId,
+              club_name: club.name,
+              team_name: item.scrapedSuffix || null,
+              category: selectedGroup.category || null,
+              region: null
+            })
+            .select()
+            .single();
 
-        alert(`✅ Team "${item.scrapedName}" wurde erstellt und zur Gruppe hinzugefügt!`);
+          if (teamError) throw teamError;
+          teamId = newTeam.id;
+          
+          // Aktualisiere State-Arrays
+          setTeams((prev) => [...prev, newTeam]);
+        }
+
+        // Erstelle team_season (falls noch nicht vorhanden)
+        const { data: existingSeason, error: seasonCheckError } = await supabase
+          .from('team_seasons')
+          .select('id')
+          .eq('team_id', teamId)
+          .eq('season', selectedGroup.season)
+          .eq('league', selectedGroup.league)
+          .eq('group_name', selectedGroup.groupName)
+          .maybeSingle();
+
+        if (seasonCheckError && seasonCheckError.code !== 'PGRST116') {
+          console.warn('⚠️ Fehler beim Prüfen auf existierende team_season:', seasonCheckError);
+        }
+
+        if (!existingSeason) {
+          // Erstelle team_season
+          const { data: newSeason, error: seasonError } = await supabase
+            .from('team_seasons')
+            .insert({
+              team_id: teamId,
+              season: selectedGroup.season,
+              league: selectedGroup.league,
+              group_name: selectedGroup.groupName,
+              team_size: 6,
+              is_active: true
+            })
+            .select()
+            .single();
+
+          if (seasonError && seasonError.code !== '23505') {
+            throw seasonError;
+          }
+
+          if (newSeason && setTeamSeasons) {
+            setTeamSeasons((prev) => [...prev, newSeason]);
+          }
+        } else {
+          // Aktualisiere bestehenden Eintrag auf is_active = true
+          const { error: updateError } = await supabase
+            .from('team_seasons')
+            .update({ is_active: true })
+            .eq('id', existingSeason.id);
+
+          if (updateError) {
+            console.warn('⚠️ Fehler beim Aktualisieren der team_season:', updateError);
+          }
+        }
+
+        // Lade Gruppen-Details neu
+        if (selectedGroup) {
+          await loadGroupDetails(selectedGroup);
+        }
         
-        // Lade Daten neu
-        window.location.reload(); // Einfachste Lösung für jetzt
+        // Lade Vergleich neu
+        if (selectedGroup && scraperData) {
+          const comparison = await compareScrapedWithDatabase(selectedGroup, scraperData);
+          setComparisonResult(comparison);
+        }
       } else if (type === 'matchday') {
         // Erstelle Matchday
         if (!selectedGroup) {
-          alert('❌ Keine Gruppe ausgewählt!');
+          console.error('❌ Keine Gruppe ausgewählt!');
           return;
         }
 
         // Finde Team-IDs für home und away
-        const findTeamId = async (teamName) => {
+        const findTeamId = (teamName) => {
           const parts = teamName.split(/\s+/);
           const clubName = parts.slice(0, -1).join(' ').trim();
           const teamSuffix = parts[parts.length - 1];
@@ -900,16 +1004,82 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
           return dbTeam?.id || null;
         };
 
-        const homeTeamId = await findTeamId(item.homeTeam);
-        const awayTeamId = await findTeamId(item.awayTeam);
+        const homeTeamId = findTeamId(item.homeTeam);
+        const awayTeamId = findTeamId(item.awayTeam);
 
         if (!homeTeamId || !awayTeamId) {
-          alert(`❌ Teams nicht gefunden: ${item.homeTeam} oder ${item.awayTeam}`);
+          console.error(`❌ Teams nicht gefunden: ${item.homeTeam} oder ${item.awayTeam}`);
           return;
         }
 
         const matchDate = item.matchDate ? new Date(item.matchDate).toISOString() : new Date().toISOString();
+        const matchDateOnly = matchDate.split('T')[0];
 
+        // WICHTIG: Prüfe ZUERST ob Matchday bereits existiert (Unique Constraint!)
+        const { data: existingMatchday, error: checkError } = await supabase
+          .from('matchdays')
+          .select('id, match_date, match_number, home_team_id, away_team_id')
+          .gte('match_date', `${matchDateOnly}T00:00:00`)
+          .lt('match_date', `${matchDateOnly}T23:59:59`)
+          .or(`and(home_team_id.eq.${homeTeamId},away_team_id.eq.${awayTeamId}),and(home_team_id.eq.${awayTeamId},away_team_id.eq.${homeTeamId})`)
+          .eq('season', selectedGroup.season)
+          .eq('league', selectedGroup.league)
+          .eq('group_name', selectedGroup.groupName)
+          .maybeSingle();
+
+        if (checkError && checkError.code !== 'PGRST116') {
+          console.error('❌ Fehler beim Prüfen auf existierenden Matchday:', checkError);
+        }
+
+        if (existingMatchday) {
+          // Matchday existiert bereits - aktualisiere nur match_number falls vorhanden
+          console.log(`ℹ️ Matchday existiert bereits (ID: ${existingMatchday.id}), überspringe Erstellung`);
+          
+          if (item.matchNumber && !existingMatchday.match_number) {
+            // Aktualisiere match_number falls noch nicht vorhanden
+            const { error: updateError } = await supabase
+              .from('matchdays')
+              .update({ match_number: item.matchNumber })
+              .eq('id', existingMatchday.id);
+            
+            if (updateError) {
+              console.warn('⚠️ Fehler beim Aktualisieren der match_number:', updateError);
+            }
+          }
+
+          // Lade Vergleich neu (Matchday sollte jetzt als "matched" erkannt werden)
+          if (selectedGroup && scraperData) {
+            const comparison = await compareScrapedWithDatabase(selectedGroup, scraperData);
+            setComparisonResult(comparison);
+          }
+          return;
+        }
+
+        // Prüfe auch nach match_number (falls vorhanden)
+        if (item.matchNumber) {
+          const { data: existingByNumber, error: numberCheckError } = await supabase
+            .from('matchdays')
+            .select('id, match_number')
+            .eq('match_number', item.matchNumber)
+            .maybeSingle();
+
+          if (numberCheckError && numberCheckError.code !== 'PGRST116') {
+            console.error('❌ Fehler beim Prüfen auf match_number:', numberCheckError);
+          }
+
+          if (existingByNumber) {
+            console.log(`ℹ️ Matchday mit match_number ${item.matchNumber} existiert bereits (ID: ${existingByNumber.id}), überspringe Erstellung`);
+            
+            // Lade Vergleich neu
+            if (selectedGroup && scraperData) {
+              const comparison = await compareScrapedWithDatabase(selectedGroup, scraperData);
+              setComparisonResult(comparison);
+            }
+            return;
+          }
+        }
+
+        // Matchday existiert nicht - erstelle neuen
         const { data: newMatchday, error: matchdayError } = await supabase
           .from('matchdays')
           .insert({
@@ -926,16 +1096,141 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
           .select()
           .single();
 
-        if (matchdayError) throw matchdayError;
+        if (matchdayError) {
+          // Wenn Unique Constraint Fehler, bedeutet das Matchday existiert bereits
+          if (matchdayError.code === '23505') {
+            console.log('ℹ️ Matchday existiert bereits (Unique Constraint), überspringe Erstellung');
+            
+            // Lade Vergleich neu
+            if (selectedGroup && scraperData) {
+              const comparison = await compareScrapedWithDatabase(selectedGroup, scraperData);
+              setComparisonResult(comparison);
+            }
+            return;
+          }
+          throw matchdayError;
+        }
 
-        alert(`✅ Matchday "${item.homeTeam} vs ${item.awayTeam}" wurde erstellt!`);
+        // Lade Gruppen-Details neu (mit forceReload)
+        if (selectedGroup) {
+          await loadGroupDetails(selectedGroup, true);
+        }
         
-        // Lade Daten neu
-        window.location.reload();
+        // Lade Vergleich neu
+        if (selectedGroup && scraperData) {
+          const comparison = await compareScrapedWithDatabase(selectedGroup, scraperData);
+          setComparisonResult(comparison);
+        }
       }
     } catch (error) {
       console.error('❌ Fehler beim Erstellen:', error);
-      alert(`Fehler: ${error.message}`);
+      // Zeige Fehler in der Konsole, kein Modal
+    }
+  };
+
+  // Lade Details für eine Gruppe (mit forceReload Option)
+  const loadGroupDetails = async (group, forceReload = false) => {
+    const groupKey = getGroupKey(group);
+    if (!forceReload && selectedGroup && getGroupKey(selectedGroup) === groupKey) {
+      setSelectedGroup(null);
+      setGroupDetails(null);
+      setShowComparison(false);
+      setComparisonResult(null);
+      setScraperData(null);
+      return;
+    }
+
+    setLoadingDetails(true);
+    setSelectedGroup(group);
+    
+    // Versuche vorhandenen Snapshot zu laden (nur wenn nicht forceReload)
+    if (!forceReload) {
+      await loadScraperSnapshot(group);
+    }
+
+    try {
+      // Lade Teams neu für diese Gruppe (falls neue Teams hinzugefügt wurden)
+      const { data: updatedTeamSeasons, error: tsError } = await supabase
+        .from('team_seasons')
+        .select('*, team_info(id, club_name, team_name, category)')
+        .eq('season', group.season)
+        .eq('league', group.league)
+        .eq('group_name', group.groupName)
+        .eq('is_active', true);
+
+      if (!tsError && updatedTeamSeasons) {
+        // Finde Teams für diese team_seasons
+        const updatedTeamIds = updatedTeamSeasons.map(ts => ts.team_id);
+        const { data: updatedTeamsData, error: teamsError } = await supabase
+          .from('team_info')
+          .select('*')
+          .in('id', updatedTeamIds);
+
+        if (!teamsError && updatedTeamsData) {
+          // Aktualisiere group.teams mit neuen Daten
+          const updatedTeams = updatedTeamSeasons
+            .map(ts => {
+              const team = updatedTeamsData.find(t => t.id === ts.team_id);
+              return team ? { ...team, teamSeason: ts } : null;
+            })
+            .filter(Boolean);
+          
+          // Aktualisiere group-Objekt
+          group.teams = updatedTeams;
+        }
+      }
+
+      const teamIds = group.teams.map((t) => t.id);
+
+      // Lade alle Matchdays für diese Gruppe
+      const { data: groupMatchdays, error: matchdaysError } = await supabase
+        .from('matchdays')
+        .select(`
+          *,
+          home_team:team_info!matchdays_home_team_id_fkey(id, club_name, team_name, category),
+          away_team:team_info!matchdays_away_team_id_fkey(id, club_name, team_name, category)
+        `)
+        .in('home_team_id', teamIds.length > 0 ? teamIds : ['00000000-0000-0000-0000-000000000000'])
+        .in('away_team_id', teamIds.length > 0 ? teamIds : ['00000000-0000-0000-0000-000000000000'])
+        .eq('season', group.season)
+        .eq('league', group.league)
+        .eq('group_name', group.groupName)
+        .order('match_date', { ascending: true })
+        .order('start_time', { ascending: true });
+
+      if (matchdaysError) throw matchdaysError;
+
+      // Lade Match Results für alle Matchdays
+      const matchdayIds = (groupMatchdays || []).map((m) => m.id);
+      let matchResults = [];
+      if (matchdayIds.length > 0) {
+        const { data: results, error: resultsError } = await supabase
+          .from('match_results')
+          .select('*')
+          .in('matchday_id', matchdayIds);
+
+        if (!resultsError && results) {
+          matchResults = results;
+        }
+      }
+
+      // Berechne Tabelle
+      const standings = calculateStandings(groupMatchdays || [], matchResults, teamIds);
+
+      // Berechne Statistiken
+      const stats = calculateGroupStats(groupMatchdays || [], matchResults, group.teams.length);
+
+      setGroupDetails({
+        matchdays: groupMatchdays || [],
+        matchResults,
+        standings,
+        stats
+      });
+    } catch (error) {
+      console.error('❌ Fehler beim Laden der Gruppendetails:', error);
+      setGroupDetails({ error: error.message });
+    } finally {
+      setLoadingDetails(false);
     }
   };
 
@@ -1333,9 +1628,17 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
 
                         return (
                           <div key={match.id} className={`matchday-item ${isFinished ? 'finished' : ''}`}>
-                            <div className="matchday-date">
-                              <div className="matchday-date-main">{matchDate}</div>
-                              <div className="matchday-time">{matchTime}</div>
+                            <div className="matchday-header">
+                              <div className="matchday-date">
+                                <div className="matchday-date-main">{matchDate}</div>
+                                <div className="matchday-time">{matchTime}</div>
+                              </div>
+                              {match.match_number && (
+                                <div className="matchday-number-badge">
+                                  <span className="match-number-label">Match #</span>
+                                  <span className="match-number-value">{match.match_number}</span>
+                                </div>
+                              )}
                             </div>
                             <div className="matchday-teams">
                               <div className="matchday-team home">

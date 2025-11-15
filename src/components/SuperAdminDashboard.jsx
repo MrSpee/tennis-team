@@ -3464,6 +3464,8 @@ function SuperAdminDashboard() {
       players={players}
       setTeams={setTeams}
       setClubs={setClubs}
+      setTeamSeasons={setTeamSeasons}
+      loadDashboardData={loadDashboardData}
     />
   );
 
