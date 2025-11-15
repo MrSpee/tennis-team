@@ -476,14 +476,61 @@ const TeamPortraitImportTab = () => {
             );
             
             let playerId = null;
+            let matchReason = null;
             
-            // Wenn ein Match mit hoher Confidence gefunden wurde, nutze diesen Spieler
+            // PRIORITÄT 1: Nutze Matching-Ergebnisse aus performPlayerMatching
             if (playerMatch?.bestMatch && playerMatch.bestMatch.score >= 0.85) {
               playerId = playerMatch.bestMatch.player.id;
-              console.log(`✅ Verwende existierenden Spieler für ${player.name}: ${playerMatch.bestMatch.player.name} (${Math.round(playerMatch.bestMatch.score * 100)}%)`);
+              matchReason = `Matching-Ergebnis (${Math.round(playerMatch.bestMatch.score * 100)}%)`;
+              console.log(`✅ Verwende existierenden Spieler für ${player.name}: ${playerMatch.bestMatch.player.name} (${matchReason})`);
             } else {
-              // Fallback: Prüfe manuell via TVM ID
+              // PRIORITÄT 2: Prüfe via TVM ID (in allPlayers Array)
               if (player.id_number) {
+                const tvmIdStr = String(player.id_number).trim();
+                const existingByTvmId = allPlayers.find(p => {
+                  if (!p.tvm_id_number) return false;
+                  return String(p.tvm_id_number).trim() === tvmIdStr;
+                });
+                
+                if (existingByTvmId) {
+                  playerId = existingByTvmId.id;
+                  matchReason = 'TVM ID Match (in allPlayers)';
+                  console.log(`✅ Gefunden via TVM ID in allPlayers: ${existingByTvmId.name}`);
+                }
+              }
+              
+              // PRIORITÄT 3: Prüfe via Name-Matching (normalisiert) in allPlayers
+              if (!playerId) {
+                const playerNameNorm = normalizePlayerName(player.name);
+                const playerNameReversedNorm = normalizePlayerName(reverseNameOrder(player.name));
+                
+                for (const existingPlayer of allPlayers) {
+                  const existingNameNorm = normalizePlayerName(existingPlayer.name || '');
+                  const existingNameReversedNorm = normalizePlayerName(reverseNameOrder(existingPlayer.name || ''));
+                  
+                  // Exakter Match (normalisiert)
+                  if (existingNameNorm === playerNameNorm || 
+                      existingNameNorm === playerNameReversedNorm ||
+                      existingNameReversedNorm === playerNameNorm) {
+                    playerId = existingPlayer.id;
+                    matchReason = 'Exakter Name-Match (normalisiert)';
+                    console.log(`✅ Gefunden via exaktem Name-Match: ${existingPlayer.name} für ${player.name}`);
+                    break;
+                  }
+                  
+                  // Fuzzy Match (höherer Threshold: 0.90)
+                  const similarity = calculateSimilarity(playerNameNorm, existingNameNorm);
+                  if (similarity >= 0.90) {
+                    playerId = existingPlayer.id;
+                    matchReason = `Fuzzy-Match (${Math.round(similarity * 100)}%)`;
+                    console.log(`✅ Gefunden via Fuzzy-Match: ${existingPlayer.name} für ${player.name} (${matchReason})`);
+                    break;
+                  }
+                }
+              }
+              
+              // PRIORITÄT 4: Fallback - Prüfe direkt in DB via TVM ID (falls allPlayers nicht vollständig)
+              if (!playerId && player.id_number) {
                 try {
                   const tvmId = String(player.id_number).trim();
                   const { data: existing, error: checkError } = await supabase
@@ -498,39 +545,21 @@ const TeamPortraitImportTab = () => {
                     }
                   } else if (existing) {
                     playerId = existing.id;
-                    console.log(`✅ Gefunden via TVM ID: ${existing.name}`);
+                    matchReason = 'TVM ID Match (DB Query)';
+                    console.log(`✅ Gefunden via TVM ID (DB): ${existing.name}`);
                   }
                 } catch (err) {
                   console.warn(`Exception beim Prüfen von Spieler ${player.name}:`, err);
                 }
               }
-              
-              // Fallback 2: Prüfe via Name-Matching (normalisiert)
-              if (!playerId) {
-                const playerNameNorm = normalizePlayerName(player.name);
-                const playerNameReversedNorm = normalizePlayerName(reverseNameOrder(player.name));
-                
-                for (const existingPlayer of allPlayers) {
-                  const existingNameNorm = normalizePlayerName(existingPlayer.name || '');
-                  const existingNameReversedNorm = normalizePlayerName(reverseNameOrder(existingPlayer.name || ''));
-                  
-                  if (existingNameNorm === playerNameNorm || 
-                      existingNameNorm === playerNameReversedNorm ||
-                      existingNameReversedNorm === playerNameNorm) {
-                    playerId = existingPlayer.id;
-                    console.log(`✅ Gefunden via Name-Match: ${existingPlayer.name} für ${player.name}`);
-                    break;
-                  }
-                  
-                  // Fuzzy Match als letzter Ausweg
-                  const similarity = calculateSimilarity(playerNameNorm, existingNameNorm);
-                  if (similarity >= 0.90) {
-                    playerId = existingPlayer.id;
-                    console.log(`✅ Gefunden via Fuzzy-Match (${Math.round(similarity * 100)}%): ${existingPlayer.name} für ${player.name}`);
-                    break;
-                  }
-                }
-              }
+            }
+            
+            // WICHTIG: Wenn kein Match gefunden wurde, sollte der Spieler NICHT erstellt werden
+            // wenn ein ähnlicher Name existiert (auch mit niedrigerem Score)
+            if (!playerId && playerMatch?.bestMatch && playerMatch.bestMatch.score >= 0.75) {
+              // Warnung: Es gibt ein Match, aber mit niedrigerer Confidence
+              console.warn(`⚠️ Potentieller Duplikat für ${player.name}: ${playerMatch.bestMatch.player.name} (${Math.round(playerMatch.bestMatch.score * 100)}%) - bitte manuell prüfen!`);
+              // Optional: Hier könnte man den Benutzer fragen, ob er trotzdem erstellen will
             }
             
             // Erstelle Spieler NUR wenn wirklich kein Match gefunden wurde

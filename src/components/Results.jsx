@@ -162,12 +162,52 @@ const Results = () => {
         // Ignoriere club_error, aber fahre mit anderen Suchen fort
       }
       
-      // Suche nach Teams
+      // Suche nach Teams (club_name ist direkt in team_info vorhanden)
       const { data: teams, error: teamError } = await supabase
         .from('team_info')
-        .select('id, team_name, club_name, category')
+        .select(`
+          id, 
+          team_name, 
+          category,
+          club_name,
+          club_info(id, name)
+        `)
         .or(`team_name.ilike.%${term}%,club_name.ilike.%${term}%,category.ilike.%${term}%`)
         .limit(10);
+      
+      // Erweitere die Suche um club_name über club_info (falls club_name in team_info leer ist)
+      if (!teamError && teams) {
+        // Filtere Teams, bei denen der Club-Name über club_info passt
+        const { data: clubsForTeams, error: clubsError } = await supabase
+          .from('club_info')
+          .select('id, name')
+          .ilike('name', `%${term}%`)
+          .limit(5);
+        
+        if (!clubsError && clubsForTeams && clubsForTeams.length > 0) {
+          const clubIds = clubsForTeams.map(c => c.id);
+          const { data: teamsByClub, error: teamsByClubError } = await supabase
+            .from('team_info')
+            .select(`
+              id, 
+              team_name, 
+              category,
+              club_name,
+              club_info(id, name)
+            `)
+            .in('club_id', clubIds)
+            .limit(10);
+          
+          if (!teamsByClubError && teamsByClub) {
+            // Kombiniere beide Ergebnisse und entferne Duplikate
+            const allTeams = [...(teams || []), ...teamsByClub];
+            const uniqueTeams = allTeams.filter((team, index, self) => 
+              index === self.findIndex(t => t.id === team.id)
+            );
+            teams = uniqueTeams.slice(0, 10);
+          }
+        }
+      }
       
       if (teamError) {
         console.error('❌ Error searching teams:', teamError);
@@ -187,15 +227,23 @@ const Results = () => {
         // Ignoriere players_error, aber fahre mit anderen Suchen fort
       }
       
+      // Normalisiere Teams-Ergebnisse (club_name kann aus team_info oder club_info kommen)
+      const normalizedTeams = (teams || []).map(team => ({
+        id: team.id,
+        team_name: team.team_name,
+        category: team.category,
+        club_name: team.club_name || team.club_info?.name || ''
+      }));
+      
       setSearchResults({
         clubs: clubs || [],
-        teams: teams || [],
+        teams: normalizedTeams,
         players: playersList || []
       });
       
       console.log('✅ Search results:', {
         clubs: clubs?.length || 0,
-        teams: teams?.length || 0,
+        teams: normalizedTeams?.length || 0,
         players: playersList?.length || 0
       });
       
