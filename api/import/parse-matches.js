@@ -655,11 +655,46 @@ module.exports = async function handler(req, res) {
       ],
       response_format: { type: "json_object" },
       temperature: 0.1,
-      max_tokens: 2000
+      max_tokens: 4000 // Erhöht von 2000 auf 4000 für große Spielpläne
     });
+    
+    // Prüfe ob die Antwort abgeschnitten wurde (truncated)
+    if (completion.choices[0].finish_reason === 'length') {
+      console.warn('⚠️ WARNING: Response was truncated due to max_tokens limit!');
+      return res.status(400).json({
+        error: 'Antwort zu lang',
+        details: 'Der Text ist zu umfangreich. Bitte teile ihn in kleinere Abschnitte auf oder kontaktiere den Support.',
+        ...corsHeaders
+      });
+    }
 
     // Response parsen
-    const result = JSON.parse(completion.choices[0].message.content);
+    let rawContent = completion.choices[0].message.content;
+    
+    console.log('📥 Raw OpenAI response (first 500 chars):', rawContent.substring(0, 500));
+    
+    // Entferne Markdown Code-Blocks falls vorhanden (```json ... ```)
+    rawContent = rawContent.trim();
+    if (rawContent.startsWith('```json')) {
+      rawContent = rawContent.replace(/^```json\s*/i, '').replace(/```\s*$/, '');
+    } else if (rawContent.startsWith('```')) {
+      rawContent = rawContent.replace(/^```\s*/, '').replace(/```\s*$/, '');
+    }
+    
+    // Entferne leading/trailing whitespace
+    rawContent = rawContent.trim();
+    
+    console.log('🧹 Cleaned content (first 500 chars):', rawContent.substring(0, 500));
+    
+    // Versuche JSON zu parsen
+    let result;
+    try {
+      result = JSON.parse(rawContent);
+    } catch (parseError) {
+      console.error('❌ JSON Parse Error:', parseError.message);
+      console.error('❌ Content that failed to parse:', rawContent.substring(0, 1000));
+      throw new Error(`JSON-Parsing fehlgeschlagen: ${parseError.message}. Content: ${rawContent.substring(0, 200)}...`);
+    }
     
     console.log('✅ Parsing successful. Found matches:', result.matches?.length || 0);
     console.log('💰 Tokens used:', {
