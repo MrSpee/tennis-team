@@ -682,7 +682,7 @@ const TeamPortraitImportTab = () => {
               
               {/* Matching-Ergebnis */}
               {clubMatch && (
-                <div className={`match-result ${clubMatch.confidence}`}>
+                <div className={`match-result ${clubMatch.confidence} ${selectedClubId === clubMatch.match.id ? 'selected' : ''}`}>
                   <div className="match-header">
                     <div className="match-status">
                       {clubMatch.confidence === 'high' && (
@@ -704,16 +704,31 @@ const TeamPortraitImportTab = () => {
                   </div>
                   
                   <div className="match-suggestion">
-                    <div className="suggestion-item best">
+                    <div className={`suggestion-item best ${selectedClubId === clubMatch.match.id ? 'is-selected' : ''}`}>
                       <div className="suggestion-content">
-                        <strong>{clubMatch.match.name}</strong>
-                        {clubMatch.match.city && <span className="suggestion-meta">({clubMatch.match.city})</span>}
+                        <div className="suggestion-main">
+                          <strong>{clubMatch.match.name}</strong>
+                          {clubMatch.match.city && <span className="suggestion-meta">({clubMatch.match.city})</span>}
+                        </div>
+                        {selectedClubId === clubMatch.match.id && (
+                          <div className="selected-badge">
+                            <CheckCircle size={16} />
+                            <span>Ausgewählt</span>
+                          </div>
+                        )}
                       </div>
                       <button
-                        className="btn-select-match"
+                        className={`btn-select-match ${selectedClubId === clubMatch.match.id ? 'selected' : ''}`}
                         onClick={() => setSelectedClubId(clubMatch.match.id)}
                       >
-                        {selectedClubId === clubMatch.match.id ? '✓ Ausgewählt' : 'Auswählen'}
+                        {selectedClubId === clubMatch.match.id ? (
+                          <>
+                            <CheckCircle size={14} />
+                            Ausgewählt
+                          </>
+                        ) : (
+                          'Auswählen'
+                        )}
                       </button>
                     </div>
                     
@@ -721,17 +736,32 @@ const TeamPortraitImportTab = () => {
                       <div className="alternatives">
                         <div className="alternatives-label">Alternative Vorschläge:</div>
                         {clubMatch.alternatives.map((alt, idx) => (
-                          <div key={idx} className="suggestion-item">
+                          <div key={idx} className={`suggestion-item ${selectedClubId === alt.club.id ? 'is-selected' : ''}`}>
                             <div className="suggestion-content">
-                              {alt.club.name}
-                              {alt.club.city && <span className="suggestion-meta">({alt.club.city})</span>}
-                              <span className="suggestion-score">{Math.round(alt.score * 100)}%</span>
+                              <div className="suggestion-main">
+                                {alt.club.name}
+                                {alt.club.city && <span className="suggestion-meta">({alt.club.city})</span>}
+                                <span className="suggestion-score">{Math.round(alt.score * 100)}%</span>
+                              </div>
+                              {selectedClubId === alt.club.id && (
+                                <div className="selected-badge">
+                                  <CheckCircle size={16} />
+                                  <span>Ausgewählt</span>
+                                </div>
+                              )}
                             </div>
                             <button
-                              className="btn-select-match btn-secondary"
+                              className={`btn-select-match btn-secondary ${selectedClubId === alt.club.id ? 'selected' : ''}`}
                               onClick={() => setSelectedClubId(alt.club.id)}
                             >
-                              Auswählen
+                              {selectedClubId === alt.club.id ? (
+                                <>
+                                  <CheckCircle size={14} />
+                                  Ausgewählt
+                                </>
+                              ) : (
+                                'Auswählen'
+                              )}
                             </button>
                           </div>
                         ))}
@@ -778,9 +808,17 @@ const TeamPortraitImportTab = () => {
               </div>
               
               {selectedClub && (
-                <div className="selected-info">
-                  <CheckCircle size={16} className="icon-success" />
-                  <span>Ausgewählt: <strong>{selectedClub.name}</strong></span>
+                <div className="selected-info prominent">
+                  <div className="selected-info-icon">
+                    <CheckCircle size={20} className="icon-success" />
+                  </div>
+                  <div className="selected-info-content">
+                    <div className="selected-info-label">Aktuell ausgewählter Verein:</div>
+                    <div className="selected-info-name">{selectedClub.name}</div>
+                    {selectedClub.city && (
+                      <div className="selected-info-meta">{selectedClub.city}</div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -934,9 +972,15 @@ const TeamPortraitImportTab = () => {
                 </div>
                 
                 {selectedTeam && (
-                  <div className="selected-info">
-                    <CheckCircle size={16} className="icon-success" />
-                    <span>Ausgewählt: <strong>{selectedTeam.team_name}</strong> ({selectedTeam.category})</span>
+                  <div className="selected-info prominent">
+                    <div className="selected-info-icon">
+                      <CheckCircle size={20} className="icon-success" />
+                    </div>
+                    <div className="selected-info-content">
+                      <div className="selected-info-label">Aktuell ausgewähltes Team:</div>
+                      <div className="selected-info-name">{selectedTeam.team_name}</div>
+                      <div className="selected-info-meta">{selectedTeam.category}</div>
+                    </div>
                   </div>
                 )}
               </div>
