@@ -699,6 +699,7 @@ module.exports = async function handler(req, res) {
 
   } catch (error) {
     console.error('❌ Error parsing matches:', error);
+    console.error('❌ Error stack:', error.stack);
     
     // OpenAI API Fehler
     if (error.response) {
@@ -717,10 +718,30 @@ module.exports = async function handler(req, res) {
       });
     }
 
+    // JSON Parse Fehler
+    if (error instanceof SyntaxError && error.message.includes('JSON')) {
+      return res.status(500).json({
+        error: 'JSON-Parsing-Fehler',
+        details: 'Die KI-Antwort konnte nicht als JSON geparst werden. Bitte versuche es erneut.',
+        raw_error: error.message,
+        ...corsHeaders
+      });
+    }
+
+    // OpenAI API Key fehlt
+    if (error.message && error.message.includes('API key')) {
+      return res.status(500).json({
+        error: 'OpenAI API Key fehlt',
+        details: 'Der OpenAI API Key ist nicht konfiguriert. Bitte kontaktiere den Administrator.',
+        ...corsHeaders
+      });
+    }
+
     // Allgemeiner Fehler
     return res.status(500).json({
       error: 'Interner Server-Fehler beim Parsen',
       details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
       ...corsHeaders
     });
   }
