@@ -24,6 +24,9 @@ const LiveResultsWithDB = () => {
   const [showFreeTextModal, setShowFreeTextModal] = useState(false);
   const [freeTextContext, setFreeTextContext] = useState(null); // {matchId, playerType}
   const [freeTextValue, setFreeTextValue] = useState('');
+  
+  // State für Match-Status (Spielabbrüche etc.)
+  const [matchStatuses, setMatchStatuses] = useState({});
 
   // Lade echte Daten aus der Datenbank
   useEffect(() => {
@@ -280,11 +283,17 @@ const LiveResultsWithDB = () => {
 
       // Erstelle Map der bestehenden Ergebnisse
       const existingResultsMap = {};
+      const statusMap = {};
       if (existingResults) {
         existingResults.forEach(result => {
           existingResultsMap[result.match_number] = result;
+          // Speichere Status separat
+          statusMap[result.match_number] = result.status || 'normal';
         });
       }
+      
+      // Setze Match-Status
+      setMatchStatuses(statusMap);
 
       // Initialisiere Match-Ergebnisse mit bestehenden Daten
       const results = [];
@@ -303,7 +312,8 @@ const LiveResultsWithDB = () => {
             { home: existing?.set2_home || '-', guest: existing?.set2_guest || '-', isMatchTiebreak: false },
             { home: existing?.set3_home || '-', guest: existing?.set3_guest || '-', isMatchTiebreak: true }
           ],
-          comment: existing?.notes || ''
+          comment: existing?.notes || '',
+          matchStatus: existing?.status || 'normal'
         });
       });
       
@@ -321,7 +331,8 @@ const LiveResultsWithDB = () => {
             { home: existing?.set2_home || '-', guest: existing?.set2_guest || '-', isMatchTiebreak: false },
             { home: existing?.set3_home || '-', guest: existing?.set3_guest || '-', isMatchTiebreak: true }
           ],
-          comment: existing?.notes || ''
+          comment: existing?.notes || '',
+          matchStatus: existing?.status || 'normal'
         });
       });
       
@@ -339,7 +350,8 @@ const LiveResultsWithDB = () => {
             { home: existing?.set2_home || '-', guest: existing?.set2_guest || '-', isMatchTiebreak: false },
             { home: existing?.set3_home || '-', guest: existing?.set3_guest || '-', isMatchTiebreak: true }
           ],
-          comment: existing?.notes || ''
+          comment: existing?.notes || '',
+          matchStatus: existing?.status || 'normal'
         });
       });
       
@@ -368,7 +380,8 @@ const LiveResultsWithDB = () => {
         { home: '-', guest: '-', isMatchTiebreak: false },
         { home: '-', guest: '-', isMatchTiebreak: true }
       ],
-      comment: ''
+      comment: '',
+      matchStatus: 'normal'
     });
     
     results.push({
@@ -382,7 +395,8 @@ const LiveResultsWithDB = () => {
         { home: '-', guest: '-', isMatchTiebreak: false },
         { home: '-', guest: '-', isMatchTiebreak: true }
       ],
-      comment: ''
+      comment: '',
+      matchStatus: 'normal'
     });
     
     // Match 5 und 6 (Doppel-Matches)
@@ -397,7 +411,8 @@ const LiveResultsWithDB = () => {
         { home: '-', guest: '-', isMatchTiebreak: false },
         { home: '-', guest: '-', isMatchTiebreak: true }
       ],
-      comment: ''
+      comment: '',
+      matchStatus: 'normal'
     });
     
     results.push({
@@ -411,7 +426,8 @@ const LiveResultsWithDB = () => {
         { home: '-', guest: '-', isMatchTiebreak: false },
         { home: '-', guest: '-', isMatchTiebreak: true }
       ],
-      comment: ''
+      comment: '',
+      matchStatus: 'normal'
     });
     
     // Match 1 und 3 (weitere Einzel-Matches)
@@ -426,7 +442,8 @@ const LiveResultsWithDB = () => {
         { home: '-', guest: '-', isMatchTiebreak: false },
         { home: '-', guest: '-', isMatchTiebreak: true }
       ],
-      comment: ''
+      comment: '',
+      matchStatus: 'normal'
     });
     
     results.push({
@@ -440,7 +457,8 @@ const LiveResultsWithDB = () => {
         { home: '-', guest: '-', isMatchTiebreak: false },
         { home: '-', guest: '-', isMatchTiebreak: true }
       ],
-      comment: ''
+      comment: '',
+      matchStatus: 'normal'
     });
     
     setMatchResults(results);
@@ -666,6 +684,16 @@ const LiveResultsWithDB = () => {
       return match;
     }));
   };
+  
+  const handleMatchStatusChange = (matchId, status) => {
+    setMatchResults(prev => prev.map(match => {
+      if (match.id === matchId) {
+        return { ...match, matchStatus: status };
+      }
+      return match;
+    }));
+    setMatchStatuses(prev => ({ ...prev, [matchId]: status }));
+  };
 
   const saveMatchResult = async (matchData) => {
     try {
@@ -691,20 +719,39 @@ const LiveResultsWithDB = () => {
         return;
       }
 
+      // Hole Match-Status (Spielabbruch etc.)
+      const matchStatus = matchData.matchStatus || 'normal';
+      const isAborted = ['retired', 'walkover', 'disqualified', 'defaulted'].includes(matchStatus);
+      
       // Bereite Daten für Supabase vor
       const resultData = {
         matchday_id: matchId,  // Referenz zum Matchday
         match_number: parseInt(matchData.id), // Stelle sicher, dass es eine Zahl ist
         match_type: matchData.type,
         entered_by: user.id,
-        notes: '', // Wird später befüllt mit Kommentar + Gegner-Namen
-        status: hasScoreData ? 'in_progress' : 'pending'
+        notes: '', // Wird später befüllt mit Kommentar + Status-Info
+        status: isAborted ? matchStatus : (hasScoreData ? 'in_progress' : 'pending')
       };
       
       // Füge Kommentar hinzu (wenn vorhanden)
+      let notesText = '';
       if (matchData.comment && matchData.comment.trim() !== '') {
-        resultData.notes = matchData.comment;
+        notesText = matchData.comment;
       }
+      
+      // Füge Status-Info hinzu bei Spielabbrüchen
+      if (isAborted) {
+        const statusLabels = {
+          retired: 'Aufgegeben (Verletzung/Erschöpfung)',
+          walkover: 'Kampflos (w/o - Gegner nicht angetreten)',
+          disqualified: 'Disqualifikation',
+          defaulted: 'Nicht angetreten'
+        };
+        const statusLabel = statusLabels[matchStatus] || matchStatus;
+        notesText = notesText ? `${statusLabel}. ${notesText}` : statusLabel;
+      }
+      
+      resultData.notes = notesText || null;
 
       // Füge Spieler-IDs hinzu (nur wenn nicht leer)
       if (matchData.type === 'Einzel') {
@@ -876,32 +923,66 @@ const LiveResultsWithDB = () => {
         }
       };
 
-      // Berechne den Match-Gewinner mit korrekter Tennis-Logik
-      const matchWinner = calculateMatchWinner(scores);
+      // Berechne den Match-Gewinner mit korrekter Tennis-Logik oder Spielabbruch-Logik
+      let matchWinner = null;
       const hasStarted = scores.some(set => set.home > 0 || set.guest > 0);
-
-      // Setze Gesamtergebnis und Status basierend auf Tennis-Logik
-      if (matchWinner !== null) {
-        // Match ist beendet
+      
+      if (isAborted) {
+        // Bei Spielabbruch: Bestimme Gewinner basierend auf Status
+        // WICHTIG: Wir nehmen an, dass der HEIM-Spieler immer derjenige ist, der NICHT abgebrochen hat
+        // Der User muss beim Eingeben darauf achten, den richtigen Status zu wählen
+        // Für eine bessere UX könnten wir später eine explizite Gewinner-Auswahl hinzufügen
+        
+        if (matchStatus === 'retired') {
+          // Der Spieler, der NICHT aufgegeben hat, gewinnt
+          // Wir müssen prüfen, WELCHER Spieler aufgegeben hat
+          // Standard: Wenn matchStatus = retired, nehmen wir an, dass der GAST aufgegeben hat
+          matchWinner = 'home'; // Default: Heim gewinnt bei retired
+        } else if (matchStatus === 'walkover') {
+          // Kampflos: Der anwesende Spieler gewinnt
+          matchWinner = 'home'; // Default: Heim gewinnt bei w/o
+        } else if (matchStatus === 'disqualified') {
+          // Der NICHT disqualifizierte Spieler gewinnt
+          matchWinner = 'home'; // Default: Heim gewinnt bei Disqualifikation
+        } else if (matchStatus === 'defaulted') {
+          // Der erschienene Spieler gewinnt
+          matchWinner = 'home'; // Default: Heim gewinnt bei defaulted
+        }
+        
+        // Setze Ergebnis bei Spielabbruch
         resultData.home_score = matchWinner === 'home' ? 1 : 0;
         resultData.away_score = matchWinner === 'guest' ? 1 : 0;
         resultData.winner = matchWinner;
-        resultData.status = 'completed';
+        resultData.status = matchStatus; // Speichere den genauen Abbruch-Status
         resultData.completed_at = new Date().toISOString();
-      } else if (hasStarted) {
-        // Match läuft noch
-        resultData.home_score = 0; // Wird später berechnet
-        resultData.away_score = 0; // Wird später berechnet
-        resultData.winner = null;
-        resultData.status = 'in_progress';
-        resultData.completed_at = null;
+        
       } else {
-        // Nur Spieler ausgewählt, noch nicht begonnen
-        resultData.home_score = 0;
-        resultData.away_score = 0;
-        resultData.winner = null;
-        resultData.status = 'pending';
-        resultData.completed_at = null;
+        // Normale Tennis-Logik
+        matchWinner = calculateMatchWinner(scores);
+        
+        // Setze Gesamtergebnis und Status basierend auf Tennis-Logik
+        if (matchWinner !== null) {
+          // Match ist beendet
+          resultData.home_score = matchWinner === 'home' ? 1 : 0;
+          resultData.away_score = matchWinner === 'guest' ? 1 : 0;
+          resultData.winner = matchWinner;
+          resultData.status = 'completed';
+          resultData.completed_at = new Date().toISOString();
+        } else if (hasStarted) {
+          // Match läuft noch
+          resultData.home_score = 0; // Wird später berechnet
+          resultData.away_score = 0; // Wird später berechnet
+          resultData.winner = null;
+          resultData.status = 'in_progress';
+          resultData.completed_at = null;
+        } else {
+          // Nur Spieler ausgewählt, noch nicht begonnen
+          resultData.home_score = 0;
+          resultData.away_score = 0;
+          resultData.winner = null;
+          resultData.status = 'pending';
+          resultData.completed_at = null;
+        }
       }
 
       // Debug: Zeige was gesendet wird
@@ -948,11 +1029,22 @@ const LiveResultsWithDB = () => {
         }
       }
 
-      // Erfolgsmeldung basierend auf korrekter Tennis-Logik
+      // Erfolgsmeldung basierend auf Tennis-Logik oder Spielabbruch
       let statusMessage;
       
-      if (matchWinner !== null) {
-        // Match ist beendet
+      if (isAborted) {
+        // Spielabbruch
+        const winnerText = matchWinner === 'home' ? 'Heim' : 'Gast';
+        const statusLabels = {
+          retired: '🏥 Aufgabe',
+          walkover: '🚶 Kampflos (w/o)',
+          disqualified: '⛔ Disqualifikation',
+          defaulted: '❌ Nicht angetreten'
+        };
+        const statusLabel = statusLabels[matchStatus] || matchStatus;
+        statusMessage = `${statusLabel} - ${winnerText} gewinnt!`;
+      } else if (matchWinner !== null) {
+        // Match ist normal beendet
         const winnerText = matchWinner === 'home' ? 'Heim' : 'Gast';
         statusMessage = `🏆 Match abgeschlossen! ${winnerText} gewinnt!`;
       } else if (hasStarted) {
@@ -1205,13 +1297,50 @@ const LiveResultsWithDB = () => {
         )}
 
         {renderScoreInputs(matchData)}
+        
+        {/* Match-Status Auswahl (Spielabbrüche etc.) */}
+        <div className="match-status-section" style={{ marginTop: '1rem', marginBottom: '1rem' }}>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', fontSize: '0.875rem' }}>
+            📊 Match-Status:
+          </label>
+          <select
+            value={matchData.matchStatus || 'normal'}
+            onChange={(e) => handleMatchStatusChange(matchData.id, e.target.value)}
+            style={{
+              width: '100%',
+              padding: '0.75rem',
+              borderRadius: '6px',
+              border: '1px solid #d1d5db',
+              fontSize: '0.875rem',
+              backgroundColor: matchData.matchStatus && matchData.matchStatus !== 'normal' ? '#fef3c7' : 'white'
+            }}
+          >
+            <option value="normal">✅ Normal beendet</option>
+            <option value="retired">🏥 Aufgegeben (Verletzung/Erschöpfung)</option>
+            <option value="walkover">🚶 Kampflos (w/o - Gegner nicht angetreten)</option>
+            <option value="disqualified">⛔ Disqualifikation</option>
+            <option value="defaulted">❌ Nicht angetreten</option>
+          </select>
+          {matchData.matchStatus && matchData.matchStatus !== 'normal' && (
+            <div style={{ 
+              marginTop: '0.5rem', 
+              padding: '0.5rem', 
+              backgroundColor: '#fef3c7', 
+              borderRadius: '6px',
+              fontSize: '0.75rem',
+              color: '#92400e'
+            }}>
+              ⚠️ Bei Spielabbruch: Der <strong>Heim-Spieler</strong> gewinnt automatisch. Wenn der <strong>Gast</strong> gewonnen hat, bitte Spieler-Positionen tauschen.
+            </div>
+          )}
+        </div>
 
         <div className="comment-section-editable">
           <label>💬 Kommentar:</label>
           <textarea
             value={matchData.comment}
             onChange={(e) => handleCommentChange(matchData.id, e.target.value)}
-            placeholder="Zusätzliche Notizen..."
+            placeholder="Zusätzliche Notizen (z.B. Grund für Aufgabe, Verletzungsdetails)..."
             rows="3"
             className="comment-textarea"
           />

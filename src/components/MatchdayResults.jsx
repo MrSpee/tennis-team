@@ -309,11 +309,43 @@ const MatchdayResults = () => {
     
     // Gewinner (DB-Perspektive) für Zeilen-Häkchen
     const matchWinnerRaw = result.winner || calculateMatchWinner(result);
-    // Zusätzlich: Badge im Header weiterhin aus User-Perspektive
+    
+    // Badge im Header: Zeige Vereinsnamen statt "Sieg/Niederlage"
     let winnerDisplay = null;
     if (matchWinnerRaw) {
+      // Prüfe ob unser Verein beteiligt ist
+      const isOurMatch = isOurTeamHome || (matchday && playerTeams && playerTeams.length > 0 && 
+                         playerTeams.some(t => t.id === matchday.away_team_id));
+      
+      // Bestimme ob wir gewonnen haben (nur relevant wenn wir beteiligt sind)
       const userWon = (isOurTeamHome && matchWinnerRaw === 'home') || (!isOurTeamHome && matchWinnerRaw === 'guest');
-      winnerDisplay = { won: userWon, text: userWon ? 'Sieg' : 'Niederlage' };
+      
+      // Hole Team-Namen für bessere Anzeige
+      let winningTeamName = '';
+      if (matchday) {
+        if (matchWinnerRaw === 'home') {
+          // Heim-Team hat gewonnen → zeige Heim-Verein
+          winningTeamName = matchday.home_team?.club_name || 
+                          matchday.homeTeam?.club_name || 
+                          'Heim';
+        } else if (matchWinnerRaw === 'guest') {
+          // Gast-Team hat gewonnen → zeige Gast-Verein
+          winningTeamName = matchday.away_team?.club_name || 
+                          matchday.awayTeam?.club_name || 
+                          'Gast';
+        }
+      }
+      
+      // Fallback: Wenn kein Team-Name verfügbar, verwende "Heim/Gast"
+      if (!winningTeamName || winningTeamName === '') {
+        winningTeamName = matchWinnerRaw === 'home' ? 'Heim' : 'Gast';
+      }
+      
+      winnerDisplay = { 
+        won: userWon,
+        isOurMatch: isOurMatch, // NEU: Flag ob unser Verein beteiligt ist
+        text: winningTeamName // Zeige Vereinsnamen statt "Sieg/Niederlage"
+      };
     }
     
     // Hole Spieler-Daten aus playerData State (separat geladen)
@@ -335,8 +367,14 @@ const MatchdayResults = () => {
             Spiel #{result.match_number}
           </h3>
           {winnerDisplay && (
-            <div className={`improvement-badge-top ${winnerDisplay.won ? 'positive' : 'negative'}`} style={{ fontSize: '0.8rem' }}>
-              <span className="badge-icon">{winnerDisplay.won ? '✓' : '✗'}</span>
+            <div className={`improvement-badge-top ${
+              !winnerDisplay.isOurMatch ? 'neutral' : 
+              winnerDisplay.won ? 'positive' : 'negative'
+            }`} style={{ fontSize: '0.8rem' }}>
+              <span className="badge-icon">{
+                !winnerDisplay.isOurMatch ? '🏆' : 
+                winnerDisplay.won ? '✓' : '✗'
+              }</span>
               <span className="badge-value">{winnerDisplay.text}</span>
               </div>
             )}
@@ -440,6 +478,51 @@ const MatchdayResults = () => {
             </div>
           </div>
         </div>
+
+        {/* Spielabbruch-Hinweis */}
+        {result.status && ['retired', 'walkover', 'disqualified', 'defaulted'].includes(result.status) && (() => {
+          // Bestimme wer verloren hat (= wer abgebrochen hat)
+          const loserSide = matchWinnerRaw === 'home' ? 'away' : 'home';
+          const loserTeamName = loserSide === 'home' 
+            ? (matchday.home_team?.club_name || 'Heim')
+            : (matchday.away_team?.club_name || 'Gast');
+          
+          return (
+            <div style={{ 
+              marginTop: '1rem', 
+              padding: '0.75rem', 
+              background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)', 
+              borderRadius: '6px', 
+              fontSize: '0.875rem', 
+              fontWeight: '600',
+              color: '#92400e',
+              border: '2px solid #fbbf24',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}>
+              <span style={{ fontSize: '1.2rem' }}>
+                {result.status === 'retired' && '🏥'}
+                {result.status === 'walkover' && '🚶'}
+                {result.status === 'disqualified' && '⛔'}
+                {result.status === 'defaulted' && '❌'}
+              </span>
+              <div>
+                <div style={{ marginBottom: '0.25rem' }}>
+                  {result.status === 'retired' && `Spielabbruch: ${loserTeamName} gibt auf`}
+                  {result.status === 'walkover' && `Kampflos: ${loserTeamName} nicht angetreten`}
+                  {result.status === 'disqualified' && `Disqualifikation: ${loserTeamName}`}
+                  {result.status === 'defaulted' && `Nicht erschienen: ${loserTeamName}`}
+                </div>
+                {winnerDisplay && (
+                  <div style={{ fontSize: '0.8rem', fontWeight: '500', color: '#78350f' }}>
+                    ➜ Für {winnerDisplay.text} gewertet
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Notizen */}
         {result.notes && (
