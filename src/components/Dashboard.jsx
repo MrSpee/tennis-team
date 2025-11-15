@@ -142,12 +142,15 @@ function Dashboard() {
         
         // Zähle completed results pro matchday
         const counts = {};
+        // Alle abgeschlossenen Match-Status (nicht nur 'completed')
+        const FINISHED_STATUSES = ['completed', 'retired', 'walkover', 'disqualified', 'defaulted'];
+        
         (data || []).forEach(r => {
           if (!counts[r.matchday_id]) {
             counts[r.matchday_id] = { total: 0, completed: 0 };
           }
           counts[r.matchday_id].total++;
-          if (r.status === 'completed' && r.winner) {
+          if (FINISHED_STATUSES.includes(r.status) && r.winner) {
             counts[r.matchday_id].completed++;
           }
         });

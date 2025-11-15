@@ -49,13 +49,16 @@ export const computeStandings = (leagueTeams = [], matches = [], matchResults = 
     return acc;
   }, {});
   
+  // Alle abgeschlossenen Match-Status (nicht nur 'completed')
+  const FINISHED_STATUSES = ['completed', 'retired', 'walkover', 'disqualified', 'defaulted'];
+  
   // Debug: Log resultsByMatchId
   if (Object.keys(resultsByMatchId).length > 0) {
     console.log('🔍 [computeStandings] Results grouped by matchday_id:', Object.keys(resultsByMatchId).length, 'matchdays');
     Object.keys(resultsByMatchId).forEach(matchdayId => {
       const results = resultsByMatchId[matchdayId];
-      const completed = results.filter(r => r.status === 'completed' && r.winner);
-      console.log(`  Matchday ${matchdayId}: ${results.length} results, ${completed.length} completed with winner`);
+      const finished = results.filter(r => FINISHED_STATUSES.includes(r.status) && r.winner);
+      console.log(`  Matchday ${matchdayId}: ${results.length} results, ${finished.length} finished with winner`);
     });
   }
 
@@ -99,7 +102,8 @@ export const computeStandings = (leagueTeams = [], matches = [], matchResults = 
 
       let skippedResults = 0;
       matchResultsForGame.forEach((result) => {
-        if (result.status !== 'completed' || !result.winner) {
+        // Zähle alle abgeschlossenen Matches (completed, retired, walkover, etc.)
+        if (!FINISHED_STATUSES.includes(result.status) || !result.winner) {
           skippedResults++;
           return;
         }

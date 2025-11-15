@@ -367,6 +367,9 @@ const TeamView = ({
           return acc;
         }, {});
         
+        // Alle abgeschlossenen Match-Status
+        const FINISHED_STATUSES = ['completed', 'retired', 'walkover', 'disqualified', 'defaulted'];
+        
         console.log('🔍 Results grouped by matchday:', Object.keys(resultsByMatchday).map(matchdayId => {
           const match = allMatches?.find(m => m.id === matchdayId);
           const homeTeamInLeague = match ? leagueTeams.find(t => t.id === match.home_team_id) : null;
@@ -374,7 +377,7 @@ const TeamView = ({
           return {
             matchday_id: matchdayId,
             count: resultsByMatchday[matchdayId].length,
-            completed: resultsByMatchday[matchdayId].filter(r => r.status === 'completed' && r.winner).length,
+            finished: resultsByMatchday[matchdayId].filter(r => FINISHED_STATUSES.includes(r.status) && r.winner).length,
             with_winner: resultsByMatchday[matchdayId].filter(r => r.winner).length,
             match_found_in_allMatches: !!match,
             match_home_team_id: match?.home_team_id,

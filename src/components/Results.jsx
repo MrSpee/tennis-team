@@ -926,7 +926,10 @@ const Results = () => {
         return;
       }
 
-      if (result.status === 'completed' && result.winner) {
+      // Alle abgeschlossenen Match-Status (nicht nur 'completed')
+      const FINISHED_STATUSES = ['completed', 'retired', 'walkover', 'disqualified', 'defaulted'];
+      
+      if (FINISHED_STATUSES.includes(result.status) && result.winner) {
         completedMatches++;
         // KORREKTE PERSPEKTIVE: Basierend auf userSide (wie MatchdayResults)
         if (userSide === 'home') {

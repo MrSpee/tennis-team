@@ -196,21 +196,52 @@ const MatchdayResults = () => {
 
   // Berechne Gesamt-Score (aus User-Perspektive für Statistiken)
   const calculateScore = useCallback(() => {
-    if (!matchday || !playerTeams || playerTeams.length === 0) return { our: 0, opponent: 0, completed: 0 };
+    console.log('🚨🚨🚨 [MatchdayResults] calculateScore NEUE VERSION v2.0 - START 🚨🚨🚨');
+    
+    if (!matchday || !playerTeams || playerTeams.length === 0) {
+      console.log('⚠️ Early return - no matchday or playerTeams');
+      return { our: 0, opponent: 0, completed: 0 };
+    }
+    
     const playerTeamIds = playerTeams.map(t => t.id);
     const isHome = playerTeamIds.includes(matchday.home_team_id);
     const isAway = playerTeamIds.includes(matchday.away_team_id);
     const userSide = isHome ? 'home' : (isAway ? 'away' : null);
-    if (!userSide) return { our: 0, opponent: 0, completed: 0 };
+    
+    console.log('🔍 [MatchdayResults] calculateScore - userSide:', userSide, { isHome, isAway, playerTeamIds });
+    
+    if (!userSide) {
+      console.log('⚠️ Early return - no userSide');
+      return { our: 0, opponent: 0, completed: 0 };
+    }
     
     let ourScore = 0;
     let opponentScore = 0;
     let completed = 0;
 
+    // Alle abgeschlossenen Match-Status
+    const FINISHED_STATUSES = ['completed', 'retired', 'walkover', 'disqualified', 'defaulted'];
+    
+    // DEBUG: Zeige alle Results mit ihrem Status
+    console.log('🔍 [MatchdayResults] calculateScore - Results:', results.length, results);
+    results.forEach((result, idx) => {
+      console.log(`  Result ${idx + 1}:`, {
+        match_number: result.match_number,
+        status: result.status,
+        winner: result.winner,
+        isFinished: FINISHED_STATUSES.includes(result.status)
+      });
+    });
+    
     results.forEach(result => {
-      if (!result.winner) return;
+      // Nur abgeschlossene Matches mit Winner zählen
+      if (!result.winner || !FINISHED_STATUSES.includes(result.status)) {
+        console.log(`  ⚠️ Skipped (no winner or not finished):`, result.match_number, result.status, result.winner);
+        return;
+      }
       
       completed++;
+      console.log(`  ✅ Counted:`, result.match_number, result.status, result.winner);
       
       if (userSide === 'home') {
         // Wir sind Home-Team
@@ -231,12 +262,18 @@ const MatchdayResults = () => {
     let home = 0;
     let away = 0;
     let completed = 0;
+    
+    // Alle abgeschlossenen Match-Status
+    const FINISHED_STATUSES = ['completed', 'retired', 'walkover', 'disqualified', 'defaulted'];
+    
     results.forEach(r => {
-      if (!r.winner) return;
+      if (!r.winner || !FINISHED_STATUSES.includes(r.status)) return;
       completed++;
       if (r.winner === 'home') home++;
       else if (r.winner === 'guest') away++;
     });
+    
+    console.log('🔍 [MatchdayResults] calculateHomeAwayScore:', { home, away, completed, totalResults: results.length });
     return { home, away, completed };
   }, [results]);
 
@@ -255,7 +292,9 @@ const MatchdayResults = () => {
       
       // 🔧 Prüfe Anzahl der Ergebnisse (Winter: 6, Sommer: 9)
       const expectedResults = matchday.season === 'summer' ? 9 : 6;
-      const completedResults = results.filter(r => r.status === 'completed' && r.winner).length;
+      // Alle abgeschlossenen Match-Status (nicht nur 'completed')
+      const FINISHED_STATUSES = ['completed', 'retired', 'walkover', 'disqualified', 'defaulted'];
+      const completedResults = results.filter(r => FINISHED_STATUSES.includes(r.status) && r.winner).length;
       
       // Beendet: Alle Ergebnisse eingetragen ODER > 7h her
       if (completedResults >= expectedResults) {
@@ -536,11 +575,20 @@ const MatchdayResults = () => {
 
   // Berechne Werte nur wenn Daten verfügbar sind
   const score = useMemo(() => {
+    console.log('🔍 [MatchdayResults] score useMemo triggered:', {
+      hasMatchday: !!matchday,
+      playerTeamsLength: playerTeams?.length || 0,
+      resultsLength: results?.length || 0
+    });
+    
     if (!matchday || !playerTeams || playerTeams.length === 0) {
+      console.log('⚠️ [MatchdayResults] Early return from score useMemo - missing data');
       return { our: 0, opponent: 0, completed: 0 };
     }
+    
+    console.log('✅ [MatchdayResults] Calling calculateScore()...');
     return calculateScore();
-  }, [matchday, playerTeams, calculateScore]);
+  }, [matchday, playerTeams, results, calculateScore]);
 
   const countdown = useMemo(() => {
     if (!matchday) return '⏰ Wird geladen...';

@@ -384,6 +384,9 @@ export function DataProvider({ children }) {
           .or(matchIds.map(id => `matchday_id.eq.${id}`).join(','));
         
         if (!resultsError && resultsData) {
+          // Alle abgeschlossenen Match-Status (nicht nur 'completed')
+          const FINISHED_STATUSES = ['completed', 'retired', 'walkover', 'disqualified', 'defaulted'];
+          
           // Berechne scores pro match
           resultsData.forEach(result => {
             const id = result.matchday_id || result.match_id;
@@ -391,7 +394,7 @@ export function DataProvider({ children }) {
               matchScoresMap[id] = { home_wins: 0, away_wins: 0, completed: 0 };
             }
             
-            if (result.status === 'completed') {
+            if (FINISHED_STATUSES.includes(result.status)) {
               matchScoresMap[id].completed++;
               if (result.winner === 'home') {
                 matchScoresMap[id].home_wins++;
@@ -768,8 +771,11 @@ export function DataProvider({ children }) {
         let awayGames = 0;
         let completedMatches = 0;
 
+        // Alle abgeschlossenen Match-Status (nicht nur 'completed')
+        const FINISHED_STATUSES = ['completed', 'retired', 'walkover', 'disqualified', 'defaulted'];
+
         resultsForMatch.forEach((result) => {
-          if (!result || result.status !== 'completed' || !result.winner) return;
+          if (!result || !FINISHED_STATUSES.includes(result.status) || !result.winner) return;
 
           completedMatches += 1;
 
