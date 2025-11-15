@@ -403,14 +403,26 @@ const TeamPortraitImportTab = () => {
             // Prüfe ob Spieler bereits existiert (via TVM ID)
             let playerId = null;
             if (player.id_number) {
-              const { data: existing } = await supabase
-                .from('players_unified')
-                .select('id')
-                .eq('tvm_id_number', player.id_number)
-                .single();
-              
-              if (existing) {
-                playerId = existing.id;
+              try {
+                // Konvertiere zu String für korrekte Query
+                const tvmId = String(player.id_number).trim();
+                const { data: existing, error: checkError } = await supabase
+                  .from('players_unified')
+                  .select('id')
+                  .eq('tvm_id_number', tvmId)
+                  .maybeSingle();
+                
+                if (checkError) {
+                  // Ignoriere "no rows returned" Fehler (PGRST116) und 406 (Not Acceptable)
+                  if (checkError.code !== 'PGRST116' && checkError.code !== '406') {
+                    console.warn(`Fehler beim Prüfen von Spieler ${player.name}:`, checkError);
+                  }
+                } else if (existing) {
+                  playerId = existing.id;
+                }
+              } catch (err) {
+                console.warn(`Exception beim Prüfen von Spieler ${player.name}:`, err);
+                // Weiter mit Erstellung
               }
             }
             
@@ -423,19 +435,57 @@ const TeamPortraitImportTab = () => {
                   current_lk: player.lk,
                   tvm_id_number: player.id_number || null,
                   player_type: 'imported',
-                  import_source: 'tvm_import',
+                  import_source: 'manual',
                   primary_team_id: selectedTeamId
                 })
                 .select()
                 .single();
               
-              if (playerError) throw playerError;
-              playerId = newPlayer.id;
-              
-              // Erstelle Privacy Settings
-              await supabase
+              if (playerError) {
+                // Prüfe ob es ein Duplikat-Fehler ist
+                if (playerError.code === '23505') {
+                  // Duplikat - versuche nochmal zu finden
+                  try {
+                    const tvmId = player.id_number ? String(player.id_number).trim() : null;
+                    if (tvmId) {
+                      const { data: existingPlayer } = await supabase
+                        .from('players_unified')
+                        .select('id')
+                        .eq('tvm_id_number', tvmId)
+                        .maybeSingle();
+                      
+                      if (existingPlayer) {
+                        playerId = existingPlayer.id;
+                      } else {
+                        throw playerError;
+                      }
+                    } else {
+                      throw playerError;
+                    }
+                  } catch (findErr) {
+                    throw playerError;
+                  }
+                } else {
+                  throw playerError;
+                }
+              } else {
+                playerId = newPlayer.id;
+              }
+            }
+            
+            // Erstelle Privacy Settings (mit upsert für den Fall, dass es bereits existiert)
+            if (playerId) {
+              const { error: privacyError } = await supabase
                 .from('player_privacy_settings')
-                .insert({ player_id: playerId });
+                .upsert(
+                  { player_id: playerId },
+                  { onConflict: 'player_id', ignoreDuplicates: false }
+                );
+              
+              if (privacyError && privacyError.code !== '23505') {
+                // 23505 = duplicate key, das ist OK
+                console.warn(`Fehler beim Erstellen von Privacy Settings für Spieler ${player.name}:`, privacyError);
+              }
             }
             
             // Erstelle/Update team_membership
@@ -533,15 +583,49 @@ const TeamPortraitImportTab = () => {
       
       // 3. Erstelle/Update team_season
       const season = scrapedData.team_info.season || 'Winter 2025/26';
-      await supabase
-        .from('team_seasons')
-        .upsert({
-          team_id: selectedTeamId,
-          season: season,
-          league: scrapedData.team_info.league || null,
-          group_name: scrapedData.team_info.group_name || null,
-          is_active: true
-        }, { onConflict: 'team_id,season,league,group_name' });
+      try {
+        // Prüfe ob team_season bereits existiert
+        const { data: existingSeason } = await supabase
+          .from('team_seasons')
+          .select('id')
+          .eq('team_id', selectedTeamId)
+          .eq('season', season)
+          .eq('league', scrapedData.team_info.league || null)
+          .eq('group_name', scrapedData.team_info.group_name || null)
+          .maybeSingle();
+        
+        if (existingSeason) {
+          // Update existing
+          const { error: updateError } = await supabase
+            .from('team_seasons')
+            .update({ is_active: true })
+            .eq('id', existingSeason.id);
+          
+          if (updateError) {
+            console.warn('Fehler beim Updaten von team_season:', updateError);
+            errors.push(`Team-Season Update: ${updateError.message}`);
+          }
+        } else {
+          // Insert new
+          const { error: insertError } = await supabase
+            .from('team_seasons')
+            .insert({
+              team_id: selectedTeamId,
+              season: season,
+              league: scrapedData.team_info.league || null,
+              group_name: scrapedData.team_info.group_name || null,
+              is_active: true
+            });
+          
+          if (insertError) {
+            console.warn('Fehler beim Erstellen von team_season:', insertError);
+            errors.push(`Team-Season Insert: ${insertError.message}`);
+          }
+        }
+      } catch (err) {
+        console.warn('Exception beim Erstellen/Updaten von team_season:', err);
+        errors.push(`Team-Season: ${err.message}`);
+      }
       
       // Log Activity
       await LoggingService.logActivity({
