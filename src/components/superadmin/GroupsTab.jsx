@@ -1259,33 +1259,34 @@ function GroupsTab({
           .select('*')
           .in('id', updatedTeamIds);
 
-      if (!teamsError && updatedTeamsData) {
-        // Aktualisiere group.teams mit neuen Daten
-        const updatedTeams = updatedTeamSeasons
-          .map(ts => {
-            const team = updatedTeamsData.find(t => t.id === ts.team_id);
-            return team ? { ...team, teamSeason: ts } : null;
-          })
-          .filter(Boolean);
-        
-        // VALIDIERUNG: Prüfe ob alle Teams die richtige Kategorie haben
-        if (group.category) {
-          const categoryMismatches = updatedTeams.filter(team => {
-            const teamCategory = normalizeString(team.category || '');
-            const groupCategory = normalizeString(group.category);
-            return teamCategory && groupCategory && teamCategory !== groupCategory;
-          });
+        if (!teamsError && updatedTeamsData) {
+          // Aktualisiere group.teams mit neuen Daten
+          const updatedTeams = updatedTeamSeasons
+            .map(ts => {
+              const team = updatedTeamsData.find(t => t.id === ts.team_id);
+              return team ? { ...team, teamSeason: ts } : null;
+            })
+            .filter(Boolean);
           
-          if (categoryMismatches.length > 0) {
-            console.warn('⚠️ Kategorie-Mismatches in Gruppe:', group.groupName);
-            categoryMismatches.forEach(team => {
-              console.warn(`   - ${team.club_name} ${team.team_name}: ${team.category} (erwartet: ${group.category})`);
+          // VALIDIERUNG: Prüfe ob alle Teams die richtige Kategorie haben
+          if (group.category) {
+            const categoryMismatches = updatedTeams.filter(team => {
+              const teamCategory = normalizeString(team.category || '');
+              const groupCategory = normalizeString(group.category);
+              return teamCategory && groupCategory && teamCategory !== groupCategory;
             });
+            
+            if (categoryMismatches.length > 0) {
+              console.warn('⚠️ Kategorie-Mismatches in Gruppe:', group.groupName);
+              categoryMismatches.forEach(team => {
+                console.warn(`   - ${team.club_name} ${team.team_name}: ${team.category} (erwartet: ${group.category})`);
+              });
+            }
           }
+          
+          // Aktualisiere group-Objekt
+          group.teams = updatedTeams;
         }
-        
-        // Aktualisiere group-Objekt
-        group.teams = updatedTeams;
       }
 
       const teamIds = group.teams.map((t) => t.id);
