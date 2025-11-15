@@ -3466,6 +3466,13 @@ function SuperAdminDashboard() {
       setClubs={setClubs}
       setTeamSeasons={setTeamSeasons}
       loadDashboardData={loadDashboardData}
+      handleLoadMeetingDetails={handleLoadMeetingDetails}
+      loadMatchResults={loadMatchResults}
+      matchResultsData={matchResultsData}
+      handleCreateMissingPlayer={handleCreateMissingPlayer}
+      creatingPlayerKey={creatingPlayerKey}
+      teamById={teamById}
+      handleReassignMatchTeams={handleReassignMatchTeams}
     />
   );
 

@@ -6,7 +6,52 @@ import './GroupsTab.css';
 
 const FINISHED_STATUSES = ['completed', 'retired', 'walkover', 'disqualified', 'defaulted'];
 
-function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, setClubs, setTeamSeasons, loadDashboardData }) {
+// Sync-Prüfung: Prüfe ob alle abgeschlossenen Matches match_results haben
+const checkMatchResultsSync = (matchdays, matchResults) => {
+  const finishedMatches = matchdays.filter(m => 
+    FINISHED_STATUSES.includes(m.status) || 
+    (m.home_score !== null && m.away_score !== null)
+  );
+  
+  const matchResultsByMatchdayId = new Map();
+  matchResults.forEach(mr => {
+    if (!matchResultsByMatchdayId.has(mr.matchday_id)) {
+      matchResultsByMatchdayId.set(mr.matchday_id, []);
+    }
+    matchResultsByMatchdayId.get(mr.matchday_id).push(mr);
+  });
+  
+  const matchesWithoutResults = finishedMatches.filter(m => {
+    const results = matchResultsByMatchdayId.get(m.id) || [];
+    return results.length === 0;
+  });
+  
+  return {
+    totalFinished: finishedMatches.length,
+    withResults: finishedMatches.length - matchesWithoutResults.length,
+    withoutResults: matchesWithoutResults.length,
+    matchesWithoutResults: matchesWithoutResults
+  };
+};
+
+function GroupsTab({ 
+  teams, 
+  teamSeasons, 
+  matchdays, 
+  clubs, 
+  players, 
+  setTeams, 
+  setClubs, 
+  setTeamSeasons, 
+  loadDashboardData,
+  handleLoadMeetingDetails,
+  loadMatchResults,
+  matchResultsData = {},
+  handleCreateMissingPlayer,
+  creatingPlayerKey,
+  teamById,
+  handleReassignMatchTeams
+}) {
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [groupDetails, setGroupDetails] = useState(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
@@ -18,6 +63,10 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
   const [comparisonResult, setComparisonResult] = useState(null);
   const [scraperSnapshot, setScraperSnapshot] = useState(null);
   const [showComparison, setShowComparison] = useState(false);
+  
+  // Match Detail States
+  const [selectedMatch, setSelectedMatch] = useState(null);
+  const [meetingDetails, setMeetingDetails] = useState({});
 
   // Gruppiere Team-Seasons nach Kategorie, Liga und Gruppe
   const groupedData = useMemo(() => {
@@ -1273,6 +1322,9 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
         }
       }
 
+      // SYNC-PRÜFUNG: Prüfe ob alle abgeschlossenen Matches match_results haben
+      const syncCheck = checkMatchResultsSync(groupMatchdays || [], matchResults);
+
       // Berechne Tabelle
       const standings = calculateStandings(groupMatchdays || [], matchResults, teamIds);
 
@@ -1283,7 +1335,8 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
         matchdays: groupMatchdays || [],
         matchResults,
         standings,
-        stats
+        stats,
+        syncCheck
       });
     } catch (error) {
       console.error('❌ Fehler beim Laden der Gruppendetails:', error);
@@ -1654,6 +1707,76 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
                   </div>
                 )}
 
+                {/* Sync-Prüfung Warnung */}
+                {groupDetails.syncCheck && groupDetails.syncCheck.withoutResults > 0 && (
+                  <div className="details-section">
+                    <div className="sync-warning">
+                      <AlertCircle size={20} />
+                      <div className="sync-warning-content">
+                        <h4>Ergebnisse fehlen</h4>
+                        <p>
+                          {groupDetails.syncCheck.withoutResults} von {groupDetails.syncCheck.totalFinished} abgeschlossenen Spielen haben keine Einzel/Doppel-Ergebnisse.
+                        </p>
+                        <div className="sync-warning-matches">
+                          {groupDetails.syncCheck.matchesWithoutResults.slice(0, 5).map((match) => {
+                            const homeTeam = match.home_team;
+                            const awayTeam = match.away_team;
+                            const homeLabel = homeTeam
+                              ? `${homeTeam.club_name} ${homeTeam.team_name || ''}`.trim()
+                              : 'Unbekannt';
+                            const awayLabel = awayTeam
+                              ? `${awayTeam.club_name} ${awayTeam.team_name || ''}`.trim()
+                              : 'Unbekannt';
+                            return (
+                              <div key={match.id} className="sync-warning-match">
+                                <span>{homeLabel} vs {awayLabel}</span>
+                                <button
+                                  className="btn-sync-load"
+                                  onClick={async () => {
+                                    if (!handleLoadMeetingDetails) return;
+                                    const homeLabel = homeTeam
+                                      ? `${homeTeam.club_name} ${homeTeam.team_name || ''}`.trim()
+                                      : 'Unbekannt';
+                                    const awayLabel = awayTeam
+                                      ? `${awayTeam.club_name} ${awayTeam.team_name || ''}`.trim()
+                                      : 'Unbekannt';
+                                    setMeetingDetails(prev => ({
+                                      ...prev,
+                                      [match.id]: { ...prev[match.id], loading: true }
+                                    }));
+                                    try {
+                                      await handleLoadMeetingDetails(match, {
+                                        homeLabel,
+                                        awayLabel,
+                                        applyImport: true
+                                      });
+                                      if (loadMatchResults) {
+                                        setTimeout(() => loadMatchResults(match.id), 500);
+                                      }
+                                      if (loadDashboardData) {
+                                        setTimeout(() => loadDashboardData(), 1000);
+                                      }
+                                    } catch (error) {
+                                      console.error('❌ Fehler beim Laden der Ergebnisse:', error);
+                                    }
+                                  }}
+                                >
+                                  Ergebnisse laden
+                                </button>
+                              </div>
+                            );
+                          })}
+                          {groupDetails.syncCheck.matchesWithoutResults.length > 5 && (
+                            <div className="sync-warning-more">
+                              + {groupDetails.syncCheck.matchesWithoutResults.length - 5} weitere
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Spielplan */}
                 {groupDetails.matchdays && groupDetails.matchdays.length > 0 && (
                   <div className="details-section">
@@ -1685,8 +1808,17 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
                           ? `${match.home_score ?? '–'}:${match.away_score ?? '–'}`
                           : '–:–';
 
+                        // Prüfe ob Match Ergebnisse hat
+                        const matchResultsForMatch = (groupDetails.matchResults || []).filter(mr => mr.matchday_id === match.id);
+                        const hasResults = matchResultsForMatch.length > 0;
+                        const needsResults = isFinished && !hasResults;
+
                         return (
-                          <div key={match.id} className={`matchday-item ${isFinished ? 'finished' : ''}`}>
+                          <div 
+                            key={match.id} 
+                            className={`matchday-item ${isFinished ? 'finished' : ''} ${needsResults ? 'needs-results' : ''} ${selectedMatch?.id === match.id ? 'selected' : ''}`}
+                            onClick={() => setSelectedMatch(match)}
+                          >
                             <div className="matchday-header">
                               <div className="matchday-date">
                                 <div className="matchday-date-main">{matchDate}</div>
@@ -1696,6 +1828,16 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
                                 <div className="matchday-number-badge">
                                   <span className="match-number-label">Match #</span>
                                   <span className="match-number-value">{match.match_number}</span>
+                                </div>
+                              )}
+                              {needsResults && (
+                                <div className="matchday-results-badge missing">
+                                  ⚠️ Ergebnisse fehlen
+                                </div>
+                              )}
+                              {hasResults && (
+                                <div className="matchday-results-badge has-results">
+                                  ✓ {matchResultsForMatch.length} Ergebnis{matchResultsForMatch.length !== 1 ? 'se' : ''}
                                 </div>
                               )}
                             </div>
@@ -1730,11 +1872,211 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
                     </div>
                   </div>
                 )}
+
+                {/* Match-Detailansicht */}
+                {selectedMatch && (
+                  <div className="match-detail-overlay">
+                    <MatchDetailView
+                      match={selectedMatch}
+                      groupDetails={groupDetails}
+                      onClose={() => setSelectedMatch(null)}
+                      handleLoadMeetingDetails={handleLoadMeetingDetails}
+                      loadMatchResults={loadMatchResults}
+                      matchResultsData={matchResultsData}
+                      handleCreateMissingPlayer={handleCreateMissingPlayer}
+                      creatingPlayerKey={creatingPlayerKey}
+                      teamById={teamById}
+                      handleReassignMatchTeams={handleReassignMatchTeams}
+                      meetingDetails={meetingDetails}
+                      setMeetingDetails={setMeetingDetails}
+                      loadDashboardData={loadDashboardData}
+                    />
+                  </div>
+                )}
               </>
             )}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Match-Detailansicht Komponente
+function MatchDetailView({
+  match,
+  groupDetails,
+  onClose,
+  handleLoadMeetingDetails,
+  loadMatchResults,
+  matchResultsData,
+  handleCreateMissingPlayer,
+  creatingPlayerKey,
+  teamById,
+  handleReassignMatchTeams,
+  meetingDetails,
+  setMeetingDetails,
+  loadDashboardData
+}) {
+  const homeTeam = match.home_team || teamById?.get(match.home_team_id);
+  const awayTeam = match.away_team || teamById?.get(match.away_team_id);
+  const homeLabel = homeTeam
+    ? `${homeTeam.club_name}${homeTeam.team_name ? ` ${homeTeam.team_name}` : ''}`.trim()
+    : 'Unbekannt';
+  const awayLabel = awayTeam
+    ? `${awayTeam.club_name}${awayTeam.team_name ? ` ${awayTeam.team_name}` : ''}`.trim()
+    : 'Unbekannt';
+
+  const matchResultsForMatch = (groupDetails?.matchResults || []).filter(mr => mr.matchday_id === match.id);
+  const hasResults = matchResultsForMatch.length > 0;
+  const isFinished = FINISHED_STATUSES.includes(match.status) || (match.home_score !== null && match.away_score !== null);
+  const needsResults = isFinished && !hasResults;
+
+  const meetingData = meetingDetails[match.id];
+  const resultsData = matchResultsData[match.id];
+
+  // Lade Match-Results wenn Match geöffnet wird
+  useEffect(() => {
+    if (match?.id && hasResults && !resultsData) {
+      loadMatchResults?.(match.id);
+    }
+  }, [match?.id, hasResults, resultsData, loadMatchResults]);
+
+  const handleLoadResults = async () => {
+    if (!handleLoadMeetingDetails) return;
+    
+    setMeetingDetails(prev => ({
+      ...prev,
+      [match.id]: { ...prev[match.id], loading: true }
+    }));
+
+    try {
+      await handleLoadMeetingDetails(match, {
+        homeLabel,
+        awayLabel,
+        applyImport: true
+      });
+      
+      // Lade Match-Results neu
+      if (loadMatchResults) {
+        setTimeout(() => {
+          loadMatchResults(match.id);
+        }, 500);
+      }
+      
+      // Reload Dashboard Data
+      if (loadDashboardData) {
+        setTimeout(() => {
+          loadDashboardData();
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('❌ Fehler beim Laden der Ergebnisse:', error);
+    }
+  };
+
+  return (
+    <div className="match-detail-card">
+      <div className="match-detail-header">
+        <div>
+          <h3 className="match-detail-title">{homeLabel} vs. {awayLabel}</h3>
+          <div className="match-detail-meta">
+            {match.match_date
+              ? new Date(match.match_date).toLocaleString('de-DE', {
+                  weekday: 'long',
+                  day: '2-digit',
+                  month: '2-digit',
+                  year: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })
+              : 'Datum unbekannt'}
+            {match.match_number && ` · Match ${match.match_number}`}
+          </div>
+        </div>
+        <button className="btn-close" onClick={onClose}>✕</button>
+      </div>
+
+      {needsResults && (
+        <div className="match-detail-warning">
+          <AlertCircle size={20} />
+          <div>
+            <p>Dieses Spiel ist abgeschlossen, aber es fehlen die Einzel/Doppel-Ergebnisse.</p>
+            <button className="btn-load-results" onClick={handleLoadResults} disabled={meetingData?.loading}>
+              {meetingData?.loading ? 'Lade Ergebnisse…' : 'Ergebnisse aus nuLiga laden'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {meetingData?.error && (
+        <div className="match-detail-error">
+          <AlertCircle size={20} />
+          <p>{meetingData.error}</p>
+        </div>
+      )}
+
+      {resultsData && (resultsData.singles?.length > 0 || resultsData.doubles?.length > 0) && (
+        <div className="match-detail-results">
+          <h4>Ergebnisse</h4>
+          <div className="results-summary">
+            {resultsData.singles?.length || 0} Einzel · {resultsData.doubles?.length || 0} Doppel
+          </div>
+          {resultsData.singles?.length > 0 && (
+            <div className="results-section">
+              <h5>Einzel</h5>
+              <MatchResultsTable entries={resultsData.singles} />
+            </div>
+          )}
+          {resultsData.doubles?.length > 0 && (
+            <div className="results-section">
+              <h5>Doppel</h5>
+              <MatchResultsTable entries={resultsData.doubles} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {!hasResults && !needsResults && (
+        <div className="match-detail-info">
+          <p>Dieses Spiel ist noch nicht abgeschlossen.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// MatchResultsTable Komponente (vereinfacht)
+function MatchResultsTable({ entries }) {
+  if (!entries || entries.length === 0) return null;
+
+  return (
+    <div className="match-results-table">
+      {entries.map((entry, idx) => (
+        <div key={idx} className="match-result-row">
+          <div className="result-players">
+            <div className="result-home">
+              {entry.homePlayers?.map((p, i) => (
+                <span key={i}>{p.name}</span>
+              ))}
+            </div>
+            <div className="result-separator">vs</div>
+            <div className="result-away">
+              {entry.awayPlayers?.map((p, i) => (
+                <span key={i}>{p.name}</span>
+              ))}
+            </div>
+          </div>
+          <div className="result-scores">
+            {entry.setScores?.map((set, i) => (
+              <span key={i} className="set-score">{set.raw}</span>
+            ))}
+            {entry.matchPoints && (
+              <span className="match-points">{entry.matchPoints.raw}</span>
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
