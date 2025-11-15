@@ -2062,7 +2062,8 @@ function MatchDetailView({
           <AlertCircle size={20} />
           <div>
             <p>{meetingData.error}</p>
-            {meetingData.error.includes('noch keine Meeting-ID verfügbar') && (
+            {(meetingData.errorCode === 'MEETING_ID_NOT_AVAILABLE' || 
+              meetingData.error?.includes('noch keine Meeting-ID verfügbar')) && (
               <p className="error-hint">
                 💡 Tipp: Das Spiel wurde möglicherweise noch nicht gespielt. Bitte versuche es später erneut, 
                 nachdem das Spiel stattgefunden hat und die Ergebnisse in nuLiga eingetragen wurden.

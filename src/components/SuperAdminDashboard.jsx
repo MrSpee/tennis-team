@@ -2928,6 +2928,30 @@ function SuperAdminDashboard() {
           const message =
             result?.error ||
             (raw && raw.trim().length ? raw : `Serverfehler (${response.status}) beim Laden des Spielberichts.`);
+          const errorCode = result?.errorCode || null;
+
+          // WICHTIG: MEETING_ID_NOT_AVAILABLE ist kein kritischer Fehler
+          // Das Spiel wurde möglicherweise noch nicht gespielt
+          if (errorCode === 'MEETING_ID_NOT_AVAILABLE') {
+            setMeetingDetails((prev) => ({
+              ...prev,
+              [recordId]: {
+                loading: false,
+                importing: false,
+                error: message,
+                errorCode: errorCode,
+                data: null,
+                meetingId: null,
+                meetingUrl: null,
+                lastFetchedAt: new Date().toISOString()
+              }
+            }));
+            setParserMessage({
+              type: 'warning',
+              text: message
+            });
+            return; // Beende hier - kein Fehler werfen
+          }
 
           if (
             match.match_results_count > 0 &&

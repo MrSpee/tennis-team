@@ -966,9 +966,15 @@ module.exports = async function handler(req, res) {
       await cleanupMatchdayData(requestContext.matchdayId);
     }
 
-    return withCors(res, 500, {
+    // WICHTIG: Für bestimmte Error-Codes einen anderen HTTP-Status zurückgeben
+    // MEETING_ID_NOT_AVAILABLE ist kein Server-Fehler, sondern eine erwartete Situation
+    const statusCode = error.code === 'MEETING_ID_NOT_AVAILABLE' ? 200 : 500;
+
+    return withCors(res, statusCode, {
       success: false,
-      error: error.message || 'Unbekannter Fehler beim Meeting-Report-Parser.'
+      error: error.message || 'Unbekannter Fehler beim Meeting-Report-Parser.',
+      errorCode: error.code || null,
+      errorMeta: error.meta || null
     });
   }
 };
