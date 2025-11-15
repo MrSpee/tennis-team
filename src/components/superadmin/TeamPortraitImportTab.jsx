@@ -2,8 +2,12 @@ import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabaseClient';
 import { LoggingService } from '../../services/activityLogger';
-import { Loader, CheckCircle, AlertCircle, X, ExternalLink, Users, Calendar, MapPin } from 'lucide-react';
+import { calculateSimilarity, normalizeString } from '../../services/matchdayImportService';
+import { Loader, CheckCircle, AlertCircle, X, ExternalLink, Users, Calendar, MapPin, Search, AlertTriangle } from 'lucide-react';
 import './TeamPortraitImportTab.css';
+
+const FUZZY_MATCH_THRESHOLD = 0.90; // 90% für automatische Bestätigung
+const MANUAL_REVIEW_THRESHOLD = 0.75; // 75% - unter diesem Wert manuelle Prüfung
 
 const TeamPortraitImportTab = () => {
   const { player } = useAuth();
@@ -18,6 +22,7 @@ const TeamPortraitImportTab = () => {
   // Verein/Team-Zuordnung
   const [allClubs, setAllClubs] = useState([]);
   const [allTeams, setAllTeams] = useState([]);
+  const [allPlayers, setAllPlayers] = useState([]); // Für Spieler-Matching
   const [selectedClubId, setSelectedClubId] = useState(null);
   const [selectedTeamId, setSelectedTeamId] = useState(null);
   const [showCreateClubModal, setShowCreateClubModal] = useState(false);
@@ -25,35 +30,47 @@ const TeamPortraitImportTab = () => {
   const [newClubData, setNewClubData] = useState({ name: '', city: '', federation: 'TVM', website: '' });
   const [newTeamData, setNewTeamData] = useState({ team_name: '', category: '', club_id: null });
   
+  // Matching-Ergebnisse
+  const [clubMatch, setClubMatch] = useState(null); // { match: club, score: 0.95, confidence: 'high'|'medium'|'low' }
+  const [teamMatch, setTeamMatch] = useState(null); // { match: team, score: 0.92, confidence: 'high'|'medium'|'low' }
+  const [playerMatches, setPlayerMatches] = useState([]); // Array von { scrapedPlayer, matches: [{ player, score }] }
+  
   // Import-Status
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0, message: '' });
   const [importResult, setImportResult] = useState(null);
   
-  // Lade Vereine und Teams beim Mount
+  // Lade Vereine, Teams und Spieler beim Mount
   useEffect(() => {
     loadClubsAndTeams();
+    loadAllPlayers();
   }, []);
   
-  // Auto-Zuordnung wenn Daten gescraped wurden
+  // Auto-Matching wenn Daten gescraped wurden
   useEffect(() => {
-    if (scrapedData?.club_info?.club_name) {
-      autoMatchClub();
+    if (scrapedData?.club_info?.club_name && allClubs.length > 0) {
+      performClubMatching();
     }
   }, [scrapedData, allClubs]);
   
   useEffect(() => {
-    if (scrapedData?.team_info?.team_name && selectedClubId) {
-      autoMatchTeam();
+    if (scrapedData?.team_info?.team_name && selectedClubId && allTeams.length > 0) {
+      performTeamMatching();
     }
   }, [scrapedData, selectedClubId, allTeams]);
+  
+  useEffect(() => {
+    if (scrapedData?.players && scrapedData.players.length > 0 && allPlayers.length > 0) {
+      performPlayerMatching();
+    }
+  }, [scrapedData, allPlayers]);
   
   const loadClubsAndTeams = async () => {
     try {
       // Lade Vereine
       const { data: clubs, error: clubsError } = await supabase
         .from('club_info')
-        .select('id, name, city')
+        .select('id, name, city, normalized_name')
         .order('name', { ascending: true });
       
       if (clubsError) throw clubsError;
@@ -73,61 +90,161 @@ const TeamPortraitImportTab = () => {
     }
   };
   
-  const autoMatchClub = () => {
-    if (!scrapedData?.club_info?.club_name || allClubs.length === 0) return;
-    
-    const clubName = scrapedData.club_info.club_name;
-    
-    // Exakte Übereinstimmung
-    const exactMatch = allClubs.find(c => 
-      c.name.toLowerCase().trim() === clubName.toLowerCase().trim()
-    );
-    
-    if (exactMatch) {
-      setSelectedClubId(exactMatch.id);
-      return;
-    }
-    
-    // Fuzzy Matching (einfache Substring-Suche)
-    const fuzzyMatch = allClubs.find(c => 
-      c.name.toLowerCase().includes(clubName.toLowerCase()) ||
-      clubName.toLowerCase().includes(c.name.toLowerCase())
-    );
-    
-    if (fuzzyMatch) {
-      setSelectedClubId(fuzzyMatch.id);
+  const loadAllPlayers = async () => {
+    try {
+      const { data: players, error: playersError } = await supabase
+        .from('players_unified')
+        .select('id, name, current_lk, tvm_id_number, player_type')
+        .order('name', { ascending: true });
+      
+      if (playersError) throw playersError;
+      setAllPlayers(players || []);
+    } catch (err) {
+      console.error('Error loading players:', err);
+      // Nicht kritisch - Spieler-Matching funktioniert auch ohne
     }
   };
   
-  const autoMatchTeam = () => {
-    if (!scrapedData?.team_info?.team_name || !selectedClubId || allTeams.length === 0) return;
+  /**
+   * Fuzzy Matching für Verein
+   */
+  const performClubMatching = () => {
+    if (!scrapedData?.club_info?.club_name || allClubs.length === 0) return;
     
-    const teamName = scrapedData.team_info.team_name;
-    const category = scrapedData.team_info.category;
+    const scrapedClubName = scrapedData.club_info.club_name;
+    const matches = [];
     
-    // Suche Team im ausgewählten Verein
-    const clubTeams = allTeams.filter(t => t.club_id === selectedClubId);
+    // Berechne Similarity für alle Vereine
+    allClubs.forEach(club => {
+      const score = calculateSimilarity(scrapedClubName, club.name);
+      if (score > 0.5) { // Nur relevante Matches
+        matches.push({ club, score });
+      }
+    });
     
-    // Exakte Übereinstimmung
-    const exactMatch = clubTeams.find(t => 
-      t.team_name.toLowerCase().trim() === teamName.toLowerCase().trim() &&
-      (!category || t.category === category)
-    );
+    // Sortiere nach Score (höchster zuerst)
+    matches.sort((a, b) => b.score - a.score);
     
-    if (exactMatch) {
-      setSelectedTeamId(exactMatch.id);
+    if (matches.length === 0) {
+      setClubMatch(null);
       return;
     }
     
-    // Fuzzy Matching
-    const fuzzyMatch = clubTeams.find(t => 
-      t.team_name.toLowerCase().includes(teamName.toLowerCase()) &&
-      (!category || t.category === category)
-    );
+    const bestMatch = matches[0];
+    const confidence = bestMatch.score >= FUZZY_MATCH_THRESHOLD ? 'high' :
+                      bestMatch.score >= MANUAL_REVIEW_THRESHOLD ? 'medium' : 'low';
     
-    if (fuzzyMatch) {
-      setSelectedTeamId(fuzzyMatch.id);
+    setClubMatch({
+      match: bestMatch.club,
+      score: bestMatch.score,
+      confidence,
+      alternatives: matches.slice(1, 5) // Top 5 Alternativen
+    });
+    
+    // Auto-Select wenn Confidence hoch
+    if (confidence === 'high') {
+      setSelectedClubId(bestMatch.club.id);
     }
+  };
+  
+  /**
+   * Fuzzy Matching für Team
+   */
+  const performTeamMatching = () => {
+    if (!scrapedData?.team_info?.team_name || !selectedClubId || allTeams.length === 0) return;
+    
+    const scrapedTeamName = scrapedData.team_info.team_name;
+    const scrapedCategory = scrapedData.team_info.category;
+    
+    // Suche Teams im ausgewählten Verein
+    const clubTeams = allTeams.filter(t => t.club_id === selectedClubId);
+    
+    const matches = [];
+    
+    // Berechne Similarity für alle Teams des Vereins
+    clubTeams.forEach(team => {
+      // Kombiniere Team-Name und Kategorie für Matching
+      const teamLabel = `${team.team_name} ${team.category || ''}`.trim();
+      const scrapedLabel = `${scrapedTeamName} ${scrapedCategory || ''}`.trim();
+      
+      let score = calculateSimilarity(scrapedLabel, teamLabel);
+      
+      // Bonus wenn Kategorie übereinstimmt
+      if (scrapedCategory && team.category && 
+          normalizeString(scrapedCategory) === normalizeString(team.category)) {
+        score = Math.min(1.0, score + 0.1);
+      }
+      
+      if (score > 0.5) {
+        matches.push({ team, score });
+      }
+    });
+    
+    // Sortiere nach Score
+    matches.sort((a, b) => b.score - a.score);
+    
+    if (matches.length === 0) {
+      setTeamMatch(null);
+      return;
+    }
+    
+    const bestMatch = matches[0];
+    const confidence = bestMatch.score >= FUZZY_MATCH_THRESHOLD ? 'high' :
+                      bestMatch.score >= MANUAL_REVIEW_THRESHOLD ? 'medium' : 'low';
+    
+    setTeamMatch({
+      match: bestMatch.team,
+      score: bestMatch.score,
+      confidence,
+      alternatives: matches.slice(1, 5)
+    });
+    
+    // Auto-Select wenn Confidence hoch
+    if (confidence === 'high') {
+      setSelectedTeamId(bestMatch.team.id);
+    }
+  };
+  
+  /**
+   * Fuzzy Matching für Spieler
+   */
+  const performPlayerMatching = () => {
+    if (!scrapedData?.players || scrapedData.players.length === 0 || allPlayers.length === 0) return;
+    
+    const playerMatches = scrapedData.players.map(scrapedPlayer => {
+      const matches = [];
+      
+      // 1. Exakte TVM ID-Nummer Match (höchste Priorität)
+      if (scrapedPlayer.id_number) {
+        const exactIdMatch = allPlayers.find(p => 
+          p.tvm_id_number === scrapedPlayer.id_number
+        );
+        if (exactIdMatch) {
+          matches.push({ player: exactIdMatch, score: 1.0, matchType: 'tvm_id' });
+        }
+      }
+      
+      // 2. Name-Matching (nur wenn kein exakter ID-Match)
+      if (matches.length === 0) {
+        allPlayers.forEach(player => {
+          const score = calculateSimilarity(scrapedPlayer.name, player.name);
+          if (score > 0.7) { // Nur relevante Matches
+            matches.push({ player, score, matchType: 'name' });
+          }
+        });
+        
+        // Sortiere nach Score
+        matches.sort((a, b) => b.score - a.score);
+      }
+      
+      return {
+        scrapedPlayer,
+        matches: matches.slice(0, 3), // Top 3 Matches
+        bestMatch: matches[0] || null
+      };
+    });
+    
+    setPlayerMatches(playerMatches);
   };
   
   const handleScrape = async () => {
@@ -547,46 +664,7 @@ const TeamPortraitImportTab = () => {
             </h3>
             
             <div className="club-selection">
-              <label>Verein auswählen:</label>
-              <div className="selection-group">
-                <select
-                  className="select-input"
-                  value={selectedClubId || ''}
-                  onChange={(e) => {
-                    setSelectedClubId(e.target.value || null);
-                    setSelectedTeamId(null); // Reset Team wenn Verein wechselt
-                  }}
-                >
-                  <option value="">-- Verein auswählen --</option>
-                  {allClubs.map(club => (
-                    <option key={club.id} value={club.id}>
-                      {club.name} {club.city ? `(${club.city})` : ''}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="btn-secondary"
-                  onClick={() => {
-                    setNewClubData({
-                      name: scrapedData.club_info.club_name || '',
-                      city: scrapedData.club_info.city || '',
-                      federation: 'TVM',
-                      website: scrapedData.club_info.website || ''
-                    });
-                    setShowCreateClubModal(true);
-                  }}
-                >
-                  Neuer Verein
-                </button>
-              </div>
-              
-              {selectedClub && (
-                <div className="selected-info">
-                  <CheckCircle size={16} className="icon-success" />
-                  <span>Ausgewählt: <strong>{selectedClub.name}</strong></span>
-                </div>
-              )}
-              
+              {/* Gescraped Info */}
               {scrapedData.club_info && (
                 <div className="scraped-info">
                   <div className="info-row">
@@ -601,73 +679,361 @@ const TeamPortraitImportTab = () => {
                   )}
                 </div>
               )}
+              
+              {/* Matching-Ergebnis */}
+              {clubMatch && (
+                <div className={`match-result ${clubMatch.confidence}`}>
+                  <div className="match-header">
+                    <div className="match-status">
+                      {clubMatch.confidence === 'high' && (
+                        <CheckCircle size={18} className="icon-success" />
+                      )}
+                      {clubMatch.confidence === 'medium' && (
+                        <AlertTriangle size={18} className="icon-warning" />
+                      )}
+                      {clubMatch.confidence === 'low' && (
+                        <AlertCircle size={18} className="icon-error" />
+                      )}
+                      <span className="match-label">
+                        {clubMatch.confidence === 'high' && '✅ Automatisch erkannt'}
+                        {clubMatch.confidence === 'medium' && '⚠️ Bitte prüfen'}
+                        {clubMatch.confidence === 'low' && '❌ Kein gutes Match'}
+                      </span>
+                      <span className="match-score">({Math.round(clubMatch.score * 100)}% Übereinstimmung)</span>
+                    </div>
+                  </div>
+                  
+                  <div className="match-suggestion">
+                    <div className="suggestion-item best">
+                      <div className="suggestion-content">
+                        <strong>{clubMatch.match.name}</strong>
+                        {clubMatch.match.city && <span className="suggestion-meta">({clubMatch.match.city})</span>}
+                      </div>
+                      <button
+                        className="btn-select-match"
+                        onClick={() => setSelectedClubId(clubMatch.match.id)}
+                      >
+                        {selectedClubId === clubMatch.match.id ? '✓ Ausgewählt' : 'Auswählen'}
+                      </button>
+                    </div>
+                    
+                    {clubMatch.alternatives && clubMatch.alternatives.length > 0 && (
+                      <div className="alternatives">
+                        <div className="alternatives-label">Alternative Vorschläge:</div>
+                        {clubMatch.alternatives.map((alt, idx) => (
+                          <div key={idx} className="suggestion-item">
+                            <div className="suggestion-content">
+                              {alt.club.name}
+                              {alt.club.city && <span className="suggestion-meta">({alt.club.city})</span>}
+                              <span className="suggestion-score">{Math.round(alt.score * 100)}%</span>
+                            </div>
+                            <button
+                              className="btn-select-match btn-secondary"
+                              onClick={() => setSelectedClubId(alt.club.id)}
+                            >
+                              Auswählen
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              
+              {/* Manuelle Auswahl */}
+              <div className="manual-selection">
+                <label>Oder manuell auswählen:</label>
+                <div className="selection-group">
+                  <select
+                    className="select-input"
+                    value={selectedClubId || ''}
+                    onChange={(e) => {
+                      setSelectedClubId(e.target.value || null);
+                      setSelectedTeamId(null); // Reset Team wenn Verein wechselt
+                    }}
+                  >
+                    <option value="">-- Verein auswählen --</option>
+                    {allClubs.map(club => (
+                      <option key={club.id} value={club.id}>
+                        {club.name} {club.city ? `(${club.city})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => {
+                      setNewClubData({
+                        name: scrapedData.club_info.club_name || '',
+                        city: scrapedData.club_info.city || '',
+                        federation: 'TVM',
+                        website: scrapedData.club_info.website || ''
+                      });
+                      setShowCreateClubModal(true);
+                    }}
+                  >
+                    Neuer Verein
+                  </button>
+                </div>
+              </div>
+              
+              {selectedClub && (
+                <div className="selected-info">
+                  <CheckCircle size={16} className="icon-success" />
+                  <span>Ausgewählt: <strong>{selectedClub.name}</strong></span>
+                </div>
+              )}
             </div>
           </div>
           
           {/* Team-Zuordnung */}
-          <div className="import-section">
-            <h3 className="section-title">
-              <Users size={18} />
-              Team-Zuordnung
-            </h3>
-            
-            <div className="team-selection">
-              <label>Team auswählen:</label>
-              <div className="selection-group">
-                <select
-                  className="select-input"
-                  value={selectedTeamId || ''}
-                  onChange={(e) => setSelectedTeamId(e.target.value || null)}
-                  disabled={!selectedClubId}
-                >
-                  <option value="">-- Team auswählen --</option>
-                  {availableTeams.map(team => (
-                    <option key={team.id} value={team.id}>
-                      {team.team_name} ({team.category})
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="btn-secondary"
-                  onClick={() => {
-                    setNewTeamData({
-                      team_name: scrapedData.team_info.team_name || '',
-                      category: scrapedData.team_info.category || '',
-                      club_id: selectedClubId
-                    });
-                    setShowCreateTeamModal(true);
-                  }}
-                  disabled={!selectedClubId}
-                >
-                  Neues Team
-                </button>
+          {selectedClubId && (
+            <div className="import-section">
+              <h3 className="section-title">
+                <Users size={18} />
+                Team-Zuordnung
+              </h3>
+              
+              <div className="team-selection">
+                {/* Gescraped Info */}
+                {scrapedData.team_info && (
+                  <div className="scraped-info">
+                    <div className="info-row">
+                      <span className="info-label">Gescraped:</span>
+                      <span className="info-value">{scrapedData.team_info.team_name}</span>
+                    </div>
+                    <div className="info-row">
+                      <span className="info-label">Liga:</span>
+                      <span className="info-value">{scrapedData.team_info.league}</span>
+                    </div>
+                    <div className="info-row">
+                      <span className="info-label">Kategorie:</span>
+                      <span className="info-value">{scrapedData.team_info.category}</span>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Matching-Ergebnis */}
+                {teamMatch && (
+                  <div className={`match-result ${teamMatch.confidence}`}>
+                    <div className="match-header">
+                      <div className="match-status">
+                        {teamMatch.confidence === 'high' && (
+                          <CheckCircle size={18} className="icon-success" />
+                        )}
+                        {teamMatch.confidence === 'medium' && (
+                          <AlertTriangle size={18} className="icon-warning" />
+                        )}
+                        {teamMatch.confidence === 'low' && (
+                          <AlertCircle size={18} className="icon-error" />
+                        )}
+                        <span className="match-label">
+                          {teamMatch.confidence === 'high' && '✅ Automatisch erkannt'}
+                          {teamMatch.confidence === 'medium' && '⚠️ Bitte prüfen'}
+                          {teamMatch.confidence === 'low' && '❌ Kein gutes Match'}
+                        </span>
+                        <span className="match-score">({Math.round(teamMatch.score * 100)}% Übereinstimmung)</span>
+                      </div>
+                    </div>
+                    
+                    <div className="match-suggestion">
+                      <div className="suggestion-item best">
+                        <div className="suggestion-content">
+                          <strong>{teamMatch.match.team_name}</strong>
+                          <span className="suggestion-meta">({teamMatch.match.category})</span>
+                        </div>
+                        <button
+                          className="btn-select-match"
+                          onClick={() => setSelectedTeamId(teamMatch.match.id)}
+                        >
+                          {selectedTeamId === teamMatch.match.id ? '✓ Ausgewählt' : 'Auswählen'}
+                        </button>
+                      </div>
+                      
+                      {teamMatch.alternatives && teamMatch.alternatives.length > 0 && (
+                        <div className="alternatives">
+                          <div className="alternatives-label">Alternative Vorschläge:</div>
+                          {teamMatch.alternatives.map((alt, idx) => (
+                            <div key={idx} className="suggestion-item">
+                              <div className="suggestion-content">
+                                {alt.team.team_name}
+                                <span className="suggestion-meta">({alt.team.category})</span>
+                                <span className="suggestion-score">{Math.round(alt.score * 100)}%</span>
+                              </div>
+                              <button
+                                className="btn-select-match btn-secondary"
+                                onClick={() => setSelectedTeamId(alt.team.id)}
+                              >
+                                Auswählen
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Alle Teams des Vereins anzeigen */}
+                {availableTeams.length > 0 && (
+                  <div className="all-teams-list">
+                    <div className="all-teams-label">
+                      <Search size={14} />
+                      Alle Teams dieses Vereins ({availableTeams.length}):
+                    </div>
+                    <div className="teams-grid">
+                      {availableTeams.map(team => (
+                        <div
+                          key={team.id}
+                          className={`team-card ${selectedTeamId === team.id ? 'selected' : ''}`}
+                          onClick={() => setSelectedTeamId(team.id)}
+                        >
+                          <div className="team-card-name">{team.team_name}</div>
+                          <div className="team-card-category">{team.category}</div>
+                          {selectedTeamId === team.id && (
+                            <CheckCircle size={16} className="team-card-check" />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Manuelle Auswahl */}
+                <div className="manual-selection">
+                  <label>Oder manuell auswählen:</label>
+                  <div className="selection-group">
+                    <select
+                      className="select-input"
+                      value={selectedTeamId || ''}
+                      onChange={(e) => setSelectedTeamId(e.target.value || null)}
+                      disabled={!selectedClubId}
+                    >
+                      <option value="">-- Team auswählen --</option>
+                      {availableTeams.map(team => (
+                        <option key={team.id} value={team.id}>
+                          {team.team_name} ({team.category})
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => {
+                        setNewTeamData({
+                          team_name: scrapedData.team_info.team_name || '',
+                          category: scrapedData.team_info.category || '',
+                          club_id: selectedClubId
+                        });
+                        setShowCreateTeamModal(true);
+                      }}
+                      disabled={!selectedClubId}
+                    >
+                      Neues Team
+                    </button>
+                  </div>
+                </div>
+                
+                {selectedTeam && (
+                  <div className="selected-info">
+                    <CheckCircle size={16} className="icon-success" />
+                    <span>Ausgewählt: <strong>{selectedTeam.team_name}</strong> ({selectedTeam.category})</span>
+                  </div>
+                )}
               </div>
-              
-              {selectedTeam && (
-                <div className="selected-info">
-                  <CheckCircle size={16} className="icon-success" />
-                  <span>Ausgewählt: <strong>{selectedTeam.team_name}</strong> ({selectedTeam.category})</span>
-                </div>
-              )}
-              
-              {scrapedData.team_info && (
-                <div className="scraped-info">
-                  <div className="info-row">
-                    <span className="info-label">Gescraped:</span>
-                    <span className="info-value">{scrapedData.team_info.team_name}</span>
-                  </div>
-                  <div className="info-row">
-                    <span className="info-label">Liga:</span>
-                    <span className="info-value">{scrapedData.team_info.league}</span>
-                  </div>
-                  <div className="info-row">
-                    <span className="info-label">Kategorie:</span>
-                    <span className="info-value">{scrapedData.team_info.category}</span>
-                  </div>
-                </div>
-              )}
             </div>
-          </div>
+          )}
+          
+          {/* Spieler-Matching */}
+          {selectedTeamId && playerMatches.length > 0 && (
+            <div className="import-section">
+              <h3 className="section-title">
+                <Users size={18} />
+                Spieler-Zuordnung ({playerMatches.length})
+              </h3>
+              
+              <div className="players-matching">
+                <div className="matching-summary">
+                  <div className="summary-item">
+                    <CheckCircle size={16} className="icon-success" />
+                    <span>
+                      {playerMatches.filter(pm => pm.bestMatch && pm.bestMatch.score >= FUZZY_MATCH_THRESHOLD).length} automatisch erkannt
+                    </span>
+                  </div>
+                  <div className="summary-item">
+                    <AlertTriangle size={16} className="icon-warning" />
+                    <span>
+                      {playerMatches.filter(pm => pm.bestMatch && pm.bestMatch.score >= MANUAL_REVIEW_THRESHOLD && pm.bestMatch.score < FUZZY_MATCH_THRESHOLD).length} bitte prüfen
+                    </span>
+                  </div>
+                  <div className="summary-item">
+                    <AlertCircle size={16} className="icon-error" />
+                    <span>
+                      {playerMatches.filter(pm => !pm.bestMatch || pm.bestMatch.score < MANUAL_REVIEW_THRESHOLD).length} neu anlegen
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="players-list-matching">
+                  {playerMatches.map((pm, idx) => {
+                    const scraped = pm.scrapedPlayer;
+                    const best = pm.bestMatch;
+                    const confidence = !best ? 'none' :
+                                     best.score >= FUZZY_MATCH_THRESHOLD ? 'high' :
+                                     best.score >= MANUAL_REVIEW_THRESHOLD ? 'medium' : 'low';
+                    
+                    return (
+                      <div key={idx} className={`player-match-item ${confidence}`}>
+                        <div className="player-match-scraped">
+                          <span className="player-position">{scraped.position}.</span>
+                          <span className="player-name">{scraped.name}</span>
+                          <span className="player-lk">LK {scraped.lk}</span>
+                          {scraped.id_number && (
+                            <span className="player-id">ID: {scraped.id_number}</span>
+                          )}
+                        </div>
+                        
+                        {best && (
+                          <div className="player-match-result">
+                            <div className="match-indicator">
+                              {confidence === 'high' && <CheckCircle size={14} className="icon-success" />}
+                              {confidence === 'medium' && <AlertTriangle size={14} className="icon-warning" />}
+                              {confidence === 'low' && <AlertCircle size={14} className="icon-error" />}
+                              <span className="match-score">{Math.round(best.score * 100)}%</span>
+                            </div>
+                            <div className="match-player-info">
+                              <strong>{best.player.name}</strong>
+                              {best.player.current_lk && (
+                                <span className="match-lk">LK {best.player.current_lk}</span>
+                              )}
+                              {best.matchType === 'tvm_id' && (
+                                <span className="match-type-badge">TVM ID Match</span>
+                              )}
+                            </div>
+                            {pm.matches.length > 1 && (
+                              <div className="match-alternatives">
+                                {pm.matches.slice(1, 3).map((alt, altIdx) => (
+                                  <div key={altIdx} className="match-alternative">
+                                    {alt.player.name} ({Math.round(alt.score * 100)}%)
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {!best && (
+                          <div className="player-match-result no-match">
+                            <AlertCircle size={14} className="icon-error" />
+                            <span>Wird als neuer Spieler angelegt</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
           
           {/* Vorschau */}
           <div className="import-section">
