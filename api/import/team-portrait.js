@@ -72,8 +72,15 @@ module.exports = async function handler(req, res) {
     const html = await response.text();
     
     // Parse HTML mit cheerio
-    // In Vercel Serverless Functions muss cheerio dynamisch importiert werden
-    const cheerio = (await import('cheerio')).default || require('cheerio');
+    // In Vercel Serverless Functions (CommonJS) verwenden wir require
+    let cheerio;
+    try {
+      cheerio = require('cheerio');
+    } catch (e) {
+      // Fallback für ES Modules
+      const cheerioModule = await import('cheerio');
+      cheerio = cheerioModule.default || cheerioModule;
+    }
     const $ = cheerio.load(html);
 
     // 1. VEREIN-INFORMATIONEN extrahieren
@@ -138,12 +145,18 @@ function extractClubInfo($) {
   };
 
   // Verein-Name und ID (z.B. "Kölner THC Stadion Rot-Weiss (2097)")
-  const clubHeader = $('h1').first().text().trim();
+  // Suche nach h1 oder anderen Headern
+  let clubHeader = $('h1').first().text().trim();
+  if (!clubHeader) {
+    // Fallback: Suche nach Text mit Verein-Info
+    clubHeader = $('body').text().match(/^([^\n]+?)\s*\((\d+)\)/)?.[0] || '';
+  }
+  
   const clubMatch = clubHeader.match(/^(.+?)\s*\((\d+)\)$/);
   if (clubMatch) {
     clubInfo.club_name = clubMatch[1].trim();
     clubInfo.club_id = clubMatch[2].trim();
-  } else {
+  } else if (clubHeader) {
     clubInfo.club_name = clubHeader;
   }
 
@@ -218,29 +231,38 @@ function extractTeamInfo($) {
   };
 
   // Mannschafts-Name (aus Tabelle "Mannschaft")
+  // Suche nach Tabellen mit Verein/Mannschaft/Liga Info
   $('table').each((i, table) => {
     const $table = $(table);
-    $table.find('tr').each((j, row) => {
-      const $row = $(row);
-      const label = $row.find('td').first().text().trim();
-      const value = $row.find('td').last().text().trim();
-      
-      if (label === 'Mannschaft' && value) {
-        teamInfo.team_name = value;
-      }
-      if (label === 'Liga' && value) {
-        teamInfo.league = value;
-        // Extrahiere Kategorie und Gruppe aus Liga (z.B. "Herren 40 1. Bezirksliga Gr. 043")
-        const categoryMatch = value.match(/^(Herren|Damen|Mixed)\s+(\d+)/i);
-        if (categoryMatch) {
-          teamInfo.category = `${categoryMatch[1]} ${categoryMatch[2]}`;
+    const tableText = $table.text();
+    
+    // Prüfe ob es die Info-Tabelle ist (enthält "Verein", "Mannschaft", "Liga")
+    if (tableText.includes('Verein') || tableText.includes('Mannschaft') || tableText.includes('Liga')) {
+      $table.find('tr').each((j, row) => {
+        const $row = $(row);
+        const cells = $row.find('td, th');
+        if (cells.length >= 2) {
+          const label = cells.first().text().trim();
+          const value = cells.last().text().trim();
+          
+          if (label === 'Mannschaft' && value) {
+            teamInfo.team_name = value;
+          }
+          if (label === 'Liga' && value) {
+            teamInfo.league = value;
+            // Extrahiere Kategorie und Gruppe aus Liga (z.B. "Herren 40 1. Bezirksliga Gr. 043")
+            const categoryMatch = value.match(/^(Herren|Damen|Mixed)\s+(\d+)/i);
+            if (categoryMatch) {
+              teamInfo.category = `${categoryMatch[1]} ${categoryMatch[2]}`;
+            }
+            const groupMatch = value.match(/Gr\.\s*(\d+)/i);
+            if (groupMatch) {
+              teamInfo.group_name = `Gr. ${groupMatch[1].padStart(3, '0')}`;
+            }
+          }
         }
-        const groupMatch = value.match(/Gr\.\s*(\d+)/i);
-        if (groupMatch) {
-          teamInfo.group_name = `Gr. ${groupMatch[1].padStart(3, '0')}`;
-        }
-      }
-    });
+      });
+    }
   });
 
   // Saison (aus Header oder Text)

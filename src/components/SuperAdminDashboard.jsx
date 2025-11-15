@@ -17,6 +17,7 @@ import ClubsTab from './superadmin/ClubsTab';
 import PlayersTab from './superadmin/PlayersTab';
 import MatchdaysTab from './superadmin/MatchdaysTab';
 import ScraperTab from './superadmin/ScraperTab';
+import TeamPortraitImportTab from './superadmin/TeamPortraitImportTab';
 import './Dashboard.css';
 import './SuperAdminDashboard.css';
 
@@ -3476,6 +3477,9 @@ function SuperAdminDashboard() {
         <button className={selectedTab === 'import' ? 'active' : ''} onClick={() => setSelectedTab('import')}>
           <Download size={16} /> Import-Tools
         </button>
+        <button className={selectedTab === 'team-portrait' ? 'active' : ''} onClick={() => setSelectedTab('team-portrait')}>
+          <Download size={16} /> Team-Portrait
+        </button>
       </div>
 
       <div className="dashboard-toolbar">
@@ -3514,6 +3518,7 @@ function SuperAdminDashboard() {
           {selectedTab === 'matchdays' && renderMatchdays()}
           {selectedTab === 'scraper' && renderScraper()}
           {selectedTab === 'import' && <ImportTab />}
+          {selectedTab === 'team-portrait' && <TeamPortraitImportTab />}
         </div>
       )}
     </div>
