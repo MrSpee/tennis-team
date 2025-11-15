@@ -720,7 +720,13 @@ const MatchdayResults = () => {
       <div className="fade-in lk-card-full scoreboard-card">
         <div className="formkurve-header">
           <div className="formkurve-title">
-            {isCompleted ? 'Endergebnis' : 'Aktueller Stand'}
+            {(() => {
+              const homeAwayScore = calculateHomeAwayScore();
+              const expectedMatches = matchday?.season === 'summer' ? 9 : 6;
+              const homeAwayCompleted = homeAwayScore.completed >= expectedMatches;
+              const displayIsCompleted = score.completed > 0 ? isCompleted : homeAwayCompleted;
+              return displayIsCompleted ? 'Endergebnis' : 'Aktueller Stand';
+            })()}
           </div>
           {isCompleted && (
             <div className={`improvement-badge-top ${score.our > score.opponent ? 'positive' : score.opponent > score.our ? 'negative' : 'neutral'}`}>
@@ -759,13 +765,24 @@ const MatchdayResults = () => {
           </div>
           ); })()}
           
-          {/* Status */}
-          <div className="score-status-text">
-            {isCompleted 
-              ? `✅ Alle ${score.completed} Spiele beendet`
-              : `🎾 ${score.completed} von 6 Spielen beendet`
-            }
-          </div>
+          {/* Status - Verwende calculateHomeAwayScore wenn User nicht Teil des Matches ist */}
+          {(() => {
+            const homeAwayScore = calculateHomeAwayScore();
+            const expectedMatches = matchday?.season === 'summer' ? 9 : 6;
+            const homeAwayCompleted = homeAwayScore.completed >= expectedMatches;
+            // Verwende homeAwayScore wenn score.completed = 0 (User nicht Teil des Matches)
+            const displayCompleted = score.completed > 0 ? score.completed : homeAwayScore.completed;
+            const displayIsCompleted = score.completed > 0 ? isCompleted : homeAwayCompleted;
+            
+            return (
+              <div className="score-status-text">
+                {displayIsCompleted 
+                  ? `✅ Alle ${displayCompleted} Spiele beendet`
+                  : `🎾 ${displayCompleted} von ${expectedMatches} Spielen beendet`
+                }
+              </div>
+            );
+          })()}
           
           {/* Edit Button */}
             <button

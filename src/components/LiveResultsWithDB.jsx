@@ -209,10 +209,44 @@ const LiveResultsWithDB = () => {
             .in('team_id', opponentClubTeamIds)
             .eq('is_active', true);
           
-          const opponentTeamMemberIds = [...new Set((opponentTeamMembers || []).map(tm => tm.player_id))]; // Duplikate entfernen
+          let opponentTeamMemberIds = [...new Set((opponentTeamMembers || []).map(tm => tm.player_id))]; // Duplikate entfernen
+          
+          // 3. FALLBACK: Wenn keine Spieler in team_memberships gefunden wurden, lade ALLE Spieler die in match_results für dieses Team vorkommen
+          if (opponentTeamMemberIds.length === 0 && awayTeamId) {
+            console.log('⚠️ Keine Spieler in team_memberships gefunden, suche in match_results...');
+            
+            // Lade alle match_results für dieses Matchday
+            const { data: matchResults, error: resultsError } = await supabase
+              .from('match_results')
+              .select('home_player_id, guest_player_id, home_player1_id, home_player2_id, guest_player1_id, guest_player2_id')
+              .eq('matchday_id', matchId);
+            
+            if (!resultsError && matchResults) {
+              const playerIdsFromResults = new Set();
+              matchResults.forEach(result => {
+                if (result.home_player_id) playerIdsFromResults.add(result.home_player_id);
+                if (result.guest_player_id) playerIdsFromResults.add(result.guest_player_id);
+                if (result.home_player1_id) playerIdsFromResults.add(result.home_player1_id);
+                if (result.home_player2_id) playerIdsFromResults.add(result.home_player2_id);
+                if (result.guest_player1_id) playerIdsFromResults.add(result.guest_player1_id);
+                if (result.guest_player2_id) playerIdsFromResults.add(result.guest_player2_id);
+              });
+              
+              // Prüfe welche Spieler zum Away-Team gehören (über match_results die guest_* haben)
+              const awayPlayerIds = new Set();
+              matchResults.forEach(result => {
+                if (result.guest_player_id) awayPlayerIds.add(result.guest_player_id);
+                if (result.guest_player1_id) awayPlayerIds.add(result.guest_player1_id);
+                if (result.guest_player2_id) awayPlayerIds.add(result.guest_player2_id);
+              });
+              
+              opponentTeamMemberIds = Array.from(awayPlayerIds);
+              console.log(`✅ ${opponentTeamMemberIds.length} Spieler aus match_results gefunden`);
+            }
+          }
           
           if (opponentTeamMemberIds.length > 0) {
-            // 3. Lade Spieler-Daten
+            // 4. Lade Spieler-Daten
             const { data: opponentsData, error: opponentsError } = await supabase
               .from('players_unified')
               .select('id, name, current_lk, season_start_lk')
@@ -236,10 +270,10 @@ const LiveResultsWithDB = () => {
               };
               const sortedOpponents = (opponentsData || []).sort(sortByLK);
               setOpponentPlayers(sortedOpponents);
-              console.log('✅ Gegner-Spieler geladen:', sortedOpponents.length);
+              console.log('✅ Gegner-Spieler geladen:', sortedOpponents.length, 'Spieler');
             }
           } else {
-            console.warn('⚠️ Gegner-Verein hat keine Spieler in Teams');
+            console.warn('⚠️ Gegner-Verein hat keine Spieler in Teams oder match_results');
             setOpponentPlayers([]);
           }
         } else {
@@ -546,15 +580,42 @@ const LiveResultsWithDB = () => {
   
   // Lade Gegner-Spieler neu
   const reloadOpponentPlayers = async () => {
-    if (!match?.away_team_id) return;
+    if (!match?.away_team_id || !match?.away_team?.club_name) return;
     
     try {
+      // 1. Lade aus team_memberships
+      const { data: opponentClubTeams } = await supabase
+        .from('team_info')
+        .select('id')
+        .ilike('club_name', `%${match.away_team.club_name}%`);
+      
+      const opponentClubTeamIds = (opponentClubTeams || []).map(t => t.id);
+      
       const { data: opponentTeamMembers } = await supabase
         .from('team_memberships')
         .select('player_id')
-        .eq('team_id', match.away_team_id);
+        .in('team_id', opponentClubTeamIds)
+        .eq('is_active', true);
       
-      const opponentTeamMemberIds = (opponentTeamMembers || []).map(tm => tm.player_id);
+      let opponentTeamMemberIds = [...new Set((opponentTeamMembers || []).map(tm => tm.player_id))];
+      
+      // 2. FALLBACK: Lade aus match_results wenn keine in team_memberships
+      if (opponentTeamMemberIds.length === 0) {
+        const { data: matchResults } = await supabase
+          .from('match_results')
+          .select('guest_player_id, guest_player1_id, guest_player2_id')
+          .eq('matchday_id', matchId);
+        
+        if (matchResults) {
+          const awayPlayerIds = new Set();
+          matchResults.forEach(result => {
+            if (result.guest_player_id) awayPlayerIds.add(result.guest_player_id);
+            if (result.guest_player1_id) awayPlayerIds.add(result.guest_player1_id);
+            if (result.guest_player2_id) awayPlayerIds.add(result.guest_player2_id);
+          });
+          opponentTeamMemberIds = Array.from(awayPlayerIds);
+        }
+      }
       
       if (opponentTeamMemberIds.length > 0) {
         const { data: opponentsData } = await supabase
