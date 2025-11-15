@@ -206,30 +206,99 @@ const TeamPortraitImportTab = () => {
   };
   
   /**
-   * Fuzzy Matching für Spieler
+   * Normalisiert Spielernamen für besseres Matching
+   */
+  const normalizePlayerName = (name) => {
+    if (!name) return '';
+    return name
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, ' ')
+      .replace(/[ä]/g, 'ae')
+      .replace(/[ö]/g, 'oe')
+      .replace(/[ü]/g, 'ue')
+      .replace(/ß/g, 'ss')
+      .replace(/[^a-z0-9\s,]/g, '')
+      .trim();
+  };
+
+  /**
+   * Kehrt die Reihenfolge von "Nachname, Vorname" zu "Vorname Nachname" um
+   */
+  const reverseNameOrder = (name) => {
+    if (!name) return name;
+    const parts = name.split(',').map(p => p.trim());
+    if (parts.length === 2) {
+      return `${parts[1]} ${parts[0]}`;
+    }
+    return name;
+  };
+
+  /**
+   * Verbessertes Fuzzy Matching für Spieler
    */
   const performPlayerMatching = () => {
     if (!scrapedData?.players || scrapedData.players.length === 0 || allPlayers.length === 0) return;
     
     const playerMatches = scrapedData.players.map(scrapedPlayer => {
       const matches = [];
+      const scrapedName = scrapedPlayer.name || '';
+      const scrapedNameNorm = normalizePlayerName(scrapedName);
+      const scrapedNameReversed = reverseNameOrder(scrapedName);
+      const scrapedNameReversedNorm = normalizePlayerName(scrapedNameReversed);
       
-      // 1. Exakte TVM ID-Nummer Match (höchste Priorität)
+      // PRIORITÄT 1: Exakte TVM ID-Nummer Match (höchste Priorität)
       if (scrapedPlayer.id_number) {
-        const exactIdMatch = allPlayers.find(p => 
-          p.tvm_id_number === scrapedPlayer.id_number
-        );
+        const tvmIdStr = String(scrapedPlayer.id_number).trim();
+        const exactIdMatch = allPlayers.find(p => {
+          if (!p.tvm_id_number) return false;
+          return String(p.tvm_id_number).trim() === tvmIdStr;
+        });
         if (exactIdMatch) {
           matches.push({ player: exactIdMatch, score: 1.0, matchType: 'tvm_id' });
         }
       }
       
-      // 2. Name-Matching (nur wenn kein exakter ID-Match)
+      // PRIORITÄT 2: Exakter Name-Match (normalisiert)
+      if (matches.length === 0) {
+        const exactNameMatch = allPlayers.find(p => {
+          const pNameNorm = normalizePlayerName(p.name || '');
+          return pNameNorm === scrapedNameNorm || 
+                 pNameNorm === scrapedNameReversedNorm;
+        });
+        if (exactNameMatch) {
+          matches.push({ player: exactNameMatch, score: 0.98, matchType: 'exact_name' });
+        }
+      }
+      
+      // PRIORITÄT 3: Fuzzy Name-Matching mit verschiedenen Varianten
       if (matches.length === 0) {
         allPlayers.forEach(player => {
-          const score = calculateSimilarity(scrapedPlayer.name, player.name);
-          if (score > 0.7) { // Nur relevante Matches
-            matches.push({ player, score, matchType: 'name' });
+          const playerName = player.name || '';
+          const playerNameNorm = normalizePlayerName(playerName);
+          const playerNameReversed = reverseNameOrder(playerName);
+          const playerNameReversedNorm = normalizePlayerName(playerNameReversed);
+          
+          // Berechne Similarity für alle Varianten
+          const scores = [
+            calculateSimilarity(scrapedName, playerName),
+            calculateSimilarity(scrapedNameNorm, playerNameNorm),
+            calculateSimilarity(scrapedNameReversed, playerName),
+            calculateSimilarity(scrapedNameReversedNorm, playerNameNorm),
+            calculateSimilarity(scrapedName, playerNameReversed),
+            calculateSimilarity(scrapedNameNorm, playerNameReversedNorm)
+          ];
+          
+          const maxScore = Math.max(...scores);
+          
+          // Nur relevante Matches (Threshold erhöht auf 0.85 für bessere Qualität)
+          if (maxScore >= 0.85) {
+            matches.push({ 
+              player, 
+              score: maxScore, 
+              matchType: 'fuzzy_name',
+              variant: scores.indexOf(maxScore)
+            });
           }
         });
         
@@ -239,7 +308,7 @@ const TeamPortraitImportTab = () => {
       
       return {
         scrapedPlayer,
-        matches: matches.slice(0, 3), // Top 3 Matches
+        matches: matches.slice(0, 5), // Top 5 Matches für bessere Übersicht
         bestMatch: matches[0] || null
       };
     });
@@ -400,33 +469,71 @@ const TeamPortraitImportTab = () => {
           const player = scrapedData.players[i];
           
           try {
-            // Prüfe ob Spieler bereits existiert (via TVM ID)
+            // WICHTIG: Nutze die Matching-Ergebnisse aus performPlayerMatching
+            const playerMatch = playerMatches.find(pm => 
+              pm.scrapedPlayer.name === player.name && 
+              pm.scrapedPlayer.id_number === player.id_number
+            );
+            
             let playerId = null;
-            if (player.id_number) {
-              try {
-                // Konvertiere zu String für korrekte Query
-                const tvmId = String(player.id_number).trim();
-                const { data: existing, error: checkError } = await supabase
-                  .from('players_unified')
-                  .select('id')
-                  .eq('tvm_id_number', tvmId)
-                  .maybeSingle();
-                
-                if (checkError) {
-                  // Ignoriere "no rows returned" Fehler (PGRST116) und 406 (Not Acceptable)
-                  if (checkError.code !== 'PGRST116' && checkError.code !== '406') {
-                    console.warn(`Fehler beim Prüfen von Spieler ${player.name}:`, checkError);
+            
+            // Wenn ein Match mit hoher Confidence gefunden wurde, nutze diesen Spieler
+            if (playerMatch?.bestMatch && playerMatch.bestMatch.score >= 0.85) {
+              playerId = playerMatch.bestMatch.player.id;
+              console.log(`✅ Verwende existierenden Spieler für ${player.name}: ${playerMatch.bestMatch.player.name} (${Math.round(playerMatch.bestMatch.score * 100)}%)`);
+            } else {
+              // Fallback: Prüfe manuell via TVM ID
+              if (player.id_number) {
+                try {
+                  const tvmId = String(player.id_number).trim();
+                  const { data: existing, error: checkError } = await supabase
+                    .from('players_unified')
+                    .select('id, name')
+                    .eq('tvm_id_number', tvmId)
+                    .maybeSingle();
+                  
+                  if (checkError) {
+                    if (checkError.code !== 'PGRST116' && checkError.code !== '406') {
+                      console.warn(`Fehler beim Prüfen von Spieler ${player.name}:`, checkError);
+                    }
+                  } else if (existing) {
+                    playerId = existing.id;
+                    console.log(`✅ Gefunden via TVM ID: ${existing.name}`);
                   }
-                } else if (existing) {
-                  playerId = existing.id;
+                } catch (err) {
+                  console.warn(`Exception beim Prüfen von Spieler ${player.name}:`, err);
                 }
-              } catch (err) {
-                console.warn(`Exception beim Prüfen von Spieler ${player.name}:`, err);
-                // Weiter mit Erstellung
+              }
+              
+              // Fallback 2: Prüfe via Name-Matching (normalisiert)
+              if (!playerId) {
+                const playerNameNorm = normalizePlayerName(player.name);
+                const playerNameReversedNorm = normalizePlayerName(reverseNameOrder(player.name));
+                
+                for (const existingPlayer of allPlayers) {
+                  const existingNameNorm = normalizePlayerName(existingPlayer.name || '');
+                  const existingNameReversedNorm = normalizePlayerName(reverseNameOrder(existingPlayer.name || ''));
+                  
+                  if (existingNameNorm === playerNameNorm || 
+                      existingNameNorm === playerNameReversedNorm ||
+                      existingNameReversedNorm === playerNameNorm) {
+                    playerId = existingPlayer.id;
+                    console.log(`✅ Gefunden via Name-Match: ${existingPlayer.name} für ${player.name}`);
+                    break;
+                  }
+                  
+                  // Fuzzy Match als letzter Ausweg
+                  const similarity = calculateSimilarity(playerNameNorm, existingNameNorm);
+                  if (similarity >= 0.90) {
+                    playerId = existingPlayer.id;
+                    console.log(`✅ Gefunden via Fuzzy-Match (${Math.round(similarity * 100)}%): ${existingPlayer.name} für ${player.name}`);
+                    break;
+                  }
+                }
               }
             }
             
-            // Erstelle Spieler falls nicht vorhanden
+            // Erstelle Spieler NUR wenn wirklich kein Match gefunden wurde
             if (!playerId) {
               const { data: newPlayer, error: playerError } = await supabase
                 .from('players_unified')
