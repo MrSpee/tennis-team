@@ -578,7 +578,8 @@ const MatchdayResults = () => {
     console.log('🔍 [MatchdayResults] score useMemo triggered:', {
       hasMatchday: !!matchday,
       playerTeamsLength: playerTeams?.length || 0,
-      resultsLength: results?.length || 0
+      resultsLength: results?.length || 0,
+      resultsDetails: results?.map(r => ({ id: r.id, status: r.status, winner: r.winner }))
     });
     
     if (!matchday || !playerTeams || playerTeams.length === 0) {
@@ -587,7 +588,9 @@ const MatchdayResults = () => {
     }
     
     console.log('✅ [MatchdayResults] Calling calculateScore()...');
-    return calculateScore();
+    const calculatedScore = calculateScore();
+    console.log('✅ [MatchdayResults] Score calculated:', calculatedScore);
+    return calculatedScore;
   }, [matchday, playerTeams, results, calculateScore]);
 
   const countdown = useMemo(() => {
@@ -596,7 +599,13 @@ const MatchdayResults = () => {
   }, [matchday, getCountdown]);
 
   const showLiveBadge = useMemo(() => shouldShowLiveBadge(), [shouldShowLiveBadge]);
-  const isCompleted = score.completed >= 6;
+  
+  const isCompleted = useMemo(() => {
+    const expectedMatches = matchday?.season === 'summer' ? 9 : 6;
+    const completed = score.completed >= expectedMatches;
+    console.log('🔍 [MatchdayResults] isCompleted:', { completed, scoreCompleted: score.completed, expectedMatches });
+    return completed;
+  }, [score, matchday]);
 
   if (loading) {
     return (
