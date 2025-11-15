@@ -258,7 +258,8 @@ const MatchdayResults = () => {
   }, [matchday, playerTeams, results]);
 
   // Berechne Home/Away-Score (DB-Perspektive, links=Home, rechts=Away)
-  const calculateHomeAwayScore = useCallback(() => {
+  // WICHTIG: useMemo statt useCallback, damit es nur einmal berechnet wird!
+  const homeAwayScore = useMemo(() => {
     let home = 0;
     let away = 0;
     let completed = 0;
@@ -273,7 +274,7 @@ const MatchdayResults = () => {
       else if (r.winner === 'guest') away++;
     });
     
-    console.log('🔍 [MatchdayResults] calculateHomeAwayScore:', { home, away, completed, totalResults: results.length });
+    console.log('🔍 [MatchdayResults] homeAwayScore calculated:', { home, away, completed, totalResults: results.length });
     return { home, away, completed };
   }, [results]);
 
@@ -721,7 +722,6 @@ const MatchdayResults = () => {
         <div className="formkurve-header">
           <div className="formkurve-title">
             {(() => {
-              const homeAwayScore = calculateHomeAwayScore();
               const expectedMatches = matchday?.season === 'summer' ? 9 : 6;
               const homeAwayCompleted = homeAwayScore.completed >= expectedMatches;
               const displayIsCompleted = score.completed > 0 ? isCompleted : homeAwayCompleted;
@@ -757,32 +757,26 @@ const MatchdayResults = () => {
           </div>
           
           {/* Großer Score: HOME : AWAY (berechnet) */}
-          {(() => { const s = calculateHomeAwayScore(); return (
           <div className="score-display-large">
-              <div className="score-number-huge">{s.home}</div>
-                <div className="score-separator-huge">:</div>
-              <div className="score-number-huge">{s.away}</div>
+            <div className="score-number-huge">{homeAwayScore.home}</div>
+            <div className="score-separator-huge">:</div>
+            <div className="score-number-huge">{homeAwayScore.away}</div>
           </div>
-          ); })()}
           
-          {/* Status - Verwende calculateHomeAwayScore wenn User nicht Teil des Matches ist */}
-          {(() => {
-            const homeAwayScore = calculateHomeAwayScore();
-            const expectedMatches = matchday?.season === 'summer' ? 9 : 6;
-            const homeAwayCompleted = homeAwayScore.completed >= expectedMatches;
-            // Verwende homeAwayScore wenn score.completed = 0 (User nicht Teil des Matches)
-            const displayCompleted = score.completed > 0 ? score.completed : homeAwayScore.completed;
-            const displayIsCompleted = score.completed > 0 ? isCompleted : homeAwayCompleted;
-            
-            return (
-              <div className="score-status-text">
-                {displayIsCompleted 
-                  ? `✅ Alle ${displayCompleted} Spiele beendet`
-                  : `🎾 ${displayCompleted} von ${expectedMatches} Spielen beendet`
-                }
-              </div>
-            );
-          })()}
+          {/* Status - Verwende homeAwayScore wenn User nicht Teil des Matches ist */}
+          <div className="score-status-text">
+            {(() => {
+              const expectedMatches = matchday?.season === 'summer' ? 9 : 6;
+              const homeAwayCompleted = homeAwayScore.completed >= expectedMatches;
+              // Verwende homeAwayScore wenn score.completed = 0 (User nicht Teil des Matches)
+              const displayCompleted = score.completed > 0 ? score.completed : homeAwayScore.completed;
+              const displayIsCompleted = score.completed > 0 ? isCompleted : homeAwayCompleted;
+              
+              return displayIsCompleted 
+                ? `✅ Alle ${displayCompleted} Spiele beendet`
+                : `🎾 ${displayCompleted} von ${expectedMatches} Spielen beendet`;
+            })()}
+          </div>
           
           {/* Edit Button */}
             <button
