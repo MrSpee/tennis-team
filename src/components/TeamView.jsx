@@ -43,12 +43,60 @@ const TeamView = ({
     [sortedLeagueMatches]
   );
 
+  // Lade leagueMeta direkt aus team_seasons, wenn teamId gesetzt ist
+  const [localLeagueMeta, setLocalLeagueMeta] = useState(null);
+  
+  useEffect(() => {
+    if (!teamId) {
+      setLocalLeagueMeta(null);
+      return;
+    }
+    
+    const loadLeagueMeta = async () => {
+      try {
+        const currentSeason = 'Winter 2025/26';
+        const { data: teamSeason } = await supabase
+          .from('team_seasons')
+          .select('league, group_name, season, team_info!inner(category)')
+          .eq('team_id', teamId)
+          .eq('is_active', true)
+          .eq('season', currentSeason)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        if (teamSeason) {
+          setLocalLeagueMeta({
+            league: teamSeason.league,
+            group: teamSeason.group_name,
+            season: teamSeason.season
+          });
+          console.log('✅ Local LeagueMeta loaded for teamId:', teamId, {
+            category: teamSeason.team_info?.category,
+            league: teamSeason.league,
+            group: teamSeason.group_name
+          });
+        } else {
+          console.warn('⚠️ No team_season found for teamId:', teamId);
+          setLocalLeagueMeta(null);
+        }
+      } catch (error) {
+        console.error('❌ Error loading local league meta:', error);
+        setLocalLeagueMeta(null);
+      }
+    };
+    
+    loadLeagueMeta();
+  }, [teamId]);
+  
   const leagueSubtitle = useMemo(() => {
-    if (leagueMeta && (leagueMeta.league || leagueMeta.group || leagueMeta.season)) {
-      return [leagueMeta.league, leagueMeta.group, leagueMeta.season].filter(Boolean).join(' • ');
+    // Priorisiere localLeagueMeta über leagueMeta aus Context
+    const meta = localLeagueMeta || leagueMeta;
+    if (meta && (meta.league || meta.group || meta.season)) {
+      return [meta.league, meta.group, meta.season].filter(Boolean).join(' • ');
     }
     return display || 'Liga-Spielplan';
-  }, [leagueMeta, display]);
+  }, [localLeagueMeta, leagueMeta, display]);
 
   const hasLeagueMatches = sortedLeagueMatches.length > 0;
 
@@ -214,6 +262,8 @@ const TeamView = ({
       console.log('📊 Loading standings for team:', tid);
       
       // 1. Hole Team-Season Info für Liga/Gruppe (mit aktuelle Saison)
+      // WICHTIG: Filtere auch nach season, um sicherzustellen, dass wir die richtige Saison laden
+      const currentSeason = 'Winter 2025/26';
       const { data: teamSeasons, error: seasonError } = await supabase
         .from('team_seasons')
         .select(`
@@ -221,16 +271,23 @@ const TeamView = ({
           group_name,
           season,
           team_id,
-          team_info!team_seasons_team_id_fkey(id, team_name, club_name)
+          team_info!team_seasons_team_id_fkey(id, team_name, club_name, category)
         `)
         .eq('team_id', tid)
         .eq('is_active', true)
+        .eq('season', currentSeason)
         .order('created_at', { ascending: false })
         .limit(1);
       
-      if (seasonError) throw seasonError;
+      console.log('🔍 Team Seasons Query:', { tid, currentSeason, teamSeasons });
+      
+      if (seasonError) {
+        console.error('❌ Error loading team seasons:', seasonError);
+        throw seasonError;
+      }
+      
       if (!teamSeasons || teamSeasons.length === 0) {
-        console.warn('❌ Team-Season nicht gefunden - league/group_name fehlen');
+        console.warn('❌ Team-Season nicht gefunden - league/group_name fehlen', { tid, currentSeason });
         setStandings([]);
         return;
       }
@@ -238,13 +295,20 @@ const TeamView = ({
       const teamSeason = teamSeasons[0];
       const teamInfo = teamSeason.team_info;
       
+      console.log('🏆 Team Season Info:', {
+        teamId: tid,
+        teamName: teamInfo?.team_name,
+        category: teamInfo?.category,
+        league: teamSeason.league,
+        group_name: teamSeason.group_name,
+        season: teamSeason.season
+      });
+      
       if (!teamSeason.league || !teamSeason.group_name) {
         console.warn('❌ league oder group_name sind NULL:', teamSeason);
         setStandings([]);
         return;
       }
-      
-      console.log('🏆 Team Season Info:', teamSeason);
       
       // 2. Finde alle Teams in der gleichen Liga/Gruppe/Saison (über team_seasons)
       const { data: leagueTeamSeasons, error: teamsError } = await supabase

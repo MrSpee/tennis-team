@@ -9,7 +9,8 @@ import {
   CheckCircle,
   Download,
   RefreshCw,
-  CalendarDays
+  CalendarDays,
+  Trophy
 } from 'lucide-react';
 import ImportTab from './ImportTab';
 import OverviewTab from './superadmin/OverviewTab';
@@ -18,6 +19,7 @@ import PlayersTab from './superadmin/PlayersTab';
 import MatchdaysTab from './superadmin/MatchdaysTab';
 import ScraperTab from './superadmin/ScraperTab';
 import TeamPortraitImportTab from './superadmin/TeamPortraitImportTab';
+import GroupsTab from './superadmin/GroupsTab';
 import './Dashboard.css';
 import './SuperAdminDashboard.css';
 
@@ -819,7 +821,7 @@ function SuperAdminDashboard() {
           .order('club_name', { ascending: true }),
         supabase
           .from('team_seasons')
-          .select('*')
+          .select('*, team_info(id, club_name, team_name, category)')
           .order('season', { ascending: true }),
         supabase
           .from('matchdays')
@@ -3373,7 +3375,7 @@ function SuperAdminDashboard() {
 
   const renderOverview = () => <OverviewTab stats={stats} buildInfo={buildInfo} />;
 
-  const renderClubs = () => <ClubsTab clubs={clubs} />;
+  const renderClubs = () => <ClubsTab clubs={clubs} teams={teams} players={players} />;
 
   const renderPlayers = () => (
     <PlayersTab
@@ -3453,6 +3455,16 @@ function SuperAdminDashboard() {
     />
   );
 
+  const renderGroups = () => (
+    <GroupsTab
+      teams={teams}
+      teamSeasons={teamSeasons}
+      matchdays={seasonMatchdays}
+      clubs={clubs}
+      players={players}
+    />
+  );
+
   // ---------------------------------------------------------------------------
   // UI Rendering
   // ---------------------------------------------------------------------------
@@ -3479,6 +3491,9 @@ function SuperAdminDashboard() {
         </button>
         <button className={selectedTab === 'team-portrait' ? 'active' : ''} onClick={() => setSelectedTab('team-portrait')}>
           <Download size={16} /> Team-Portrait
+        </button>
+        <button className={selectedTab === 'groups' ? 'active' : ''} onClick={() => setSelectedTab('groups')}>
+          <Trophy size={16} /> Gruppen
         </button>
       </div>
 
@@ -3519,6 +3534,7 @@ function SuperAdminDashboard() {
           {selectedTab === 'scraper' && renderScraper()}
           {selectedTab === 'import' && <ImportTab />}
           {selectedTab === 'team-portrait' && <TeamPortraitImportTab />}
+          {selectedTab === 'groups' && renderGroups()}
         </div>
       )}
     </div>

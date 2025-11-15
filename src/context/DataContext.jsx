@@ -632,9 +632,14 @@ export function DataProvider({ children }) {
             season,
             status,
             home_score,
-            away_score
+            away_score,
+            league,
+            group_name
           `)
-          .or(`home_team_id.eq.${referenceTeam.id},away_team_id.eq.${referenceTeam.id}`);
+          .or(`home_team_id.eq.${referenceTeam.id},away_team_id.eq.${referenceTeam.id}`)
+          .eq('season', seasonLabel)
+          .eq('league', referenceTeam.league)
+          .eq('group_name', referenceTeam.group_name);
 
         if (ownMatchesError) {
           throw ownMatchesError;
@@ -707,9 +712,14 @@ export function DataProvider({ children }) {
           home_team_id,
           away_team_id,
           home_score,
-          away_score
+          away_score,
+          league,
+          group_name
         `)
-        .or(`home_team_id.in.(${idList}),away_team_id.in.(${idList})`);
+        .or(`home_team_id.in.(${idList}),away_team_id.in.(${idList})`)
+        .eq('season', seasonLabel)
+        .eq('league', referenceTeam.league)
+        .eq('group_name', referenceTeam.group_name);
 
       if (matchesError) {
         throw matchesError;

@@ -131,6 +131,7 @@ const Results = () => {
 
   // ✅ NEU: Lade Matches für ein beliebiges Team (auch ohne Membership)
   const [externalTeamMatches, setExternalTeamMatches] = useState({});
+  const [externalLeagueMatches, setExternalLeagueMatches] = useState({});
   
   // ✅ NEU: Globale Suche
   const performGlobalSearch = async (term) => {
@@ -313,8 +314,37 @@ const Results = () => {
     try {
       console.log('📥 Loading matches for external team:', teamId);
       
-      // ✅ MIT Team-Info laden!
-      const { data, error } = await supabase
+      // 1. Lade Team-Season Info für Liga/Gruppe
+      const currentSeason = 'Winter 2025/26';
+      const { data: teamSeasons } = await supabase
+        .from('team_seasons')
+        .select('league, group_name, season, team_info!inner(id, team_name, club_name, category)')
+        .eq('team_id', teamId)
+        .eq('is_active', true)
+        .eq('season', currentSeason)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (!teamSeasons) {
+        console.warn('⚠️ No team_season found for team:', teamId);
+        return;
+      }
+      
+      // 2. Lade alle Teams in der gleichen Liga/Gruppe
+      const { data: leagueTeamSeasons } = await supabase
+        .from('team_seasons')
+        .select('team_id, team_info!inner(id, team_name, club_name, category)')
+        .eq('league', teamSeasons.league)
+        .eq('group_name', teamSeasons.group_name)
+        .eq('season', teamSeasons.season)
+        .eq('is_active', true);
+      
+      const leagueTeamIds = (leagueTeamSeasons || []).map(ts => ts.team_info.id);
+      
+      // 3. Lade ALLE Matchdays für die gesamte Liga/Gruppe (nicht nur für dieses Team!)
+      // WICHTIG: Für die Tabelle brauchen wir alle Matches der Gruppe, nicht nur die des ausgewählten Teams!
+      const { data: allGroupMatchdays, error: allGroupError } = await supabase
         .from('matchdays')
         .select(`
           id,
@@ -327,21 +357,174 @@ const Results = () => {
           status,
           home_score,
           away_score,
+          league,
+          group_name,
           home_team:team_info!matchdays_home_team_id_fkey(id, club_name, team_name, category),
           away_team:team_info!matchdays_away_team_id_fkey(id, club_name, team_name, category)
         `)
-        .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
-        .order('match_date', { ascending: true }); // ✅ Chronologisch aufsteigend
+        .eq('season', currentSeason)
+        .eq('league', teamSeasons.league)
+        .eq('group_name', teamSeasons.group_name)
+        .order('match_date', { ascending: true });
       
-      if (error) {
-        console.error('❌ Error loading external team matches:', error);
-        throw error;
+      if (allGroupError) {
+        console.error('❌ Error loading all group matchdays:', allGroupError);
+        throw allGroupError;
       }
       
-      console.log('✅ Raw external matches loaded:', data?.length || 0, data);
+      // 4. Filtere Matchdays für dieses spezifische Team (für filteredMatches)
+      const matchdays = (allGroupMatchdays || []).filter(m => 
+        m.home_team_id === teamId || m.away_team_id === teamId
+      );
       
-      // Transformiere wie DataContext
-      const transformedMatches = (data || []).map(m => {
+      console.log('✅ Loaded matchdays:', {
+        totalGroupMatches: allGroupMatchdays?.length || 0,
+        teamMatches: matchdays.length,
+        league: teamSeasons.league,
+        group: teamSeasons.group_name
+      });
+      
+      // 5. Lade match_results für ALLE Matchdays der Gruppe (für Tabelle!)
+      const allMatchIds = (allGroupMatchdays || []).map(m => m.id);
+      let matchResults = [];
+      if (allMatchIds.length > 0) {
+        const { data: results } = await supabase
+          .from('match_results')
+          .select('*')
+          .in('matchday_id', allMatchIds);
+        matchResults = results || [];
+      }
+      
+      const resultsByMatchId = matchResults.reduce((acc, result) => {
+        if (!result || !result.matchday_id) return acc;
+        if (!acc[result.matchday_id]) acc[result.matchday_id] = [];
+        acc[result.matchday_id].push(result);
+        return acc;
+      }, {});
+      
+      // 6. Transformiere ALLE Matchdays der Gruppe zu leagueMatches Format (für Tabelle!)
+      const FINISHED_STATUSES = ['completed', 'retired', 'walkover', 'disqualified', 'defaulted'];
+      
+      const leagueMatchDetails = (allGroupMatchdays || []).map(match => {
+        const matchDate = match.match_date ? new Date(match.match_date) : null;
+        const resultsForMatch = resultsByMatchId[match.id] || [];
+        
+        let homeMatchPoints = 0;
+        let awayMatchPoints = 0;
+        let homeSets = 0;
+        let awaySets = 0;
+        let homeGames = 0;
+        let awayGames = 0;
+        let completedMatches = 0;
+        
+        resultsForMatch.forEach((result) => {
+          if (!result || !FINISHED_STATUSES.includes(result.status) || !result.winner) return;
+          
+          completedMatches += 1;
+          
+          if (result.winner === 'home') {
+            homeMatchPoints += 1;
+          } else if (result.winner === 'guest' || result.winner === 'away') {
+            awayMatchPoints += 1;
+          }
+          
+          const set1Home = parseInt(result.set1_home || 0, 10);
+          const set1Guest = parseInt(result.set1_guest || 0, 10);
+          const set2Home = parseInt(result.set2_home || 0, 10);
+          const set2Guest = parseInt(result.set2_guest || 0, 10);
+          const set3Home = parseInt(result.set3_home || 0, 10);
+          const set3Guest = parseInt(result.set3_guest || 0, 10);
+          
+          if (set1Home > set1Guest) homeSets += 1;
+          else if (set1Guest > set1Home) awaySets += 1;
+          homeGames += set1Home;
+          awayGames += set1Guest;
+          
+          if (set2Home > set2Guest) homeSets += 1;
+          else if (set2Guest > set2Home) awaySets += 1;
+          homeGames += set2Home;
+          awayGames += set2Guest;
+          
+          if (set3Home !== null && set3Guest !== null) {
+            if (set3Home > set3Guest) homeSets += 1;
+            else if (set3Guest > set3Home) awaySets += 1;
+            homeGames += set3Home;
+            awayGames += set3Guest;
+          }
+        });
+        
+        const expectedMatches = 6;
+        const displayScore = completedMatches > 0 
+          ? `${homeMatchPoints}:${awayMatchPoints}`
+          : (match.home_score !== null && match.away_score !== null 
+            ? `${match.home_score}:${match.away_score}` 
+            : '–:–');
+        
+        const winner = homeMatchPoints > awayMatchPoints ? 'home' 
+          : awayMatchPoints > homeMatchPoints ? 'away' 
+          : null;
+        
+        const isPlayerHomeTeam = match.home_team_id === teamId;
+        const isPlayerAwayTeam = match.away_team_id === teamId;
+        const involvesPlayerTeam = isPlayerHomeTeam || isPlayerAwayTeam;
+        
+        const buildTeamLabel = (team) => {
+          if (!team) return 'Unbekannt';
+          const parts = [team.club_name, team.team_name].filter(Boolean);
+          return parts.join(' ') || 'Unbekannt';
+        };
+        
+        return {
+          id: match.id,
+          date: matchDate,
+          start_time: match.start_time || null,
+          season: match.season,
+          status: match.status,
+          venue: match.venue,
+          home_team_id: match.home_team_id,
+          away_team_id: match.away_team_id,
+          homeTeam: {
+            id: match.home_team_id,
+            displayName: buildTeamLabel(match.home_team),
+            club_name: match.home_team?.club_name || null,
+            team_name: match.home_team?.team_name || null,
+            isPlayerTeam: isPlayerHomeTeam
+          },
+          awayTeam: {
+            id: match.away_team_id,
+            displayName: buildTeamLabel(match.away_team),
+            club_name: match.away_team?.club_name || null,
+            team_name: match.away_team?.team_name || null,
+            isPlayerTeam: isPlayerAwayTeam
+          },
+          homeMatchPoints,
+          awayMatchPoints,
+          homeSets,
+          awaySets,
+          homeGames,
+          awayGames,
+          completedMatches,
+          expectedMatches,
+          displayScore,
+          winner,
+          involvesPlayerTeam,
+          isPlayerHomeTeam,
+          isPlayerAwayTeam
+        };
+      }).sort((a, b) => {
+        const aTime = a.date ? a.date.getTime() : 0;
+        const bTime = b.date ? b.date.getTime() : 0;
+        return aTime - bTime;
+      });
+      
+      // 6. Speichere leagueMatches
+      setExternalLeagueMatches(prev => ({
+        ...prev,
+        [teamId]: leagueMatchDetails
+      }));
+      
+      // 7. Transformiere auch zu einfachen matches (für Kompatibilität)
+      const transformedMatches = (matchdays || []).map(m => {
         const isHome = m.home_team_id === teamId;
         const opponentTeam = isHome ? m.away_team : m.home_team;
         const ourTeam = isHome ? m.home_team : m.away_team;
@@ -365,7 +548,14 @@ const Results = () => {
         [teamId]: transformedMatches
       }));
       
-      console.log('✅ External team matches transformed:', transformedMatches.length);
+      console.log('✅ External team matches loaded:', {
+        teamId,
+        totalGroupMatches: allGroupMatchdays?.length || 0,
+        teamMatches: matchdays.length,
+        leagueMatches: leagueMatchDetails.length,
+        league: teamSeasons.league,
+        group: teamSeasons.group_name
+      });
       
     } catch (error) {
       console.error('❌ Error loading external team matches:', error);
@@ -1411,8 +1601,18 @@ const Results = () => {
                     <button
                       key={team.id}
                       onClick={() => {
-                        setSelectedClubTeamId(team.id === selectedClubTeamId ? null : team.id);
-                        setSelectedTeamId(team.id === selectedClubTeamId ? '' : team.id);
+                        // WICHTIG: Setze immer die Team-ID, nicht die Kategorie
+                        const newTeamId = team.id === selectedClubTeamId ? null : team.id;
+                        console.log('🔵 Button clicked:', { 
+                          clickedCategory: team.category, 
+                          clickedTeamId: team.id, 
+                          clickedTeamName: team.team_name,
+                          currentSelectedId: selectedClubTeamId,
+                          newTeamId: newTeamId
+                        });
+                        setSelectedClubTeamId(newTeamId);
+                        // WICHTIG: Aktualisiere auch selectedTeamId in DataContext, damit leagueMeta neu geladen wird
+                        setSelectedTeamId(newTeamId || '');
                       }}
                       style={{
                         padding: '0.5rem 1rem',
@@ -1511,11 +1711,16 @@ const Results = () => {
             filteredMatchOpponents: filteredMatches.map(m => m.opponent)
           });
           
+          // Verwende leagueMatches aus externalLeagueMatches, falls vorhanden
+          const effectiveLeagueMatches = selectedClubTeamId && externalLeagueMatches[selectedClubTeamId]
+            ? externalLeagueMatches[selectedClubTeamId]
+            : leagueMatches;
+          
           return (
             <TeamView 
               teamId={selectedClubTeamId || selectedTeamId}
               matches={filteredMatches}
-              leagueMatches={leagueMatches}
+              leagueMatches={effectiveLeagueMatches}
               leagueMeta={leagueMeta}
               playerTeamIds={playerTeams.map(team => team.id)}
               display={display}

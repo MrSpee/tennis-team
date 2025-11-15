@@ -117,11 +117,56 @@ export const tokenSetRatio = (str1, str2) => {
 };
 
 /**
- * Kombinierter Similarity Score
+ * Prüft ob ein String ein Präfix/Abkürzung eines anderen ist
+ * z.B. "SV Blau" ist Präfix von "SV Blau-Weiß-Rot"
+ */
+export const isPrefixMatch = (shortStr, longStr) => {
+  if (!shortStr || !longStr) return false;
+  
+  const shortNorm = normalizeString(shortStr);
+  const longNorm = normalizeString(longStr);
+  
+  // Prüfe ob shortStr ein Präfix von longStr ist
+  if (longNorm.startsWith(shortNorm)) {
+    // Zusätzlich: Prüfe ob der Rest nur aus Bindestrichen, Leerzeichen und Wörtern besteht
+    const remainder = longNorm.substring(shortNorm.length).trim();
+    // Wenn der Rest leer ist oder nur aus Bindestrichen/Leerzeichen besteht, ist es ein gutes Match
+    if (remainder.length === 0 || /^[\s-]+$/.test(remainder)) {
+      return true;
+    }
+    // Wenn der Rest mit Bindestrich beginnt und weitere Wörter enthält, ist es auch ein Match
+    if (remainder.startsWith('-') && remainder.length > 1) {
+      return true;
+    }
+  }
+  
+  return false;
+};
+
+/**
+ * Kombinierter Similarity Score mit Präfix-Matching
  */
 export const calculateSimilarity = (str1, str2) => {
   if (!str1 || !str2) return 0;
   if (normalizeString(str1) === normalizeString(str2)) return 1.0;
+  
+  // Prüfe Präfix-Matching (für abgekürzte Namen)
+  // "SV Blau" sollte gut zu "SV Blau-Weiß-Rot" matchen
+  const str1Norm = normalizeString(str1);
+  const str2Norm = normalizeString(str2);
+  
+  // Wenn einer der Strings deutlich kürzer ist, prüfe Präfix-Match
+  if (Math.abs(str1Norm.length - str2Norm.length) > 3) {
+    const shorter = str1Norm.length < str2Norm.length ? str1Norm : str2Norm;
+    const longer = str1Norm.length < str2Norm.length ? str2Norm : str1Norm;
+    
+    if (isPrefixMatch(shorter, longer)) {
+      // Präfix-Match: Score basierend auf Länge des kürzeren Strings
+      const prefixScore = shorter.length / longer.length;
+      // Mindestens 0.75 für Präfix-Matches, aber nicht mehr als 0.95
+      return Math.max(0.75, Math.min(0.95, prefixScore * 1.1));
+    }
+  }
   
   const jw = jaroWinkler(str1, str2);
   const tsr = tokenSetRatio(str1, str2);

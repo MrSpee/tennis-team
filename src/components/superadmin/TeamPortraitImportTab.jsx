@@ -34,6 +34,7 @@ const TeamPortraitImportTab = () => {
   const [clubMatch, setClubMatch] = useState(null); // { match: club, score: 0.95, confidence: 'high'|'medium'|'low' }
   const [teamMatch, setTeamMatch] = useState(null); // { match: team, score: 0.92, confidence: 'high'|'medium'|'low' }
   const [playerMatches, setPlayerMatches] = useState([]); // Array von { scrapedPlayer, matches: [{ player, score }] }
+  const [matchMatches, setMatchMatches] = useState([]); // Array von { scrapedMatch, homeTeamMatch: { team, score }, awayTeamMatch: { team, score }, alternatives: {...} }
   
   // Import-Status
   const [isImporting, setIsImporting] = useState(false);
@@ -64,6 +65,12 @@ const TeamPortraitImportTab = () => {
       performPlayerMatching();
     }
   }, [scrapedData, allPlayers]);
+  
+  useEffect(() => {
+    if (scrapedData?.matches && scrapedData.matches.length > 0 && allTeams.length > 0) {
+      performMatchMatching();
+    }
+  }, [scrapedData, allTeams]);
   
   const loadClubsAndTeams = async () => {
     try {
@@ -314,6 +321,89 @@ const TeamPortraitImportTab = () => {
     });
     
     setPlayerMatches(playerMatches);
+  };
+  
+  const performMatchMatching = () => {
+    if (!scrapedData?.matches || scrapedData.matches.length === 0 || allTeams.length === 0) return;
+    
+    const matchMatches = scrapedData.matches.map(scrapedMatch => {
+      const findTeamMatches = (teamName) => {
+        if (!teamName) return { matches: [], bestMatch: null };
+        
+        const matches = [];
+        
+        // 1. Exakte Matches
+        const exactMatches = allTeams.filter(t => 
+          t.team_name === teamName || 
+          `${t.club_name} ${t.team_name}` === teamName ||
+          t.club_name === teamName
+        );
+        
+        exactMatches.forEach(team => {
+          matches.push({ team, score: 1.0, matchType: 'exact' });
+        });
+        
+        // 2. Fuzzy Matches (wenn keine exakten Matches)
+        if (matches.length === 0) {
+          const normalizedSearch = normalizeString(teamName);
+          
+          allTeams.forEach(team => {
+            const teamLabel = `${team.club_name} ${team.team_name}`;
+            const normalizedTeam = normalizeString(teamLabel);
+            const score = calculateSimilarity(normalizedSearch, normalizedTeam);
+            
+            if (score >= 0.5) { // Nur relevante Matches
+              matches.push({ team, score, matchType: 'fuzzy' });
+            }
+          });
+          
+          // Sortiere nach Score
+          matches.sort((a, b) => b.score - a.score);
+        }
+        
+        const bestMatch = matches.length > 0 ? matches[0] : null;
+        const confidence = bestMatch?.score >= FUZZY_MATCH_THRESHOLD ? 'high' :
+                          bestMatch?.score >= MANUAL_REVIEW_THRESHOLD ? 'medium' : 'low';
+        
+        return {
+          matches: matches.slice(0, 10), // Top 10 Alternativen
+          bestMatch,
+          confidence
+        };
+      };
+      
+      const homeTeamMatches = findTeamMatches(scrapedMatch.home_team);
+      const awayTeamMatches = findTeamMatches(scrapedMatch.away_team);
+      
+      // Manuell ausgewählte Teams (initial: bestMatch wenn confidence high)
+      const selectedHomeTeamId = homeTeamMatches.confidence === 'high' ? homeTeamMatches.bestMatch?.team.id : null;
+      const selectedAwayTeamId = awayTeamMatches.confidence === 'high' ? awayTeamMatches.bestMatch?.team.id : null;
+      
+      return {
+        scrapedMatch,
+        homeTeamMatches,
+        awayTeamMatches,
+        selectedHomeTeamId,
+        selectedAwayTeamId
+      };
+    });
+    
+    setMatchMatches(matchMatches);
+  };
+  
+  // Handler für manuelle Team-Auswahl bei Matches
+  const handleMatchTeamSelection = (matchIndex, teamType, teamId) => {
+    setMatchMatches(prev => {
+      const updated = [...prev];
+      if (updated[matchIndex]) {
+        if (teamType === 'home') {
+          updated[matchIndex].selectedHomeTeamId = teamId;
+        } else {
+          updated[matchIndex].selectedAwayTeamId = teamId;
+        }
+      }
+      return updated;
+    });
   };
   
   const handleScrape = async () => {
@@ -691,23 +781,48 @@ const TeamPortraitImportTab = () => {
       // 2. Importiere Matches
       setImportProgress({ current: importedPlayers, total: totalSteps, message: 'Importiere Spieltermine...' });
       
-      if (scrapedData.matches && scrapedData.matches.length > 0) {
-        for (let i = 0; i < scrapedData.matches.length; i++) {
-          const match = scrapedData.matches[i];
+      let skippedMatches = 0;
+      let newMatchdays = 0;
+      let updatedScores = 0;
+      
+      // Nutze matchMatches (mit manuell ausgewählten Teams)
+      if (matchMatches && matchMatches.length > 0) {
+        for (let i = 0; i < matchMatches.length; i++) {
+          const matchMatch = matchMatches[i];
+          const match = matchMatch.scrapedMatch;
           
           try {
-            // Finde Home/Away Team IDs
-            const homeTeam = allTeams.find(t => 
-              t.team_name === match.home_team || 
-              `${t.club_name} ${t.team_name}` === match.home_team
-            );
-            const awayTeam = allTeams.find(t => 
-              t.team_name === match.away_team || 
-              `${t.club_name} ${t.team_name}` === match.away_team
-            );
+            // Nutze manuell ausgewählte Teams (oder bestMatch falls vorhanden)
+            // Ignoriere "__all__" als Team-ID
+            const homeTeamId = (matchMatch.selectedHomeTeamId && matchMatch.selectedHomeTeamId !== '__all__') 
+              ? matchMatch.selectedHomeTeamId 
+              : (matchMatch.homeTeamMatches.bestMatch?.team.id && matchMatch.homeTeamMatches.confidence === 'high' ? matchMatch.homeTeamMatches.bestMatch.team.id : null);
+            const awayTeamId = (matchMatch.selectedAwayTeamId && matchMatch.selectedAwayTeamId !== '__all__') 
+              ? matchMatch.selectedAwayTeamId 
+              : (matchMatch.awayTeamMatches.bestMatch?.team.id && matchMatch.awayTeamMatches.confidence === 'high' ? matchMatch.awayTeamMatches.bestMatch.team.id : null);
+            
+            if (!homeTeamId || !awayTeamId || homeTeamId === '__all__' || awayTeamId === '__all__') {
+              console.warn(`⚠️ Match ${match.match_number || i + 1} übersprungen: Teams nicht ausgewählt`, {
+                home_team: match.home_team,
+                away_team: match.away_team,
+                homeTeamId,
+                awayTeamId
+              });
+              skippedMatches++;
+              errors.push(`Match ${match.match_number || i + 1}: Teams nicht ausgewählt (${match.home_team} vs ${match.away_team})`);
+              continue;
+            }
+            
+            const homeTeam = allTeams.find(t => t.id === homeTeamId);
+            const awayTeam = allTeams.find(t => t.id === awayTeamId);
             
             if (!homeTeam || !awayTeam) {
-              errors.push(`Match ${match.match_number}: Teams nicht gefunden (${match.home_team} vs ${match.away_team})`);
+              console.warn(`⚠️ Match ${match.match_number || i + 1} übersprungen: Teams nicht gefunden`, {
+                homeTeamId,
+                awayTeamId
+              });
+              skippedMatches++;
+              errors.push(`Match ${match.match_number || i + 1}: Teams nicht gefunden`);
               continue;
             }
             
@@ -718,26 +833,77 @@ const TeamPortraitImportTab = () => {
               continue;
             }
             
-            // Erstelle Matchday
-            const { error: matchError } = await supabase
-              .from('matchdays')
-              .upsert({
-                match_date: matchDate.toISOString(),
-                start_time: match.start_time || null,
-                match_number: match.match_number,
-                home_team_id: homeTeam.id,
-                away_team_id: awayTeam.id,
-                venue: match.venue || null,
-                court_number: match.court_range || null,
-                season: scrapedData.team_info.season || 'Winter 2025/26',
-                league: scrapedData.team_info.league || null,
-                group_name: scrapedData.team_info.group_name || null,
-                status: match.status || 'scheduled',
-                home_score: match.match_points ? parseInt(match.match_points.split(':')[0]) : null,
-                away_score: match.match_points ? parseInt(match.match_points.split(':')[1]) : null
-              }, { onConflict: 'match_number' });
+            // Prüfe ob Matchday bereits existiert
+            let existingMatchday = null;
+            if (match.match_number) {
+              const { data: existing } = await supabase
+                .from('matchdays')
+                .select('id, home_score, away_score')
+                .eq('match_number', match.match_number)
+                .maybeSingle();
+              
+              existingMatchday = existing;
+            }
             
-            if (matchError) throw matchError;
+            // Erstelle/Update Matchday
+            const matchdayData = {
+              match_date: matchDate.toISOString(),
+              start_time: match.start_time || null,
+              match_number: match.match_number,
+              home_team_id: homeTeam.id,
+              away_team_id: awayTeam.id,
+              venue: match.venue || null,
+              court_number: match.court_range || null,
+              season: scrapedData.team_info.season || 'Winter 2025/26',
+              league: scrapedData.team_info.league || null,
+              group_name: scrapedData.team_info.group_name || null,
+              status: match.status || 'scheduled',
+              home_score: match.match_points ? parseInt(match.match_points.split(':')[0]) : null,
+              away_score: match.match_points ? parseInt(match.match_points.split(':')[1]) : null
+            };
+            
+            let matchError = null;
+            if (existingMatchday) {
+              // Update existing (nur wenn Scores vorhanden)
+              if (matchdayData.home_score !== null || matchdayData.away_score !== null) {
+                const { error: updateError } = await supabase
+                  .from('matchdays')
+                  .update({
+                    home_score: matchdayData.home_score,
+                    away_score: matchdayData.away_score,
+                    status: matchdayData.status
+                  })
+                  .eq('id', existingMatchday.id);
+                
+                matchError = updateError;
+                if (!updateError) {
+                  updatedScores++;
+                }
+              } else {
+                skippedMatches++;
+                continue; // Überspringe, wenn kein Update nötig
+              }
+            } else {
+              // Insert new
+              const { error: insertError } = await supabase
+                .from('matchdays')
+                .insert(matchdayData);
+              
+              matchError = insertError;
+              if (!insertError) {
+                newMatchdays++;
+              }
+            }
+            
+            if (matchError) {
+              // Prüfe ob es ein Duplikat-Fehler ist (z.B. unique constraint auf match_date + teams)
+              if (matchError.code === '23505') {
+                console.warn(`⚠️ Match ${match.match_number || i + 1} bereits vorhanden (Duplikat)`);
+                skippedMatches++;
+                continue;
+              }
+              throw matchError;
+            }
             
             importedMatches++;
             setImportProgress({ 
@@ -817,11 +983,19 @@ const TeamPortraitImportTab = () => {
         success: true,
         players: importedPlayers,
         matches: importedMatches,
+        newMatchdays: newMatchdays,
+        updatedScores: updatedScores,
+        skippedMatches: skippedMatches,
         errors: errors
       });
       
+      const matchSummary = [];
+      if (newMatchdays > 0) matchSummary.push(`${newMatchdays} neue Matchdays`);
+      if (updatedScores > 0) matchSummary.push(`${updatedScores} aktualisierte Scores`);
+      if (skippedMatches > 0) matchSummary.push(`${skippedMatches} übersprungen`);
+      
       setSuccessMessage(
-        `✅ Import erfolgreich! ${importedPlayers} Spieler, ${importedMatches} Spieltermine importiert.`
+        `✅ Import erfolgreich! ${importedPlayers} Spieler importiert. ${matchSummary.length > 0 ? `Matches: ${matchSummary.join(' · ')}.` : ''}`
       );
       
     } catch (err) {
@@ -1336,6 +1510,259 @@ const TeamPortraitImportTab = () => {
             </div>
           )}
           
+          {/* Match-Matching */}
+          {matchMatches.length > 0 && (
+            <div className="import-section">
+              <h3 className="section-title">
+                <Calendar size={18} />
+                Spieltermine-Zuordnung ({matchMatches.length})
+              </h3>
+              
+              <div className="matches-matching">
+                <div className="matching-summary">
+                  <div className="summary-item">
+                    <span className="summary-label">✅ Automatisch erkannt:</span>
+                    <span className="summary-value">
+                      {matchMatches.filter(m => 
+                        m.homeTeamMatches.confidence === 'high' && 
+                        m.awayTeamMatches.confidence === 'high' &&
+                        m.selectedHomeTeamId && 
+                        m.selectedAwayTeamId
+                      ).length}
+                    </span>
+                  </div>
+                  <div className="summary-item">
+                    <span className="summary-label">⚠️ Bitte prüfen:</span>
+                    <span className="summary-value">
+                      {matchMatches.filter(m => 
+                        (m.homeTeamMatches.confidence === 'medium' || m.awayTeamMatches.confidence === 'medium') ||
+                        !m.selectedHomeTeamId || !m.selectedAwayTeamId
+                      ).length}
+                    </span>
+                  </div>
+                  <div className="summary-item">
+                    <span className="summary-label">❌ Kein Match:</span>
+                    <span className="summary-value">
+                      {matchMatches.filter(m => 
+                        (!m.homeTeamMatches.bestMatch || !m.awayTeamMatches.bestMatch)
+                      ).length}
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="matches-list">
+                  {matchMatches.map((mm, idx) => {
+                    const match = mm.scrapedMatch;
+                    const homeConfidence = mm.homeTeamMatches.confidence;
+                    const awayConfidence = mm.awayTeamMatches.confidence;
+                    const hasBothTeams = mm.selectedHomeTeamId && mm.selectedAwayTeamId;
+                    
+                    return (
+                      <div key={idx} className={`match-match-item ${hasBothTeams ? 'complete' : 'incomplete'}`}>
+                        <div className="match-match-header">
+                          <div className="match-match-info">
+                            <div className="match-match-number">
+                              {match.match_number ? `Match #${match.match_number}` : `Match ${idx + 1}`}
+                            </div>
+                            <div className="match-match-date">
+                              {match.match_date && new Date(match.match_date).toLocaleDateString('de-DE')}
+                              {match.start_time && ` ${match.start_time}`}
+                            </div>
+                            {match.venue && (
+                              <div className="match-match-venue">
+                                <MapPin size={12} />
+                                {match.venue}
+                              </div>
+                            )}
+                            {match.match_points && (
+                              <div className="match-match-score">
+                                {match.match_points}
+                              </div>
+                            )}
+                          </div>
+                          {hasBothTeams && (
+                            <div className="match-match-status">
+                              <CheckCircle size={16} className="icon-success" />
+                              <span>Bereit zum Import</span>
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div className="match-match-teams">
+                          {/* Home Team */}
+                          <div className="match-team-selection">
+                            <div className="team-selection-label">
+                              <span>Heim:</span>
+                              <span className="scraped-team-name">{match.home_team}</span>
+                            </div>
+                            <div className="team-selection-matches">
+                              {mm.homeTeamMatches.bestMatch ? (
+                                <>
+                                  <div className={`team-match-result ${homeConfidence}`}>
+                                    <div className="team-match-header">
+                                      {homeConfidence === 'high' && <CheckCircle size={14} className="icon-success" />}
+                                      {homeConfidence === 'medium' && <AlertTriangle size={14} className="icon-warning" />}
+                                      {homeConfidence === 'low' && <AlertCircle size={14} className="icon-error" />}
+                                      <span>
+                                        {mm.homeTeamMatches.bestMatch.team.club_name} {mm.homeTeamMatches.bestMatch.team.team_name}
+                                      </span>
+                                      <span className="match-score">({Math.round(mm.homeTeamMatches.bestMatch.score * 100)}%)</span>
+                                    </div>
+                                  </div>
+                                  
+                                  <select
+                                    className="team-select-dropdown"
+                                    value={mm.selectedHomeTeamId === '__all__' ? '' : (mm.selectedHomeTeamId || '')}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      if (value === '__all__') {
+                                        handleMatchTeamSelection(idx, 'home', '__all__');
+                                      } else {
+                                        handleMatchTeamSelection(idx, 'home', value || null);
+                                      }
+                                    }}
+                                  >
+                                    <option value="">-- Team auswählen --</option>
+                                    {mm.homeTeamMatches.matches.map((tm, tmIdx) => (
+                                      <option key={tmIdx} value={tm.team.id}>
+                                        {tm.team.club_name} {tm.team.team_name} ({tm.team.category}) - {Math.round(tm.score * 100)}%
+                                      </option>
+                                    ))}
+                                    <option value="__all__">-- Alle Teams anzeigen --</option>
+                                  </select>
+                                  
+                                  {mm.selectedHomeTeamId === '__all__' && (
+                                    <select
+                                      className="team-select-dropdown"
+                                      value=""
+                                      onChange={(e) => {
+                                        if (e.target.value) {
+                                          handleMatchTeamSelection(idx, 'home', e.target.value);
+                                        }
+                                      }}
+                                    >
+                                      <option value="">-- Team auswählen --</option>
+                                      {allTeams.map(team => (
+                                        <option key={team.id} value={team.id}>
+                                          {team.club_name} {team.team_name} ({team.category})
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
+                                </>
+                              ) : (
+                                <div className="team-match-result no-match">
+                                  <AlertCircle size={14} className="icon-error" />
+                                  <span>Kein Team gefunden</span>
+                                  <select
+                                    className="team-select-dropdown"
+                                    value={mm.selectedHomeTeamId || ''}
+                                    onChange={(e) => handleMatchTeamSelection(idx, 'home', e.target.value || null)}
+                                  >
+                                    <option value="">-- Team manuell auswählen --</option>
+                                    {allTeams.map(team => (
+                                      <option key={team.id} value={team.id}>
+                                        {team.club_name} {team.team_name} ({team.category})
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          
+                          <div className="match-vs">vs</div>
+                          
+                          {/* Away Team */}
+                          <div className="match-team-selection">
+                            <div className="team-selection-label">
+                              <span>Gast:</span>
+                              <span className="scraped-team-name">{match.away_team}</span>
+                            </div>
+                            <div className="team-selection-matches">
+                              {mm.awayTeamMatches.bestMatch ? (
+                                <>
+                                  <div className={`team-match-result ${awayConfidence}`}>
+                                    <div className="team-match-header">
+                                      {awayConfidence === 'high' && <CheckCircle size={14} className="icon-success" />}
+                                      {awayConfidence === 'medium' && <AlertTriangle size={14} className="icon-warning" />}
+                                      {awayConfidence === 'low' && <AlertCircle size={14} className="icon-error" />}
+                                      <span>
+                                        {mm.awayTeamMatches.bestMatch.team.club_name} {mm.awayTeamMatches.bestMatch.team.team_name}
+                                      </span>
+                                      <span className="match-score">({Math.round(mm.awayTeamMatches.bestMatch.score * 100)}%)</span>
+                                    </div>
+                                  </div>
+                                  
+                                  <select
+                                    className="team-select-dropdown"
+                                    value={mm.selectedAwayTeamId === '__all__' ? '' : (mm.selectedAwayTeamId || '')}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      if (value === '__all__') {
+                                        handleMatchTeamSelection(idx, 'away', '__all__');
+                                      } else {
+                                        handleMatchTeamSelection(idx, 'away', value || null);
+                                      }
+                                    }}
+                                  >
+                                    <option value="">-- Team auswählen --</option>
+                                    {mm.awayTeamMatches.matches.map((tm, tmIdx) => (
+                                      <option key={tmIdx} value={tm.team.id}>
+                                        {tm.team.club_name} {tm.team.team_name} ({tm.team.category}) - {Math.round(tm.score * 100)}%
+                                      </option>
+                                    ))}
+                                    <option value="__all__">-- Alle Teams anzeigen --</option>
+                                  </select>
+                                  
+                                  {mm.selectedAwayTeamId === '__all__' && (
+                                    <select
+                                      className="team-select-dropdown"
+                                      value=""
+                                      onChange={(e) => {
+                                        if (e.target.value) {
+                                          handleMatchTeamSelection(idx, 'away', e.target.value);
+                                        }
+                                      }}
+                                    >
+                                      <option value="">-- Team auswählen --</option>
+                                      {allTeams.map(team => (
+                                        <option key={team.id} value={team.id}>
+                                          {team.club_name} {team.team_name} ({team.category})
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
+                                </>
+                              ) : (
+                                <div className="team-match-result no-match">
+                                  <AlertCircle size={14} className="icon-error" />
+                                  <span>Kein Team gefunden</span>
+                                  <select
+                                    className="team-select-dropdown"
+                                    value={mm.selectedAwayTeamId || ''}
+                                    onChange={(e) => handleMatchTeamSelection(idx, 'away', e.target.value || null)}
+                                  >
+                                    <option value="">-- Team manuell auswählen --</option>
+                                    {allTeams.map(team => (
+                                      <option key={team.id} value={team.id}>
+                                        {team.club_name} {team.team_name} ({team.category})
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+          
           {/* Vorschau */}
           <div className="import-section">
             <h3 className="section-title">
@@ -1414,7 +1841,9 @@ const TeamPortraitImportTab = () => {
               <h4>Import-Ergebnis:</h4>
               <ul>
                 <li>✅ {importResult.players} Spieler importiert</li>
-                <li>✅ {importResult.matches} Spieltermine importiert</li>
+                <li>
+                  ✅ Matches verarbeitet: {importResult.newMatchdays || 0} neue Matchdays · {importResult.updatedScores || 0} aktualisierte Scores · {importResult.skippedMatches || 0} übersprungen
+                </li>
                 {importResult.errors && importResult.errors.length > 0 && (
                   <li className="errors">
                     ⚠️ {importResult.errors.length} Fehler:

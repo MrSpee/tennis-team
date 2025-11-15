@@ -835,6 +835,50 @@ module.exports = async function handler(req, res) {
     const diceCoefficient = imports.diceCoefficient || (() => 0);
     const TEAM_SIMILARITY_THRESHOLD = 0.85;
 
+    // Hilfsfunktion für Präfix-Matching (für abgekürzte Namen wie "SV Blau" vs "SV Blau-Weiß-Rot")
+    const isPrefixMatch = (shortStr, longStr) => {
+      if (!shortStr || !longStr) return false;
+      const shortNorm = normalizeTeam(shortStr);
+      const longNorm = normalizeTeam(longStr);
+      
+      if (longNorm.startsWith(shortNorm)) {
+        const remainder = longNorm.substring(shortNorm.length).trim();
+        // Wenn der Rest leer ist oder nur aus Bindestrichen/Leerzeichen besteht, ist es ein gutes Match
+        if (remainder.length === 0 || /^[\s-]+$/.test(remainder)) {
+          return true;
+        }
+        // Wenn der Rest mit Bindestrich beginnt und weitere Wörter enthält, ist es auch ein Match
+        if (remainder.startsWith('-') && remainder.length > 1) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // Verbesserte Similarity-Berechnung mit Präfix-Matching
+    const calculateTeamSimilarity = (str1, str2) => {
+      if (!str1 || !str2) return 0;
+      const norm1 = normalizeTeam(str1);
+      const norm2 = normalizeTeam(str2);
+      if (norm1 === norm2) return 1.0;
+      
+      // Prüfe Präfix-Matching (für abgekürzte Namen)
+      if (Math.abs(norm1.length - norm2.length) > 3) {
+        const shorter = norm1.length < norm2.length ? norm1 : norm2;
+        const longer = norm1.length < norm2.length ? norm2 : norm1;
+        
+        if (isPrefixMatch(shorter, longer)) {
+          // Präfix-Match: Score basierend auf Länge des kürzeren Strings
+          const prefixScore = shorter.length / longer.length;
+          // Mindestens 0.75 für Präfix-Matches, aber nicht mehr als 0.95
+          return Math.max(0.75, Math.min(0.95, prefixScore * 1.1));
+        }
+      }
+      
+      // Fallback zu diceCoefficient
+      return diceCoefficient(str1, str2);
+    };
+
     const metaHome = meetingData.metadata?.homeTeam ? normalizeTeam(meetingData.metadata.homeTeam) : null;
     const metaAway = meetingData.metadata?.awayTeam ? normalizeTeam(meetingData.metadata.awayTeam) : null;
     const localHome = homeTeam ? normalizeTeam(homeTeam) : null;
@@ -842,7 +886,7 @@ module.exports = async function handler(req, res) {
 
     // Prüfe Heimteam - nur Fehler werfen wenn nicht ähnlich genug
     if (metaHome && localHome && metaHome !== localHome) {
-      const similarity = diceCoefficient(metaHome, localHome);
+      const similarity = calculateTeamSimilarity(meetingData.metadata?.homeTeam || '', homeTeam || '');
       if (similarity < TEAM_SIMILARITY_THRESHOLD) {
         const error = new Error(
           `Spielbericht gehört zu "${meetingData.metadata?.homeTeam || 'unbekannt'}" (Heim), nicht zu "${homeTeam}". Ähnlichkeit: ${(similarity * 100).toFixed(1)}%`
@@ -851,12 +895,12 @@ module.exports = async function handler(req, res) {
         error.meta = { type: 'home', expected: homeTeam, actual: meetingData.metadata?.homeTeam, similarity };
         throw error;
       }
-      // Wenn ähnlich genug, akzeptieren wir es (z.B. "SV RG Sürth 1" vs "SV Rot-Gelb Sürth 1")
+      // Wenn ähnlich genug, akzeptieren wir es (z.B. "SV RG Sürth 1" vs "SV Rot-Gelb Sürth 1" oder "SV Blau" vs "SV Blau-Weiß-Rot 1")
     }
 
     // Prüfe Gastteam - nur Fehler werfen wenn nicht ähnlich genug
     if (metaAway && localAway && metaAway !== localAway) {
-      const similarity = diceCoefficient(metaAway, localAway);
+      const similarity = calculateTeamSimilarity(meetingData.metadata?.awayTeam || '', awayTeam || '');
       if (similarity < TEAM_SIMILARITY_THRESHOLD) {
         const error = new Error(
           `Spielbericht gehört zu "${meetingData.metadata?.awayTeam || 'unbekannt'}" (Gast), nicht zu "${awayTeam}". Ähnlichkeit: ${(similarity * 100).toFixed(1)}%`
@@ -865,7 +909,7 @@ module.exports = async function handler(req, res) {
         error.meta = { type: 'away', expected: awayTeam, actual: meetingData.metadata?.awayTeam, similarity };
         throw error;
       }
-      // Wenn ähnlich genug, akzeptieren wir es (z.B. "SV RG Sürth 1" vs "SV Rot-Gelb Sürth 1")
+      // Wenn ähnlich genug, akzeptieren wir es (z.B. "SV RG Sürth 1" vs "SV Rot-Gelb Sürth 1" oder "SV Blau" vs "SV Blau-Weiß-Rot 1")
     }
 
     let applyResult = null;
