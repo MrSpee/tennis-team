@@ -88,7 +88,7 @@ async function determineMeetingId({
 
   const matched = matchedResult.match;
 
-  if (!matched || !matched.meetingId) {
+  if (!matched) {
     const availableMatches =
       targetGroup.matches?.map((entry) => ({
         matchNumber: entry.matchNumber || entry.match_number || null,
@@ -98,12 +98,29 @@ async function determineMeetingId({
       })) || [];
 
     const error = new Error(
-      `Meeting-ID konnte aus der Gruppenübersicht nicht ermittelt werden (Gruppe ${groupId}). ` +
+      `Match konnte in der Gruppenübersicht nicht gefunden werden (Gruppe ${groupId}). ` +
         `Gesucht: Match "${normalizedMatchNumber}", Heim "${normalizeTeamLabel(searchHome)}", ` +
         `Gast "${normalizeTeamLabel(searchAway)}". Matches: ${JSON.stringify(availableMatches)}`
     );
-    error.code = 'MATCH_ID_NOT_FOUND';
+    error.code = 'MATCH_NOT_FOUND';
     error.meta = { groupId, normalizedMatchNumber, searchHome, searchAway };
+    throw error;
+  }
+
+  // Match gefunden, aber keine Meeting-ID verfügbar
+  if (!matched.meetingId && !matched.meeting_id) {
+    const error = new Error(
+      `Match "${matched.matchNumber || matched.match_number || normalizedMatchNumber}" (${matched.homeTeam || matched.home_team} vs ${matched.awayTeam || matched.away_team}) wurde gefunden, ` +
+        `aber es ist noch keine Meeting-ID verfügbar. Das Spiel wurde möglicherweise noch nicht gespielt oder die Ergebnisse sind noch nicht in nuLiga eingetragen.`
+    );
+    error.code = 'MEETING_ID_NOT_AVAILABLE';
+    error.meta = { 
+      groupId, 
+      matchNumber: matched.matchNumber || matched.match_number || normalizedMatchNumber,
+      homeTeam: matched.homeTeam || matched.home_team,
+      awayTeam: matched.awayTeam || matched.away_team,
+      matchFound: true
+    };
     throw error;
   }
 
@@ -119,8 +136,8 @@ async function determineMeetingId({
   }
 
   return {
-    meetingId: matched.meetingId,
-    meetingReportUrl: matched.meetingReportUrl || null,
+    meetingId: matched.meetingId || matched.meeting_id,
+    meetingReportUrl: matched.meetingReportUrl || matched.meeting_report_url || null,
     groupMeta: targetGroup.group,
     matchMeta: {
       ...matched,

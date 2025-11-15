@@ -1054,6 +1054,15 @@
   color: #991b1b;
 }
 
+.match-detail-error .error-hint {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 4px;
+  font-size: 0.875rem;
+  color: #78350f;
+}
+
 .match-detail-results {
   padding: 1.5rem;
 }

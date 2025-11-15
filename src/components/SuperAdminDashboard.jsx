@@ -327,7 +327,7 @@ function SuperAdminDashboard() {
   const [selectedSeasonMatch, setSelectedSeasonMatch] = useState(null);
   const [playerSearch, setPlayerSearch] = useState('');
   const [playerSort, setPlayerSort] = useState({ column: 'name', direction: 'asc' });
-  const [selectedTab, setSelectedTab] = useState('matchdays');
+  const [selectedTab, setSelectedTab] = useState('groups');
   const [dateFilter, setDateFilter] = useState('all');
   const [logsFilter, setLogsFilter] = useState('all');
   const [selectedPlayerRow, setSelectedPlayerRow] = useState(null);
@@ -429,8 +429,13 @@ function SuperAdminDashboard() {
     const lookup = new Map();
     (teams || []).forEach((team) => {
       if (!team?.id) return;
+      // WICHTIG: Kategorie ist Teil des Keys! "VKC 1" (Herren 30) ≠ "VKC 1" (Herren 50)
+      const categoryKey = team.category ? `::${normalizeString(team.category)}` : '';
       buildTeamKeys(team.team_name, team.club_name).forEach((key) => {
-        if (!lookup.has(key)) lookup.set(key, team.id);
+        const fullKey = `${key}${categoryKey}`;
+        if (!lookup.has(fullKey)) lookup.set(fullKey, team.id);
+        // Auch ohne Kategorie für Fallback (aber niedrigere Priorität)
+        if (!categoryKey && !lookup.has(key)) lookup.set(key, team.id);
       });
     });
     return lookup;
@@ -1296,6 +1301,48 @@ function SuperAdminDashboard() {
 
       const teamNamePayload = preferredSuffix || preferredTeamName || team.original;
 
+      // WICHTIG: Prüfe ZUERST ob Team bereits existiert (mit Kategorie-Prüfung!)
+      if (category && teamNamePayload) {
+        const { data: existingTeam, error: checkError } = await supabase
+          .from('team_info')
+          .select('id, club_name, team_name, category')
+          .eq('club_id', clubId)
+          .eq('team_name', teamNamePayload)
+          .eq('category', category)
+          .maybeSingle();
+        
+        if (checkError && checkError.code !== 'PGRST116') {
+          console.warn('⚠️ Fehler beim Prüfen auf existierendes Team:', checkError);
+        }
+        
+        if (existingTeam) {
+          console.log(`ℹ️ Team existiert bereits (ID: ${existingTeam.id}): ${existingTeam.club_name} ${existingTeam.team_name} (${existingTeam.category})`);
+          setTeams((prev) => {
+            if (prev.some(t => t.id === existingTeam.id)) return prev;
+            return [existingTeam, ...prev];
+          });
+          updateTeamMapping(summary.clubName, team.normalized, (current) => ({
+            ...current,
+            existingTeamId: existingTeam.id,
+            import: true
+          }));
+          return existingTeam;
+        }
+        
+        // Prüfe auch ob Team mit gleichem Namen aber ANDERER Kategorie existiert
+        const { data: conflictingTeam } = await supabase
+          .from('team_info')
+          .select('id, club_name, team_name, category')
+          .eq('club_id', clubId)
+          .eq('team_name', teamNamePayload)
+          .neq('category', category)
+          .maybeSingle();
+        
+        if (conflictingTeam) {
+          console.warn(`⚠️ Team "${conflictingTeam.club_name} ${conflictingTeam.team_name}" existiert bereits mit Kategorie "${conflictingTeam.category}", aber erwartet wird "${category}". Erstelle neues Team.`);
+        }
+      }
+
       const payload = {
         club_id: clubId,
         club_name: clubRecord?.name || summary.clubName,
@@ -1305,7 +1352,33 @@ function SuperAdminDashboard() {
       };
 
       const { data: createdTeam, error: teamError } = await supabase.from('team_info').insert(payload).select().single();
-      if (teamError) throw teamError;
+      if (teamError) {
+        // Wenn Unique Constraint verletzt, versuche das bestehende Team zu finden
+        if (teamError.code === '23505' && category && teamNamePayload) {
+          const { data: existingTeam } = await supabase
+            .from('team_info')
+            .select('id, club_name, team_name, category')
+            .eq('club_id', clubId)
+            .eq('team_name', teamNamePayload)
+            .eq('category', category)
+            .maybeSingle();
+          
+          if (existingTeam) {
+            console.log(`ℹ️ Team existiert bereits (Unique Constraint): ${existingTeam.club_name} ${existingTeam.team_name} (${existingTeam.category})`);
+            setTeams((prev) => {
+              if (prev.some(t => t.id === existingTeam.id)) return prev;
+              return [existingTeam, ...prev];
+            });
+            updateTeamMapping(summary.clubName, team.normalized, (current) => ({
+              ...current,
+              existingTeamId: existingTeam.id,
+              import: true
+            }));
+            return existingTeam;
+          }
+        }
+        throw teamError;
+      }
 
       setTeams((prev) => [createdTeam, ...prev]);
       updateTeamMapping(summary.clubName, team.normalized, (current) => ({
@@ -1427,8 +1500,11 @@ function SuperAdminDashboard() {
         }
       }
 
-      const getTeamIdForMatch = async (teamName) => {
+      const getTeamIdForMatch = async (teamName, groupCategory = null) => {
         if (!teamName) return { teamId: null, clubName: '' };
+        
+        // WICHTIG: Kategorie aus dem Group-Kontext verwenden
+        const expectedCategory = groupCategory || group.group?.category || null;
         
         // Strategie 1: Direkter Match im Registry
         const normalizedName = normalizeString(teamName);
@@ -1436,13 +1512,20 @@ function SuperAdminDashboard() {
           return { teamId: teamIdRegistry.get(normalizedName), clubName: '' };
         }
 
-        // Strategie 2: Suche in scraperClubSummaries
+        // Strategie 2: Suche in scraperClubSummaries (mit Kategorie-Prüfung)
         for (const summary of scraperClubSummaries) {
           for (const team of summary.teams) {
             const fullName = `${summary.clubName} ${team.original}`.trim();
             if (normalizeString(fullName) === normalizedName || normalizeString(team.original) === normalizedName) {
+              // WICHTIG: Prüfe Kategorie-Übereinstimmung
+              const teamCategory = team.category || summary.categories?.[0] || null;
+              if (expectedCategory && teamCategory && 
+                  normalizeString(teamCategory) !== normalizeString(expectedCategory)) {
+                continue; // Kategorie stimmt nicht überein, überspringe
+              }
+              
               if (team.existingTeamId) {
-                console.log(`✅ Match-Import: "${teamName}" → Team-ID ${team.existingTeamId}`);
+                console.log(`✅ Match-Import: "${teamName}" → Team-ID ${team.existingTeamId} (Kategorie: ${teamCategory || 'unbekannt'})`);
                 teamIdRegistry.set(normalizedName, team.existingTeamId);
                 return { teamId: team.existingTeamId, clubName: summary.clubName };
               }
@@ -1450,17 +1533,32 @@ function SuperAdminDashboard() {
           }
         }
 
-        // Strategie 3: Exakte Suche via splitTeamLabel (mit Team-Nummer)
+        // Strategie 3: Exakte Suche via splitTeamLabel (mit Team-Nummer + Kategorie)
         const { clubName, suffix } = splitTeamLabel(teamName || '');
         
-        // WICHTIG: Suche zuerst nach exaktem Match (Club + Team-Nummer)
+        // WICHTIG: Suche zuerst nach exaktem Match (Club + Team-Nummer + Kategorie)
         if (clubName && suffix) {
           const exactKey = normalizeString(`${clubName} ${suffix}`);
-          if (existingTeamLookup.has(exactKey)) {
-            const teamId = existingTeamLookup.get(exactKey);
-            console.log(`✅ Match-Import (Exakt): "${teamName}" → Team-ID ${teamId}`);
+          const categoryKey = expectedCategory ? `::${normalizeString(expectedCategory)}` : '';
+          const fullKey = `${exactKey}${categoryKey}`;
+          
+          if (existingTeamLookup.has(fullKey)) {
+            const teamId = existingTeamLookup.get(fullKey);
+            console.log(`✅ Match-Import (Exakt mit Kategorie): "${teamName}" → Team-ID ${teamId} (Kategorie: ${expectedCategory})`);
             teamIdRegistry.set(normalizedName, teamId);
             return { teamId, clubName: clubName || '' };
+          }
+          
+          // Fallback: Ohne Kategorie (nur wenn keine Kategorie erwartet wird)
+          if (!expectedCategory && existingTeamLookup.has(exactKey)) {
+            const teamId = existingTeamLookup.get(exactKey);
+            const matchedTeam = teamById.get(teamId);
+            // Prüfe ob das gefundene Team eine Kategorie hat - wenn ja, nicht verwenden
+            if (!matchedTeam?.category) {
+              console.log(`✅ Match-Import (Exakt ohne Kategorie): "${teamName}" → Team-ID ${teamId}`);
+              teamIdRegistry.set(normalizedName, teamId);
+              return { teamId, clubName: clubName || '' };
+            }
           }
         }
         
@@ -1473,29 +1571,35 @@ function SuperAdminDashboard() {
         });
 
         for (const key of filteredKeys) {
-          if (existingTeamLookup.has(key)) {
-            const teamId = existingTeamLookup.get(key);
-            // Zusätzliche Validierung: Prüfe ob Team wirklich passt
+          const categoryKey = expectedCategory ? `::${normalizeString(expectedCategory)}` : '';
+          const fullKey = `${key}${categoryKey}`;
+          
+          if (existingTeamLookup.has(fullKey)) {
+            const teamId = existingTeamLookup.get(fullKey);
             const matchedTeam = teamById.get(teamId);
             if (matchedTeam) {
               const matchedClubNormalized = normalizeString(matchedTeam.club_name || '');
               const matchedSuffixNormalized = normalizeString(matchedTeam.team_name || '');
+              const matchedCategoryNormalized = normalizeString(matchedTeam.category || '');
               const searchClubNormalized = normalizeString(clubName || '');
               const searchSuffixNormalized = normalizeString(suffix || '');
+              const searchCategoryNormalized = expectedCategory ? normalizeString(expectedCategory) : '';
               
-              // Nur akzeptieren wenn Club UND Team-Nummer übereinstimmen
-              if (matchedClubNormalized === searchClubNormalized && 
-                  (searchSuffixNormalized === '' || matchedSuffixNormalized === searchSuffixNormalized)) {
-                console.log(`✅ Match-Import (Fallback validiert): "${teamName}" → Team-ID ${teamId}`);
-            teamIdRegistry.set(normalizedName, teamId);
-            return { teamId, clubName: clubName || '' };
+              // WICHTIG: Prüfe Club, Team-Nummer UND Kategorie
+              const clubMatch = matchedClubNormalized === searchClubNormalized;
+              const suffixMatch = searchSuffixNormalized === '' || matchedSuffixNormalized === searchSuffixNormalized;
+              const categoryMatch = !searchCategoryNormalized || matchedCategoryNormalized === searchCategoryNormalized;
+              
+              if (clubMatch && suffixMatch && categoryMatch) {
+                console.log(`✅ Match-Import (Fallback validiert): "${teamName}" → Team-ID ${teamId} (Kategorie: ${matchedTeam.category || 'unbekannt'})`);
+                teamIdRegistry.set(normalizedName, teamId);
+                return { teamId, clubName: clubName || '' };
               }
             }
           }
         }
 
-        // Strategie 5: Direkte Datenbank-Suche (wenn alle anderen Strategien fehlschlagen)
-        // Dies ist wichtig, um Teams zu finden, die bereits in der DB existieren, aber nicht im Registry sind
+        // Strategie 5: Direkte Datenbank-Suche (mit Kategorie-Filter)
         if (clubName) {
           try {
             // Suche nach Club-Namen (case-insensitive)
@@ -1506,13 +1610,19 @@ function SuperAdminDashboard() {
               .limit(5);
             
             if (!clubError && clubs && clubs.length > 0) {
-              // Für jeden gefundenen Club: Suche nach Team
+              // Für jeden gefundenen Club: Suche nach Team (MIT KATEGORIE!)
               for (const club of clubs) {
-                const { data: teams, error: teamError } = await supabase
+                let teamsQuery = supabase
                   .from('team_info')
-                  .select('id, club_name, team_name')
-                  .eq('club_id', club.id)
-                  .limit(10);
+                  .select('id, club_name, team_name, category')
+                  .eq('club_id', club.id);
+                
+                // WICHTIG: Filtere nach Kategorie, wenn erwartet
+                if (expectedCategory) {
+                  teamsQuery = teamsQuery.eq('category', expectedCategory);
+                }
+                
+                const { data: teams, error: teamError } = await teamsQuery.limit(10);
                 
                 if (!teamError && teams) {
                   // Prüfe ob Team-Name übereinstimmt
@@ -1524,7 +1634,13 @@ function SuperAdminDashboard() {
                     if (normalizedTeamLabel === normalizedName ||
                         normalizeString(`${club.name} ${suffix || ''}`.trim()) === normalizedTeamLabel ||
                         (suffix && normalizeString(team.team_name || '') === normalizeString(suffix))) {
-                      console.log(`✅ Match-Import (DB-Suche): "${teamName}" → Team-ID ${team.id}`);
+                      // Zusätzliche Kategorie-Prüfung
+                      if (expectedCategory && team.category && 
+                          normalizeString(team.category) !== normalizeString(expectedCategory)) {
+                        continue; // Kategorie stimmt nicht, überspringe
+                      }
+                      
+                      console.log(`✅ Match-Import (DB-Suche mit Kategorie): "${teamName}" → Team-ID ${team.id} (Kategorie: ${team.category || 'unbekannt'})`);
                       teamIdRegistry.set(normalizedName, team.id);
                       return { teamId: team.id, clubName: team.club_name || club.name };
                     }
@@ -1537,7 +1653,7 @@ function SuperAdminDashboard() {
           }
         }
 
-        console.error(`❌ Match-Import: Kein Team gefunden für "${teamName}"`);
+        console.error(`❌ Match-Import: Kein Team gefunden für "${teamName}" (erwartete Kategorie: ${expectedCategory || 'unbekannt'})`);
         return { teamId: null, clubName: clubName || '' };
       };
 
@@ -1585,8 +1701,10 @@ function SuperAdminDashboard() {
             }
           }
 
-          const homeLookup = await getTeamIdForMatch(match.homeTeam);
-          const awayLookup = await getTeamIdForMatch(match.awayTeam);
+          // WICHTIG: Kategorie aus Group-Kontext verwenden
+          const groupCategory = group.group?.category || match.category || null;
+          const homeLookup = await getTeamIdForMatch(match.homeTeam, groupCategory);
+          const awayLookup = await getTeamIdForMatch(match.awayTeam, groupCategory);
 
           // WICHTIG: Wenn Teams fehlen, markiere als "fehlend" aber überspringe NICHT
           // Das Match wird später manuell ergänzt werden können

@@ -623,10 +623,24 @@ function GroupsTab({
         return;
       }
 
-      // Suche Team in DB - ZUERST in der aktuellen Gruppe
+      // WICHTIG: Kategorie aus dem Scraped-Team oder Group-Header
+      const expectedCategory = scrapedTeam.category || group?.category || null;
+      
+      // Suche Team in DB - ZUERST in der aktuellen Gruppe (mit Kategorie-Prüfung)
       const teamKey = `${normalizeString(dbClub.name || '')}_${normalizeString(teamSuffix)}`;
       let dbTeam = groupTeamsByKey.get(teamKey);
-
+      
+      // VALIDIERUNG: Prüfe ob gefundenes Team die richtige Kategorie hat
+      if (dbTeam && expectedCategory) {
+        const teamCategory = normalizeString(dbTeam.category || '');
+        const groupCategory = normalizeString(expectedCategory);
+        if (teamCategory && groupCategory && teamCategory !== groupCategory) {
+          // Kategorie stimmt nicht - Team ist falsch zugeordnet!
+          console.warn(`⚠️ Team "${dbTeam.club_name} ${dbTeam.team_name}" hat falsche Kategorie: ${dbTeam.category} (erwartet: ${expectedCategory})`);
+          dbTeam = null; // Ignoriere dieses Team
+        }
+      }
+      
       // Falls nicht in Gruppe gefunden, suche global (aber markiere als "nicht in Gruppe")
       // WICHTIG: Kategorie ist entscheidend! "VKC 1" in Herren 30 ≠ "VKC 1" in Herren 50
       if (!dbTeam) {
@@ -636,15 +650,17 @@ function GroupsTab({
           const normalizedScrapedSuffix = normalizeString(teamSuffix);
           const teamNameMatch = normalizedDbTeam === normalizedScrapedSuffix;
           
+          if (!teamNameMatch) return false;
+          
           // Kategorie MUSS übereinstimmen (aus Header der Gruppe)
-          if (teamNameMatch && group?.category) {
+          if (expectedCategory) {
             const teamCategory = normalizeString(team.category || '');
-            const groupCategory = normalizeString(group.category);
+            const groupCategory = normalizeString(expectedCategory);
             return teamCategory === groupCategory;
           }
           
-          // Wenn keine Kategorie vorhanden, nur Name-Match (sollte nicht passieren)
-          return teamNameMatch;
+          // Wenn keine Kategorie erwartet wird, akzeptiere nur Teams ohne Kategorie
+          return !team.category;
         });
       }
 
@@ -723,7 +739,7 @@ function GroupsTab({
       if (!found && matchDate) {
         const matchDateOnly = matchDate ? new Date(matchDate).toISOString().split('T')[0] : null;
         
-        // Versuche Team-IDs zu finden
+        // Versuche Team-IDs zu finden (MIT KATEGORIE!)
         const findTeamIdForMatch = (teamName) => {
           const parts = teamName.split(/\s+/);
           const clubName = parts.slice(0, -1).join(' ').trim();
@@ -738,11 +754,26 @@ function GroupsTab({
 
           if (!dbClub) return null;
 
+          // WICHTIG: Kategorie aus Group-Kontext verwenden
+          const expectedCategory = group?.category || null;
+
           const dbTeam = teams.find((team) => {
             if (team.club_id !== dbClub.id) return false;
             const normalizedDbTeam = normalizeString(team.team_name || '');
             const normalizedScrapedSuffix = normalizeString(teamSuffix);
-            return normalizedDbTeam === normalizedScrapedSuffix;
+            const teamNameMatch = normalizedDbTeam === normalizedScrapedSuffix;
+            
+            if (!teamNameMatch) return false;
+            
+            // Kategorie MUSS übereinstimmen
+            if (expectedCategory) {
+              const teamCategory = normalizeString(team.category || '');
+              const groupCategory = normalizeString(expectedCategory);
+              return teamCategory === groupCategory;
+            }
+            
+            // Wenn keine Kategorie erwartet wird, akzeptiere nur Teams ohne Kategorie
+            return !team.category;
           });
 
           return dbTeam?.id || null;
@@ -1759,6 +1790,14 @@ function GroupsTab({
                                       }
                                     } catch (error) {
                                       console.error('❌ Fehler beim Laden der Ergebnisse:', error);
+                                      setMeetingDetails(prev => ({
+                                        ...prev,
+                                        [match.id]: { 
+                                          ...prev[match.id], 
+                                          loading: false,
+                                          error: error.message || 'Fehler beim Laden der Ergebnisse'
+                                        }
+                                      }));
                                     }
                                   }}
                                 >
@@ -1972,9 +2011,17 @@ function MatchDetailView({
         }, 1000);
       }
     } catch (error) {
-      console.error('❌ Fehler beim Laden der Ergebnisse:', error);
-    }
-  };
+        console.error('❌ Fehler beim Laden der Ergebnisse:', error);
+        setMeetingDetails(prev => ({
+          ...prev,
+          [match.id]: { 
+            ...prev[match.id], 
+            loading: false,
+            error: error.message || 'Fehler beim Laden der Ergebnisse'
+          }
+        }));
+      }
+    };
 
   return (
     <div className="match-detail-card">
@@ -2013,7 +2060,15 @@ function MatchDetailView({
       {meetingData?.error && (
         <div className="match-detail-error">
           <AlertCircle size={20} />
-          <p>{meetingData.error}</p>
+          <div>
+            <p>{meetingData.error}</p>
+            {meetingData.error.includes('noch keine Meeting-ID verfügbar') && (
+              <p className="error-hint">
+                💡 Tipp: Das Spiel wurde möglicherweise noch nicht gespielt. Bitte versuche es später erneut, 
+                nachdem das Spiel stattgefunden hat und die Ergebnisse in nuLiga eingetragen wurden.
+              </p>
+            )}
+          </div>
         </div>
       )}
 
