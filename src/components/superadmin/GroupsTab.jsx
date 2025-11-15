@@ -813,6 +813,23 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
             return;
           }
 
+          // VALIDIERUNG: Prüfe ob Team die richtige Kategorie hat
+          const { data: teamCheck, error: teamCheckError } = await supabase
+            .from('team_info')
+            .select('category')
+            .eq('id', item.existingTeamId)
+            .single();
+
+          if (teamCheckError) {
+            console.error('❌ Fehler beim Prüfen der Team-Kategorie:', teamCheckError);
+            return;
+          }
+
+          if (teamCheck.category !== selectedGroup.category) {
+            console.error(`❌ Team hat Kategorie "${teamCheck.category}", aber Gruppe erfordert "${selectedGroup.category}"!`);
+            return;
+          }
+
           const { data: newSeason, error: seasonError } = await supabase
             .from('team_seasons')
             .insert({
@@ -888,13 +905,21 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
           return;
         }
 
+        // WICHTIG: Die Gruppe determiniert die Kategorie!
+        // Alle Teams in dieser Gruppe MÜSSEN die gleiche Kategorie wie die Gruppe haben
+        const requiredCategory = selectedGroup.category;
+        if (!requiredCategory) {
+          console.error('❌ Gruppe hat keine Kategorie!');
+          return;
+        }
+
         // WICHTIG: Prüfe ZUERST ob Team bereits existiert (club_id + team_name + category)
         const { data: existingTeam, error: checkError } = await supabase
           .from('team_info')
           .select('id, club_name, team_name, category')
           .eq('club_id', item.suggestedClubId)
           .eq('team_name', item.scrapedSuffix || '')
-          .eq('category', selectedGroup.category || '')
+          .eq('category', requiredCategory)
           .maybeSingle();
 
         if (checkError && checkError.code !== 'PGRST116') {
@@ -903,18 +928,24 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
 
         let teamId;
         if (existingTeam) {
+          // VALIDIERUNG: Prüfe ob Kategorie übereinstimmt
+          if (existingTeam.category !== requiredCategory) {
+            console.error(`❌ Team "${existingTeam.club_name} ${existingTeam.team_name}" hat Kategorie "${existingTeam.category}", aber Gruppe erfordert "${requiredCategory}"!`);
+            return;
+          }
+          
           // Team existiert bereits - verwende es
           console.log(`ℹ️ Team existiert bereits (ID: ${existingTeam.id}), verwende es`);
           teamId = existingTeam.id;
         } else {
-          // Erstelle neues Team
+          // Erstelle neues Team mit der Kategorie der Gruppe
           const { data: newTeam, error: teamError } = await supabase
             .from('team_info')
             .insert({
               club_id: item.suggestedClubId,
               club_name: club.name,
               team_name: item.scrapedSuffix || null,
-              category: selectedGroup.category || null,
+              category: requiredCategory, // WICHTIG: Kategorie kommt von der Gruppe!
               region: null
             })
             .select()
@@ -1179,18 +1210,33 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
           .select('*')
           .in('id', updatedTeamIds);
 
-        if (!teamsError && updatedTeamsData) {
-          // Aktualisiere group.teams mit neuen Daten
-          const updatedTeams = updatedTeamSeasons
-            .map(ts => {
-              const team = updatedTeamsData.find(t => t.id === ts.team_id);
-              return team ? { ...team, teamSeason: ts } : null;
-            })
-            .filter(Boolean);
+      if (!teamsError && updatedTeamsData) {
+        // Aktualisiere group.teams mit neuen Daten
+        const updatedTeams = updatedTeamSeasons
+          .map(ts => {
+            const team = updatedTeamsData.find(t => t.id === ts.team_id);
+            return team ? { ...team, teamSeason: ts } : null;
+          })
+          .filter(Boolean);
+        
+        // VALIDIERUNG: Prüfe ob alle Teams die richtige Kategorie haben
+        if (group.category) {
+          const categoryMismatches = updatedTeams.filter(team => {
+            const teamCategory = normalizeString(team.category || '');
+            const groupCategory = normalizeString(group.category);
+            return teamCategory && groupCategory && teamCategory !== groupCategory;
+          });
           
-          // Aktualisiere group-Objekt
-          group.teams = updatedTeams;
+          if (categoryMismatches.length > 0) {
+            console.warn('⚠️ Kategorie-Mismatches in Gruppe:', group.groupName);
+            categoryMismatches.forEach(team => {
+              console.warn(`   - ${team.club_name} ${team.team_name}: ${team.category} (erwartet: ${group.category})`);
+            });
+          }
         }
+        
+        // Aktualisiere group-Objekt
+        group.teams = updatedTeams;
       }
 
       const teamIds = group.teams.map((t) => t.id);
