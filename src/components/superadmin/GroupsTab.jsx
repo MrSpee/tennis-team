@@ -142,19 +142,29 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
   const calculateStandings = (matchdays, matchResults, teamIds) => {
     const teamStats = new Map();
 
-    // Initialisiere alle Teams
+    // WICHTIG: Nur Teams initialisieren, die auch tatsächlich in Matchdays vorkommen
+    // Dies verhindert, dass Teams ohne Matchdays in der Tabelle erscheinen
+    const teamsInMatchdays = new Set();
+    matchdays.forEach((match) => {
+      teamsInMatchdays.add(match.home_team_id);
+      teamsInMatchdays.add(match.away_team_id);
+    });
+
+    // Initialisiere nur Teams, die in Matchdays vorkommen
     teamIds.forEach((teamId) => {
-      teamStats.set(teamId, {
-        teamId,
-        matches: 0,
-        wins: 0,
-        losses: 0,
-        setsWon: 0,
-        setsLost: 0,
-        gamesWon: 0,
-        gamesLost: 0,
-        points: 0
-      });
+      if (teamsInMatchdays.has(teamId)) {
+        teamStats.set(teamId, {
+          teamId,
+          matches: 0,
+          wins: 0,
+          losses: 0,
+          setsWon: 0,
+          setsLost: 0,
+          gamesWon: 0,
+          gamesLost: 0,
+          points: 0
+        });
+      }
     });
 
     // Gruppiere Match Results nach Matchday
@@ -569,7 +579,7 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
       let dbTeam = groupTeamsByKey.get(teamKey);
 
       // Falls nicht in Gruppe gefunden, suche global (aber markiere als "nicht in Gruppe")
-      // WICHTIG: Prüfe auch auf category, um Duplikate zu vermeiden
+      // WICHTIG: Kategorie ist entscheidend! "VKC 1" in Herren 30 ≠ "VKC 1" in Herren 50
       if (!dbTeam) {
         dbTeam = teams.find((team) => {
           if (team.club_id !== dbClub.id) return false;
@@ -577,11 +587,14 @@ function GroupsTab({ teams, teamSeasons, matchdays, clubs, players, setTeams, se
           const normalizedScrapedSuffix = normalizeString(teamSuffix);
           const teamNameMatch = normalizedDbTeam === normalizedScrapedSuffix;
           
-          // Prüfe auch category, falls vorhanden
-          if (teamNameMatch && selectedGroup?.category) {
-            return team.category === selectedGroup.category;
+          // Kategorie MUSS übereinstimmen (aus Header der Gruppe)
+          if (teamNameMatch && group?.category) {
+            const teamCategory = normalizeString(team.category || '');
+            const groupCategory = normalizeString(group.category);
+            return teamCategory === groupCategory;
           }
           
+          // Wenn keine Kategorie vorhanden, nur Name-Match (sollte nicht passieren)
           return teamNameMatch;
         });
       }
