@@ -823,7 +823,6 @@ function SuperAdminDashboard() {
         supabase
           .from('matchdays')
           .select('*, match_results(count)')
-          .eq('season', 'Winter 2025/26')
           .order('match_date', { ascending: true })
           .order('start_time', { ascending: true })
       ]);

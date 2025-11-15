@@ -5,7 +5,9 @@ const parseIntSafe = (value) => {
 
 export const buildTeamLabel = (team = {}) => {
   const parts = [team.club_name, team.team_name].filter(Boolean);
-  return parts.length > 0 ? parts.join(' ') : team.team_name || team.club_name || 'Unbekanntes Team';
+  const label = parts.length > 0 ? parts.join(' ') : team.team_name || team.club_name || 'Unbekanntes Team';
+  // Normalisiere mehrfache Leerzeichen zu einzelnen Leerzeichen
+  return label.replace(/\s+/g, ' ').trim();
 };
 
 export const computeStandings = (leagueTeams = [], matches = [], matchResults = []) => {
@@ -69,13 +71,6 @@ export const computeStandings = (leagueTeams = [], matches = [], matchResults = 
 
     const matchResultsForGame = resultsByMatchId[match.id] || [];
 
-    if (matchResultsForGame.length === 0) {
-      console.log(`⚠️ [computeStandings] Match ${match.id} hat keine match_results`);
-      return;
-    }
-    
-    console.log(`✅ [computeStandings] Match ${match.id} hat ${matchResultsForGame.length} match_results`);
-
     let homeMatchPoints = 0;
     let awayMatchPoints = 0;
     let homeSets = 0;
@@ -83,61 +78,81 @@ export const computeStandings = (leagueTeams = [], matches = [], matchResults = 
     let homeGames = 0;
     let awayGames = 0;
 
-    let skippedResults = 0;
-    matchResultsForGame.forEach((result) => {
-      if (result.status !== 'completed' || !result.winner) {
-        skippedResults++;
+    // FALLBACK: Wenn keine match_results vorhanden sind, verwende home_score/away_score
+    if (matchResultsForGame.length === 0) {
+      console.log(`⚠️ [computeStandings] Match ${match.id} hat keine match_results, verwende home_score/away_score als Fallback`);
+      
+      // Verwende home_score und away_score aus dem matchday
+      const homeScore = parseIntSafe(match.home_score);
+      const awayScore = parseIntSafe(match.away_score);
+      
+      if (homeScore === 0 && awayScore === 0) {
+        console.log(`⚠️ [computeStandings] Match ${match.id}: home_score und away_score sind beide 0, überspringe Match`);
         return;
       }
+      
+      homeMatchPoints = homeScore;
+      awayMatchPoints = awayScore;
+      console.log(`✅ [computeStandings] Match ${match.id}: ${homeMatchPoints}:${awayMatchPoints} (aus home_score/away_score)`);
+    } else {
+      console.log(`✅ [computeStandings] Match ${match.id} hat ${matchResultsForGame.length} match_results`);
 
-      if (result.winner === 'home') {
-        homeMatchPoints += 1;
-      } else if (result.winner === 'guest' || result.winner === 'away') {
-        awayMatchPoints += 1;
-      }
-
-      const set1Home = parseIntSafe(result.set1_home);
-      const set1Guest = parseIntSafe(result.set1_guest);
-      const set2Home = parseIntSafe(result.set2_home);
-      const set2Guest = parseIntSafe(result.set2_guest);
-      const set3Home = parseIntSafe(result.set3_home);
-      const set3Guest = parseIntSafe(result.set3_guest);
-
-      if (set1Home > set1Guest) homeSets += 1;
-      else if (set1Guest > set1Home) awaySets += 1;
-      homeGames += set1Home;
-      awayGames += set1Guest;
-
-      if (set2Home > set2Guest) homeSets += 1;
-      else if (set2Guest > set2Home) awaySets += 1;
-      homeGames += set2Home;
-      awayGames += set2Guest;
-
-      if (set3Home > 0 || set3Guest > 0) {
-        if (set3Home > set3Guest) homeSets += 1;
-        else if (set3Guest > set3Home) awaySets += 1;
-
-        const isChampionsTiebreak = set3Home >= 10 || set3Guest >= 10;
-
-        if (isChampionsTiebreak) {
-          if (set3Home > set3Guest) {
-            homeGames += 1;
-          } else if (set3Guest > set3Home) {
-            awayGames += 1;
-          }
-        } else {
-          homeGames += set3Home;
-          awayGames += set3Guest;
+      let skippedResults = 0;
+      matchResultsForGame.forEach((result) => {
+        if (result.status !== 'completed' || !result.winner) {
+          skippedResults++;
+          return;
         }
-      }
-    });
 
-    if (homeMatchPoints + awayMatchPoints === 0) {
-      console.log(`⚠️ [computeStandings] Match ${match.id}: Keine Match-Punkte (${skippedResults} results übersprungen)`);
-      return;
+        if (result.winner === 'home') {
+          homeMatchPoints += 1;
+        } else if (result.winner === 'guest' || result.winner === 'away') {
+          awayMatchPoints += 1;
+        }
+
+        const set1Home = parseIntSafe(result.set1_home);
+        const set1Guest = parseIntSafe(result.set1_guest);
+        const set2Home = parseIntSafe(result.set2_home);
+        const set2Guest = parseIntSafe(result.set2_guest);
+        const set3Home = parseIntSafe(result.set3_home);
+        const set3Guest = parseIntSafe(result.set3_guest);
+
+        if (set1Home > set1Guest) homeSets += 1;
+        else if (set1Guest > set1Home) awaySets += 1;
+        homeGames += set1Home;
+        awayGames += set1Guest;
+
+        if (set2Home > set2Guest) homeSets += 1;
+        else if (set2Guest > set2Home) awaySets += 1;
+        homeGames += set2Home;
+        awayGames += set2Guest;
+
+        if (set3Home > 0 || set3Guest > 0) {
+          if (set3Home > set3Guest) homeSets += 1;
+          else if (set3Guest > set3Home) awaySets += 1;
+
+          const isChampionsTiebreak = set3Home >= 10 || set3Guest >= 10;
+
+          if (isChampionsTiebreak) {
+            if (set3Home > set3Guest) {
+              homeGames += 1;
+            } else if (set3Guest > set3Home) {
+              awayGames += 1;
+            }
+          } else {
+            homeGames += set3Home;
+            awayGames += set3Guest;
+          }
+        }
+      });
+
+      if (homeMatchPoints + awayMatchPoints === 0) {
+        console.log(`⚠️ [computeStandings] Match ${match.id}: Keine Match-Punkte (${skippedResults} results übersprungen)`);
+        return;
+      }
+      
+      console.log(`✅ [computeStandings] Match ${match.id}: ${homeMatchPoints}:${awayMatchPoints} (${matchResultsForGame.length - skippedResults} results gezählt)`);
     }
-    
-    console.log(`✅ [computeStandings] Match ${match.id}: ${homeMatchPoints}:${awayMatchPoints} (${matchResultsForGame.length - skippedResults} results gezählt)`);
 
     const homeStats = teamStats[homeTeamId];
     const awayStats = teamStats[awayTeamId];
