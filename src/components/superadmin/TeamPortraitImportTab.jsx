@@ -408,10 +408,26 @@ const TeamPortraitImportTab = () => {
         return;
       }
       
+      // Hole Club-Name aus club_id
+      const { data: clubData, error: clubError } = await supabase
+        .from('club_info')
+        .select('name')
+        .eq('id', newTeamData.club_id)
+        .single();
+      
+      if (clubError) {
+        throw new Error(`Fehler beim Laden des Vereins: ${clubError.message}`);
+      }
+      
+      if (!clubData || !clubData.name) {
+        throw new Error('Verein nicht gefunden');
+      }
+      
       const { data, error: createError } = await supabase
         .from('team_info')
         .insert({
           club_id: newTeamData.club_id,
+          club_name: clubData.name, // ✅ WICHTIG: club_name ist NOT NULL
           team_name: newTeamData.team_name,
           category: newTeamData.category
         })
@@ -419,6 +435,26 @@ const TeamPortraitImportTab = () => {
         .single();
       
       if (createError) throw createError;
+      
+      // ✅ Erstelle team_season, wenn scrapedData vorhanden ist
+      if (scrapedData?.team_info) {
+        const season = scrapedData.team_info.season || 'Winter 2025/26';
+        const { error: seasonError } = await supabase
+          .from('team_seasons')
+          .insert({
+            team_id: data.id,
+            season: season,
+            league: scrapedData.team_info.league || null,
+            group_name: scrapedData.team_info.group_name || null,
+            team_size: 6, // Standard Team-Größe für Tennis
+            is_active: true
+          });
+        
+        if (seasonError) {
+          console.warn('⚠️ Fehler beim Erstellen von team_season:', seasonError);
+          // Nicht kritisch, Team wurde erstellt
+        }
+      }
       
       // Aktualisiere Liste
       setAllTeams([...allTeams, data]);
@@ -750,6 +786,7 @@ const TeamPortraitImportTab = () => {
               season: season,
               league: scrapedData.team_info.league || null,
               group_name: scrapedData.team_info.group_name || null,
+              team_size: 6, // Standard Team-Größe für Tennis
               is_active: true
             });
           
