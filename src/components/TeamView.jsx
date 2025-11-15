@@ -465,8 +465,7 @@ const TeamView = ({
           )
         `)
         .eq('team_id', tid)
-        .eq('is_active', true)
-        .order('name', { foreignTable: 'players_unified', ascending: true });
+        .eq('is_active', true);
       
       if (error) throw error;
       
@@ -486,21 +485,62 @@ const TeamView = ({
         teamCountMap[tc.player_id] = (teamCountMap[tc.player_id] || 0) + 1;
       });
       
-      const players = (data || []).map((d, index) => {
+      // Map zu Spielerobjekten und entferne Duplikate
+      const playersMap = new Map();
+      
+      (data || []).forEach((d) => {
         const profile = d.players_unified || {};
-        const explicitPosition = typeof d.position === 'number' ? d.position : null;
-        const derivedPosition = explicitPosition ?? index + 1;
         const playerId = profile.id || d.player_id;
-
-        return {
-          ...profile,
-          id: playerId,
-          position: derivedPosition,
-          is_captain: d.role === 'captain',
-          role: d.role || 'player',
-          team_count: playerId ? (teamCountMap[playerId] || 1) : 1
-        };
-      }).filter(p => p.id);
+        
+        if (!playerId) return;
+        
+        // Nur behalten, wenn noch nicht vorhanden ODER wenn dieser Eintrag ein App-User ist
+        if (!playersMap.has(playerId) || profile.player_type === 'app_user') {
+          playersMap.set(playerId, {
+            ...profile,
+            id: playerId,
+            is_captain: d.role === 'captain',
+            role: d.role || 'player',
+            team_count: playerId ? (teamCountMap[playerId] || 1) : 1
+          });
+        }
+      });
+      
+      // Konvertiere Map zu Array
+      let players = Array.from(playersMap.values());
+      
+      // Helper-Funktion: Extrahiere numerische LK
+      const extractLK = (player) => {
+        const lkString = player.current_lk || player.season_start_lk || '';
+        // Entferne "LK " Präfix falls vorhanden
+        const cleanedLK = lkString.toString().replace(/^LK\s*/i, '').trim();
+        const parsed = parseFloat(cleanedLK);
+        return isNaN(parsed) ? 999 : parsed; // Spieler ohne LK ans Ende
+      };
+      
+      // Sortiere nach LK (niedrigere LK = besser = Position 1)
+      players.sort((a, b) => {
+        const lkA = extractLK(a);
+        const lkB = extractLK(b);
+        
+        // Primär: nach LK aufsteigend
+        if (lkA !== lkB) {
+          return lkA - lkB;
+        }
+        
+        // Sekundär: nach Name alphabetisch
+        const nameA = (a.name || '').toLowerCase();
+        const nameB = (b.name || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
+      
+      // Weise Position basierend auf LK-Sortierung zu
+      players = players.map((p, index) => ({
+        ...p,
+        position: index + 1
+      }));
+      
+      console.log(`✅ Kader geladen: ${players.length} Spieler (${playersMap.size} unique nach Deduplizierung)`);
       
       setTeamPlayers(players);
     } catch (error) {
