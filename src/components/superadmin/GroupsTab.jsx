@@ -1019,10 +1019,12 @@ function GroupsTab({
                 console.warn(`⚠️ Team "${team.club_name} ${team.team_name}" hat Kategorie "${team.category}", erwartet "${expectedCategory}"`);
                 return false;
               }
+              // Kategorie stimmt überein - Team ist korrekt
+              return true;
             }
             
-            // Wenn keine Kategorie erwartet wird, akzeptiere nur Teams ohne Kategorie
-            return !team.category;
+            // Wenn keine Kategorie erwartet wird, akzeptiere alle Teams
+            return true;
           });
 
           if (!dbTeam) {
