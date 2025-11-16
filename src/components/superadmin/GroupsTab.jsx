@@ -4,13 +4,12 @@ import { Trophy, Users, Calendar, TrendingUp, ChevronRight, ChevronDown, Award, 
 import { calculateSimilarity, normalizeString } from '../../services/matchdayImportService';
 import './GroupsTab.css';
 
-const FINISHED_STATUSES = ['completed', 'retired', 'walkover', 'disqualified', 'defaulted'];
+const FINISHED_STATUSES = ['completed'];
 
 // Sync-Prüfung: Prüfe ob alle abgeschlossenen Matches match_results haben
 const checkMatchResultsSync = (matchdays, matchResults) => {
   const finishedMatches = matchdays.filter(m => 
-    FINISHED_STATUSES.includes(m.status) || 
-    (m.home_score !== null && m.away_score !== null)
+    FINISHED_STATUSES.includes(m.status)
   );
   
   const matchResultsByMatchdayId = new Map();
@@ -367,8 +366,7 @@ function GroupsTab({
   const calculateGroupStats = (matchdays, matchResults, teamCount) => {
     const totalMatches = matchdays.length;
     const completedMatches = matchdays.filter((m) =>
-      FINISHED_STATUSES.includes(m.status) ||
-      (m.home_score !== null && m.away_score !== null)
+      FINISHED_STATUSES.includes(m.status)
     ).length;
     const scheduledMatches = matchdays.filter((m) => m.status === 'scheduled').length;
     const cancelledMatches = matchdays.filter((m) => m.status === 'cancelled').length;
