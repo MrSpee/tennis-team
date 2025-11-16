@@ -739,6 +739,27 @@ function GroupsTab({
       overallMatch: 0
     };
 
+    // Lade Clubs und Teams aus DB (für Matching benötigt)
+    let clubs = [];
+    let teams = [];
+    try {
+      const { data: clubsData, error: clubsError } = await supabase
+        .from('club_info')
+        .select('id, name, normalized_name');
+      if (!clubsError && clubsData) {
+        clubs = clubsData;
+      }
+
+      const { data: teamsData, error: teamsError } = await supabase
+        .from('team_info')
+        .select('id, club_id, club_name, team_name, category');
+      if (!teamsError && teamsData) {
+        teams = teamsData;
+      }
+    } catch (err) {
+      console.warn('⚠️ Fehler beim Laden von Clubs/Teams für Vergleich:', err);
+    }
+
     // 1. Club-Vergleich
     const scrapedClubs = new Set();
     const scrapedTeams = scrapedData.teamsDetailed || [];
