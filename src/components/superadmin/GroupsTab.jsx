@@ -1974,8 +1974,8 @@ function GroupsTab({
                       {groupDetails.matchdays.map((match) => {
                         const homeTeam = match.home_team;
                         const awayTeam = match.away_team;
-                        const homeInGroup = selectedGroup ? group.teams.some(t => t.id === match.home_team_id) : false;
-                        const awayInGroup = selectedGroup ? group.teams.some(t => t.id === match.away_team_id) : false;
+                        const homeInGroup = selectedGroup ? (selectedGroup.teams || []).some(t => t.id === match.home_team_id) : false;
+                        const awayInGroup = selectedGroup ? (selectedGroup.teams || []).some(t => t.id === match.away_team_id) : false;
                         const homeLabel = homeTeam
                           ? `${homeTeam.club_name} ${homeTeam.team_name || ''}`.trim()
                           : 'Unbekannt';
