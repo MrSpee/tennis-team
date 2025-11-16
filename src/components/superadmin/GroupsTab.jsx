@@ -1136,7 +1136,15 @@ function GroupsTab({
           return;
         }
 
-        const matchDate = item.matchDate ? new Date(item.matchDate).toISOString() : new Date().toISOString();
+        // WICHTIG: Wenn kein Datum vorhanden ist, verwende NICHT den aktuellen Timestamp!
+        // Das würde zu falschen Import-Daten führen (z.B. Match 428)
+        if (!item.matchDate) {
+          console.error(`❌ Match ${item.matchNumber || 'unbekannt'} (${item.homeTeam} vs ${item.awayTeam}) hat kein Datum - kann nicht importiert werden!`);
+          setError(`Match ${item.matchNumber || 'unbekannt'} hat kein Datum und kann nicht importiert werden. Bitte Datum in nuLiga prüfen oder manuell eingeben.`);
+          return;
+        }
+        
+        const matchDate = new Date(item.matchDate).toISOString();
         const matchDateOnly = matchDate.split('T')[0];
 
         // WICHTIG: Prüfe ZUERST ob Matchday bereits existiert (Unique Constraint!)
