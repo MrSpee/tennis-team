@@ -943,13 +943,18 @@ function GroupsTab({
       // Suche Match in DB - mehrere Strategien
       let found = false;
       let matchedDb = null;
+      let matchingStrategy = null;
       
       // Strategie 1: Suche nach match_number
       if (matchNumber) {
         matchedDb = allGroupMatchdays.find((match) =>
           match.match_number && String(match.match_number) === String(matchNumber)
         ) || null;
-        found = Boolean(matchedDb);
+        if (matchedDb) {
+          found = true;
+          matchingStrategy = 'match_number';
+          console.log(`✅ Match gefunden (Strategie: match_number #${matchNumber}): DB-ID ${matchedDb.id}`);
+        }
       }
 
       // Strategie 2: Suche nach Datum + Teams (wenn Teams gefunden werden können)
@@ -969,7 +974,10 @@ function GroupsTab({
                    calculateSimilarity(clubName, club.name || '') >= 0.90;
           });
 
-          if (!dbClub) return null;
+          if (!dbClub) {
+            console.warn(`⚠️ Club nicht gefunden für Team "${teamName}" (Club: "${clubName}")`);
+            return null;
+          }
 
           // WICHTIG: Kategorie aus Group-Kontext verwenden
           const expectedCategory = group?.category || null;
@@ -986,13 +994,19 @@ function GroupsTab({
             if (expectedCategory) {
               const teamCategory = normalizeString(team.category || '');
               const groupCategory = normalizeString(expectedCategory);
-              return teamCategory === groupCategory;
+              if (teamCategory !== groupCategory) {
+                console.warn(`⚠️ Team "${team.club_name} ${team.team_name}" hat Kategorie "${team.category}", erwartet "${expectedCategory}"`);
+                return false;
+              }
             }
             
             // Wenn keine Kategorie erwartet wird, akzeptiere nur Teams ohne Kategorie
             return !team.category;
           });
 
+          if (!dbTeam) {
+            console.warn(`⚠️ Team nicht gefunden: "${teamName}" (Club: "${clubName}", Suffix: "${teamSuffix}", Kategorie: "${expectedCategory || 'keine'}")`);
+          }
           return dbTeam?.id || null;
         };
 
@@ -1010,17 +1024,37 @@ function GroupsTab({
               (match.home_team_id === awayTeamId && match.away_team_id === homeTeamId);
             return sameDate && sameTeams;
           }) || null;
-          found = Boolean(matchedDb);
+          if (matchedDb) {
+            found = true;
+            matchingStrategy = 'date+teams';
+            console.log(`✅ Match gefunden (Strategie: Datum+Teams, ${matchDateOnly}): DB-ID ${matchedDb.id}`);
+          }
+        } else {
+          if (!homeTeamId) console.warn(`⚠️ Home-Team-ID nicht gefunden für "${homeTeam}"`);
+          if (!awayTeamId) console.warn(`⚠️ Away-Team-ID nicht gefunden für "${awayTeam}"`);
         }
 
-        // Fallback: Nur nach Datum suchen (weniger genau)
+        // Fallback: Nur nach Datum suchen (weniger genau) - NUR wenn genau 1 Match an diesem Tag
         if (!found && matchDateOnly) {
-          matchedDb = allGroupMatchdays.find((match) => {
+          const matchesOnDate = allGroupMatchdays.filter((match) => {
             if (!match.match_date) return false;
             const dbDateOnly = toDateOnly(match.match_date);
             return dbDateOnly === matchDateOnly;
-          }) || null;
-          found = Boolean(matchedDb);
+          });
+          
+          // WICHTIG: Nur wenn genau 1 Match an diesem Tag, verwende es
+          // Sonst wäre das Matching zu unsicher (mehrere Matches am gleichen Tag)
+          if (matchesOnDate.length === 1) {
+            matchedDb = matchesOnDate[0];
+            found = true;
+            matchingStrategy = 'date-only';
+            console.warn(`⚠️ Match gefunden (Strategie: Datum-only, ${matchDateOnly}): DB-ID ${matchedDb.id}. Teams konnten nicht eindeutig gemappt werden - bitte manuell prüfen!`);
+          } else if (matchesOnDate.length > 1) {
+            console.warn(`⚠️ Match-Matching per Datum-only nicht möglich: ${matchesOnDate.length} Matches am ${matchDateOnly} gefunden. Matching zu unsicher. Scraped: "${homeTeam}" vs "${awayTeam}" (Match #${matchNumber || 'unbekannt'})`);
+            // matchedDb bleibt null, found bleibt false
+          } else {
+            console.warn(`⚠️ Kein Match gefunden für Datum ${matchDateOnly}. Scraped: "${homeTeam}" vs "${awayTeam}" (Match #${matchNumber || 'unbekannt'})`);
+          }
         }
       }
 
@@ -1075,6 +1109,15 @@ function GroupsTab({
           const needsResultImport = isCompleted && !hasResultsInDb;
 
           if (needsDateUpdate || needsTimeUpdate || needsNumberUpdate || needsTeamUpdate || needsResultImport) {
+            const mismatchReasons = [];
+            if (needsDateUpdate) mismatchReasons.push('Datum');
+            if (needsTimeUpdate) mismatchReasons.push('Zeit');
+            if (needsNumberUpdate) mismatchReasons.push('Matchnummer');
+            if (needsTeamUpdate) mismatchReasons.push('Teams');
+            if (needsResultImport) mismatchReasons.push('Ergebnisse');
+            
+            console.log(`⚠️ Abweichung erkannt für Match ${matchedDb.id} (Match #${matchNumber || matchedDb.match_number || 'unbekannt'}): ${mismatchReasons.join(', ')}. Matching-Strategie: ${matchingStrategy || 'unbekannt'}`);
+            
             comparison.matchdays.mismatchItems.push({
               dbMatch: {
                 id: matchedDb.id,
@@ -1103,6 +1146,7 @@ function GroupsTab({
                 homeTeamId: resolvedHomeId,
                 awayTeamId: resolvedAwayId
               },
+              matchingStrategy: matchingStrategy || null,
               action: 'update_matchday'
             });
           }
@@ -1569,6 +1613,8 @@ function GroupsTab({
     if (!mismatchItem?.dbMatch || !selectedGroup) return;
     const matchId = mismatchItem.dbMatch.id;
     const updates = {};
+    const warnings = [];
+    
     try {
       if (mismatchItem.needs.date && mismatchItem.scraped.matchDateIso) {
         updates.match_date = new Date(mismatchItem.scraped.matchDateIso).toISOString();
@@ -1579,14 +1625,67 @@ function GroupsTab({
       if (mismatchItem.needs.number && mismatchItem.scraped.matchNumber != null) {
         updates.match_number = mismatchItem.scraped.matchNumber;
       }
-      if (mismatchItem.needs.teams && mismatchItem.resolved?.homeTeamId && mismatchItem.resolved?.awayTeamId) {
-        updates.home_team_id = mismatchItem.resolved.homeTeamId;
-        updates.away_team_id = mismatchItem.resolved.awayTeamId;
+      
+      // WICHTIG: Teams nur updaten wenn resolved IDs vorhanden sind
+      if (mismatchItem.needs.teams) {
+        if (mismatchItem.resolved?.homeTeamId && mismatchItem.resolved?.awayTeamId) {
+          updates.home_team_id = mismatchItem.resolved.homeTeamId;
+          updates.away_team_id = mismatchItem.resolved.awayTeamId;
+        } else {
+          // Teams konnten nicht automatisch gemappt werden
+          warnings.push(`Teams konnten nicht automatisch gemappt werden: "${mismatchItem.scraped.homeTeam}" vs "${mismatchItem.scraped.awayTeam}"`);
+          console.warn(`⚠️ Teams konnten nicht automatisch gemappt werden für Match ${mismatchItem.dbMatch.id}:`, {
+            scraped: {
+              homeTeam: mismatchItem.scraped.homeTeam,
+              awayTeam: mismatchItem.scraped.awayTeam
+            },
+            resolved: mismatchItem.resolved
+          });
+        }
       }
+      
       if (Object.keys(updates).length > 0) {
         const { error: updErr } = await supabase.from('matchdays').update(updates).eq('id', matchId);
         if (updErr) throw updErr;
+        
+        const updatedFields = Object.keys(updates).join(', ');
+        console.log(`✅ Matchday ${matchId} aktualisiert: ${updatedFields}`);
+      } else if (warnings.length > 0) {
+        // Keine Updates möglich, aber Warnungen vorhanden
+        const message = `⚠️ Keine Änderungen möglich:\n\n${warnings.join('\n')}\n\nMöchtest du die Teams manuell zuordnen?`;
+        if (window.confirm(message)) {
+          // Öffne manuelles Re-Mapping (falls verfügbar)
+          const dbMatch = mismatchItem.dbMatch;
+          const currentMatch = {
+            id: dbMatch.id,
+            home_team_id: dbMatch.home_team_id,
+            away_team_id: dbMatch.away_team_id,
+            match_number: dbMatch.match_number,
+            match_date: dbMatch.match_date,
+            group_name: selectedGroup.groupName
+          };
+          
+          // Versuche handleReassignMatchTeams zu verwenden (wenn verfügbar)
+          if (handleReassignMatchTeams) {
+            try {
+              // Zeige Dialog für manuelle Team-Zuordnung
+              // Der User muss die Teams manuell auswählen - das ist komplexer, daher nur Hinweis
+              alert('Bitte verwende die "Teams neu zuordnen"-Funktion im Matchday-Detail, um die Teams manuell zuzuordnen.');
+            } catch (reassignErr) {
+              console.error('❌ Fehler beim Öffnen des Re-Mapping-Dialogs:', reassignErr);
+            }
+          } else {
+            alert('Bitte verwende die "Teams neu zuordnen"-Funktion im Matchday-Detail, um die Teams manuell zuzuordnen.');
+          }
+        }
+        return; // Beende hier, da keine Updates gemacht wurden
+      } else {
+        // Keine Updates und keine Warnungen - sollte nicht passieren, aber logge es
+        console.warn(`⚠️ handleSyncMatchday: Keine Updates für Match ${matchId}, aber auch keine Warnungen.`, mismatchItem);
+        alert('Keine Änderungen erforderlich oder möglich.');
+        return;
       }
+      
       // Optional: Ergebnisse importieren
       if (mismatchItem.needs.importResults && handleLoadMeetingDetails) {
         const homeTeam = teamById.get(updates.home_team_id || mismatchItem.dbMatch.home_team_id);
@@ -1598,13 +1697,22 @@ function GroupsTab({
           { homeLabel, awayLabel, applyImport: true }
         );
       }
+      
+      // Lade Daten neu
       await loadGroupDetails(selectedGroup, true);
       if (scraperData) {
         const refreshed = await compareScrapedWithDatabase(selectedGroup, scraperData);
         setComparisonResult(refreshed);
       }
+      
+      // Zeige Erfolgsmeldung
+      if (warnings.length === 0) {
+        const updatedFields = Object.keys(updates).join(', ');
+        console.log(`✅ Matchday erfolgreich synchronisiert: ${updatedFields}`);
+      }
     } catch (err) {
       console.error('❌ Fehler beim Sync des Matchdays:', err);
+      alert(`Fehler beim Synchronisieren: ${err.message || 'Unbekannter Fehler'}`);
     }
   };
 
