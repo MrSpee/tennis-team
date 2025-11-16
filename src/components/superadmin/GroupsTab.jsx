@@ -724,7 +724,7 @@ function GroupsTab({
       groupKey,
       clubs: { total: 0, matched: 0, missing: 0, missingItems: [] },
       teams: { total: 0, matched: 0, missing: 0, missingItems: [] },
-      matchdays: { total: 0, matched: 0, missing: 0, missingItems: [] },
+      matchdays: { total: 0, matched: 0, missing: 0, missingItems: [], mismatchItems: [] },
       overallMatch: 0
     };
 
@@ -907,6 +907,15 @@ function GroupsTab({
       }
     }
 
+    const toDateOnly = (iso) => {
+      if (!iso) return null;
+      try {
+        return new Date(iso).toISOString().split('T')[0];
+      } catch {
+        return null;
+      }
+    };
+
     scrapedMatches.forEach((scrapedMatch) => {
       // Robustere Extraktion der Matchnummer (verschiedene mögliche Felder)
       const matchNumber =
@@ -922,17 +931,19 @@ function GroupsTab({
 
       // Suche Match in DB - mehrere Strategien
       let found = false;
+      let matchedDb = null;
       
       // Strategie 1: Suche nach match_number
       if (matchNumber) {
-        found = allGroupMatchdays.some((match) => 
+        matchedDb = allGroupMatchdays.find((match) =>
           match.match_number && String(match.match_number) === String(matchNumber)
-        );
+        ) || null;
+        found = Boolean(matchedDb);
       }
 
       // Strategie 2: Suche nach Datum + Teams (wenn Teams gefunden werden können)
       if (!found && matchDate) {
-        const matchDateOnly = matchDate ? new Date(matchDate).toISOString().split('T')[0] : null;
+        const matchDateOnly = toDateOnly(matchDate);
         
         // Versuche Team-IDs zu finden (MIT KATEGORIE!)
         const findTeamIdForMatch = (teamName) => {
@@ -979,28 +990,115 @@ function GroupsTab({
 
         // Suche nach Datum + Teams
         if (homeTeamId && awayTeamId && matchDateOnly) {
-          found = allGroupMatchdays.some((match) => {
+          matchedDb = allGroupMatchdays.find((match) => {
             if (!match.match_date) return false;
-            const dbDateOnly = new Date(match.match_date).toISOString().split('T')[0];
+            const dbDateOnly = toDateOnly(match.match_date);
             const sameDate = dbDateOnly === matchDateOnly;
-            const sameTeams = (match.home_team_id === homeTeamId && match.away_team_id === awayTeamId) ||
-                             (match.home_team_id === awayTeamId && match.away_team_id === homeTeamId);
+            const sameTeams =
+              (match.home_team_id === homeTeamId && match.away_team_id === awayTeamId) ||
+              (match.home_team_id === awayTeamId && match.away_team_id === homeTeamId);
             return sameDate && sameTeams;
-          });
+          }) || null;
+          found = Boolean(matchedDb);
         }
 
         // Fallback: Nur nach Datum suchen (weniger genau)
         if (!found && matchDateOnly) {
-          found = allGroupMatchdays.some((match) => {
+          matchedDb = allGroupMatchdays.find((match) => {
             if (!match.match_date) return false;
-            const dbDateOnly = new Date(match.match_date).toISOString().split('T')[0];
+            const dbDateOnly = toDateOnly(match.match_date);
             return dbDateOnly === matchDateOnly;
-          });
+          }) || null;
+          found = Boolean(matchedDb);
         }
       }
 
       if (found) {
         comparison.matchdays.matched += 1;
+        // Prüfe auf Abweichungen (Zeit, match_number, Teams)
+        try {
+          const desiredDate = matchDate ? new Date(matchDate).toISOString() : null;
+          const desiredTime = scrapedMatch.startTime || null;
+          const dbTime = matchedDb?.start_time || null;
+          const dbDateIso = matchedDb?.match_date ? new Date(matchedDb.match_date).toISOString() : null;
+          const needsDateUpdate = Boolean(desiredDate && dbDateIso && toDateOnly(desiredDate) !== toDateOnly(dbDateIso));
+          const needsTimeUpdate = Boolean(desiredTime && desiredTime !== dbTime);
+          const needsNumberUpdate = Boolean(matchNumber && String(matchedDb?.match_number || '') !== String(matchNumber));
+
+          // Prüfe Teams nur, wenn wir IDs sicher bestimmen konnten
+          let needsTeamUpdate = false;
+          let resolvedHomeId = null;
+          let resolvedAwayId = null;
+          if (group?.category) {
+            const partsHome = homeTeam.split(/\s+/);
+            const homeClubName = partsHome.slice(0, -1).join(' ').trim();
+            const homeSuffix = partsHome[partsHome.length - 1];
+            const partsAway = awayTeam.split(/\s+/);
+            const awayClubName = partsAway.slice(0, - 1).join(' ').trim();
+            const awaySuffix = partsAway[partsAway.length - 1];
+            const dbClubHome = clubs.find((c) => normalizeString(c.name || '') === normalizeString(homeClubName));
+            const dbClubAway = clubs.find((c) => normalizeString(c.name || '') === normalizeString(awayClubName));
+            if (dbClubHome && dbClubAway) {
+              const findTeamWithCat = (clubId, suffix) =>
+                teams.find((t) =>
+                  t.club_id === clubId &&
+                  normalizeString(t.team_name || '') === normalizeString(suffix) &&
+                  normalizeString(t.category || '') === normalizeString(group.category)
+                );
+              const homeT = findTeamWithCat(dbClubHome.id, homeSuffix);
+              const awayT = findTeamWithCat(dbClubAway.id, awaySuffix);
+              resolvedHomeId = homeT?.id || null;
+              resolvedAwayId = awayT?.id || null;
+              if (resolvedHomeId && resolvedAwayId) {
+                needsTeamUpdate = Boolean(
+                  matchedDb.home_team_id !== resolvedHomeId || matchedDb.away_team_id !== resolvedAwayId
+                );
+              }
+            }
+          }
+
+          const scrapedStatus = scrapedMatch.status === 'completed' ? 'completed' :
+            scrapedMatch.status === 'cancelled' ? 'cancelled' : 'scheduled';
+          const isCompleted = scrapedStatus === 'completed';
+          const hasResultsInDb = (groupDetails?.matchResults || []).some((r) => r.matchday_id === matchedDb.id);
+          const needsResultImport = isCompleted && !hasResultsInDb;
+
+          if (needsDateUpdate || needsTimeUpdate || needsNumberUpdate || needsTeamUpdate || needsResultImport) {
+            comparison.matchdays.mismatchItems.push({
+              dbMatch: {
+                id: matchedDb.id,
+                match_number: matchedDb.match_number,
+                match_date: matchedDb.match_date,
+                start_time: matchedDb.start_time,
+                home_team_id: matchedDb.home_team_id,
+                away_team_id: matchedDb.away_team_id
+              },
+              scraped: {
+                matchNumber,
+                matchDateIso: matchDate,
+                startTime: scrapedMatch.startTime || null,
+                homeTeam,
+                awayTeam,
+                status: scrapedStatus
+              },
+              needs: {
+                date: needsDateUpdate,
+                time: needsTimeUpdate,
+                number: needsNumberUpdate,
+                teams: needsTeamUpdate,
+                importResults: needsResultImport
+              },
+              resolved: {
+                homeTeamId: resolvedHomeId,
+                awayTeamId: resolvedAwayId
+              },
+              action: 'update_matchday'
+            });
+          }
+        } catch (mismatchErr) {
+          // eslint-disable-next-line no-console
+          console.warn('⚠️ Fehler bei Abgleich Match-Abweichungen:', mismatchErr);
+        }
       } else {
         comparison.matchdays.missing += 1;
         comparison.matchdays.missingItems.push({
@@ -1452,6 +1550,50 @@ function GroupsTab({
     } catch (error) {
       console.error('❌ Fehler beim Erstellen:', error);
       // Zeige Fehler in der Konsole, kein Modal
+    }
+  };
+
+  // Sync/Update für abweichende Matchdays
+  const handleSyncMatchday = async (mismatchItem) => {
+    if (!mismatchItem?.dbMatch || !selectedGroup) return;
+    const matchId = mismatchItem.dbMatch.id;
+    const updates = {};
+    try {
+      if (mismatchItem.needs.date && mismatchItem.scraped.matchDateIso) {
+        updates.match_date = new Date(mismatchItem.scraped.matchDateIso).toISOString();
+      }
+      if (mismatchItem.needs.time) {
+        updates.start_time = (mismatchItem.scraped.startTime || '').toString().slice(0, 5) || null;
+      }
+      if (mismatchItem.needs.number && mismatchItem.scraped.matchNumber != null) {
+        updates.match_number = mismatchItem.scraped.matchNumber;
+      }
+      if (mismatchItem.needs.teams && mismatchItem.resolved?.homeTeamId && mismatchItem.resolved?.awayTeamId) {
+        updates.home_team_id = mismatchItem.resolved.homeTeamId;
+        updates.away_team_id = mismatchItem.resolved.awayTeamId;
+      }
+      if (Object.keys(updates).length > 0) {
+        const { error: updErr } = await supabase.from('matchdays').update(updates).eq('id', matchId);
+        if (updErr) throw updErr;
+      }
+      // Optional: Ergebnisse importieren
+      if (mismatchItem.needs.importResults && handleLoadMeetingDetails) {
+        const homeTeam = teamById.get(updates.home_team_id || mismatchItem.dbMatch.home_team_id);
+        const awayTeam = teamById.get(updates.away_team_id || mismatchItem.dbMatch.away_team_id);
+        const homeLabel = homeTeam ? `${homeTeam.club_name} ${homeTeam.team_name || ''}`.trim() : '';
+        const awayLabel = awayTeam ? `${awayTeam.club_name} ${awayTeam.team_name || ''}`.trim() : '';
+        await handleLoadMeetingDetails(
+          { id: matchId, group_name: selectedGroup.groupName, match_number: updates.match_number || mismatchItem.dbMatch.match_number, match_date: updates.match_date || mismatchItem.dbMatch.match_date },
+          { homeLabel, awayLabel, applyImport: true }
+        );
+      }
+      await loadGroupDetails(selectedGroup, true);
+      if (scraperData) {
+        const refreshed = await compareScrapedWithDatabase(selectedGroup, scraperData);
+        setComparisonResult(refreshed);
+      }
+    } catch (err) {
+      console.error('❌ Fehler beim Sync des Matchdays:', err);
     }
   };
 
@@ -2003,6 +2145,54 @@ function GroupsTab({
                               </div>
                             </div>
                           ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Abweichende Matchdays */}
+                    {(comparisonResult.matchdays?.mismatchItems || []).length > 0 && (
+                      <div className="comparison-differences">
+                        <h5 className="differences-title">
+                          <AlertCircle size={18} /> Abweichende Matchdays ({(comparisonResult.matchdays?.mismatchItems || []).length})
+                        </h5>
+                        <div className="differences-list">
+                          {(comparisonResult.matchdays?.mismatchItems || []).map((item, idx) => {
+                            const needs = item.needs || {};
+                            const chips = [];
+                            if (needs.number) chips.push('Matchnummer');
+                            if (needs.date) chips.push('Datum');
+                            if (needs.time) chips.push('Zeit');
+                            if (needs.teams) chips.push('Teams');
+                            if (needs.importResults) chips.push('Ergebnisse');
+                            return (
+                              <div key={idx} className="difference-item clickable" onClick={() => handleSyncMatchday(item)} title="nuLiga-Stand übernehmen">
+                                <div className="difference-item-content">
+                                  <div className="difference-match-info">
+                                    <span className="difference-name">
+                                      {item.scraped.matchNumber ? `Match #${item.scraped.matchNumber}` : 'Match'}
+                                    </span>
+                                    <span className="difference-teams">
+                                      {item.scraped.homeTeam} vs {item.scraped.awayTeam}
+                                    </span>
+                                    {item.scraped.matchDateIso && (
+                                      <span className="difference-date">
+                                        {new Date(item.scraped.matchDateIso).toLocaleDateString('de-DE')}
+                                        {item.scraped.startTime ? ` · ${String(item.scraped.startTime).slice(0,5)}` : ''}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="difference-chips">
+                                    {chips.map((c) => (
+                                      <span key={c} className="chip">{c}</span>
+                                    ))}
+                                  </div>
+                                  <span className="difference-action">
+                                    <RefreshCw size={16} /> nuLiga übernehmen
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
