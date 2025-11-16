@@ -190,29 +190,19 @@ function GroupsTab({
   const calculateStandings = (matchdays, matchResults, teamIds) => {
     const teamStats = new Map();
 
-    // WICHTIG: Nur Teams initialisieren, die auch tatsächlich in Matchdays vorkommen
-    // Dies verhindert, dass Teams ohne Matchdays in der Tabelle erscheinen
-    const teamsInMatchdays = new Set();
-    matchdays.forEach((match) => {
-      teamsInMatchdays.add(match.home_team_id);
-      teamsInMatchdays.add(match.away_team_id);
-    });
-
-    // Initialisiere nur Teams, die in Matchdays vorkommen
+    // WICHTIG: Alle Gruppen-Teams initialisieren (auch wenn sie noch keine Matchdays haben)
     teamIds.forEach((teamId) => {
-      if (teamsInMatchdays.has(teamId)) {
-        teamStats.set(teamId, {
-          teamId,
-          matches: 0,
-          wins: 0,
-          losses: 0,
-          setsWon: 0,
-          setsLost: 0,
-          gamesWon: 0,
-          gamesLost: 0,
-          points: 0
-        });
-      }
+      teamStats.set(teamId, {
+        teamId,
+        matches: 0,
+        wins: 0,
+        losses: 0,
+        setsWon: 0,
+        setsLost: 0,
+        gamesWon: 0,
+        gamesLost: 0,
+        points: 0
+      });
     });
 
     // Gruppiere Match Results nach Matchday
