@@ -1003,29 +1003,35 @@ function GroupsTab({
           // WICHTIG: Kategorie aus Group-Kontext verwenden
           const expectedCategory = group?.category || null;
 
-          const dbTeam = teams.find((team) => {
+          // WICHTIG: Filtere zuerst nach Club, dann nach Team-Name, dann nach Kategorie
+          // Das stellt sicher, dass wir das Team mit der RICHTIGEN Kategorie finden
+          const candidateTeams = teams.filter((team) => {
             if (team.club_id !== dbClub.id) return false;
             const normalizedDbTeam = normalizeString(team.team_name || '');
             const normalizedScrapedSuffix = normalizeString(teamSuffix);
             const teamNameMatch = normalizedDbTeam === normalizedScrapedSuffix;
-            
-            if (!teamNameMatch) return false;
-            
-            // Kategorie MUSS übereinstimmen
-            if (expectedCategory) {
-              const teamCategory = normalizeString(team.category || '');
-              const groupCategory = normalizeString(expectedCategory);
-              if (teamCategory !== groupCategory) {
-                console.warn(`⚠️ Team "${team.club_name} ${team.team_name}" hat Kategorie "${team.category}", erwartet "${expectedCategory}"`);
-                return false;
-              }
-              // Kategorie stimmt überein - Team ist korrekt
-              return true;
-            }
-            
-            // Wenn keine Kategorie erwartet wird, akzeptiere alle Teams
-            return true;
+            return teamNameMatch;
           });
+
+          // Wenn mehrere Teams mit gleichem Namen existieren, wähle das mit der richtigen Kategorie
+          let dbTeam = null;
+          if (expectedCategory) {
+            const normalizedExpectedCategory = normalizeString(expectedCategory);
+            // Priorität 1: Team mit exakt passender Kategorie
+            dbTeam = candidateTeams.find((team) => {
+              const teamCategory = normalizeString(team.category || '');
+              return teamCategory === normalizedExpectedCategory;
+            });
+            
+            // Wenn kein Team mit passender Kategorie gefunden, logge alle Kandidaten
+            if (!dbTeam && candidateTeams.length > 0) {
+              const foundCategories = candidateTeams.map(t => t.category).join(', ');
+              console.warn(`⚠️ Team "${clubName} ${teamSuffix}" gefunden, aber keine passende Kategorie. Gefundene Kategorien: ${foundCategories}, erwartet: ${expectedCategory}`);
+            }
+          } else {
+            // Wenn keine Kategorie erwartet wird, nimm das erste Team
+            dbTeam = candidateTeams[0] || null;
+          }
 
           if (!dbTeam) {
             console.warn(`⚠️ Team nicht gefunden: "${teamName}" (Club: "${clubName}", Suffix: "${teamSuffix}", Kategorie: "${expectedCategory || 'keine'}")`);
