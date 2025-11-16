@@ -1013,6 +1013,9 @@ function GroupsTab({
             return teamNameMatch;
           });
 
+          console.log(`🔍 [findTeamIdForMatch] Suche Team: "${teamName}" (Club: "${clubName}", Suffix: "${teamSuffix}", Kategorie: "${expectedCategory}")`);
+          console.log(`🔍 [findTeamIdForMatch] Gefundene Kandidaten: ${candidateTeams.length}`, candidateTeams.map(t => `${t.club_name} ${t.team_name} (${t.category})`));
+
           // Wenn mehrere Teams mit gleichem Namen existieren, wähle das mit der richtigen Kategorie
           let dbTeam = null;
           if (expectedCategory) {
@@ -1027,14 +1030,20 @@ function GroupsTab({
             if (!dbTeam && candidateTeams.length > 0) {
               const foundCategories = candidateTeams.map(t => t.category).join(', ');
               console.warn(`⚠️ Team "${clubName} ${teamSuffix}" gefunden, aber keine passende Kategorie. Gefundene Kategorien: ${foundCategories}, erwartet: ${expectedCategory}`);
+            } else if (dbTeam) {
+              console.log(`✅ [findTeamIdForMatch] Team gefunden: ${dbTeam.club_name} ${dbTeam.team_name} (${dbTeam.category}) - ID: ${dbTeam.id}`);
             }
           } else {
             // Wenn keine Kategorie erwartet wird, nimm das erste Team
             dbTeam = candidateTeams[0] || null;
+            if (dbTeam) {
+              console.log(`✅ [findTeamIdForMatch] Team gefunden (ohne Kategorie-Prüfung): ${dbTeam.club_name} ${dbTeam.team_name} - ID: ${dbTeam.id}`);
+            }
           }
 
           if (!dbTeam) {
             console.warn(`⚠️ Team nicht gefunden: "${teamName}" (Club: "${clubName}", Suffix: "${teamSuffix}", Kategorie: "${expectedCategory || 'keine'}")`);
+            console.warn(`⚠️ Verfügbare Teams für Club "${clubName}":`, teams.filter(t => t.club_id === dbClub.id).map(t => `${t.team_name} (${t.category})`));
           }
           return dbTeam?.id || null;
         };
