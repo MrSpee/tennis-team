@@ -429,6 +429,17 @@ function GroupsTab({
     };
   };
 
+  // Hilfsfunktion: Matchpunkte aus match_results ableiten
+  const deriveMatchPointsFromResults = (results = []) => {
+    const accumulator = { home: 0, away: 0 };
+    results.forEach((result) => {
+      if (!FINISHED_STATUSES.includes(result.status) || !result.winner) return;
+      if (result.winner === 'home') accumulator.home += 1;
+      if (result.winner === 'guest' || result.winner === 'away') accumulator.away += 1;
+    });
+    return accumulator;
+  };
+
   const toggleCategory = (category) => {
     setExpandedCategories((prev) => {
       const next = new Set(prev);
@@ -2312,15 +2323,21 @@ function GroupsTab({
                             })
                           : '–';
                         const matchTime = match.start_time || '–';
-                        const isFinished = FINISHED_STATUSES.includes(match.status) ||
-                          (match.home_score !== null && match.away_score !== null);
-                        const score = isFinished
-                          ? `${match.home_score ?? '–'}:${match.away_score ?? '–'}`
-                          : '–:–';
-
                         // Prüfe ob Match Ergebnisse hat
                         const matchResultsForMatch = (groupDetails.matchResults || []).filter(mr => mr.matchday_id === match.id);
                         const hasResults = matchResultsForMatch.length > 0;
+                        const isFinished = FINISHED_STATUSES.includes(match.status) ||
+                          (match.home_score !== null && match.away_score !== null);
+                        // Wenn match_results vorhanden sind, Score daraus berechnen (Quelle: nuLiga)
+                        const pointsFromResults = hasResults
+                          ? deriveMatchPointsFromResults(matchResultsForMatch)
+                          : null;
+                        const score = isFinished
+                          ? pointsFromResults
+                            ? `${pointsFromResults.home}:${pointsFromResults.away}`
+                            : `${match.home_score ?? '–'}:${match.away_score ?? '–'}`
+                          : '–:–';
+
                         const needsResults = isFinished && !hasResults;
 
                         return (
