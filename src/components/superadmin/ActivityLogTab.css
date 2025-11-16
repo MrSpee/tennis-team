@@ -1,0 +1,74 @@
+/* Minimal styles for Activity Log tab */
+.activity-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.activity-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.activity-toolbar .toolbar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.activity-toolbar .toolbar-group.grow {
+  flex: 1 1 280px;
+}
+.btn-refresh {
+  padding: 8px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+  cursor: pointer;
+}
+.activity-error {
+  color: #b91c1c;
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.activity-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+}
+.activity-title {
+  font-weight: 600;
+}
+.activity-action {
+  color: #1f2937;
+}
+.activity-entity,
+.activity-id {
+  color: #475569;
+}
+.activity-meta {
+  color: #64748b;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.activity-details {
+  margin: 8px 0 0;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 12px;
+  overflow: auto;
+}
+.activity-empty {
+  color: #475569;
+}
+
+
