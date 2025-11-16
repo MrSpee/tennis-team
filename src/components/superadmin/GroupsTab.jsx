@@ -994,24 +994,8 @@ function GroupsTab({
       let matchedDb = null;
       let matchingStrategy = null;
       
-      // Strategie 1: Suche nach match_number
-      if (matchNumber) {
-        matchedDb = allGroupMatchdays.find((match) =>
-          match.match_number && String(match.match_number) === String(matchNumber)
-        ) || null;
-        if (matchedDb) {
-          found = true;
-          matchingStrategy = 'match_number';
-          console.log(`✅ Match gefunden (Strategie: match_number #${matchNumber}): DB-ID ${matchedDb.id}`);
-        }
-      }
-
-      // Strategie 2: Suche nach Datum + Teams (wenn Teams gefunden werden können)
-      if (!found && matchDate) {
-        const matchDateOnly = toDateOnly(matchDate);
-        
-        // Versuche Team-IDs zu finden (MIT KATEGORIE!)
-        const findTeamIdForMatch = (teamName) => {
+      // Versuche Team-IDs zu finden (MIT KATEGORIE!) - wird für mehrere Strategien benötigt
+      const findTeamIdForMatch = (teamName) => {
           const parts = teamName.split(/\s+/);
           const clubName = parts.slice(0, -1).join(' ').trim();
           const teamSuffix = parts[parts.length - 1];
@@ -1076,6 +1060,22 @@ function GroupsTab({
           return dbTeam?.id || null;
         };
 
+      // Strategie 1: Suche nach match_number
+      if (matchNumber) {
+        matchedDb = allGroupMatchdays.find((match) =>
+          match.match_number && String(match.match_number) === String(matchNumber)
+        ) || null;
+        if (matchedDb) {
+          found = true;
+          matchingStrategy = 'match_number';
+          console.log(`✅ Match gefunden (Strategie: match_number #${matchNumber}): DB-ID ${matchedDb.id}`);
+        }
+      }
+
+      // Strategie 2: Suche nach Datum + Teams (wenn Teams gefunden werden können)
+      if (!found && matchDate) {
+        const matchDateOnly = toDateOnly(matchDate);
+        
         const homeTeamId = findTeamIdForMatch(homeTeam);
         const awayTeamId = findTeamIdForMatch(awayTeam);
 
@@ -1136,36 +1136,16 @@ function GroupsTab({
           const needsTimeUpdate = Boolean(desiredTime && desiredTime !== dbTime);
           const needsNumberUpdate = Boolean(matchNumber && String(matchedDb?.match_number || '') !== String(matchNumber));
 
-          // Prüfe Teams nur, wenn wir IDs sicher bestimmen konnten
+          // Prüfe Teams - verwende findTeamIdForMatch für konsistente Logik
           let needsTeamUpdate = false;
           let resolvedHomeId = null;
           let resolvedAwayId = null;
-          if (group?.category) {
-            const partsHome = homeTeam.split(/\s+/);
-            const homeClubName = partsHome.slice(0, -1).join(' ').trim();
-            const homeSuffix = partsHome[partsHome.length - 1];
-            const partsAway = awayTeam.split(/\s+/);
-            const awayClubName = partsAway.slice(0, - 1).join(' ').trim();
-            const awaySuffix = partsAway[partsAway.length - 1];
-            const dbClubHome = clubs.find((c) => normalizeString(c.name || '') === normalizeString(homeClubName));
-            const dbClubAway = clubs.find((c) => normalizeString(c.name || '') === normalizeString(awayClubName));
-            if (dbClubHome && dbClubAway) {
-              const findTeamWithCat = (clubId, suffix) =>
-                teams.find((t) =>
-                  t.club_id === clubId &&
-                  normalizeString(t.team_name || '') === normalizeString(suffix) &&
-                  normalizeString(t.category || '') === normalizeString(group.category)
-                );
-              const homeT = findTeamWithCat(dbClubHome.id, homeSuffix);
-              const awayT = findTeamWithCat(dbClubAway.id, awaySuffix);
-              resolvedHomeId = homeT?.id || null;
-              resolvedAwayId = awayT?.id || null;
-              if (resolvedHomeId && resolvedAwayId) {
-                needsTeamUpdate = Boolean(
-                  matchedDb.home_team_id !== resolvedHomeId || matchedDb.away_team_id !== resolvedAwayId
-                );
-              }
-            }
+          resolvedHomeId = findTeamIdForMatch(homeTeam);
+          resolvedAwayId = findTeamIdForMatch(awayTeam);
+          if (resolvedHomeId && resolvedAwayId) {
+            needsTeamUpdate = Boolean(
+              matchedDb.home_team_id !== resolvedHomeId || matchedDb.away_team_id !== resolvedAwayId
+            );
           }
 
           const scrapedStatus = scrapedMatch.status === 'completed' ? 'completed' :
