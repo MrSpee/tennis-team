@@ -232,9 +232,8 @@ function GroupsTab({
 
       if (!homeStats || !awayStats) return;
 
-      // Prüfe ob Match beendet ist
-      const isFinished = FINISHED_STATUSES.includes(match.status) ||
-        (match.home_score !== null && match.away_score !== null);
+      // Prüfe ob Match beendet ist (nur echter Abschluss zählt)
+      const isFinished = FINISHED_STATUSES.includes(match.status);
 
       if (!isFinished) return;
 
@@ -419,6 +418,9 @@ function GroupsTab({
     setShowComparison(false);
 
     try {
+      // Optional: Fehlende Teams automatisch anlegen (Kategorie der Gruppe)
+      const AUTO_CREATE_MISSING_GROUP_TEAMS = true;
+
       const groupId = extractGroupId(group.groupName);
       if (!groupId) {
         throw new Error('Gruppen-ID konnte nicht extrahiert werden');
@@ -447,7 +449,20 @@ function GroupsTab({
       }
 
       const details = Array.isArray(data.details) ? data.details : [];
-      const groupData = details.find(
+      // Wähle die korrekte Gruppe: gleiche Gruppen-Nr. UND gleiche Kategorie UND gleiche Liga
+      const normalize = (v) => (v || '').toString().trim().toLowerCase();
+      const wantedGroupId = groupId;
+      const wantedCategory = normalize(group.category);
+      const wantedLeague = normalize(group.league);
+      const groupCandidates = details.filter((entry) => {
+        const entryGroupId = extractGroupId(entry.group?.groupName || entry.group?.groupId);
+        const entryCategory = normalize(entry.group?.category || entry.group?.meta?.category || entry.meta?.category);
+        const entryLeague = normalize(entry.group?.league || entry.group?.meta?.league || entry.meta?.league);
+        return entryGroupId === wantedGroupId
+          && (!wantedCategory || entryCategory === wantedCategory)
+          && (!wantedLeague || entryLeague === wantedLeague);
+      });
+      const groupData = groupCandidates[0] || details.find(
         (entry) => extractGroupId(entry.group?.groupName || entry.group?.groupId) === groupId
       );
 
@@ -473,6 +488,28 @@ function GroupsTab({
       const comparison = await compareScrapedWithDatabase(group, scrapedData);
       setComparisonResult(comparison);
       setShowComparison(true);
+
+      // Optional: Fehlende Teams/Seasons automatisch anlegen, strikt in Gruppen-Kategorie
+      if (AUTO_CREATE_MISSING_GROUP_TEAMS && comparison?.teams?.missingItems?.length) {
+        for (const item of comparison.teams.missingItems) {
+          // Nur Teams verarbeiten, Clubs werden separat behandelt
+          if (item.requiresClub) continue; // Club erst anlegen falls nötig (manuell/anderer Flow)
+          if (item.action === 'add_team_season' || item.action === 'create_team') {
+            try {
+              // Nutze vorhandene Logik inkl. Kategoriekontrolle
+              // eslint-disable-next-line no-await-in-loop
+              await handleCreateMissingItem(item, 'team');
+            } catch (e) {
+              // Weiter mit nächsten
+              // eslint-disable-next-line no-console
+              console.warn('⚠️ Auto-Anlage fehlgeschlagen für Team:', item?.scrapedName, e);
+            }
+          }
+        }
+        // Nach Anlage: Vergleich aktualisieren
+        const refreshed = await compareScrapedWithDatabase(group, scrapedData);
+        setComparisonResult(refreshed);
+      }
 
       // Aktualisiere Snapshot mit Vergleichsergebnis
       await updateScraperSnapshotComparison(groupKey, comparison);

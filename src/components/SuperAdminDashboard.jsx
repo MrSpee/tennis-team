@@ -1592,8 +1592,8 @@ function SuperAdminDashboard() {
               
               if (clubMatch && suffixMatch && categoryMatch) {
                 console.log(`✅ Match-Import (Fallback validiert): "${teamName}" → Team-ID ${teamId} (Kategorie: ${matchedTeam.category || 'unbekannt'})`);
-                teamIdRegistry.set(normalizedName, teamId);
-                return { teamId, clubName: clubName || '' };
+            teamIdRegistry.set(normalizedName, teamId);
+            return { teamId, clubName: clubName || '' };
               }
             }
           }
@@ -3264,14 +3264,21 @@ function SuperAdminDashboard() {
           setClubs((prev) => [newClub, ...prev]);
         }
 
-        // Erstelle Team
+      // Erstelle Team
         const { data: newTeam, error: teamError } = await supabase
           .from('team_info')
           .insert({
             club_id: clubId,
             club_name: clubName,
             team_name: suffix || null,
-            category: match.league || null,
+          // Kategorie aus Match-Kontext ableiten: bevorzugt Kategorie des Gegners/anderen Teams
+          category: (() => {
+            const opponentCategory =
+              (match.away_team_id && teamById.get(match.away_team_id)?.category) ||
+              (match.home_team_id && teamById.get(match.home_team_id)?.category) ||
+              null;
+            return opponentCategory || null;
+          })(),
             region: null
           })
           .select()
@@ -3308,14 +3315,21 @@ function SuperAdminDashboard() {
           setClubs((prev) => [newClub, ...prev]);
         }
 
-        // Erstelle Team
+      // Erstelle Team
         const { data: newTeam, error: teamError } = await supabase
           .from('team_info')
           .insert({
             club_id: clubId,
             club_name: clubName,
             team_name: suffix || null,
-            category: match.league || null,
+          // Kategorie aus Match-Kontext ableiten: bevorzugt Kategorie des Gegners/anderen Teams
+          category: (() => {
+            const opponentCategory =
+              (match.home_team_id && teamById.get(match.home_team_id)?.category) ||
+              (match.away_team_id && teamById.get(match.away_team_id)?.category) ||
+              null;
+            return opponentCategory || null;
+          })(),
             region: null
           })
           .select()
