@@ -20,6 +20,7 @@ import MatchdaysTab from './superadmin/MatchdaysTab';
 import ScraperTab from './superadmin/ScraperTab';
 import TeamPortraitImportTab from './superadmin/TeamPortraitImportTab';
 import GroupsTab from './superadmin/GroupsTab';
+import ActivityLogTab from './superadmin/ActivityLogTab';
 import './Dashboard.css';
 import './SuperAdminDashboard.css';
 
@@ -3632,6 +3633,8 @@ function SuperAdminDashboard() {
     />
   );
 
+  const renderActivity = () => <ActivityLogTab />;
+
   // ---------------------------------------------------------------------------
   // UI Rendering
   // ---------------------------------------------------------------------------
@@ -3661,6 +3664,9 @@ function SuperAdminDashboard() {
         </button>
         <button className={selectedTab === 'groups' ? 'active' : ''} onClick={() => setSelectedTab('groups')}>
           <Trophy size={16} /> Gruppen
+        </button>
+        <button className={selectedTab === 'activity' ? 'active' : ''} onClick={() => setSelectedTab('activity')}>
+          <Activity size={16} /> Aktivität
         </button>
       </div>
 
@@ -3702,6 +3708,7 @@ function SuperAdminDashboard() {
           {selectedTab === 'import' && <ImportTab />}
           {selectedTab === 'team-portrait' && <TeamPortraitImportTab />}
           {selectedTab === 'groups' && renderGroups()}
+          {selectedTab === 'activity' && renderActivity()}
         </div>
       )}
     </div>
