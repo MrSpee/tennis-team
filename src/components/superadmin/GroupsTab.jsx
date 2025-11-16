@@ -585,6 +585,15 @@ function GroupsTab({
       setComparisonResult(comparison);
       setShowComparison(true);
 
+      // Wenn Bereinigung durchgeführt wurde, lade Gruppen-Details neu
+      if (comparison.fixActionsPerformed) {
+        console.log('🔄 Lade Gruppen-Details neu nach automatischer Bereinigung...');
+        await loadGroupDetails(group, true);
+        // Vergleich erneut durchführen, um aktualisierte Daten zu zeigen
+        const refreshedComparison = await compareScrapedWithDatabase(group, scrapedData);
+        setComparisonResult(refreshedComparison);
+      }
+
       // Optional: Fehlende Teams/Seasons automatisch anlegen, strikt in Gruppen-Kategorie
       if (AUTO_CREATE_MISSING_GROUP_TEAMS && comparison?.teams?.missingItems?.length) {
         for (const item of comparison.teams.missingItems) {
@@ -851,12 +860,14 @@ function GroupsTab({
       let dbTeam = groupTeamsByKey.get(teamKey);
       
       // VALIDIERUNG: Prüfe ob gefundenes Team die richtige Kategorie hat
+      let wrongCategoryTeam = null;
       if (dbTeam && expectedCategory) {
         const teamCategory = normalizeString(dbTeam.category || '');
         const groupCategory = normalizeString(expectedCategory);
         if (teamCategory && groupCategory && teamCategory !== groupCategory) {
           // Kategorie stimmt nicht - Team ist falsch zugeordnet!
           console.warn(`⚠️ Team "${dbTeam.club_name} ${dbTeam.team_name}" hat falsche Kategorie: ${dbTeam.category} (erwartet: ${expectedCategory})`);
+          wrongCategoryTeam = dbTeam; // Merke das falsche Team für später
           dbTeam = null; // Ignoriere dieses Team
         }
       }
@@ -864,23 +875,40 @@ function GroupsTab({
       // Falls nicht in Gruppe gefunden, suche global (aber markiere als "nicht in Gruppe")
       // WICHTIG: Kategorie ist entscheidend! "VKC 1" in Herren 30 ≠ "VKC 1" in Herren 50
       if (!dbTeam) {
-        dbTeam = teams.find((team) => {
+        // Suche nach Team mit richtiger Kategorie
+        const candidateTeams = teams.filter((team) => {
           if (team.club_id !== dbClub.id) return false;
           const normalizedDbTeam = normalizeString(team.team_name || '');
           const normalizedScrapedSuffix = normalizeString(teamSuffix);
           const teamNameMatch = normalizedDbTeam === normalizedScrapedSuffix;
-          
-          if (!teamNameMatch) return false;
-          
-          // Kategorie MUSS übereinstimmen (aus Header der Gruppe)
-          if (expectedCategory) {
+          return teamNameMatch;
+        });
+
+        if (expectedCategory) {
+          const normalizedExpectedCategory = normalizeString(expectedCategory);
+          dbTeam = candidateTeams.find((team) => {
             const teamCategory = normalizeString(team.category || '');
-            const groupCategory = normalizeString(expectedCategory);
-            return teamCategory === groupCategory;
-          }
-          
+            return teamCategory === normalizedExpectedCategory;
+          });
+        } else {
           // Wenn keine Kategorie erwartet wird, akzeptiere nur Teams ohne Kategorie
-          return !team.category;
+          dbTeam = candidateTeams.find(team => !team.category) || null;
+        }
+      }
+      
+      // AUTOMATISCHE BEREINIGUNG: Wenn falsches Team in Gruppe, entferne es und füge richtiges hinzu
+      if (wrongCategoryTeam && dbTeam && expectedCategory) {
+        comparison.teams.fixActions = comparison.teams.fixActions || [];
+        comparison.teams.fixActions.push({
+          action: 'fix_category_mismatch',
+          wrongTeamId: wrongCategoryTeam.id,
+          wrongTeamName: `${wrongCategoryTeam.club_name} ${wrongCategoryTeam.team_name}`,
+          wrongCategory: wrongCategoryTeam.category,
+          correctTeamId: dbTeam.id,
+          correctTeamName: `${dbTeam.club_name} ${dbTeam.team_name}`,
+          correctCategory: dbTeam.category,
+          clubId: dbClub.id,
+          teamSuffix: teamSuffix
         });
       }
 
@@ -1204,13 +1232,135 @@ function GroupsTab({
       }
     });
 
-    // 4. Berechne prozentuale Übereinstimmung
+    // 4. AUTOMATISCHE BEREINIGUNG: Führe Fix-Actions aus
+    let fixActionsPerformed = false;
+    if (comparison.teams.fixActions && comparison.teams.fixActions.length > 0) {
+      console.log(`🔧 Starte automatische Bereinigung: ${comparison.teams.fixActions.length} Teams mit falscher Kategorie werden korrigiert...`);
+      fixActionsPerformed = true;
+      
+      for (const fixAction of comparison.teams.fixActions) {
+        try {
+          // 1. Entferne falsches Team aus der Gruppe (setze is_active = false)
+          const { error: deactivateError } = await supabase
+            .from('team_seasons')
+            .update({ is_active: false })
+            .eq('team_id', fixAction.wrongTeamId)
+            .eq('season', group.season)
+            .eq('league', group.league)
+            .eq('group_name', group.groupName)
+            .eq('is_active', true);
+          
+          if (deactivateError) {
+            console.error(`❌ Fehler beim Deaktivieren des falschen Teams ${fixAction.wrongTeamId}:`, deactivateError);
+            continue;
+          }
+          
+          console.log(`✅ Falsches Team entfernt: ${fixAction.wrongTeamName} (${fixAction.wrongCategory}) aus Gruppe ${group.groupName}`);
+
+          // 2. Prüfe ob richtiges Team bereits in Gruppe ist
+          const { data: existingTeamSeason, error: checkError } = await supabase
+            .from('team_seasons')
+            .select('id')
+            .eq('team_id', fixAction.correctTeamId)
+            .eq('season', group.season)
+            .eq('league', group.league)
+            .eq('group_name', group.groupName)
+            .maybeSingle();
+          
+          if (checkError && checkError.code !== 'PGRST116') {
+            console.error(`❌ Fehler beim Prüfen des richtigen Teams ${fixAction.correctTeamId}:`, checkError);
+            continue;
+          }
+
+          // 3. Füge richtiges Team zur Gruppe hinzu (falls noch nicht vorhanden)
+          if (!existingTeamSeason) {
+            const { error: insertError } = await supabase
+              .from('team_seasons')
+              .insert({
+                team_id: fixAction.correctTeamId,
+                season: group.season,
+                league: group.league,
+                group_name: group.groupName,
+                is_active: true
+              });
+            
+            if (insertError) {
+              console.error(`❌ Fehler beim Hinzufügen des richtigen Teams ${fixAction.correctTeamId}:`, insertError);
+              continue;
+            }
+            
+            console.log(`✅ Richtiges Team hinzugefügt: ${fixAction.correctTeamName} (${fixAction.correctCategory}) zu Gruppe ${group.groupName}`);
+          } else {
+            // Aktiviere team_season falls es bereits existiert aber inaktiv ist
+            const { error: activateError } = await supabase
+              .from('team_seasons')
+              .update({ is_active: true })
+              .eq('id', existingTeamSeason.id);
+            
+            if (activateError) {
+              console.error(`❌ Fehler beim Aktivieren des richtigen Teams ${fixAction.correctTeamId}:`, activateError);
+            } else {
+              console.log(`✅ Richtiges Team aktiviert: ${fixAction.correctTeamName} (${fixAction.correctCategory}) in Gruppe ${group.groupName}`);
+            }
+          }
+
+          // 4. Aktualisiere Matchdays: Ersetze falsche Team-IDs durch richtige
+          const { data: matchdaysToUpdate, error: matchdaysError } = await supabase
+            .from('matchdays')
+            .select('id, home_team_id, away_team_id')
+            .eq('season', group.season)
+            .eq('league', group.league)
+            .eq('group_name', group.groupName)
+            .or(`home_team_id.eq.${fixAction.wrongTeamId},away_team_id.eq.${fixAction.wrongTeamId}`);
+          
+          if (matchdaysError) {
+            console.error(`❌ Fehler beim Laden der Matchdays für Update:`, matchdaysError);
+            continue;
+          }
+
+          if (matchdaysToUpdate && matchdaysToUpdate.length > 0) {
+            for (const matchday of matchdaysToUpdate) {
+              const updates = {};
+              if (matchday.home_team_id === fixAction.wrongTeamId) {
+                updates.home_team_id = fixAction.correctTeamId;
+              }
+              if (matchday.away_team_id === fixAction.wrongTeamId) {
+                updates.away_team_id = fixAction.correctTeamId;
+              }
+              
+              if (Object.keys(updates).length > 0) {
+                const { error: updateError } = await supabase
+                  .from('matchdays')
+                  .update(updates)
+                  .eq('id', matchday.id);
+                
+                if (updateError) {
+                  console.error(`❌ Fehler beim Aktualisieren des Matchdays ${matchday.id}:`, updateError);
+                } else {
+                  console.log(`✅ Matchday ${matchday.id} aktualisiert: Team-IDs korrigiert`);
+                }
+              }
+            }
+          }
+
+        } catch (err) {
+          console.error(`❌ Fehler bei automatischer Bereinigung für ${fixAction.wrongTeamName}:`, err);
+        }
+      }
+      
+      console.log(`✅ Automatische Bereinigung abgeschlossen!`);
+    }
+
+    // 5. Berechne prozentuale Übereinstimmung
     const totalItems = comparison.clubs.total + comparison.teams.total + comparison.matchdays.total;
     const totalMatched = comparison.clubs.matched + comparison.teams.matched + comparison.matchdays.matched;
     
     comparison.overallMatch = totalItems > 0 
       ? Math.round((totalMatched / totalItems) * 100) 
       : 100;
+
+    // Markiere ob Bereinigung durchgeführt wurde (für Neuladen der Gruppen-Details)
+    comparison.fixActionsPerformed = fixActionsPerformed;
 
     return comparison;
   };
