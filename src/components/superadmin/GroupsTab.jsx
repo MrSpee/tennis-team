@@ -66,6 +66,28 @@ function GroupsTab({
   // Match Detail States
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [meetingDetails, setMeetingDetails] = useState({});
+  // URL-State
+  const [urlMatchHandledKey, setUrlMatchHandledKey] = useState(null);
+
+  // Query-Param Utilities
+  const getQueryParams = () => {
+    try {
+      return new URLSearchParams(window.location.search);
+    } catch {
+      return new URLSearchParams();
+    }
+  };
+  const updateQueryParams = (updater) => {
+    try {
+      const url = new URL(window.location.href);
+      const params = url.searchParams;
+      updater(params);
+      url.search = params.toString();
+      window.history.replaceState({}, '', url.toString());
+    } catch {
+      // ignore
+    }
+  };
 
   // Hilfsfunktion: Team zur aktuellen Gruppe hinzufügen (team_seasons erzeugen)
   const addTeamToCurrentGroup = async (teamId, group) => {
@@ -430,6 +452,47 @@ function GroupsTab({
     return match ? match[1] : null;
   };
 
+  // Wähle Gruppe anhand URL-Param (group=NNN) sobald Daten da sind
+  useEffect(() => {
+    try {
+      if (!groupedData || groupedData.length === 0) return;
+      if (selectedGroup) return; // bereits ausgewählt
+      const params = new URLSearchParams(window.location.search);
+      const groupParam = params.get('group');
+      if (!groupParam) return;
+      const target = groupedData.find((g) => extractGroupId(g.groupName) === groupParam);
+      if (target) {
+        // Öffne direkt diese Gruppe
+        loadGroupDetails(target);
+      }
+    } catch {
+      // ignore
+    }
+  }, [groupedData, selectedGroup]);
+
+  // Sync URL beim Wechsel der ausgewählten Gruppe
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      const params = url.searchParams;
+      if (!selectedGroup) {
+        // Gruppe schließen → Param entfernen
+        params.delete('group');
+        url.search = params.toString();
+        window.history.replaceState({}, '', url.toString());
+        return;
+      }
+      const gid = extractGroupId(selectedGroup.groupName);
+      if (gid) {
+        params.set('group', gid);
+        url.search = params.toString();
+        window.history.replaceState({}, '', url.toString());
+      }
+    } catch {
+      // ignore
+    }
+  }, [selectedGroup]);
+
   // Scraper-Funktionen
   const handleScrapeGroup = async (group) => {
     if (!group) return;
@@ -543,6 +606,74 @@ function GroupsTab({
       setScraperLoading(false);
     }
   };
+
+  // Wähle Match anhand URL-Param (matchday oder match Nummer), sobald Matchdays geladen sind
+  useEffect(() => {
+    if (!selectedGroup || !groupDetails?.matchdays?.length) return;
+    const groupKey = `${selectedGroup.category}::${selectedGroup.league}::${selectedGroup.groupName}::${selectedGroup.season}`;
+    if (urlMatchHandledKey === groupKey) return; // pro Gruppe nur einmal initial anwenden
+    const params = getQueryParams();
+    const matchdayId = params.get('matchday');
+    const matchNumberParam = params.get('match');
+    let preselect = null;
+    if (matchdayId) {
+      preselect = groupDetails.matchdays.find((m) => m.id === matchdayId) || null;
+    }
+    if (!preselect && matchNumberParam) {
+      preselect = groupDetails.matchdays.find(
+        (m) => m.match_number && String(m.match_number) === String(matchNumberParam)
+      ) || null;
+    }
+    if (preselect) {
+      setSelectedMatch(preselect);
+      setUrlMatchHandledKey(groupKey);
+    } else {
+      // nichts zu preselecten, aber merken dass geprüft wurde
+      setUrlMatchHandledKey(groupKey);
+    }
+  }, [selectedGroup, groupDetails?.matchdays, urlMatchHandledKey]);
+
+  // Sync URL, wenn ausgewähltes Match wechselt
+  useEffect(() => {
+    if (!selectedMatch) {
+      // Entferne Param, wenn kein Match ausgewählt
+      updateQueryParams((p) => {
+        p.delete('matchday');
+        p.delete('match');
+      });
+      return;
+    }
+    updateQueryParams((p) => {
+      p.set('matchday', selectedMatch.id);
+      if (selectedMatch.match_number != null) {
+        p.set('match', String(selectedMatch.match_number));
+      } else {
+        p.delete('match');
+      }
+    });
+  }, [selectedMatch]);
+
+  // Reagiere auf Browser-Navigation (Vor/Zurück)
+  useEffect(() => {
+    const onPopState = () => {
+      const params = getQueryParams();
+      const matchdayId = params.get('matchday');
+      const matchNumberParam = params.get('match');
+      if (!groupDetails?.matchdays?.length) return;
+      let next = null;
+      if (matchdayId) {
+        next = groupDetails.matchdays.find((m) => m.id === matchdayId) || null;
+      }
+      if (!next && matchNumberParam) {
+        next = groupDetails.matchdays.find(
+          (m) => m.match_number && String(m.match_number) === String(matchNumberParam)
+        ) || null;
+      }
+      setSelectedMatch(next);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [groupDetails?.matchdays]);
 
   // Speichere Scraper-Snapshot in DB
   const saveScraperSnapshot = async (groupKey, group, scrapedData) => {
@@ -2144,6 +2275,22 @@ function MatchDetailView({
   setMeetingDetails,
   loadDashboardData
 }) {
+  // Spieler-Lookup nach Name (für Badges)
+  const [playerLookupByName, setPlayerLookupByName] = React.useState(new Map());
+  useEffect(() => {
+    try {
+      // Erzeuge Lookup aus bereits geladenen Results (falls Spielernamen vorkommen)
+      const map = new Map();
+      const results = groupDetails?.matchResults || [];
+      results.forEach((r) => {
+        // Keine eindeutige Quelle hier; der echte Lookup kommt aus dem Dashboard (players),
+        // aber hier bauen wir minimal einen Zwischenspeicher, falls später erweitert wird.
+      });
+      setPlayerLookupByName(map);
+    } catch {
+      setPlayerLookupByName(new Map());
+    }
+  }, [groupDetails]);
   const homeTeam = match.home_team || teamById?.get(match.home_team_id);
   const awayTeam = match.away_team || teamById?.get(match.away_team_id);
   const homeLabel = homeTeam
@@ -2268,13 +2415,13 @@ function MatchDetailView({
           {resultsData.singles?.length > 0 && (
             <div className="results-section">
               <h5>Einzel</h5>
-              <MatchResultsTable entries={resultsData.singles} />
+              <MatchResultsTable entries={resultsData.singles} playerLookupByName={playerLookupByName} />
             </div>
           )}
           {resultsData.doubles?.length > 0 && (
             <div className="results-section">
               <h5>Doppel</h5>
-              <MatchResultsTable entries={resultsData.doubles} />
+              <MatchResultsTable entries={resultsData.doubles} playerLookupByName={playerLookupByName} />
             </div>
           )}
         </div>
@@ -2290,7 +2437,7 @@ function MatchDetailView({
 }
 
 // MatchResultsTable Komponente (vereinfacht)
-function MatchResultsTable({ entries }) {
+function MatchResultsTable({ entries, playerLookupByName = new Map() }) {
   if (!entries || entries.length === 0) return null;
 
   return (
@@ -2299,15 +2446,39 @@ function MatchResultsTable({ entries }) {
         <div key={idx} className="match-result-row">
           <div className="result-players">
             <div className="result-home">
-              {entry.homePlayers?.map((p, i) => (
-                <span key={i}>{p.name}</span>
-              ))}
+              {entry.homePlayers?.map((p, i) => {
+                const name = p.name || 'Unbekannt';
+                const player = playerLookupByName.get(name);
+                const badge =
+                  player?.user_id ? 'App' : player ? 'DB' : 'Neu';
+                return (
+                  <span key={i}>
+                    {name}
+                    <span className={`player-badge ${badge === 'App' ? 'app' : badge === 'DB' ? 'db' : 'new'}`}>
+                      {badge}
+                    </span>
+                    {p.lk ? <span className="player-lk">LK {p.lk}</span> : null}
+                  </span>
+                );
+              })}
             </div>
             <div className="result-separator">vs</div>
             <div className="result-away">
-              {entry.awayPlayers?.map((p, i) => (
-                <span key={i}>{p.name}</span>
-              ))}
+              {entry.awayPlayers?.map((p, i) => {
+                const name = p.name || 'Unbekannt';
+                const player = playerLookupByName.get(name);
+                const badge =
+                  player?.user_id ? 'App' : player ? 'DB' : 'Neu';
+                return (
+                  <span key={i}>
+                    {name}
+                    <span className={`player-badge ${badge === 'App' ? 'app' : badge === 'DB' ? 'db' : 'new'}`}>
+                      {badge}
+                    </span>
+                    {p.lk ? <span className="player-lk">LK {p.lk}</span> : null}
+                  </span>
+                );
+              })}
             </div>
           </div>
           <div className="result-scores">
