@@ -67,6 +67,38 @@ function GroupsTab({
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [meetingDetails, setMeetingDetails] = useState({});
 
+  // Hilfsfunktion: Team zur aktuellen Gruppe hinzufügen (team_seasons erzeugen)
+  const addTeamToCurrentGroup = async (teamId, group) => {
+    if (!teamId || !group) return;
+    try {
+      const { data: exists, error: checkError } = await supabase
+        .from('team_seasons')
+        .select('id')
+        .eq('team_id', teamId)
+        .eq('season', group.season)
+        .eq('league', group.league)
+        .eq('group_name', group.groupName)
+        .maybeSingle();
+      if (checkError && checkError.code !== 'PGRST116') {
+        console.warn('⚠️ Fehler beim Prüfen team_seasons:', checkError);
+      }
+      if (!exists) {
+        const { error: insertError } = await supabase.from('team_seasons').insert({
+          team_id: teamId,
+          season: group.season,
+          league: group.league,
+          group_name: group.groupName,
+          team_size: 6,
+          is_active: true
+        });
+        if (insertError) throw insertError;
+      }
+    } catch (e) {
+      console.error('❌ Team konnte der Gruppe nicht hinzugefügt werden:', e);
+      throw e;
+    }
+  };
+
   // Gruppiere Team-Seasons nach Kategorie, Liga und Gruppe
   const groupedData = useMemo(() => {
     const groups = new Map();
@@ -1438,6 +1470,8 @@ function GroupsTab({
       const teamIds = group.teams.map((t) => t.id);
 
       // Lade alle Matchdays für diese Gruppe
+      // Lade ALLE Matchdays der Gruppe (vollständiger Spielplan),
+      // unabhängig davon, ob beide Teams bereits als Gruppen-Teams verknüpft sind.
       const { data: groupMatchdays, error: matchdaysError } = await supabase
         .from('matchdays')
         .select(`
@@ -1445,8 +1479,6 @@ function GroupsTab({
           home_team:team_info!matchdays_home_team_id_fkey(id, club_name, team_name, category),
           away_team:team_info!matchdays_away_team_id_fkey(id, club_name, team_name, category)
         `)
-        .in('home_team_id', teamIds.length > 0 ? teamIds : ['00000000-0000-0000-0000-000000000000'])
-        .in('away_team_id', teamIds.length > 0 ? teamIds : ['00000000-0000-0000-0000-000000000000'])
         .eq('season', group.season)
         .eq('league', group.league)
         .eq('group_name', group.groupName)
@@ -1942,6 +1974,8 @@ function GroupsTab({
                       {groupDetails.matchdays.map((match) => {
                         const homeTeam = match.home_team;
                         const awayTeam = match.away_team;
+                        const homeInGroup = selectedGroup ? group.teams.some(t => t.id === match.home_team_id) : false;
+                        const awayInGroup = selectedGroup ? group.teams.some(t => t.id === match.away_team_id) : false;
                         const homeLabel = homeTeam
                           ? `${homeTeam.club_name} ${homeTeam.team_name || ''}`.trim()
                           : 'Unbekannt';
@@ -1971,7 +2005,7 @@ function GroupsTab({
                         return (
                           <div 
                             key={match.id} 
-                            className={`matchday-item ${isFinished ? 'finished' : ''} ${needsResults ? 'needs-results' : ''} ${selectedMatch?.id === match.id ? 'selected' : ''}`}
+                            className={`matchday-item ${isFinished ? 'finished' : ''} ${needsResults ? 'needs-results' : ''} ${(!homeInGroup || !awayInGroup) ? 'not-in-group' : ''} ${selectedMatch?.id === match.id ? 'selected' : ''}`}
                             onClick={() => setSelectedMatch(match)}
                           >
                             <div className="matchday-header">
@@ -1983,6 +2017,11 @@ function GroupsTab({
                                 <div className="matchday-number-badge">
                                   <span className="match-number-label">Match #</span>
                                   <span className="match-number-value">{match.match_number}</span>
+                                </div>
+                              )}
+                              {(!homeInGroup || !awayInGroup) && (
+                                <div className="matchday-results-badge missing">
+                                  ⚠️ Team fehlt in Gruppe
                                 </div>
                               )}
                               {needsResults && (
@@ -2007,6 +2046,38 @@ function GroupsTab({
                                 <span className="team-name">{awayLabel}</span>
                               </div>
                             </div>
+                            {(!homeInGroup || !awayInGroup) && (
+                              <div className="matchday-venue" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                {!homeInGroup && homeTeam?.id && (
+                                  <button
+                                    className="btn-sync-load"
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      try {
+                                        await addTeamToCurrentGroup(homeTeam.id, selectedGroup);
+                                        await loadGroupDetails(selectedGroup, true);
+                                      } catch {}
+                                    }}
+                                  >
+                                    + {homeLabel} zur Gruppe
+                                  </button>
+                                )}
+                                {!awayInGroup && awayTeam?.id && (
+                                  <button
+                                    className="btn-sync-load"
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      try {
+                                        await addTeamToCurrentGroup(awayTeam.id, selectedGroup);
+                                        await loadGroupDetails(selectedGroup, true);
+                                      } catch {}
+                                    }}
+                                  >
+                                    + {awayLabel} zur Gruppe
+                                  </button>
+                                )}
+                              </div>
+                            )}
                             {match.venue && (
                               <div className="matchday-venue">
                                 <span>📍 {match.venue}</span>
