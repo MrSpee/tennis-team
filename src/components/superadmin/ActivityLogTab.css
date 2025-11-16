@@ -1,4 +1,4 @@
-/* Minimal styles for Activity Log tab */
+/* Redesigned styles for Activity Log tab */
 .activity-tab {
   display: flex;
   flex-direction: column;
@@ -9,6 +9,10 @@
   gap: 12px;
   align-items: flex-end;
   flex-wrap: wrap;
+  background: linear-gradient(180deg, #f8fafc, #ffffff);
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
 }
 .activity-toolbar .toolbar-group {
   display: flex;
@@ -19,11 +23,17 @@
   flex: 1 1 280px;
 }
 .btn-refresh {
-  padding: 8px 12px;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  background: #f8fafc;
+  padding: 10px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #ffffff, #f1f5f9);
+  font-weight: 700;
   cursor: pointer;
+  transition: all .15s ease;
+}
+.btn-refresh:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(2,6,23,0.06);
 }
 .activity-error {
   color: #b91c1c;
@@ -38,13 +48,17 @@
   gap: 10px;
 }
 .activity-item {
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  box-shadow: 0 10px 20px rgba(2,6,23,0.03);
 }
 .activity-title {
   font-weight: 600;
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 .activity-action {
   color: #1f2937;
@@ -70,5 +84,29 @@
 .activity-empty {
   color: #475569;
 }
+
+.activity-dashboard {
+  gap: 16px !important;
+}
+.activity-dashboard .activity-item {
+  padding: 14px;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.badge.action { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
+.badge.entity { background: #ecfeff; color: #155e75; border-color: #a5f3fc; }
+.badge.category { background: #f0fdf4; color: #14532d; border-color: #bbf7d0; }
+.row { display: flex; gap: 12px; }
+.col { flex: 1; }
+.col.right { display: flex; align-items: center; }
 
 

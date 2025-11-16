@@ -47,13 +47,49 @@ class LoggingService {
         return null;
       }
       
+      // Hilfsfunktionen
+      const getSessionId = () => {
+        try {
+          const key = 'app_session_id';
+          let sid = localStorage.getItem(key);
+          if (!sid) {
+            sid = crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            localStorage.setItem(key, sid);
+          }
+          return sid;
+        } catch {
+          return null;
+        }
+      };
+      const getDevice = () => {
+        try {
+          const ua = navigator.userAgent || '';
+          const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) || (window.innerWidth && window.innerWidth < 768);
+          const isTablet = /iPad|Tablet|Nexus 7|Nexus 10/i.test(ua) || (window.innerWidth >= 768 && window.innerWidth < 1024);
+          return isTablet ? 'Tablet' : (isMobile ? 'Mobil' : 'Desktop');
+        } catch {
+          return 'Unbekannt';
+        }
+      };
+      const getAppVersion = () => {
+        try {
+          // bevorzugt von globaler Konstante oder Build-Env
+          return window.__APP_VERSION__ || (import.meta && import.meta.env && import.meta.env.VITE_APP_VERSION) || 'unbekannt';
+        } catch {
+          return 'unbekannt';
+        }
+      };
+
       // Erweitere Details um Browser-Info
       const enhancedDetails = {
         ...details,
         timestamp: new Date().toISOString(),
         userAgent: navigator.userAgent,
         url: window.location.href,
-        referrer: document.referrer
+        referrer: document.referrer,
+        device: getDevice(),
+        app_version: getAppVersion(),
+        session_id: getSessionId()
       };
 
       // Hole aktuellen User (falls verfügbar)
@@ -172,6 +208,18 @@ class LoggingService {
       step: step,
       step_name: stepData.stepName || `Step ${step}`,
       ...stepData,
+      source: 'onboarding'
+    });
+  }
+
+  /**
+   * Loggt Onboarding-Abbruch mit Grund
+   */
+  static async logOnboardingAbort(step, reason, extra = {}) {
+    return this.logActivity('onboarding_aborted', 'player', null, {
+      step,
+      reason,
+      ...extra,
       source: 'onboarding'
     });
   }

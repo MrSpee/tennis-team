@@ -15,6 +15,10 @@ function OnboardingFlow() {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [showAbortModal, setShowAbortModal] = useState(false);
+  const [abortReason, setAbortReason] = useState('keine_zeit');
+  const [abortNote, setAbortNote] = useState('');
+  const [onboardingCompleted, setOnboardingCompleted] = useState(false);
   const [availableTeams, setAvailableTeams] = useState([]);
   const [playerSearch, setPlayerSearch] = useState(''); // Umbenannt von importedPlayerSearch
   const [playerResults, setPlayerResults] = useState([]); // Umbenannt von importedPlayerResults
@@ -48,6 +52,20 @@ function OnboardingFlow() {
       }
     };
     logStart();
+    // Abbruch auf Unload (Best Effort)
+    const beforeUnload = async () => {
+      if (!onboardingCompleted) {
+        try {
+          await LoggingService.logOnboardingAbort(currentStep, 'window_close');
+        } catch {
+          // best effort
+        }
+      }
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', beforeUnload);
+    };
   }, []);
 
   // Lade verfügbare Teams
@@ -353,6 +371,7 @@ function OnboardingFlow() {
           duration_seconds: onboardingDuration
         }
       );
+      setOnboardingCompleted(true);
 
       console.log(`📊 Onboarding completed in ${onboardingDuration}s`);
 
@@ -384,6 +403,37 @@ function OnboardingFlow() {
               transform: translateY(-10px);
             }
           }
+          .abort-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #fff1f2;
+            color: #be123c;
+            border: 2px solid #fda4af;
+            border-radius: 10px;
+            padding: 8px 12px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all .2s ease;
+          }
+          .abort-btn:hover { background: #ffe4e6; }
+          .abort-modal-backdrop {
+            position: fixed; inset: 0; background: rgba(0,0,0,.35);
+            display: flex; align-items: center; justify-content: center; z-index: 50;
+          }
+          .abort-modal {
+            width: 100%; max-width: 520px; background: white; border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,.2); overflow: hidden;
+          }
+          .abort-header {
+            padding: 16px 20px;
+            background: linear-gradient(135deg, #fecaca, #fda4af);
+            color: #7f1d1d; font-weight: 800; font-size: 1.05rem;
+          }
+          .abort-body { padding: 16px 20px; }
+          .abort-actions { display: flex; gap: 10px; justify-content: flex-end; padding: 12px 20px; background: #fafafa; }
+          .btn-outline { background: white; border: 2px solid #e5e7eb; border-radius: 10px; padding: 10px 14px; font-weight: 700; }
+          .btn-primary { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; border: none; border-radius: 10px; padding: 10px 14px; font-weight: 800; }
         `}
       </style>
 
@@ -413,6 +463,11 @@ function OnboardingFlow() {
         </div>
         <div style={{ textAlign: 'center', fontSize: '0.85rem', color: '#6b7280' }}>
           Schritt {currentStep} von 4
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+          <button className="abort-btn" type="button" onClick={() => setShowAbortModal(true)}>
+            ✖️ Abbrechen
+          </button>
         </div>
       </div>
 
@@ -768,6 +823,61 @@ function OnboardingFlow() {
                 style={{ minWidth: '200px' }}
               >
                 {loading ? '⏳ Speichert...' : '✅ Profil erstellen'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Abort Modal */}
+      {showAbortModal && (
+        <div className="abort-modal-backdrop" onClick={() => setShowAbortModal(false)}>
+          <div className="abort-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="abort-header">Onboarding abbrechen</div>
+            <div className="abort-body">
+              <div style={{ marginBottom: '10px', color: '#374151', fontWeight: 700 }}>Warum möchtest du abbrechen?</div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="radio" name="abort_reason" value="keine_zeit" checked={abortReason === 'keine_zeit'} onChange={(e) => setAbortReason(e.target.value)} />
+                  <span>Keine Zeit gerade</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="radio" name="abort_reason" value="finde_mich_nicht" checked={abortReason === 'finde_mich_nicht'} onChange={(e) => setAbortReason(e.target.value)} />
+                  <span>Ich finde mich/mein Team nicht</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="radio" name="abort_reason" value="daten_sorge" checked={abortReason === 'daten_sorge'} onChange={(e) => setAbortReason(e.target.value)} />
+                  <span>Ich bin unsicher wegen meiner Daten</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="radio" name="abort_reason" value="technischer_fehler" checked={abortReason === 'technischer_fehler'} onChange={(e) => setAbortReason(e.target.value)} />
+                  <span>Technischer Fehler</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="radio" name="abort_reason" value="sonstiges" checked={abortReason === 'sonstiges'} onChange={(e) => setAbortReason(e.target.value)} />
+                  <span>Sonstiges</span>
+                </label>
+              </div>
+              <textarea
+                placeholder="Optional: kurze Notiz für uns (hilft uns sehr!)"
+                value={abortNote}
+                onChange={(e) => setAbortNote(e.target.value)}
+                style={{ marginTop: 12, width: '100%', minHeight: 80, border: '2px solid #e5e7eb', borderRadius: 10, padding: 10 }}
+              />
+            </div>
+            <div className="abort-actions">
+              <button className="btn-outline" onClick={() => setShowAbortModal(false)}>Weiter machen</button>
+              <button
+                className="btn-primary"
+                onClick={async () => {
+                  try {
+                    await LoggingService.logOnboardingAbort(currentStep, abortReason, abortNote ? { note: abortNote } : {});
+                  } catch {}
+                  setShowAbortModal(false);
+                  navigate('/');
+                }}
+              >
+                Abbrechen & zurück
               </button>
             </div>
           </div>
