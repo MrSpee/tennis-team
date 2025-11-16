@@ -1362,6 +1362,81 @@ function GroupsTab({
               categoryMismatches.forEach(team => {
                 console.warn(`   - ${team.club_name} ${team.team_name}: ${team.category} (erwartet: ${group.category})`);
               });
+
+              // Auto-Remap: Erzeuge/verwende korrekt kategorisierte Teams und re-mappe Verknüpfungen dieser Gruppe
+              for (const wrongTeam of categoryMismatches) {
+                try {
+                  // 1) Prüfe, ob ein korrektes Team existiert (gleicher Club + team_name + richtige Kategorie)
+                  const { data: existingCorrect, error: existErr } = await supabase
+                    .from('team_info')
+                    .select('*')
+                    .eq('club_id', wrongTeam.club_id)
+                    .eq('team_name', wrongTeam.team_name || null)
+                    .eq('category', group.category)
+                    .maybeSingle();
+                  if (existErr && existErr.code !== 'PGRST116') {
+                    console.warn('⚠️ Fehler bei Suche nach korrekt kategorisiertem Team:', existErr);
+                  }
+
+                  let correctTeam = existingCorrect || null;
+
+                  // 2) Falls nicht vorhanden, anlegen
+                  if (!correctTeam) {
+                    const { data: created, error: createErr } = await supabase
+                      .from('team_info')
+                      .insert({
+                        club_id: wrongTeam.club_id,
+                        club_name: wrongTeam.club_name,
+                        team_name: wrongTeam.team_name || null,
+                        category: group.category,
+                        region: wrongTeam.region || null
+                      })
+                      .select()
+                      .single();
+                    if (createErr) {
+                      console.warn('⚠️ Konnte korrektes Team nicht anlegen:', createErr);
+                      continue;
+                    }
+                    correctTeam = created;
+                  }
+
+                  // 3) Re-map team_seasons dieser Gruppe auf korrektes Team
+                  const { error: tsUpdateErr } = await supabase
+                    .from('team_seasons')
+                    .update({ team_id: correctTeam.id })
+                    .eq('team_id', wrongTeam.id)
+                    .eq('season', group.season)
+                    .eq('league', group.league)
+                    .eq('group_name', group.groupName);
+                  if (tsUpdateErr) {
+                    console.warn('⚠️ Konnte team_seasons nicht remappen:', tsUpdateErr);
+                  }
+
+                  // 4) Re-map matchdays dieser Gruppe auf korrektes Team (sowohl home als auch away)
+                  const { error: mdUpdateHomeErr } = await supabase
+                    .from('matchdays')
+                    .update({ home_team_id: correctTeam.id })
+                    .eq('home_team_id', wrongTeam.id)
+                    .eq('season', group.season)
+                    .eq('league', group.league)
+                    .eq('group_name', group.groupName);
+                  if (mdUpdateHomeErr) {
+                    console.warn('⚠️ Konnte matchdays (home) nicht remappen:', mdUpdateHomeErr);
+                  }
+                  const { error: mdUpdateAwayErr } = await supabase
+                    .from('matchdays')
+                    .update({ away_team_id: correctTeam.id })
+                    .eq('away_team_id', wrongTeam.id)
+                    .eq('season', group.season)
+                    .eq('league', group.league)
+                    .eq('group_name', group.groupName);
+                  if (mdUpdateAwayErr) {
+                    console.warn('⚠️ Konnte matchdays (away) nicht remappen:', mdUpdateAwayErr);
+                  }
+                } catch (autoRemapError) {
+                  console.warn('⚠️ Auto-Remap Kategorie fehlgeschlagen:', autoRemapError);
+                }
+              }
             }
           }
           
