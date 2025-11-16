@@ -6,7 +6,7 @@ import './GroupsTab.css';
 
 const FINISHED_STATUSES = ['completed'];
 
-// Sync-Prüfung: Prüfe ob alle abgeschlossenen Matches match_results haben
+// Sync-Prüfung: Prüfe ob alle abgeschlossenen Matches match_results haben MIT Spieler-IDs
 const checkMatchResultsSync = (matchdays, matchResults) => {
   const finishedMatches = matchdays.filter(m => 
     FINISHED_STATUSES.includes(m.status)
@@ -20,9 +20,21 @@ const checkMatchResultsSync = (matchdays, matchResults) => {
     matchResultsByMatchdayId.get(mr.matchday_id).push(mr);
   });
   
+  // Prüfe: Matches ohne Ergebnisse ODER mit Ergebnissen aber ohne Spieler-IDs
   const matchesWithoutResults = finishedMatches.filter(m => {
     const results = matchResultsByMatchdayId.get(m.id) || [];
-    return results.length === 0;
+    if (results.length === 0) return true; // Keine Ergebnisse
+    
+    // Prüfe ob alle Ergebnisse Spieler-IDs haben
+    const hasPlayerIds = results.every(r => {
+      if (r.match_type === 'Einzel') {
+        return r.home_player_id && r.guest_player_id;
+      } else {
+        return r.home_player1_id && r.home_player2_id && r.guest_player1_id && r.guest_player2_id;
+      }
+    });
+    
+    return !hasPlayerIds; // Ergebnisse vorhanden, aber keine Spieler-IDs
   });
   
   return {
@@ -2504,6 +2516,69 @@ function GroupsTab({
                         <p>
                           {groupDetails.syncCheck.withoutResults} von {groupDetails.syncCheck.totalFinished} abgeschlossenen Spielen haben keine Einzel/Doppel-Ergebnisse.
                         </p>
+                        {/* Button zum automatischen Import aller fehlenden Ergebnisse */}
+                        {groupDetails.syncCheck.matchesWithoutResults.length > 0 && (
+                          <button
+                            className="btn-sync-all"
+                            onClick={async () => {
+                              if (!handleLoadMeetingDetails) return;
+                              const matchesToImport = groupDetails.syncCheck.matchesWithoutResults;
+                              let successCount = 0;
+                              let errorCount = 0;
+                              
+                              for (const match of matchesToImport) {
+                                const homeTeam = match.home_team;
+                                const awayTeam = match.away_team;
+                                const homeLabel = homeTeam
+                                  ? `${homeTeam.club_name} ${homeTeam.team_name || ''}`.trim()
+                                  : 'Unbekannt';
+                                const awayLabel = awayTeam
+                                  ? `${awayTeam.club_name} ${awayTeam.team_name || ''}`.trim()
+                                  : 'Unbekannt';
+                                
+                                setMeetingDetails(prev => ({
+                                  ...prev,
+                                  [match.id]: { ...prev[match.id], loading: true, importing: true }
+                                }));
+                                
+                                try {
+                                  await handleLoadMeetingDetails(match, {
+                                    homeLabel,
+                                    awayLabel,
+                                    applyImport: true
+                                  });
+                                  successCount++;
+                                  console.log(`✅ Ergebnisse importiert für Match #${match.match_number}`);
+                                  
+                                  // Kurze Pause zwischen Imports
+                                  await new Promise(resolve => setTimeout(resolve, 500));
+                                } catch (error) {
+                                  errorCount++;
+                                  console.error(`❌ Fehler beim Import für Match #${match.match_number}:`, error);
+                                } finally {
+                                  setMeetingDetails(prev => ({
+                                    ...prev,
+                                    [match.id]: { ...prev[match.id], loading: false, importing: false }
+                                  }));
+                                }
+                              }
+                              
+                              // Lade Daten neu
+                              if (loadMatchResults) {
+                                for (const match of matchesToImport) {
+                                  setTimeout(() => loadMatchResults(match.id), 500);
+                                }
+                              }
+                              if (loadDashboardData) {
+                                setTimeout(() => loadDashboardData(), 1000);
+                              }
+                              
+                              alert(`Import abgeschlossen: ${successCount} erfolgreich, ${errorCount} Fehler`);
+                            }}
+                          >
+                            Alle Ergebnisse automatisch importieren ({groupDetails.syncCheck.matchesWithoutResults.length} Matches)
+                          </button>
+                        )}
                         <div className="sync-warning-matches">
                           {groupDetails.syncCheck.matchesWithoutResults.slice(0, 5).map((match) => {
                             const homeTeam = match.home_team;
