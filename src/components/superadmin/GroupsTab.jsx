@@ -755,7 +755,14 @@ function GroupsTab({
     }
 
     scrapedMatches.forEach((scrapedMatch) => {
-      const matchNumber = scrapedMatch.matchNumber || scrapedMatch.match_number;
+      // Robustere Extraktion der Matchnummer (verschiedene mögliche Felder)
+      const matchNumber =
+        scrapedMatch.matchNumber ??
+        scrapedMatch.match_number ??
+        scrapedMatch.number ??
+        scrapedMatch.nr ??
+        scrapedMatch.id ??
+        null;
       const homeTeam = scrapedMatch.homeTeam || '';
       const awayTeam = scrapedMatch.awayTeam || '';
       const matchDate = scrapedMatch.matchDateIso;
