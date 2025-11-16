@@ -665,7 +665,7 @@ module.exports = async function handler(req, res) {
         error: 'Antwort zu lang',
         details: 'Der Text ist zu umfangreich. Bitte teile ihn in kleinere Abschnitte auf oder kontaktiere den Support.',
         ...corsHeaders
-      });
+    });
     }
 
     // Response parsen

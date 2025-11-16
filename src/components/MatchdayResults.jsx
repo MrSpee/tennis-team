@@ -232,7 +232,7 @@ const MatchdayResults = () => {
         isFinished: FINISHED_STATUSES.includes(result.status)
       });
     });
-    
+
     results.forEach(result => {
       // Nur abgeschlossene Matches mit Winner zählen
       if (!result.winner || !FINISHED_STATUSES.includes(result.status)) {
@@ -759,7 +759,7 @@ const MatchdayResults = () => {
           {/* Großer Score: HOME : AWAY (berechnet) */}
           <div className="score-display-large">
             <div className="score-number-huge">{homeAwayScore.home}</div>
-            <div className="score-separator-huge">:</div>
+                <div className="score-separator-huge">:</div>
             <div className="score-number-huge">{homeAwayScore.away}</div>
           </div>
           
