@@ -178,8 +178,8 @@
 }
 
 .group-details-panel {
-  width: 700px;
-  min-width: 600px;
+  width: 1000px;
+  min-width: 900px;
   background: #ffffff;
   border-radius: 12px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
@@ -282,25 +282,32 @@
 .details-stats {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 1rem;
-  margin-bottom: 2rem;
+  gap: 1.5rem;
+  margin-bottom: 2.5rem;
 }
 
 .stat-card {
   background: linear-gradient(135deg, #f0f4ff 0%, #faf5ff 100%);
-  border-radius: 10px;
-  padding: 1rem;
+  border-radius: 12px;
+  padding: 1.5rem;
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 1.5rem;
   border: 1px solid #e5e7eb;
+  transition: all 0.2s ease-in-out;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+  border-color: #c7d2fe;
 }
 
 .stat-icon {
-  width: 48px;
-  height: 48px;
+  width: 64px;
+  height: 64px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 10px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -308,23 +315,29 @@
   flex-shrink: 0;
 }
 
+.stat-icon svg {
+  width: 32px;
+  height: 32px;
+}
+
 .stat-content {
   flex: 1;
 }
 
 .stat-value {
-  font-size: 1.75rem;
+  font-size: 2.5rem;
   font-weight: 700;
   color: #1f2937;
   line-height: 1;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.5rem;
 }
 
 .stat-label {
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   color: #6b7280;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  font-weight: 600;
 }
 
 .details-section {
@@ -356,15 +369,21 @@
 .standings-table thead {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .standings-table th {
-  padding: 0.75rem;
+  padding: 1rem 0.75rem;
   text-align: left;
-  font-weight: 600;
-  font-size: 0.75rem;
+  font-weight: 700;
+  font-size: 0.875rem;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 1px;
+  color: white;
+  white-space: nowrap;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.2);
 }
 
 .standings-table tbody tr {
@@ -835,6 +854,7 @@
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
 
 @media (max-width: 768px) {
   .groups-grid {
