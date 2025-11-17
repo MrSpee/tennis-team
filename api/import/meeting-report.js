@@ -519,59 +519,100 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
     const homeTeamName = teamsMeta?.homeTeam || 'Heim';
     const awayTeamName = teamsMeta?.awayTeam || 'Gast';
 
+    // DEBUG: Log Spieler-Daten
+    console.log(`[meeting-report] 🔍 Resolve Players für Match #${matchNumber} (${type}):`);
+    console.log(`  Home Players:`, homePlayers.map(p => ({ name: p?.name, lk: p?.lk, position: p?.position })));
+    console.log(`  Away Players:`, awayPlayers.map(p => ({ name: p?.name, lk: p?.lk, position: p?.position })));
+
     if (type === 'Einzel') {
-      result.home_player_id = await ensurePlayer(homePlayers[0], {
+      if (!homePlayers[0]) {
+        console.warn(`[meeting-report] ⚠️ Kein Home-Player für Match #${matchNumber} (${type})`);
+      }
+      if (!awayPlayers[0]) {
+        console.warn(`[meeting-report] ⚠️ Kein Away-Player für Match #${matchNumber} (${type})`);
+      }
+
+      result.home_player_id = homePlayers[0] ? await ensurePlayer(homePlayers[0], {
         matchNumber,
         matchType: type,
         side: 'home',
         teamName: homeTeamName,
         slot: 'spieler'
-      });
-      result.guest_player_id = await ensurePlayer(awayPlayers[0], {
+      }) : null;
+      
+      result.guest_player_id = awayPlayers[0] ? await ensurePlayer(awayPlayers[0], {
         matchNumber,
         matchType: type,
         side: 'away',
         teamName: awayTeamName,
         slot: 'spieler'
-      });
+      }) : null;
+      
       // Speichere Positionen für später (werden in team_memberships gespeichert)
       result._home_player_position = homePlayers[0]?.position || null;
       result._guest_player_position = awayPlayers[0]?.position || null;
     } else {
-      result.home_player1_id = await ensurePlayer(homePlayers[0], {
+      if (!homePlayers[0] || !homePlayers[1]) {
+        console.warn(`[meeting-report] ⚠️ Fehlende Home-Players für Match #${matchNumber} (${type}):`, {
+          player1: !!homePlayers[0],
+          player2: !!homePlayers[1]
+        });
+      }
+      if (!awayPlayers[0] || !awayPlayers[1]) {
+        console.warn(`[meeting-report] ⚠️ Fehlende Away-Players für Match #${matchNumber} (${type}):`, {
+          player1: !!awayPlayers[0],
+          player2: !!awayPlayers[1]
+        });
+      }
+
+      result.home_player1_id = homePlayers[0] ? await ensurePlayer(homePlayers[0], {
         matchNumber,
         matchType: type,
         side: 'home',
         teamName: homeTeamName,
         slot: 'spieler1'
-      });
-      result.home_player2_id = await ensurePlayer(homePlayers[1], {
+      }) : null;
+      
+      result.home_player2_id = homePlayers[1] ? await ensurePlayer(homePlayers[1], {
         matchNumber,
         matchType: type,
         side: 'home',
         teamName: homeTeamName,
         slot: 'spieler2'
-      });
-      result.guest_player1_id = await ensurePlayer(awayPlayers[0], {
+      }) : null;
+      
+      result.guest_player1_id = awayPlayers[0] ? await ensurePlayer(awayPlayers[0], {
         matchNumber,
         matchType: type,
         side: 'away',
         teamName: awayTeamName,
         slot: 'spieler1'
-      });
-      result.guest_player2_id = await ensurePlayer(awayPlayers[1], {
+      }) : null;
+      
+      result.guest_player2_id = awayPlayers[1] ? await ensurePlayer(awayPlayers[1], {
         matchNumber,
         matchType: type,
         side: 'away',
         teamName: awayTeamName,
         slot: 'spieler2'
-      });
+      }) : null;
+      
       // Speichere Positionen für später (werden in team_memberships gespeichert)
       result._home_player1_position = homePlayers[0]?.position || null;
       result._home_player2_position = homePlayers[1]?.position || null;
       result._guest_player1_position = awayPlayers[0]?.position || null;
       result._guest_player2_position = awayPlayers[1]?.position || null;
     }
+
+    // DEBUG: Log Ergebnis
+    console.log(`[meeting-report] ✅ Resolved Player IDs für Match #${matchNumber}:`, {
+      home_player_id: result.home_player_id,
+      guest_player_id: result.guest_player_id,
+      home_player1_id: result.home_player1_id,
+      home_player2_id: result.home_player2_id,
+      guest_player1_id: result.guest_player1_id,
+      guest_player2_id: result.guest_player2_id
+    });
 
     return result;
   };

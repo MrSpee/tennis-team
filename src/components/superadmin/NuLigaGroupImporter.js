@@ -288,6 +288,8 @@ async function ensureTeamSeasons(scrapedData, teamMap, group, supabase, result) 
 async function importMatches(scrapedData, teamMap, group, supabase, result) {
   const matches = scrapedData.matches || [];
   
+  console.log(`[importMatches] 🔍 Importiere ${matches.length} Matches für Gruppe ${group.groupName}`);
+  
   for (const match of matches) {
     try {
       const homeTeamName = match.homeTeam || '';
@@ -295,12 +297,24 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
       const homeTeam = teamMap.get(homeTeamName);
       const awayTeam = teamMap.get(awayTeamName);
       
+      // DEBUG: Log Match-Info
+      console.log(`[importMatches] 🔍 Prüfe Match #${match.matchNumber}:`, {
+        homeTeam: homeTeamName,
+        awayTeam: awayTeamName,
+        matchDate: match.matchDateIso,
+        startTime: match.startTime,
+        status: match.status,
+        homeTeamFound: !!homeTeam,
+        awayTeamFound: !!awayTeam
+      });
+      
       if (!homeTeam || !awayTeam) {
         result.errors.push({
           type: 'match_import_error',
           matchNumber: match.matchNumber,
           error: `Teams nicht gefunden: ${homeTeamName} oder ${awayTeamName}`
         });
+        console.warn(`[importMatches] ⚠️ Teams nicht gefunden für Match #${match.matchNumber}`);
         continue;
       }
       
@@ -318,9 +332,12 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
           .maybeSingle();
         
         existingMatch = data;
+        if (existingMatch) {
+          console.log(`[importMatches] ✅ Bestehendes Match gefunden über match_number #${match.matchNumber}`);
+        }
       }
       
-      // Fallback: Suche nach Datum + Teams
+      // Fallback: Suche nach Datum + Teams (auch wenn match_number vorhanden ist, für doppelte Prüfung)
       if (!existingMatch && match.matchDateIso) {
         const matchDateOnly = new Date(match.matchDateIso).toISOString().split('T')[0];
         const { data } = await supabase
@@ -336,6 +353,14 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
           .maybeSingle();
         
         existingMatch = data;
+        if (existingMatch) {
+          console.log(`[importMatches] ✅ Bestehendes Match gefunden über Datum + Teams für Match #${match.matchNumber}`);
+        }
+      }
+      
+      // WICHTIG: Wenn kein Datum vorhanden ist, aber match_number vorhanden ist, sollte das Match trotzdem importiert werden
+      if (!match.matchDateIso && match.matchNumber) {
+        console.log(`[importMatches] ⚠️ Match #${match.matchNumber} hat kein Datum, aber match_number vorhanden - importiere trotzdem`);
       }
       
       // Bereite Match-Daten vor
@@ -365,8 +390,12 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
           .update(matchData)
           .eq('id', existingMatch.id);
         
-        if (error) throw error;
+        if (error) {
+          console.error(`[importMatches] ❌ Fehler beim Update von Match #${match.matchNumber}:`, error);
+          throw error;
+        }
         result.matchesUpdated++;
+        console.log(`[importMatches] ✅ Match #${match.matchNumber} aktualisiert`);
       } else {
         // Erstelle neues Match
         const { error } = await supabase
@@ -375,8 +404,12 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
           .select()
           .single();
         
-        if (error) throw error;
+        if (error) {
+          console.error(`[importMatches] ❌ Fehler beim Erstellen von Match #${match.matchNumber}:`, error);
+          throw error;
+        }
         result.matchesImported++;
+        console.log(`[importMatches] ✅ Match #${match.matchNumber} erstellt (Datum: ${match.matchDateIso || 'kein Datum'})`);
       }
     } catch (error) {
       result.errors.push({
@@ -410,10 +443,20 @@ async function importMatchResults(scrapedData, group, supabase, result) {
   const groupId = extractGroupId(group.groupName) || scrapedData.group?.groupId || null;
   
   for (const match of matches) {
-    // WICHTIG: Nur Matches mit meetingId UND completed Status importieren
-    if (!match.meetingId || match.status !== 'completed') {
+    // WICHTIG: Nur Matches mit meetingId importieren
+    // Status kann variieren, aber meetingId ist erforderlich
+    if (!match.meetingId) {
+      console.log(`[importMatchResults] ⏭️ Match #${match.matchNumber} hat keine meetingId, überspringe`);
       continue;
     }
+    
+    // DEBUG: Log Match-Info
+    console.log(`[importMatchResults] 🔍 Prüfe Match #${match.matchNumber}:`, {
+      meetingId: match.meetingId,
+      status: match.status,
+      homeTeam: match.homeTeam,
+      awayTeam: match.awayTeam
+    });
     
     try {
       // Finde Matchday in DB
