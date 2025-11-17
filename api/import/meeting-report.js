@@ -471,8 +471,9 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
         .insert({
           name: name,
           current_lk: playerLk || null,
-          data_source: 'nuliga_scraper',
-          is_verified: false
+          import_source: 'nuliga_scraper',
+          import_lk: playerLk || null,
+          is_active: false // Spieler aus nuLiga sind zunächst nicht aktiv (kein User-Account)
         })
         .select()
         .single();
