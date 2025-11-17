@@ -389,17 +389,35 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
 }
 
 /**
+ * Extrahiert numerische Gruppen-ID aus Group-Name (z.B. "Gr. 034" → "34")
+ */
+function extractGroupId(groupName) {
+  if (!groupName) return null;
+  const match = String(groupName).match(/Gr\.\s*(\d+)/i) || String(groupName).match(/(\d+)/);
+  if (!match) return null;
+  const num = match[1].replace(/^0+/, '');
+  return num || '0';
+}
+
+/**
  * Importiert Match-Results (wenn meetingId vorhanden)
+ * WICHTIG: Match-Results Import ist optional und sollte Fehler nicht blockieren
  */
 async function importMatchResults(scrapedData, group, supabase, result) {
   const matches = scrapedData.matches || [];
   
+  // Extrahiere numerische Gruppen-ID
+  const groupId = extractGroupId(group.groupName) || scrapedData.group?.groupId || null;
+  
   for (const match of matches) {
-    if (!match.meetingId || match.status !== 'completed') continue;
+    // WICHTIG: Nur Matches mit meetingId UND completed Status importieren
+    if (!match.meetingId || match.status !== 'completed') {
+      continue;
+    }
     
     try {
       // Finde Matchday in DB
-      const { data: matchday } = await supabase
+      const { data: matchday, error: matchdayError } = await supabase
         .from('matchdays')
         .select('id, home_team_id, away_team_id')
         .eq('match_number', match.matchNumber)
@@ -408,30 +426,56 @@ async function importMatchResults(scrapedData, group, supabase, result) {
         .eq('group_name', group.groupName)
         .maybeSingle();
       
-      if (!matchday) {
+      if (matchdayError) {
         result.errors.push({
           type: 'match_results_import_error',
           matchNumber: match.matchNumber,
-          error: 'Matchday nicht gefunden'
+          error: `Fehler beim Laden des Matchdays: ${matchdayError.message}`
         });
         continue;
       }
       
-      // Lade Team-Namen für API
-      const { data: homeTeam } = await supabase
-        .from('team_info')
-        .select('club_name, team_name')
-        .eq('id', matchday.home_team_id)
-        .single();
+      if (!matchday) {
+        // Matchday nicht gefunden - das ist ok, vielleicht wurde es noch nicht importiert
+        console.log(`[importMatchResults] Matchday nicht gefunden für Match #${match.matchNumber}, überspringe Match-Results Import`);
+        continue;
+      }
       
-      const { data: awayTeam } = await supabase
-        .from('team_info')
-        .select('club_name, team_name')
-        .eq('id', matchday.away_team_id)
-        .single();
+      // Lade Team-Namen für API (mit Fehlerbehandlung)
+      let homeLabel = '';
+      let awayLabel = '';
       
-      const homeLabel = homeTeam ? `${homeTeam.club_name} ${homeTeam.team_name || ''}`.trim() : '';
-      const awayLabel = awayTeam ? `${awayTeam.club_name} ${awayTeam.team_name || ''}`.trim() : '';
+      if (matchday.home_team_id) {
+        const { data: homeTeam, error: homeError } = await supabase
+          .from('team_info')
+          .select('club_name, team_name')
+          .eq('id', matchday.home_team_id)
+          .maybeSingle();
+        
+        if (!homeError && homeTeam) {
+          homeLabel = `${homeTeam.club_name} ${homeTeam.team_name || ''}`.trim();
+        }
+      }
+      
+      if (matchday.away_team_id) {
+        const { data: awayTeam, error: awayError } = await supabase
+          .from('team_info')
+          .select('club_name, team_name')
+          .eq('id', matchday.away_team_id)
+          .maybeSingle();
+        
+        if (!awayError && awayTeam) {
+          awayLabel = `${awayTeam.club_name} ${awayTeam.team_name || ''}`.trim();
+        }
+      }
+      
+      // Fallback: Verwende Team-Namen aus scraped Match
+      if (!homeLabel && match.homeTeam) {
+        homeLabel = match.homeTeam;
+      }
+      if (!awayLabel && match.awayTeam) {
+        awayLabel = match.awayTeam;
+      }
       
       // Rufe Meeting-Report API auf
       const response = await fetch('/api/import/meeting-report', {
@@ -440,7 +484,7 @@ async function importMatchResults(scrapedData, group, supabase, result) {
         body: JSON.stringify({
           matchdayId: matchday.id,
           meetingId: match.meetingId,
-          groupId: group.groupName,
+          groupId: groupId, // WICHTIG: Numerische ID, nicht Name!
           matchNumber: match.matchNumber,
           matchDate: match.matchDateIso,
           homeTeam: homeLabel,
@@ -449,22 +493,47 @@ async function importMatchResults(scrapedData, group, supabase, result) {
         })
       });
       
-      const responseData = await response.json();
-      
-      if (response.ok && responseData.success) {
-        result.matchResultsImported++;
-      } else {
+      let responseData;
+      try {
+        const text = await response.text();
+        responseData = text ? JSON.parse(text) : {};
+      } catch (parseError) {
         result.errors.push({
           type: 'match_results_import_error',
           matchNumber: match.matchNumber,
-          error: responseData.error || 'Unbekannter Fehler'
+          error: `Fehler beim Parsen der API-Antwort: ${parseError.message}`
         });
+        continue;
+      }
+      
+      if (response.ok && responseData.success) {
+        result.matchResultsImported++;
+        console.log(`[importMatchResults] ✅ Match-Results importiert für Match #${match.matchNumber}`);
+      } else {
+        // WICHTIG: Bestimmte Fehler sind ok (z.B. MEETING_ID_NOT_AVAILABLE)
+        const errorCode = responseData.errorCode;
+        const isExpectedError = errorCode === 'MEETING_ID_NOT_AVAILABLE' || 
+                                errorCode === 'MATCH_NOT_FOUND' ||
+                                response.status === 200; // 200 mit success: false ist ok
+        
+        if (!isExpectedError) {
+          result.errors.push({
+            type: 'match_results_import_error',
+            matchNumber: match.matchNumber,
+            error: responseData.error || `HTTP ${response.status}: Unbekannter Fehler`,
+            errorCode
+          });
+        } else {
+          console.log(`[importMatchResults] ℹ️ Match-Results Import übersprungen für Match #${match.matchNumber}: ${responseData.error || 'Meeting-ID nicht verfügbar'}`);
+        }
       }
     } catch (error) {
+      // WICHTIG: Fehler beim Match-Results Import sollten den gesamten Import nicht blockieren
+      console.error(`[importMatchResults] Fehler beim Import für Match #${match.matchNumber}:`, error);
       result.errors.push({
         type: 'match_results_import_error',
         matchNumber: match.matchNumber,
-        error: error.message
+        error: error.message || 'Unbekannter Fehler'
       });
     }
   }
