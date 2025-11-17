@@ -183,7 +183,7 @@ function ScraperTab({
           <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '1rem', borderTop: '1px solid #e2e8f0' }}>
             <button
               onClick={handleScraperImport}
-              disabled={scraperImporting || clubsNeedingConfirmation.length > 0}
+              disabled={scraperImporting}
               className="btn-modern"
               style={{
                 display: 'flex',

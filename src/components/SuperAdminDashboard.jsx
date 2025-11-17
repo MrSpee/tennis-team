@@ -1297,7 +1297,8 @@ function SuperAdminDashboard() {
       const teamMapping = mapping.teams?.[team.normalized] || {};
       const preferredTeamName = teamMapping.teamName || team.original;
       const preferredSuffix = teamMapping.teamSuffix || team.suffix || '';
-      const category = teamMapping.category || team.category || null;
+      // WICHTIG: Kategorie aus Team, TeamMapping, Summary oder Group-Kontext nehmen
+      const category = teamMapping.category || team.category || summary.categories?.[0] || null;
       const region = clubRecord?.region || mapping.newClub?.region || null;
 
       const teamNamePayload = preferredSuffix || preferredTeamName || team.original;
@@ -1438,10 +1439,25 @@ function SuperAdminDashboard() {
         const mapping = scraperClubMappings[summary.clubName] || ensureClubMapping(summary);
         if (!mapping) continue;
 
-        const linkedClubId = mapping.existingClubId;
+        // AUTOMATISCHES CLUB-ERSTELLEN: Wenn Club nicht gemappt ist, erstelle ihn automatisch
+        let linkedClubId = mapping.existingClubId;
         if (!linkedClubId) {
-          clubIssues.push({ type: 'club-missing', clubName: summary.clubName });
-          continue;
+          console.log(`🔄 Automatisches Erstellen von Club: ${summary.clubName}`);
+          try {
+            const { clubId } = await ensureClubRecord(summary);
+            if (clubId) {
+              linkedClubId = clubId;
+              console.log(`✅ Club automatisch erstellt: ${summary.clubName} (ID: ${clubId})`);
+            } else {
+              clubIssues.push({ type: 'club-creation-failed', clubName: summary.clubName });
+              console.error(`❌ Fehler beim automatischen Erstellen von Club: ${summary.clubName}`);
+              continue;
+            }
+          } catch (clubError) {
+            clubIssues.push({ type: 'club-creation-error', clubName: summary.clubName, error: clubError.message });
+            console.error(`❌ Fehler beim automatischen Erstellen von Club: ${summary.clubName}`, clubError);
+            continue;
+          }
         }
 
         const resolvedClubName =
@@ -1456,6 +1472,7 @@ function SuperAdminDashboard() {
 
           let resolvedTeamId = teamMapping?.existingTeamId || null;
 
+          // AUTOMATISCHES TEAM-ERSTELLEN: Wenn Team nicht gefunden wird, erstelle es automatisch
           if (!resolvedTeamId) {
             const statusProbe = resolveTeamStatus(team.original, resolvedClubName, team.suffix);
             if (statusProbe?.teamId) {
@@ -1466,6 +1483,7 @@ function SuperAdminDashboard() {
               }));
             } else {
               const keys = buildTeamKeys(team.original, resolvedClubName, team.suffix);
+              let found = false;
               for (const key of keys) {
                 if (existingTeamLookup.has(key)) {
                   resolvedTeamId = existingTeamLookup.get(key);
@@ -1473,7 +1491,29 @@ function SuperAdminDashboard() {
                     ...current,
                     existingTeamId: resolvedTeamId
                   }));
+                  found = true;
                   break;
+                }
+              }
+              
+              // Wenn Team nicht gefunden wurde, erstelle es automatisch
+              if (!found) {
+                console.log(`🔄 Automatisches Erstellen von Team: ${summary.clubName} ${team.original}`);
+                try {
+                  const createdTeam = await createTeamForSummary(summary, team);
+                  if (createdTeam?.id) {
+                    resolvedTeamId = createdTeam.id;
+                    console.log(`✅ Team automatisch erstellt: ${summary.clubName} ${team.original} (ID: ${resolvedTeamId})`);
+                    // Aktualisiere Lookups
+                    const keys = buildTeamKeys(team.original, resolvedClubName, team.suffix);
+                    keys.forEach((key) => {
+                      if (key) existingTeamLookup.set(key, resolvedTeamId);
+                    });
+                    teamById.set(resolvedTeamId, createdTeam);
+                  }
+                } catch (teamError) {
+                  console.error(`❌ Fehler beim automatischen Erstellen von Team: ${summary.clubName} ${team.original}`, teamError);
+                  // Weiter mit nächstem Team, aber markiere als fehlend
                 }
               }
             }
@@ -1668,8 +1708,9 @@ function SuperAdminDashboard() {
 
         for (const match of group.matches || []) {
           const selection = selections[match.id];
+          // IMPORTIERE ALLE MATCHES STANDARDMÄSSIG (außer sie wurden explizit deaktiviert)
           const shouldImport =
-            selection !== undefined ? selection.import !== false : scraperMatchStatus(match).recommended;
+            selection !== undefined ? selection.import !== false : true;
           if (!shouldImport) continue;
 
           const matchDateIso = match.matchDateIso ? new Date(match.matchDateIso).toISOString() : null;
@@ -2327,13 +2368,18 @@ function SuperAdminDashboard() {
     scraperClubSummaries,
     scraperClubMappings,
     ensureClubMapping,
+    ensureClubRecord,
+    createTeamForSummary,
     existingClubMap,
     existingTeamLookup,
+    teamById,
     resolveTeamStatus,
     updateTeamMapping,
     scraperMatchSelections,
     scraperMatchStatus,
-    supabase
+    supabase,
+    ensureTeamSeason,
+    inferTeamSize
   ]);
 
   const handleAdoptExistingClub = useCallback(

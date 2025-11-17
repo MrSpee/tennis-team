@@ -164,7 +164,7 @@ const Results = () => {
       }
       
       // Suche nach Teams (club_name ist direkt in team_info vorhanden)
-      const { data: teams, error: teamError } = await supabase
+      let { data: teams, error: teamError } = await supabase
         .from('team_info')
         .select(`
           id, 
