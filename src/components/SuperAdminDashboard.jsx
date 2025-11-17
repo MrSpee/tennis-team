@@ -2930,6 +2930,24 @@ function SuperAdminDashboard() {
       }));
 
       try {
+        // WICHTIG: Lade meeting_id aus der Datenbank (falls vorhanden)
+        let dbMeetingId = null;
+        let dbMeetingUrl = null;
+        try {
+          const { data: matchdayData } = await supabase
+            .from('matchdays')
+            .select('meeting_id, meeting_report_url')
+            .eq('id', match.id)
+            .maybeSingle();
+          
+          if (matchdayData) {
+            dbMeetingId = matchdayData.meeting_id;
+            dbMeetingUrl = matchdayData.meeting_report_url;
+          }
+        } catch (dbError) {
+          console.warn('⚠️ Fehler beim Laden der meeting_id aus DB:', dbError);
+        }
+
         const payload = {
           matchdayId: match.id,
           groupId: resolveGroupId(match.group_name),
@@ -2940,19 +2958,25 @@ function SuperAdminDashboard() {
           apply: applyImport
         };
 
+        // Priorität: DB meeting_id > existing.meetingId > extractMeetingMeta > match.meeting_id
         const meetingMeta = extractMeetingMeta(match);
-        if (meetingMeta.meetingId) {
-          payload.meetingId = meetingMeta.meetingId;
-        }
-        if (meetingMeta.meetingUrl) {
-          payload.meetingUrl = meetingMeta.meetingUrl;
-        }
-
-        if (existing.meetingId) {
+        if (dbMeetingId) {
+          payload.meetingId = dbMeetingId;
+          console.log(`[handleLoadMeetingDetails] ✅ meetingId aus DB geladen: ${dbMeetingId}`);
+        } else if (existing.meetingId) {
           payload.meetingId = existing.meetingId;
+        } else if (meetingMeta.meetingId) {
+          payload.meetingId = meetingMeta.meetingId;
+        } else if (match.meeting_id) {
+          payload.meetingId = match.meeting_id;
         }
-        if (existing.meetingUrl && !payload.meetingUrl) {
+        
+        if (dbMeetingUrl) {
+          payload.meetingUrl = dbMeetingUrl;
+        } else if (existing.meetingUrl && !payload.meetingUrl) {
           payload.meetingUrl = existing.meetingUrl;
+        } else if (meetingMeta.meetingUrl && !payload.meetingUrl) {
+          payload.meetingUrl = meetingMeta.meetingUrl;
         }
 
         const response = await fetch('/api/import/meeting-report', {

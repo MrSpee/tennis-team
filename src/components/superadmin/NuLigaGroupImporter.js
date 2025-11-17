@@ -380,7 +380,9 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
         home_score: match.matchPoints?.home || null,
         away_score: match.matchPoints?.away || null,
         final_score: match.matchPoints ? `${match.matchPoints.home}:${match.matchPoints.away}` : null,
-        notes: match.notes || null
+        notes: match.notes || null,
+        meeting_id: match.meetingId || null, // WICHTIG: meetingId speichern!
+        meeting_report_url: match.meetingReportUrl || null
       };
       
       if (existingMatch) {
@@ -442,40 +444,83 @@ async function importMatchResults(scrapedData, group, supabase, result) {
   // Extrahiere numerische Gruppen-ID
   const groupId = extractGroupId(group.groupName) || scrapedData.group?.groupId || null;
   
+  // WICHTIG: Lade alle Matchdays für diese Gruppe aus der DB (inkl. meeting_id)
+  const { data: allMatchdays, error: matchdaysError } = await supabase
+    .from('matchdays')
+    .select('id, match_number, meeting_id, home_team_id, away_team_id')
+    .eq('season', group.season)
+    .eq('league', group.league)
+    .eq('group_name', group.groupName);
+  
+  if (matchdaysError) {
+    result.errors.push({
+      type: 'match_results_import_error',
+      error: `Fehler beim Laden der Matchdays: ${matchdaysError.message}`
+    });
+    return;
+  }
+  
+  // Erstelle Map: match_number -> matchday (inkl. meeting_id aus DB)
+  const matchdayMap = new Map();
+  if (allMatchdays) {
+    allMatchdays.forEach(md => {
+      if (md.match_number) {
+        matchdayMap.set(String(md.match_number), md);
+      }
+    });
+  }
+  
+  // Kombiniere: Scraped Matches + DB Matchdays
   for (const match of matches) {
+    // WICHTIG: meetingId kann aus scraped Match ODER aus DB Matchday kommen
+    let meetingId = match.meetingId;
+    let matchday = null;
+    
+    if (match.matchNumber) {
+      matchday = matchdayMap.get(String(match.matchNumber));
+      // Priorität: DB meeting_id > scraped meetingId
+      if (matchday?.meeting_id) {
+        meetingId = matchday.meeting_id;
+      }
+    }
+    
     // WICHTIG: Nur Matches mit meetingId importieren
-    // Status kann variieren, aber meetingId ist erforderlich
-    if (!match.meetingId) {
-      console.log(`[importMatchResults] ⏭️ Match #${match.matchNumber} hat keine meetingId, überspringe`);
+    if (!meetingId) {
+      console.log(`[importMatchResults] ⏭️ Match #${match.matchNumber} hat keine meetingId (weder scraped noch in DB), überspringe`);
       continue;
     }
     
     // DEBUG: Log Match-Info
     console.log(`[importMatchResults] 🔍 Prüfe Match #${match.matchNumber}:`, {
-      meetingId: match.meetingId,
+      meetingId: meetingId,
+      meetingIdSource: matchday?.meeting_id ? 'DB' : 'scraped',
       status: match.status,
       homeTeam: match.homeTeam,
       awayTeam: match.awayTeam
     });
     
     try {
-      // Finde Matchday in DB
-      const { data: matchday, error: matchdayError } = await supabase
-        .from('matchdays')
-        .select('id, home_team_id, away_team_id')
-        .eq('match_number', match.matchNumber)
-        .eq('season', group.season)
-        .eq('league', group.league)
-        .eq('group_name', group.groupName)
-        .maybeSingle();
-      
-      if (matchdayError) {
-        result.errors.push({
-          type: 'match_results_import_error',
-          matchNumber: match.matchNumber,
-          error: `Fehler beim Laden des Matchdays: ${matchdayError.message}`
-        });
-        continue;
+      // Wenn matchday noch nicht geladen, lade es jetzt
+      if (!matchday && match.matchNumber) {
+        const { data: loadedMatchday, error: matchdayError } = await supabase
+          .from('matchdays')
+          .select('id, home_team_id, away_team_id, meeting_id')
+          .eq('match_number', match.matchNumber)
+          .eq('season', group.season)
+          .eq('league', group.league)
+          .eq('group_name', group.groupName)
+          .maybeSingle();
+        
+        if (matchdayError) {
+          result.errors.push({
+            type: 'match_results_import_error',
+            matchNumber: match.matchNumber,
+            error: `Fehler beim Laden des Matchdays: ${matchdayError.message}`
+          });
+          continue;
+        }
+        
+        matchday = loadedMatchday;
       }
       
       if (!matchday) {
@@ -526,7 +571,7 @@ async function importMatchResults(scrapedData, group, supabase, result) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           matchdayId: matchday.id,
-          meetingId: match.meetingId,
+          meetingId: meetingId, // WICHTIG: Verwende meetingId aus DB oder scraped
           groupId: groupId, // WICHTIG: Numerische ID, nicht Name!
           matchNumber: match.matchNumber,
           matchDate: match.matchDateIso,
