@@ -202,6 +202,26 @@ function normalizeLk(value) {
 }
 
 async function applyMeetingResults({ supabase, matchdayId, singles, doubles, metadata }) {
+  // DEBUG: Log Eingabe
+  console.log(`[meeting-report] 📥 applyMeetingResults aufgerufen:`, {
+    matchdayId,
+    singlesCount: singles?.length || 0,
+    doublesCount: doubles?.length || 0,
+    metadata: metadata ? { homeTeam: metadata.homeTeam, awayTeam: metadata.awayTeam } : null
+  });
+  
+  if (singles && singles.length > 0) {
+    console.log(`[meeting-report] 📋 Erstes Einzel-Match:`, {
+      matchNumber: singles[0].matchNumber,
+      hasHomePlayers: !!singles[0].homePlayers,
+      hasAwayPlayers: !!singles[0].awayPlayers,
+      homePlayersCount: singles[0].homePlayers?.length || 0,
+      awayPlayersCount: singles[0].awayPlayers?.length || 0,
+      homePlayers: singles[0].homePlayers?.map(p => ({ name: p?.name, lk: p?.lk })) || [],
+      awayPlayers: singles[0].awayPlayers?.map(p => ({ name: p?.name, lk: p?.lk })) || []
+    });
+  }
+  
   const rows = [];
   let counter = 0;
   const playerCache = new Map();
@@ -327,8 +347,17 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
   };
 
   const ensurePlayer = async (player, context) => {
+    // DEBUG: Log Eingabe
+    console.log(`[meeting-report] 🔍 ensurePlayer aufgerufen:`, {
+      player: player ? { name: player.name, lk: player.lk, raw: player.raw } : null,
+      context
+    });
+    
     const name = player?.name?.trim();
-    if (!name) return null;
+    if (!name) {
+      console.warn(`[meeting-report] ⚠️ ensurePlayer: Kein Name vorhanden!`, { player, context });
+      return null;
+    }
     
     // Prüfe ob es ein "nicht angetreten"-Marker ist
     if (isPlayerNotPlayed(name) || isPlayerNotPlayed(player?.raw)) {
@@ -502,6 +531,13 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
         return null;
       }
       
+      if (!newPlayer || !newPlayer.id) {
+        console.error(`[meeting-report] ❌ Spieler erstellt, aber keine ID zurückgegeben!`, { newPlayer, name, playerLk });
+        playerCache.set(cacheKey, null);
+        registerMissingPlayer(player, context);
+        return null;
+      }
+      
       console.log(`[meeting-report] ✅ Neuer Spieler erstellt: "${name}" (ID: ${newPlayer.id}, LK: ${playerLk || 'keine'})`);
       playerCache.set(cacheKey, newPlayer.id);
       return newPlayer.id;
@@ -522,8 +558,13 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
 
     // DEBUG: Log Spieler-Daten
     console.log(`[meeting-report] 🔍 Resolve Players für Match #${matchNumber} (${type}):`);
-    console.log(`  Home Players:`, homePlayers.map(p => ({ name: p?.name, lk: p?.lk, position: p?.position })));
-    console.log(`  Away Players:`, awayPlayers.map(p => ({ name: p?.name, lk: p?.lk, position: p?.position })));
+    console.log(`  Home Players (${homePlayers.length}):`, homePlayers.map(p => ({ name: p?.name, lk: p?.lk, position: p?.position, raw: p?.raw })));
+    console.log(`  Away Players (${awayPlayers.length}):`, awayPlayers.map(p => ({ name: p?.name, lk: p?.lk, position: p?.position, raw: p?.raw })));
+    console.log(`  Match-Objekt:`, { 
+      hasHomePlayers: !!match.homePlayers, 
+      hasAwayPlayers: !!match.awayPlayers,
+      matchKeys: Object.keys(match)
+    });
 
     if (type === 'Einzel') {
       if (!homePlayers[0]) {
