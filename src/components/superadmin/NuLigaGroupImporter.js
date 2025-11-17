@@ -607,9 +607,17 @@ async function importMatchResults(scrapedData, group, supabase, result) {
           } : null,
           applyResult: responseData.applyResult ? {
             inserted: responseData.applyResult.inserted?.length || 0,
-            missingPlayers: responseData.applyResult.missingPlayers?.length || 0
+            missingPlayers: responseData.applyResult.missingPlayers?.length || 0,
+            missingPlayersList: responseData.applyResult.missingPlayers?.map(p => ({ name: p.name, lk: p.lk, context: p.contexts?.[0] })) || []
           } : null
         });
+        
+        // WICHTIG: Zeige fehlende Spieler in der Konsole
+        if (responseData.applyResult?.missingPlayers && responseData.applyResult.missingPlayers.length > 0) {
+          console.warn(`[importMatchResults] ⚠️ ${responseData.applyResult.missingPlayers.length} Spieler konnten nicht erstellt werden:`, 
+            responseData.applyResult.missingPlayers.map(p => `${p.name} (LK: ${p.lk || 'keine'})`).join(', ')
+          );
+        }
         result.matchResultsImported++;
       } else {
         // WICHTIG: Bestimmte Fehler sind ok (z.B. MEETING_ID_NOT_AVAILABLE)

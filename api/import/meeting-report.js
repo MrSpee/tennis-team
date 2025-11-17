@@ -258,15 +258,28 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
   };
 
   const registerMissingPlayer = (player, context) => {
-    if (!player || !player.name) return;
+    if (!player || !player.name) {
+      console.warn(`[meeting-report] ⚠️ registerMissingPlayer: Kein Spieler oder Name vorhanden`, { player, context });
+      return;
+    }
     const normalizedName = player.name.trim();
-    if (!normalizedName) return;
+    if (!normalizedName) {
+      console.warn(`[meeting-report] ⚠️ registerMissingPlayer: Name ist leer`, { player, context });
+      return;
+    }
     
     // Prüfe ob es ein "nicht angetreten"-Marker ist
     if (isPlayerNotPlayed(normalizedName) || isPlayerNotPlayed(player.raw)) {
       console.log(`[meeting-report] ⏭️  Spieler nicht angetreten, überspringe: "${normalizedName}"`);
       return; // Ignoriere - kein Spieler angetreten
     }
+    
+    // DEBUG: Log fehlenden Spieler
+    console.warn(`[meeting-report] ⚠️ Fehlender Spieler registriert: "${normalizedName}"`, {
+      context,
+      lk: player.lk,
+      raw: player.raw
+    });
     
     const primaryKey = `${normalizedName.toLowerCase()}|${player.lk || ''}`;
     const entry =
@@ -492,15 +505,22 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
     console.log(
       `[meeting-report] ⚠️ Spieler nicht gefunden: "${name}" (bester Score: ${(bestScore * 100).toFixed(1)}%) - erstelle neuen Spieler`
     );
+    console.log(`[meeting-report] 🔍 Spieler-Details:`, {
+      name,
+      lk: playerLk,
+      raw: player.raw,
+      context
+    });
     
     try {
       // Erstelle neuen Spieler in players_unified
+      // WICHTIG: import_source muss einer der erlaubten Werte sein: 'tvm_import', 'manual', 'ai_import'
       const { data: newPlayer, error: insertError } = await supabase
         .from('players_unified')
         .insert({
           name: name,
           current_lk: playerLk || null,
-          import_source: 'nuliga_scraper',
+          import_source: 'ai_import', // WICHTIG: 'nuliga_scraper' ist nicht erlaubt, verwende 'ai_import'
           import_lk: playerLk || null,
           is_active: false // Spieler aus nuLiga sind zunächst nicht aktiv (kein User-Account)
         })
