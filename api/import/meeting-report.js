@@ -989,6 +989,17 @@ module.exports = async function handler(req, res) {
       meetingId: resolvedMeetingId,
       meetingUrl: resolvedMeetingUrl
     });
+    
+    // DEBUG: Log extrahierte Daten
+    console.log(`[meeting-report] 📥 Meeting-Report extrahiert:`, {
+      singlesCount: meetingData.singles?.length || 0,
+      doublesCount: meetingData.doubles?.length || 0,
+      firstSingle: meetingData.singles?.[0] ? {
+        matchNumber: meetingData.singles[0].matchNumber,
+        homePlayers: meetingData.singles[0].homePlayers?.map(p => ({ name: p.name, lk: p.lk })) || [],
+        awayPlayers: meetingData.singles[0].awayPlayers?.map(p => ({ name: p.name, lk: p.lk })) || []
+      } : null
+    });
 
     const normalizeTeam = imports.normalizeTeamLabel || ((value) => (value ? value.toString().toLowerCase().trim() : ''));
     const diceCoefficient = imports.diceCoefficient || (() => 0);
@@ -1086,6 +1097,17 @@ module.exports = async function handler(req, res) {
       });
     }
 
+    // DEBUG: Log Rückgabe-Daten
+    console.log(`[meeting-report] 📤 Rückgabe-Daten:`, {
+      success: true,
+      singlesCount: meetingData.singles?.length || 0,
+      doublesCount: meetingData.doubles?.length || 0,
+      applyResult: applyResult ? {
+        inserted: applyResult.inserted?.length || 0,
+        missingPlayers: applyResult.missingPlayers?.length || 0
+      } : null
+    });
+    
     return withCors(res, 200, {
       success: true,
       applied: Boolean(apply),

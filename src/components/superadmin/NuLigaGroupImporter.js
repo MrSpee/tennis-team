@@ -594,9 +594,23 @@ async function importMatchResults(scrapedData, group, supabase, result) {
         continue;
       }
       
+      // DEBUG: Log API-Antwort
       if (response.ok && responseData.success) {
-        result.matchResultsImported++;
         console.log(`[importMatchResults] ✅ Match-Results importiert für Match #${match.matchNumber}`);
+        console.log(`[importMatchResults] 📊 API-Antwort:`, {
+          singlesCount: responseData.singles?.length || 0,
+          doublesCount: responseData.doubles?.length || 0,
+          firstSingle: responseData.singles?.[0] ? {
+            matchNumber: responseData.singles[0].matchNumber,
+            homePlayers: responseData.singles[0].homePlayers?.map(p => ({ name: p.name, lk: p.lk })) || [],
+            awayPlayers: responseData.singles[0].awayPlayers?.map(p => ({ name: p.name, lk: p.lk })) || []
+          } : null,
+          applyResult: responseData.applyResult ? {
+            inserted: responseData.applyResult.inserted?.length || 0,
+            missingPlayers: responseData.applyResult.missingPlayers?.length || 0
+          } : null
+        });
+        result.matchResultsImported++;
       } else {
         // WICHTIG: Bestimmte Fehler sind ok (z.B. MEETING_ID_NOT_AVAILABLE)
         const errorCode = responseData.errorCode;
