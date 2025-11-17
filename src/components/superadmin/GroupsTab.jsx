@@ -1632,6 +1632,8 @@ function GroupsTab({
         }
 
         // Finde Team-IDs für home und away
+        // WICHTIG: Berücksichtige die Kategorie der Gruppe!
+        const requiredCategory = selectedGroup.category;
         const findTeamId = (teamName) => {
           const parts = teamName.split(/\s+/);
           const clubName = parts.slice(0, -1).join(' ').trim();
@@ -1646,11 +1648,20 @@ function GroupsTab({
 
           if (!dbClub) return null;
 
+          // WICHTIG: Suche Team mit Kategorie-Filter!
           const dbTeam = teams.find((team) => {
             if (team.club_id !== dbClub.id) return false;
             const normalizedDbTeam = normalizeString(team.team_name || '');
             const normalizedScrapedSuffix = normalizeString(teamSuffix);
-            return normalizedDbTeam === normalizedScrapedSuffix;
+            const teamNameMatch = normalizedDbTeam === normalizedScrapedSuffix;
+            
+            // WICHTIG: Prüfe auch Kategorie-Übereinstimmung
+            if (requiredCategory && team.category) {
+              const categoryMatch = normalizeString(team.category) === normalizeString(requiredCategory);
+              return teamNameMatch && categoryMatch;
+            }
+            
+            return teamNameMatch;
           });
 
           return dbTeam?.id || null;
