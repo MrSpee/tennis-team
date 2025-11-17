@@ -441,16 +441,75 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
       console.log(
         `[meeting-report] ✅ Spieler gefunden: "${name}" → "${bestMatch.name}" (${matchType}, Score: ${(bestScore * 100).toFixed(1)}%)`
       );
+      
+      // Aktualisiere LK, falls vorhanden und unterschiedlich
+      if (playerLk && bestMatch.current_lk !== playerLk) {
+        try {
+          await supabase
+            .from('players_unified')
+            .update({ current_lk: playerLk })
+            .eq('id', bestMatch.id);
+          console.log(`[meeting-report] ✅ LK aktualisiert für "${bestMatch.name}": ${bestMatch.current_lk} → ${playerLk}`);
+        } catch (updateError) {
+          console.warn(`[meeting-report] ⚠️ Fehler beim LK-Update für "${bestMatch.name}":`, updateError.message);
+        }
+      }
+      
       playerCache.set(cacheKey, bestMatch.id);
       return bestMatch.id;
     }
 
+    // WICHTIG: Spieler nicht gefunden → automatisch anlegen!
     console.log(
-      `[meeting-report] ⚠️ Spieler nicht gefunden: "${name}" (bester Score: ${(bestScore * 100).toFixed(1)}%)`
+      `[meeting-report] ⚠️ Spieler nicht gefunden: "${name}" (bester Score: ${(bestScore * 100).toFixed(1)}%) - erstelle neuen Spieler`
     );
-    playerCache.set(cacheKey, null);
-    registerMissingPlayer(player, context);
-    return null;
+    
+    try {
+      // Erstelle neuen Spieler in players_unified
+      const { data: newPlayer, error: insertError } = await supabase
+        .from('players_unified')
+        .insert({
+          name: name,
+          current_lk: playerLk || null,
+          data_source: 'nuliga_scraper',
+          is_verified: false
+        })
+        .select()
+        .single();
+      
+      if (insertError) {
+        // Prüfe ob Spieler bereits existiert (Unique Constraint)
+        if (insertError.code === '23505') {
+          // Versuche es nochmal zu finden (Race Condition)
+          const { data: found } = await supabase
+            .from('players_unified')
+            .select('id, name, current_lk')
+            .ilike('name', name)
+            .limit(1)
+            .maybeSingle();
+          
+          if (found) {
+            console.log(`[meeting-report] ✅ Spieler gefunden nach Race Condition: "${name}" (ID: ${found.id})`);
+            playerCache.set(cacheKey, found.id);
+            return found.id;
+          }
+        }
+        
+        console.error(`[meeting-report] ❌ Fehler beim Erstellen von Spieler "${name}":`, insertError.message);
+        playerCache.set(cacheKey, null);
+        registerMissingPlayer(player, context);
+        return null;
+      }
+      
+      console.log(`[meeting-report] ✅ Neuer Spieler erstellt: "${name}" (ID: ${newPlayer.id}, LK: ${playerLk || 'keine'})`);
+      playerCache.set(cacheKey, newPlayer.id);
+      return newPlayer.id;
+    } catch (createError) {
+      console.error(`[meeting-report] ❌ Unerwarteter Fehler beim Erstellen von Spieler "${name}":`, createError);
+      playerCache.set(cacheKey, null);
+      registerMissingPlayer(player, context);
+      return null;
+    }
   };
 
   const resolvePlayersForMatch = async (match, type, matchNumber, teamsMeta) => {
