@@ -624,13 +624,40 @@ function GroupsTab({
         alert(successMessage);
       }
 
-      // Lade Gruppen-Details neu
+      // Lade Gruppen-Details neu (WICHTIG: forceReload = true)
       await loadGroupDetails(group, true);
+      
+      // Warte kurz, damit State aktualisiert wird
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Lade Match-Results neu für alle Matches in dieser Gruppe
+      // Hole Matchdays direkt aus der DB, da groupDetails State möglicherweise noch nicht aktualisiert ist
+      if (loadMatchResults) {
+        const { data: matchdays } = await supabase
+          .from('matchdays')
+          .select('id')
+          .eq('season', group.season)
+          .eq('league', group.league)
+          .eq('group_name', group.groupName);
+        
+        if (matchdays && matchdays.length > 0) {
+          for (const matchday of matchdays) {
+            try {
+              await loadMatchResults(matchday.id);
+            } catch (err) {
+              console.warn(`Fehler beim Laden der Match-Results für Matchday ${matchday.id}:`, err);
+            }
+          }
+        }
+      }
       
       // Lade Dashboard-Daten neu (falls verfügbar)
       if (loadDashboardData) {
         await loadDashboardData();
       }
+      
+      // Lade Gruppen-Details nochmal, um sicherzustellen, dass alles aktualisiert ist
+      await loadGroupDetails(group, true);
 
     } catch (error) {
       console.error('❌ Fehler beim Import der Gruppe:', error);
