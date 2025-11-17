@@ -381,8 +381,8 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
         away_score: match.matchPoints?.away || null,
         final_score: match.matchPoints ? `${match.matchPoints.home}:${match.matchPoints.away}` : null,
         notes: match.notes || null,
-        meeting_id: match.meetingId || null, // WICHTIG: meetingId speichern!
-        meeting_report_url: match.meetingReportUrl || null
+        meeting_id: match.meetingId || null, // WICHTIG: meetingId speichern (wird in DB gespeichert)
+        meeting_report_url: match.meetingReportUrl || null // WICHTIG: meetingReportUrl speichern
       };
       
       if (existingMatch) {
