@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import { Trophy, Users, Calendar, TrendingUp, ChevronRight, ChevronDown, Award, Target, RefreshCw, AlertCircle, CheckCircle2, Plus } from 'lucide-react';
 import { calculateSimilarity, normalizeString } from '../../services/matchdayImportService';
+import { importGroupFromNuLiga } from './NuLigaGroupImporter';
 import './GroupsTab.css';
 
 const FINISHED_STATUSES = ['completed'];
@@ -526,9 +527,6 @@ function GroupsTab({
     setShowComparison(false);
 
     try {
-      // Optional: Fehlende Teams automatisch anlegen (Kategorie der Gruppe)
-      const AUTO_CREATE_MISSING_GROUP_TEAMS = true;
-
       const groupId = extractGroupId(group.groupName);
       if (!groupId) {
         throw new Error('Gruppen-ID konnte nicht extrahiert werden');
@@ -588,52 +586,55 @@ function GroupsTab({
 
       setScraperData(scrapedData);
 
-      // Speichere Snapshot in DB
-      const groupKey = getGroupKey(group);
-      await saveScraperSnapshot(groupKey, group, scrapedData);
+      // NEU: Verwende neuen, robusten Importer
+      // Lade Clubs und Teams für Import
+      const { data: clubsData } = await supabase
+        .from('club_info')
+        .select('*');
+      
+      const { data: teamsData } = await supabase
+        .from('team_info')
+        .select('*');
 
-      // Führe Vergleich durch
-      const comparison = await compareScrapedWithDatabase(group, scrapedData);
-      setComparisonResult(comparison);
-      setShowComparison(true);
+      const importResult = await importGroupFromNuLiga(
+        group,
+        scrapedData,
+        supabase,
+        clubsData || [],
+        teamsData || []
+      );
 
-      // Wenn Bereinigung durchgeführt wurde, lade Gruppen-Details neu
-      if (comparison.fixActionsPerformed) {
-        console.log('🔄 Lade Gruppen-Details neu nach automatischer Bereinigung...');
-        await loadGroupDetails(group, true);
-        // Vergleich erneut durchführen, um aktualisierte Daten zu zeigen
-        const refreshedComparison = await compareScrapedWithDatabase(group, scrapedData);
-        setComparisonResult(refreshedComparison);
+      // Zeige Ergebnis
+      const successMessage = [
+        `✅ Import abgeschlossen!`,
+        `${importResult.clubsCreated} Clubs erstellt`,
+        `${importResult.teamsCreated} Teams erstellt`,
+        `${importResult.teamSeasonsCreated} Team-Seasons erstellt`,
+        `${importResult.matchesImported} Matches importiert`,
+        `${importResult.matchesUpdated} Matches aktualisiert`,
+        `${importResult.matchResultsImported} Match-Results importiert`
+      ].filter(Boolean).join('\n');
+
+      if (importResult.errors.length > 0) {
+        const errorMessage = importResult.errors
+          .map(e => `- ${e.type}: ${e.error || e.message}`)
+          .join('\n');
+        alert(`${successMessage}\n\n⚠️ Fehler:\n${errorMessage}`);
+      } else {
+        alert(successMessage);
       }
 
-      // Optional: Fehlende Teams/Seasons automatisch anlegen, strikt in Gruppen-Kategorie
-      if (AUTO_CREATE_MISSING_GROUP_TEAMS && comparison?.teams?.missingItems?.length) {
-        for (const item of comparison.teams.missingItems) {
-          // Nur Teams verarbeiten, Clubs werden separat behandelt
-          if (item.requiresClub) continue; // Club erst anlegen falls nötig (manuell/anderer Flow)
-          if (item.action === 'add_team_season' || item.action === 'create_team') {
-            try {
-              // Nutze vorhandene Logik inkl. Kategoriekontrolle
-              // eslint-disable-next-line no-await-in-loop
-              await handleCreateMissingItem(item, 'team');
-            } catch (e) {
-              // Weiter mit nächsten
-              // eslint-disable-next-line no-console
-              console.warn('⚠️ Auto-Anlage fehlgeschlagen für Team:', item?.scrapedName, e);
-            }
-          }
-        }
-        // Nach Anlage: Vergleich aktualisieren
-        const refreshed = await compareScrapedWithDatabase(group, scrapedData);
-        setComparisonResult(refreshed);
+      // Lade Gruppen-Details neu
+      await loadGroupDetails(group, true);
+      
+      // Lade Dashboard-Daten neu (falls verfügbar)
+      if (loadDashboardData) {
+        await loadDashboardData();
       }
-
-      // Aktualisiere Snapshot mit Vergleichsergebnis
-      await updateScraperSnapshotComparison(groupKey, comparison);
 
     } catch (error) {
-      console.error('❌ Fehler beim Scrapen der Gruppe:', error);
-      alert(`Fehler beim Scrapen: ${error.message}`);
+      console.error('❌ Fehler beim Import der Gruppe:', error);
+      alert(`Fehler beim Import: ${error.message}`);
     } finally {
       setScraperLoading(false);
     }
