@@ -2872,6 +2872,9 @@ function MatchDetailView({
   setMeetingDetails,
   loadDashboardData
 }) {
+  const meetingData = meetingDetails[match.id];
+  const resultsData = matchResultsData[match.id];
+
   // Spieler-Lookup nach Name (für Badges)
   const [playerLookupByName, setPlayerLookupByName] = React.useState(new Map());
   useEffect(() => {
@@ -2913,9 +2916,6 @@ function MatchDetailView({
   const hasResults = matchResultsForMatch.length > 0;
   const isFinished = FINISHED_STATUSES.includes(match.status) || (match.home_score !== null && match.away_score !== null);
   const needsResults = isFinished && !hasResults;
-
-  const meetingData = meetingDetails[match.id];
-  const resultsData = matchResultsData[match.id];
 
   // Lade Match-Results wenn Match geöffnet wird
   useEffect(() => {
