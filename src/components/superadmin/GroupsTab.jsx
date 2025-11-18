@@ -2453,7 +2453,121 @@ function GroupsTab({
               </button>
             </div>
           </div>
-@@
+
+          <div className="group-importer-grid">
+            <div className="group-importer-field">
+              <label>Gruppen-IDs (z.B. 34, 35, 36)</label>
+              <input
+                type="text"
+                value={groupImportInput}
+                onChange={(e) => setGroupImportInput(e.target.value)}
+                placeholder="Leer lassen = alle Gruppen laut nuLiga"
+              />
+              <span className="group-importer-hint">
+                Mehrere IDs durch Komma oder Leerzeichen trennen
+              </span>
+            </div>
+            <div className="group-importer-field">
+              <label>Saison</label>
+              <input
+                type="text"
+                value={groupImportSeason}
+                onChange={(e) => setGroupImportSeason(e.target.value)}
+                placeholder="z.B. Winter 2025/26"
+              />
+              <span className="group-importer-hint">
+                Wird an den Scraper weitergegeben (optional)
+              </span>
+            </div>
+          </div>
+
+          <div className="group-importer-buttons">
+            <button
+              className="group-importer-btn"
+              onClick={handleFetchGroupImportData}
+              disabled={groupImportLoading}
+            >
+              {groupImportLoading && groupImportDetails.length === 0 ? (
+                <>
+                  <Loader size={16} className="spinning" />
+                  Lädt nuLiga-Daten…
+                </>
+              ) : (
+                <>
+                  <RefreshCw size={16} />
+                  nuLiga Daten laden
+                </>
+              )}
+            </button>
+            {groupImportDetails.length > 0 && (
+              <button
+                className="group-importer-btn ghost"
+                onClick={handleImportAllGroups}
+                disabled={groupImportLoading}
+              >
+                <Download size={16} />
+                Offene Gruppen importieren
+              </button>
+            )}
+          </div>
+
+          {groupImportError && (
+            <div className="group-importer-alert error">
+              <AlertCircle size={18} />
+              <span>{groupImportError}</span>
+            </div>
+          )}
+
+          {groupImportDetails.length > 0 && (
+            <div className="group-importer-results">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Gruppe</th>
+                    <th>Liga</th>
+                    <th>Kategorie</th>
+                    <th>Saison</th>
+                    <th>Matches</th>
+                    <th>Status</th>
+                    <th>Aktion</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groupImportDetails.map((detail) => {
+                    const status = detail.__importStatus || 'pending';
+                    const groupLabel = detail.group?.groupName || detail.group?.groupId || 'Unbekannt';
+                    return (
+                      <tr key={detail.__importKey}>
+                        <td>{groupLabel}</td>
+                        <td>{detail.group?.league || '–'}</td>
+                        <td>{detail.group?.category || '–'}</td>
+                        <td>{groupImportSeason || detail.season || '–'}</td>
+                        <td>{detail.matches?.length ?? 0}</td>
+                        <td>
+                          <span className={`status-badge status-${status}`}>
+                            {status === 'running' && <Loader size={14} className="spinning" />}
+                            {getImporterStatusLabel(status)}
+                          </span>
+                          {detail.__importSummary && (
+                            <div className="status-hint">{detail.__importSummary}</div>
+                          )}
+                        </td>
+                        <td>
+                          <button
+                            className="group-importer-btn secondary"
+                            onClick={() => handleImportSingleGroup(detail)}
+                            disabled={groupImportLoading}
+                          >
+                            Importieren
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
           {groupImportLogs.length > 0 && (
             <div className="group-importer-log">
               <h4>Letzte Aktionen</h4>
