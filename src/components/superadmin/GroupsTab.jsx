@@ -28,10 +28,18 @@ const checkMatchResultsSync = (matchdays, matchResults) => {
     
     // Prüfe ob alle Ergebnisse Spieler-IDs haben
     const hasPlayerIds = results.every(r => {
+      if (r.status === 'walkover') {
+        return true;
+      }
       if (r.match_type === 'Einzel') {
         return r.home_player_id && r.guest_player_id;
       } else {
-        return r.home_player1_id && r.home_player2_id && r.guest_player1_id && r.guest_player2_id;
+        return (
+          r.home_player1_id &&
+          r.home_player2_id &&
+          r.guest_player1_id &&
+          r.guest_player2_id
+        );
       }
     });
     

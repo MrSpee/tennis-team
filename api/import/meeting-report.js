@@ -174,6 +174,9 @@ function buildNotes(match) {
   if (match.games?.raw) {
     lines.push(`Spiele: ${match.games.raw}`);
   }
+  if (match.walkover?.reason) {
+    lines.push(`Walkover: ${match.walkover.reason}`);
+  }
   return lines.join(' | ');
 }
 
@@ -683,8 +686,13 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
     counter += 1;
     const setScores = match.setScores || [];
     const matchPoints = match.matchPoints || null;
-    const status = matchPoints && matchPoints.home != null && matchPoints.away != null ? 'completed' : 'pending';
-    const winner = status === 'completed' ? determineMatchWinner(setScores, matchPoints) : null;
+    const hasScore = matchPoints && matchPoints.home != null && matchPoints.away != null;
+    let status = hasScore ? 'completed' : 'pending';
+    let winner = hasScore ? determineMatchWinner(setScores, matchPoints) : null;
+    if (match.walkover?.winner) {
+      status = 'walkover';
+      winner = match.walkover.winner === 'guest' ? 'guest' : 'home';
+    }
     const matchNumberLabel = match.matchNumber || counter;
     const playerAssignments = await resolvePlayersForMatch(match, type, matchNumberLabel, metadata);
 
@@ -761,7 +769,7 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
       notes: buildNotes(match),
       status,
       winner,
-      completed_at: status === 'completed' ? new Date().toISOString() : null,
+      completed_at: status !== 'pending' ? new Date().toISOString() : null,
       entered_at: new Date().toISOString(),
       ...cleanAssignments
     });
