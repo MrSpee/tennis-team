@@ -3058,14 +3058,13 @@ function MatchResultsTable({ entries, playerLookupByName = new Map() }) {
               {entry.homePlayers?.map((p, i) => {
                 const name = p.name || 'Unbekannt';
                 const player = playerLookupByName.get(name);
-                const badge =
-                  player?.user_id ? 'App' : player ? 'DB' : 'Neu';
+                const badge = player?.user_id ? 'App' : player ? 'DB' : 'Neu';
                 return (
-                  <span key={i}>
-                    {name}
+                  <span key={i} className="result-player-chip">
                     <span className={`player-badge ${badge === 'App' ? 'app' : badge === 'DB' ? 'db' : 'new'}`}>
                       {badge}
                     </span>
+                    <span className="player-name">{name}</span>
                     {p.lk ? <span className="player-lk">LK {p.lk}</span> : null}
                   </span>
                 );
@@ -3076,14 +3075,13 @@ function MatchResultsTable({ entries, playerLookupByName = new Map() }) {
               {entry.awayPlayers?.map((p, i) => {
                 const name = p.name || 'Unbekannt';
                 const player = playerLookupByName.get(name);
-                const badge =
-                  player?.user_id ? 'App' : player ? 'DB' : 'Neu';
+                const badge = player?.user_id ? 'App' : player ? 'DB' : 'Neu';
                 return (
-                  <span key={i}>
-                    {name}
+                  <span key={i} className="result-player-chip">
                     <span className={`player-badge ${badge === 'App' ? 'app' : badge === 'DB' ? 'db' : 'new'}`}>
                       {badge}
                     </span>
+                    <span className="player-name">{name}</span>
                     {p.lk ? <span className="player-lk">LK {p.lk}</span> : null}
                   </span>
                 );

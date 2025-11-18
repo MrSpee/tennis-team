@@ -1142,6 +1142,39 @@
   gap: 0.25rem;
 }
 
+.result-player-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  color: #1f2937;
+}
+
+.result-player-chip .player-badge {
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: white;
+}
+
+.result-player-chip .player-badge.app {
+  background: #7c3aed;
+}
+
+.result-player-chip .player-badge.db {
+  background: #2563eb;
+}
+
+.result-player-chip .player-badge.new {
+  background: #059669;
+}
+
+.result-player-chip .player-name {
+  font-weight: 600;
+}
+
 .result-separator {
   color: #9ca3af;
   font-weight: 500;
