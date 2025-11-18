@@ -91,6 +91,7 @@ function GroupsTab({
   const [groupImportError, setGroupImportError] = useState(null);
   const [groupImportProgress, setGroupImportProgress] = useState({ current: 0, total: 0 });
   const [showGroupImporter, setShowGroupImporter] = useState(false);
+  const [selectedGroupsForImport, setSelectedGroupsForImport] = useState(new Set());
   
   // Match Detail States
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -812,6 +813,8 @@ function GroupsTab({
       }));
 
       setGroupImportDetails(mappedDetails);
+      // Alle Gruppen standardmäßig auswählen
+      setSelectedGroupsForImport(new Set(mappedDetails.map(d => d.__importKey)));
       if (!groupImportSeason && data.season) {
         setGroupImportSeason(data.season);
       }
@@ -900,9 +903,19 @@ function GroupsTab({
       return;
     }
 
-    const pending = groupImportDetails.filter((detail) => detail.__importStatus !== 'success');
+    // Filtere nach ausgewählten Gruppen
+    const selected = groupImportDetails.filter((detail) => 
+      selectedGroupsForImport.has(detail.__importKey)
+    );
+    
+    if (selected.length === 0) {
+      setGroupImportError('Bitte mindestens eine Gruppe auswählen.');
+      return;
+    }
+
+    const pending = selected.filter((detail) => detail.__importStatus !== 'success');
     if (pending.length === 0) {
-      setGroupImportError('Alle geladenen Gruppen wurden bereits importiert.');
+      setGroupImportError('Alle ausgewählten Gruppen wurden bereits importiert.');
       return;
     }
 
@@ -2583,9 +2596,26 @@ function GroupsTab({
 
           {groupImportDetails.length > 0 && (
             <div className="group-importer-results">
+              <div className="group-importer-selection-header">
+                <label className="group-importer-select-all">
+                  <input
+                    type="checkbox"
+                    checked={selectedGroupsForImport.size === groupImportDetails.length && groupImportDetails.length > 0}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedGroupsForImport(new Set(groupImportDetails.map(d => d.__importKey)));
+                      } else {
+                        setSelectedGroupsForImport(new Set());
+                      }
+                    }}
+                  />
+                  <span>Alle auswählen ({selectedGroupsForImport.size} von {groupImportDetails.length})</span>
+                </label>
+              </div>
               <table>
                 <thead>
                   <tr>
+                    <th style={{ width: '40px' }}></th>
                     <th>Gruppe</th>
                     <th>Liga</th>
                     <th>Kategorie</th>
@@ -2599,11 +2629,32 @@ function GroupsTab({
                   {groupImportDetails.map((detail) => {
                     const status = detail.__importStatus || 'pending';
                     const groupLabel = detail.group?.groupName || detail.group?.groupId || 'Unbekannt';
+                    const isSelected = selectedGroupsForImport.has(detail.__importKey);
                     return (
-                      <tr key={detail.__importKey}>
+                      <tr key={detail.__importKey} className={isSelected ? 'row-selected' : ''}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              const newSelected = new Set(selectedGroupsForImport);
+                              if (e.target.checked) {
+                                newSelected.add(detail.__importKey);
+                              } else {
+                                newSelected.delete(detail.__importKey);
+                              }
+                              setSelectedGroupsForImport(newSelected);
+                            }}
+                          />
+                        </td>
                         <td>{groupLabel}</td>
                         <td>{detail.group?.league || '–'}</td>
-                        <td>{detail.group?.category || '–'}</td>
+                        <td>
+                          {detail.group?.category || '–'}
+                          {!detail.group?.category || detail.group?.category === 'Unbekannte Kategorie' ? (
+                            <span className="category-warning" title="Kategorie konnte nicht identifiziert werden"> ⚠️</span>
+                          ) : null}
+                        </td>
                         <td>{groupImportSeason || detail.season || '–'}</td>
                         <td>{detail.matches?.length ?? 0}</td>
                         <td>
