@@ -2719,12 +2719,12 @@ function SuperAdminDashboard() {
         if (playerIdArray.length > 0) {
           const { data: playerData, error: playerError } = await supabase
             .from('players_unified')
-            .select('id, name')
+            .select('id, name, current_lk, user_id, import_source')
             .in('id', playerIdArray);
 
           if (!playerError && playerData) {
             playerData.forEach((player) => {
-              playerMap.set(player.id, player.name);
+              playerMap.set(player.id, player);
             });
           }
         }
@@ -2757,34 +2757,38 @@ function SuperAdminDashboard() {
             games: null
           };
 
+          const pushPlayer = (collection, playerId) => {
+            if (!playerId) return;
+            const info = playerMap.get(playerId);
+            collection.push({
+              id: playerId,
+              name: info?.name || 'Unbekannt',
+              lk: info?.current_lk || null,
+              user_id: info?.user_id || null,
+              import_source: info?.import_source || null
+            });
+          };
+
           if (result.match_type === 'Einzel') {
             if (result.home_player_id) {
-              entry.homePlayers.push({ name: playerMap.get(result.home_player_id) || 'Unbekannt' });
+              pushPlayer(entry.homePlayers, result.home_player_id);
             }
             if (result.guest_player_id) {
-              entry.awayPlayers.push({ name: playerMap.get(result.guest_player_id) || 'Unbekannt' });
+              pushPlayer(entry.awayPlayers, result.guest_player_id);
             }
             singles.push(entry);
           } else if (result.match_type === 'Doppel') {
-            if (result.home_player1_id) {
-              entry.homePlayers.push({ name: playerMap.get(result.home_player1_id) || 'Unbekannt' });
-            }
-            if (result.home_player2_id) {
-              entry.homePlayers.push({ name: playerMap.get(result.home_player2_id) || 'Unbekannt' });
-            }
-            if (result.guest_player1_id) {
-              entry.awayPlayers.push({ name: playerMap.get(result.guest_player1_id) || 'Unbekannt' });
-            }
-            if (result.guest_player2_id) {
-              entry.awayPlayers.push({ name: playerMap.get(result.guest_player2_id) || 'Unbekannt' });
-            }
+            pushPlayer(entry.homePlayers, result.home_player1_id);
+            pushPlayer(entry.homePlayers, result.home_player2_id);
+            pushPlayer(entry.awayPlayers, result.guest_player1_id);
+            pushPlayer(entry.awayPlayers, result.guest_player2_id);
             doubles.push(entry);
           }
         });
 
         setMatchResultsData((prev) => ({
           ...prev,
-          [matchdayId]: { singles, doubles, loaded: true }
+          [matchdayId]: { singles, doubles, players: Object.fromEntries(playerMap), loaded: true }
         }));
       } catch (error) {
         console.error('❌ Fehler beim Laden der Match-Results:', error);

@@ -2876,18 +2876,30 @@ function MatchDetailView({
   const [playerLookupByName, setPlayerLookupByName] = React.useState(new Map());
   useEffect(() => {
     try {
-      // Erzeuge Lookup aus bereits geladenen Results (falls Spielernamen vorkommen)
       const map = new Map();
-      const results = groupDetails?.matchResults || [];
-      results.forEach((r) => {
-        // Keine eindeutige Quelle hier; der echte Lookup kommt aus dem Dashboard (players),
-        // aber hier bauen wir minimal einen Zwischenspeicher, falls später erweitert wird.
-      });
+
+      // Priorität: Spieler aus den geladenen Match-Results (inkl. LK & Quelle)
+      if (resultsData?.players) {
+        Object.values(resultsData.players).forEach((player) => {
+          if (!player?.name) return;
+          map.set(player.name, player);
+        });
+      } else {
+        // Fallback: baue Lookup aus bereits vorhandenen groupDetails
+        const results = groupDetails?.matchResults || [];
+        results.forEach((r) => {
+          if (r?.player_name) {
+            map.set(r.player_name, r);
+          }
+        });
+      }
+
       setPlayerLookupByName(map);
-    } catch {
+    } catch (error) {
+      console.warn('⚠️ Fehler beim Aufbau des Spieler-Lookups:', error);
       setPlayerLookupByName(new Map());
     }
-  }, [groupDetails]);
+  }, [groupDetails, resultsData]);
   const homeTeam = match.home_team || teamById?.get(match.home_team_id);
   const awayTeam = match.away_team || teamById?.get(match.away_team_id);
   const homeLabel = homeTeam
