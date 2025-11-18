@@ -471,6 +471,7 @@ async function importMatchResults(scrapedData, group, supabase, result) {
   }
   
   // Kombiniere: Scraped Matches + DB Matchdays
+  const skippedMatches = []; // Sammle Matches ohne meetingId für Zusammenfassung
   for (const match of matches) {
     // WICHTIG: meetingId kann aus scraped Match ODER aus DB Matchday kommen
     let meetingId = match.meetingId;
@@ -486,7 +487,7 @@ async function importMatchResults(scrapedData, group, supabase, result) {
     
     // WICHTIG: Nur Matches mit meetingId importieren
     if (!meetingId) {
-      console.log(`[importMatchResults] ⏭️ Match #${match.matchNumber} hat keine meetingId (weder scraped noch in DB), überspringe`);
+      skippedMatches.push(match.matchNumber);
       continue;
     }
     
@@ -646,6 +647,11 @@ async function importMatchResults(scrapedData, group, supabase, result) {
         error: error.message || 'Unbekannter Fehler'
       });
     }
+  }
+  
+  // Zusammenfassung: Matches ohne meetingId
+  if (skippedMatches.length > 0) {
+    console.log(`[importMatchResults] ⏭️ ${skippedMatches.length} Match(es) ohne meetingId übersprungen (noch nicht gespielt oder Ergebnisse nicht verfügbar): #${skippedMatches.slice(0, 10).join(', #')}${skippedMatches.length > 10 ? ` ... (+${skippedMatches.length - 10} weitere)` : ''}`);
   }
 }
 

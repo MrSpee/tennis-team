@@ -89,6 +89,7 @@ function GroupsTab({
   const [groupImportLogs, setGroupImportLogs] = useState([]);
   const [groupImportLoading, setGroupImportLoading] = useState(false);
   const [groupImportError, setGroupImportError] = useState(null);
+  const [groupImportProgress, setGroupImportProgress] = useState({ current: 0, total: 0 });
   const [showGroupImporter, setShowGroupImporter] = useState(false);
   
   // Match Detail States
@@ -822,24 +823,32 @@ function GroupsTab({
     }
   };
 
-  const runGroupImport = async (detail) => {
+  const runGroupImport = async (detail, preloadedClubs = null, preloadedTeams = null) => {
     const detailKey = detail.__importKey || buildDetailKey(detail);
     const groupMeta = buildGroupMetaFromDetail(detail, groupImportSeason);
     const scrapedData = buildScrapedDataFromDetail(detail, groupImportSeason);
     updateImportDetailStatus(detailKey, 'running');
 
     try {
-      const { data: clubsData, error: clubsError } = await supabase.from('club_info').select('*');
-      if (clubsError) throw clubsError;
-      const { data: teamsData, error: teamsError } = await supabase.from('team_info').select('*');
-      if (teamsError) throw teamsError;
+      // Verwende vorher geladene Daten oder lade neu (für einzelne Imports)
+      let clubsData = preloadedClubs;
+      let teamsData = preloadedTeams;
+      
+      if (!clubsData || !teamsData) {
+        const { data: clubs, error: clubsError } = await supabase.from('club_info').select('*');
+        if (clubsError) throw clubsError;
+        const { data: teams, error: teamsError } = await supabase.from('team_info').select('*');
+        if (teamsError) throw teamsError;
+        clubsData = clubs || [];
+        teamsData = teams || [];
+      }
 
       const importResult = await importGroupFromNuLiga(
         groupMeta,
         scrapedData,
         supabase,
-        clubsData || [],
-        teamsData || []
+        clubsData,
+        teamsData
       );
 
       const summary = summarizeImportResult(importResult);
@@ -854,10 +863,6 @@ function GroupsTab({
         },
         ...prev
       ]);
-
-      if (loadDashboardData) {
-        await loadDashboardData();
-      }
 
       return importResult;
     } catch (error) {
@@ -903,21 +908,61 @@ function GroupsTab({
 
     setGroupImportError(null);
     setGroupImportLoading(true);
-    let lastError = null;
+    setGroupImportProgress({ current: 0, total: pending.length });
+    
+    // OPTIMIERUNG: Lade Clubs und Teams einmalig am Anfang
+    let preloadedClubs = null;
+    let preloadedTeams = null;
+    try {
+      console.log('[Massenimport] 📦 Lade Clubs und Teams einmalig...');
+      const { data: clubs, error: clubsError } = await supabase.from('club_info').select('*');
+      if (clubsError) throw clubsError;
+      const { data: teams, error: teamsError } = await supabase.from('team_info').select('*');
+      if (teamsError) throw teamsError;
+      preloadedClubs = clubs || [];
+      preloadedTeams = teams || [];
+      console.log(`[Massenimport] ✅ ${preloadedClubs.length} Clubs und ${preloadedTeams.length} Teams geladen`);
+    } catch (error) {
+      console.error('[Massenimport] ⚠️ Fehler beim Vorladen von Clubs/Teams, lade pro Gruppe:', error);
+      // Fallback: Lade pro Gruppe (langsamer, aber funktioniert)
+    }
+
+    const errors = [];
+    let successCount = 0;
 
     try {
-      for (const detail of pending) {
+      for (let i = 0; i < pending.length; i++) {
+        const detail = pending[i];
+        setGroupImportProgress({ current: i + 1, total: pending.length });
+        
         try {
-          await runGroupImport(detail);
+          await runGroupImport(detail, preloadedClubs, preloadedTeams);
+          successCount++;
         } catch (error) {
-          lastError = error;
+          console.error(`[Massenimport] ❌ Fehler bei Gruppe ${detail.group?.groupName || 'unbekannt'}:`, error);
+          errors.push({
+            group: detail.group?.groupName || 'unbekannt',
+            error: error.message || 'Unbekannter Fehler'
+          });
         }
       }
-      if (lastError) {
-        setGroupImportError(lastError.message || 'Mindestens ein Import ist fehlgeschlagen.');
+      
+      // Lade Dashboard-Daten einmalig am Ende (nicht nach jeder Gruppe)
+      if (loadDashboardData && successCount > 0) {
+        console.log('[Massenimport] 🔄 Aktualisiere Dashboard-Daten...');
+        await loadDashboardData();
+      }
+      
+      // Zeige Zusammenfassung
+      if (errors.length > 0) {
+        const errorSummary = `${errors.length} von ${pending.length} Gruppen fehlgeschlagen:\n${errors.slice(0, 5).map(e => `- ${e.group}: ${e.error}`).join('\n')}${errors.length > 5 ? `\n... und ${errors.length - 5} weitere` : ''}`;
+        setGroupImportError(errorSummary);
+      } else {
+        console.log(`[Massenimport] ✅ Alle ${successCount} Gruppen erfolgreich importiert!`);
       }
     } finally {
       setGroupImportLoading(false);
+      setGroupImportProgress({ current: 0, total: 0 });
     }
   };
 
@@ -2511,10 +2556,28 @@ function GroupsTab({
             )}
           </div>
 
+          {/* Fortschrittsanzeige für Massenimport */}
+          {groupImportLoading && groupImportProgress.total > 0 && (
+            <div className="group-importer-progress">
+              <div className="progress-header">
+                <Loader size={16} className="spinning" />
+                <span>
+                  Importiere Gruppe {groupImportProgress.current} von {groupImportProgress.total}...
+                </span>
+              </div>
+              <div className="progress-bar">
+                <div 
+                  className="progress-fill" 
+                  style={{ width: `${(groupImportProgress.current / groupImportProgress.total) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           {groupImportError && (
             <div className="group-importer-alert error">
               <AlertCircle size={18} />
-              <span>{groupImportError}</span>
+              <span style={{ whiteSpace: 'pre-line' }}>{groupImportError}</span>
             </div>
           )}
 
@@ -3558,4 +3621,5 @@ function MatchResultsTable({ entries, playerLookupByName = new Map() }) {
 }
 
 export default GroupsTab;
+
 
