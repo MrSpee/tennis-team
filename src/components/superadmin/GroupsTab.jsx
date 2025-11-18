@@ -1454,10 +1454,15 @@ function GroupsTab({
             .from('team_info')
             .select('category')
             .eq('id', item.existingTeamId)
-            .single();
+            .maybeSingle();
 
-          if (teamCheckError) {
+          if (teamCheckError && teamCheckError.code !== 'PGRST116') {
             console.error('❌ Fehler beim Prüfen der Team-Kategorie:', teamCheckError);
+            return;
+          }
+
+          if (!teamCheck) {
+            console.error('❌ Team konnte nicht gefunden werden!');
             return;
           }
 
@@ -1530,10 +1535,31 @@ function GroupsTab({
           return;
         }
 
-        const club = clubs.find(c => c.id === item.suggestedClubId);
+        let club = clubs.find(c => c.id === item.suggestedClubId);
         if (!club) {
-          console.error('❌ Club nicht gefunden!');
-          return;
+          try {
+            const { data: fetchedClub, error: fetchClubError } = await supabase
+              .from('club_info')
+              .select('id, name, normalized_name')
+              .eq('id', item.suggestedClubId)
+              .maybeSingle();
+
+            if (fetchClubError) {
+              console.error('❌ Club konnte nicht nachgeladen werden:', fetchClubError);
+              return;
+            }
+
+            if (!fetchedClub) {
+              console.error('❌ Club nicht gefunden!');
+              return;
+            }
+
+            club = fetchedClub;
+            setClubs((prev) => (prev.some((c) => c.id === fetchedClub.id) ? prev : [...prev, fetchedClub]));
+          } catch (clubLoadError) {
+            console.error('❌ Club konnte nicht geladen werden:', clubLoadError);
+            return;
+          }
         }
 
         if (!selectedGroup) {
