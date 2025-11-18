@@ -51,14 +51,14 @@ function PlayersTab({
     );
   };
 
-  const deriveTeams = (player) =>
-    (player.player_teams || [])
-      .map((team) => {
-        const info = team?.team_info;
-        if (!info) return null;
-        return `${info.club_name}${info.team_name ? ` • ${info.team_name}` : ''}`;
-      })
-      .filter(Boolean);
+  const deriveTeams = (player) => {
+    if (player?.primary_team) {
+      const info = player.primary_team;
+      const label = `${info.club_name || 'Unbekannter Club'}${info.team_name ? ` • ${info.team_name}` : ''}`;
+      return [label];
+    }
+    return [];
+  };
 
   return (
     <div className="lk-card-full">

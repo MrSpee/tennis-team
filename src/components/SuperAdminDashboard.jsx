@@ -819,7 +819,7 @@ function SuperAdminDashboard() {
         supabase.from('club_info').select('*').order('name', { ascending: true }),
         supabase
           .from('players_unified')
-          .select('*, player_teams:team_memberships!team_memberships_player_id_fkey(team_info(id, club_name, team_name))')
+          .select('*, primary_team:team_info!players_unified_primary_team_id_fkey(id, club_name, team_name, category)')
           .order('created_at', { ascending: false }),
         supabase
           .from('team_info')
@@ -3539,10 +3539,7 @@ function SuperAdminDashboard() {
   }, [players, playerSearch]);
 
   const sortedPlayers = useMemo(() => {
-    const deriveClub = (player) => {
-      const team = (player.player_teams || []).find((entry) => entry?.team_info);
-      return team?.team_info?.club_name || '';
-    };
+    const deriveClub = (player) => player?.primary_team?.club_name || '';
 
     const parseLk = (value) => {
       if (!value) return Number.POSITIVE_INFINITY;
