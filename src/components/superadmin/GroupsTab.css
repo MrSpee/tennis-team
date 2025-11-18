@@ -27,6 +27,249 @@
   color: #6b7280;
 }
 
+.group-importer-card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+  margin-bottom: 2rem;
+  border: 1px solid #e5e7eb;
+}
+
+.group-importer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.25rem;
+  gap: 1rem;
+}
+
+.group-importer-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.group-importer-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.group-importer-subtitle {
+  margin: 0.25rem 0 0 0;
+  font-size: 0.875rem;
+  color: #475569;
+}
+
+.group-importer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.group-importer-field label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #0f172a;
+  margin-bottom: 0.35rem;
+}
+
+.group-importer-field input {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #cbd5f5;
+  font-size: 0.95rem;
+  background: #f8fafc;
+  transition: border-color 0.2s ease;
+}
+
+.group-importer-field input:focus {
+  outline: none;
+  border-color: #6366f1;
+  background: #ffffff;
+}
+
+.group-importer-hint {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.group-importer-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.group-importer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  font-weight: 600;
+  border: 1px solid #cbd5f5;
+  background: #f8fafc;
+  color: #0f172a;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.group-importer-btn.primary {
+  background: #10b981;
+  border-color: #059669;
+  color: white;
+}
+
+.group-importer-btn.secondary {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  color: #3730a3;
+}
+
+.group-importer-btn.ghost {
+  background: transparent;
+  border-style: dashed;
+  color: #0f172a;
+}
+
+.group-importer-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+
+.group-importer-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.group-importer-card .spinning {
+  animation: spin 1s linear infinite;
+}
+
+.group-importer-alert {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.group-importer-alert.error {
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.group-importer-results {
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  margin-bottom: 1rem;
+}
+
+.group-importer-results table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+.group-importer-results th,
+.group-importer-results td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.9rem;
+  text-align: left;
+}
+
+.group-importer-results th {
+  background: #f8fafc;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.status-badge.status-success {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.status-badge.status-error {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.status-badge.status-running {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+.status-badge.status-pending {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.status-hint {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin-top: 0.25rem;
+}
+
+.group-importer-log {
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 1rem;
+}
+
+.group-importer-log h4 {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.95rem;
+  color: #0f172a;
+}
+
+.group-importer-log ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.group-importer-log li {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+}
+
+.log-entry-headline {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  margin-bottom: 0.35rem;
+  color: #0f172a;
+}
+
+
 .groups-content {
   display: flex;
   gap: 2rem;

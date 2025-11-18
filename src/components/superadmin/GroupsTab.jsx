@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../../lib/supabaseClient';
-import { Trophy, Users, Calendar, TrendingUp, ChevronRight, ChevronDown, Award, Target, RefreshCw, AlertCircle, CheckCircle2, Plus } from 'lucide-react';
+import { Trophy, Users, Calendar, TrendingUp, ChevronRight, ChevronDown, Award, Target, RefreshCw, AlertCircle, CheckCircle2, Plus, Loader, Download } from 'lucide-react';
 import { calculateSimilarity, normalizeString } from '../../services/matchdayImportService';
 import { importGroupFromNuLiga } from './NuLigaGroupImporter';
 import './GroupsTab.css';
@@ -75,6 +75,12 @@ function GroupsTab({
   const [comparisonResult, setComparisonResult] = useState(null);
   const [scraperSnapshot, setScraperSnapshot] = useState(null);
   const [showComparison, setShowComparison] = useState(false);
+  const [groupImportInput, setGroupImportInput] = useState('');
+  const [groupImportSeason, setGroupImportSeason] = useState('');
+  const [groupImportDetails, setGroupImportDetails] = useState([]);
+  const [groupImportLogs, setGroupImportLogs] = useState([]);
+  const [groupImportLoading, setGroupImportLoading] = useState(false);
+  const [groupImportError, setGroupImportError] = useState(null);
   
   // Match Detail States
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -183,6 +189,12 @@ function GroupsTab({
 
     return Array.from(groups.values());
   }, [teamSeasons, teams]);
+
+  useEffect(() => {
+    if (!groupImportSeason && groupedData && groupedData.length > 0) {
+      setGroupImportSeason(groupedData[0].season || '');
+    }
+  }, [groupImportSeason, groupedData]);
 
   // Gruppiere nach Kategorien
   const categoriesMap = useMemo(() => {
@@ -476,6 +488,82 @@ function GroupsTab({
     return match ? match[1] : null;
   };
 
+  const sanitizeGroupInput = (value) => {
+    if (!value) return [];
+    return value
+      .split(/[\s,;]+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+  };
+
+  const buildDetailKey = (detail) => {
+    const rawIdentifier = detail?.group?.groupName || detail?.group?.groupId || '';
+    const groupId = extractGroupId(rawIdentifier);
+    const category = (detail?.group?.category || '').toLowerCase() || 'category';
+    const league = (detail?.group?.league || '').toLowerCase() || 'league';
+    return `${category}::${league}::${groupId || rawIdentifier || Math.random().toString(36).slice(2)}`;
+  };
+
+  const buildGroupMetaFromDetail = (detail, seasonOverride) => {
+    const rawGroup = detail?.group || {};
+    const baseName = rawGroup.groupName || rawGroup.groupId || '';
+    const groupId = extractGroupId(baseName) || extractGroupId(rawGroup.groupId || '');
+    const prettyGroupName = baseName
+      || (groupId ? `Gr. ${groupId.toString().padStart(3, '0')}` : 'Unbekannte Gruppe');
+    return {
+      category: rawGroup.category || detail?.meta?.category || 'Unbekannt',
+      league: rawGroup.league || detail?.meta?.league || 'Unbekannt',
+      groupName: prettyGroupName,
+      season: seasonOverride || rawGroup.season || detail?.season || groupImportSeason || 'Unbekannt'
+    };
+  };
+
+  const buildScrapedDataFromDetail = (detail, seasonOverride) => ({
+    group: detail?.group || {},
+    teamsDetailed: detail?.teamsDetailed || [],
+    standings: detail?.standings || [],
+    matches: detail?.matches || [],
+    season: seasonOverride || detail?.season || groupImportSeason || ''
+  });
+
+  const summarizeImportResult = (importResult = {}) => {
+    const parts = [];
+    const matchTotal = (importResult.matchesImported || 0) + (importResult.matchesUpdated || 0);
+    if (matchTotal > 0) parts.push(`${matchTotal} Matches`);
+    if (importResult.matchResultsImported) parts.push(`${importResult.matchResultsImported} Ergebnisse`);
+    if (importResult.clubsCreated) parts.push(`${importResult.clubsCreated} Vereine`);
+    if (importResult.teamsCreated) parts.push(`${importResult.teamsCreated} Teams`);
+    if (importResult.teamSeasonsCreated) parts.push(`${importResult.teamSeasonsCreated} Team-Seasons`);
+    return parts.length > 0 ? parts.join(' · ') : 'Import abgeschlossen';
+  };
+
+  const updateImportDetailStatus = (detailKey, status, summary = null) => {
+    setGroupImportDetails((prev) =>
+      prev.map((detail) =>
+        detail.__importKey === detailKey
+          ? {
+              ...detail,
+              __importStatus: status,
+              ...(summary !== null ? { __importSummary: summary } : {})
+            }
+          : detail
+      )
+    );
+  };
+
+  const getImporterStatusLabel = (status) => {
+    switch (status) {
+      case 'running':
+        return 'Import läuft…';
+      case 'success':
+        return 'Import erfolgreich';
+      case 'error':
+        return 'Fehler';
+      default:
+        return 'Bereit';
+    }
+  };
+
   // Wähle Gruppe anhand URL-Param (group=NNN) sobald Daten da sind
   useEffect(() => {
     try {
@@ -664,6 +752,163 @@ function GroupsTab({
       alert(`Fehler beim Import: ${error.message}`);
     } finally {
       setScraperLoading(false);
+    }
+  };
+
+  const handleFetchGroupImportData = async () => {
+    const sanitizedGroups = sanitizeGroupInput(groupImportInput);
+    setGroupImportError(null);
+    setGroupImportLogs([]);
+    setGroupImportDetails([]);
+    setGroupImportLoading(true);
+
+    try {
+      const payload = {
+        includeMatches: true,
+        requestDelayMs: 350
+      };
+
+      if (sanitizedGroups.length > 0) {
+        payload.groups = sanitizedGroups.join(',');
+      }
+      if (groupImportSeason) {
+        payload.season = groupImportSeason;
+      }
+
+      const response = await fetch('/api/import/scrape-nuliga', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const rawText = await response.text();
+      const data = rawText ? JSON.parse(rawText) : {};
+
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || 'nuLiga-Daten konnten nicht geladen werden.');
+      }
+
+      const details = Array.isArray(data.details) ? data.details : [];
+      if (details.length === 0) {
+        setGroupImportError('Keine Gruppen im nuLiga-Response gefunden. Bitte Filter prüfen.');
+        return;
+      }
+
+      const mappedDetails = details.map((detail) => ({
+        ...detail,
+        __importKey: buildDetailKey(detail),
+        __importStatus: 'pending',
+        __importSummary: null
+      }));
+
+      setGroupImportDetails(mappedDetails);
+      if (!groupImportSeason && data.season) {
+        setGroupImportSeason(data.season);
+      }
+    } catch (error) {
+      console.error('❌ Fehler beim Laden der nuLiga-Daten:', error);
+      setGroupImportError(error.message || 'Unbekannter Fehler beim Abrufen der nuLiga-Daten.');
+    } finally {
+      setGroupImportLoading(false);
+    }
+  };
+
+  const runGroupImport = async (detail) => {
+    const detailKey = detail.__importKey || buildDetailKey(detail);
+    const groupMeta = buildGroupMetaFromDetail(detail, groupImportSeason);
+    const scrapedData = buildScrapedDataFromDetail(detail, groupImportSeason);
+    updateImportDetailStatus(detailKey, 'running');
+
+    try {
+      const { data: clubsData, error: clubsError } = await supabase.from('club_info').select('*');
+      if (clubsError) throw clubsError;
+      const { data: teamsData, error: teamsError } = await supabase.from('team_info').select('*');
+      if (teamsError) throw teamsError;
+
+      const importResult = await importGroupFromNuLiga(
+        groupMeta,
+        scrapedData,
+        supabase,
+        clubsData || [],
+        teamsData || []
+      );
+
+      const summary = summarizeImportResult(importResult);
+      updateImportDetailStatus(detailKey, 'success', summary);
+      setGroupImportLogs((prev) => [
+        {
+          timestamp: new Date().toISOString(),
+          group: groupMeta.groupName,
+          status: 'success',
+          summary,
+          errors: importResult.errors || []
+        },
+        ...prev
+      ]);
+
+      if (loadDashboardData) {
+        await loadDashboardData();
+      }
+
+      return importResult;
+    } catch (error) {
+      console.error('❌ Fehler beim Gruppenimport:', error);
+      updateImportDetailStatus(detailKey, 'error', error.message);
+      setGroupImportLogs((prev) => [
+        {
+          timestamp: new Date().toISOString(),
+          group: groupMeta.groupName,
+          status: 'error',
+          summary: error.message,
+          errors: [error]
+        },
+        ...prev
+      ]);
+      throw error;
+    }
+  };
+
+  const handleImportSingleGroup = async (detail) => {
+    setGroupImportError(null);
+    setGroupImportLoading(true);
+    try {
+      await runGroupImport(detail);
+    } catch (error) {
+      setGroupImportError(error.message || 'Import fehlgeschlagen.');
+    } finally {
+      setGroupImportLoading(false);
+    }
+  };
+
+  const handleImportAllGroups = async () => {
+    if (groupImportDetails.length === 0) {
+      setGroupImportError('Bitte zuerst Gruppen aus nuLiga laden.');
+      return;
+    }
+
+    const pending = groupImportDetails.filter((detail) => detail.__importStatus !== 'success');
+    if (pending.length === 0) {
+      setGroupImportError('Alle geladenen Gruppen wurden bereits importiert.');
+      return;
+    }
+
+    setGroupImportError(null);
+    setGroupImportLoading(true);
+    let lastError = null;
+
+    try {
+      for (const detail of pending) {
+        try {
+          await runGroupImport(detail);
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      if (lastError) {
+        setGroupImportError(lastError.message || 'Mindestens ein Import ist fehlgeschlagen.');
+      }
+    } finally {
+      setGroupImportLoading(false);
     }
   };
 
@@ -2171,6 +2416,161 @@ function GroupsTab({
         <p className="groups-subtitle">
           Übersicht aller Gruppen nach Altersklassen und Ligen
         </p>
+      </div>
+
+      <div className="group-importer-card">
+        <div className="group-importer-header">
+          <div>
+            <h3 className="group-importer-title">nuLiga Gruppenimport</h3>
+            <p className="group-importer-subtitle">
+              Vereine, Teams, Saisons & Matchdays direkt aus nuLiga übernehmen
+            </p>
+          </div>
+          <div className="group-importer-actions">
+            <button
+              className="group-importer-btn primary"
+              onClick={handleImportAllGroups}
+              disabled={groupImportLoading || groupImportDetails.length === 0}
+            >
+              <Download size={16} />
+              Alle importieren
+            </button>
+          </div>
+        </div>
+
+        <div className="group-importer-grid">
+          <div className="group-importer-field">
+            <label>Gruppen-IDs (z.B. 34, 35, 36)</label>
+            <input
+              type="text"
+              value={groupImportInput}
+              onChange={(e) => setGroupImportInput(e.target.value)}
+              placeholder="Leer lassen = alle Gruppen laut nuLiga"
+            />
+            <span className="group-importer-hint">
+              Mehrere IDs durch Komma oder Leerzeichen trennen
+            </span>
+          </div>
+          <div className="group-importer-field">
+            <label>Saison</label>
+            <input
+              type="text"
+              value={groupImportSeason}
+              onChange={(e) => setGroupImportSeason(e.target.value)}
+              placeholder="z.B. Winter 2025/26"
+            />
+            <span className="group-importer-hint">
+              Wird an den Scraper weitergegeben (optional)
+            </span>
+          </div>
+        </div>
+
+        <div className="group-importer-buttons">
+          <button
+            className="group-importer-btn"
+            onClick={handleFetchGroupImportData}
+            disabled={groupImportLoading}
+          >
+            {groupImportLoading && groupImportDetails.length === 0 ? (
+              <>
+                <Loader size={16} className="spinning" />
+                Lädt nuLiga-Daten…
+              </>
+            ) : (
+              <>
+                <RefreshCw size={16} />
+                nuLiga Daten laden
+              </>
+            )}
+          </button>
+          {groupImportDetails.length > 0 && (
+            <button
+              className="group-importer-btn ghost"
+              onClick={handleImportAllGroups}
+              disabled={groupImportLoading}
+            >
+              <Download size={16} />
+              Offene Gruppen importieren
+            </button>
+          )}
+        </div>
+
+        {groupImportError && (
+          <div className="group-importer-alert error">
+            <AlertCircle size={18} />
+            <span>{groupImportError}</span>
+          </div>
+        )}
+
+        {groupImportDetails.length > 0 && (
+          <div className="group-importer-results">
+            <table>
+              <thead>
+                <tr>
+                  <th>Gruppe</th>
+                  <th>Liga</th>
+                  <th>Kategorie</th>
+                  <th>Saison</th>
+                  <th>Matches</th>
+                  <th>Status</th>
+                  <th>Aktion</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groupImportDetails.map((detail) => {
+                  const status = detail.__importStatus || 'pending';
+                  const groupLabel = detail.group?.groupName || detail.group?.groupId || 'Unbekannt';
+                  return (
+                    <tr key={detail.__importKey}>
+                      <td>{groupLabel}</td>
+                      <td>{detail.group?.league || '–'}</td>
+                      <td>{detail.group?.category || '–'}</td>
+                      <td>{groupImportSeason || detail.season || '–'}</td>
+                      <td>{detail.matches?.length ?? 0}</td>
+                      <td>
+                        <span className={`status-badge status-${status}`}>
+                          {status === 'running' && <Loader size={14} className="spinning" />}
+                          {getImporterStatusLabel(status)}
+                        </span>
+                        {detail.__importSummary && (
+                          <div className="status-hint">{detail.__importSummary}</div>
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          className="group-importer-btn secondary"
+                          onClick={() => handleImportSingleGroup(detail)}
+                          disabled={groupImportLoading}
+                        >
+                          Importieren
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {groupImportLogs.length > 0 && (
+          <div className="group-importer-log">
+            <h4>Letzte Aktionen</h4>
+            <ul>
+              {groupImportLogs.slice(0, 6).map((entry, index) => (
+                <li key={`${entry.timestamp}-${entry.group}-${index}`}>
+                  <div className="log-entry-headline">
+                    <strong>{entry.group}</strong>
+                    <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                  </div>
+                  <div className={`status-badge status-${entry.status}`}>
+                    {entry.summary}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       <div className="groups-content">
