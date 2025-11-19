@@ -225,6 +225,27 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
     });
   }
   
+  // WICHTIG: Lade Team-IDs aus dem Matchday für primary_team_id Zuweisung
+  let homeTeamId = null;
+  let awayTeamId = null;
+  try {
+    const { data: matchdayData, error: matchdayError } = await supabase
+      .from('matchdays')
+      .select('home_team_id, away_team_id')
+      .eq('id', matchdayId)
+      .maybeSingle();
+    
+    if (!matchdayError && matchdayData) {
+      homeTeamId = matchdayData.home_team_id;
+      awayTeamId = matchdayData.away_team_id;
+      console.log(`[meeting-report] ✅ Team-IDs geladen: home=${homeTeamId}, away=${awayTeamId}`);
+    } else if (matchdayError) {
+      console.warn(`[meeting-report] ⚠️ Fehler beim Laden der Team-IDs:`, matchdayError.message);
+    }
+  } catch (teamIdError) {
+    console.warn(`[meeting-report] ⚠️ Fehler beim Laden der Team-IDs:`, teamIdError.message);
+  }
+  
   const rows = [];
   let counter = 0;
   const playerCache = new Map();
@@ -381,6 +402,14 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
       return null; // Kein Spieler angetreten - kein Fehler
     }
     
+    // Bestimme primary_team_id aus context
+    let primaryTeamId = null;
+    if (context?.side === 'home' && homeTeamId) {
+      primaryTeamId = homeTeamId;
+    } else if (context?.side === 'away' && awayTeamId) {
+      primaryTeamId = awayTeamId;
+    }
+    
     const cacheKey = name.toLowerCase();
     if (playerCache.has(cacheKey)) return playerCache.get(cacheKey);
 
@@ -488,15 +517,79 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
       );
       
       // Aktualisiere LK, falls vorhanden und unterschiedlich
+      // Aktualisiere auch primary_team_id, falls noch nicht gesetzt
+      const updateData = {};
       if (playerLk && bestMatch.current_lk !== playerLk) {
+        updateData.current_lk = playerLk;
+      }
+      
+      // Setze primary_team_id, falls noch nicht gesetzt
+      let primaryTeamId = null;
+      if (context?.side === 'home' && homeTeamId) {
+        primaryTeamId = homeTeamId;
+      } else if (context?.side === 'away' && awayTeamId) {
+        primaryTeamId = awayTeamId;
+      }
+      
+      if (primaryTeamId && !bestMatch.primary_team_id) {
+        updateData.primary_team_id = primaryTeamId;
+      }
+      
+      if (Object.keys(updateData).length > 0) {
         try {
           await supabase
             .from('players_unified')
-            .update({ current_lk: playerLk })
+            .update(updateData)
             .eq('id', bestMatch.id);
-          console.log(`[meeting-report] ✅ LK aktualisiert für "${bestMatch.name}": ${bestMatch.current_lk} → ${playerLk}`);
+          
+          if (updateData.current_lk) {
+            console.log(`[meeting-report] ✅ LK aktualisiert für "${bestMatch.name}": ${bestMatch.current_lk} → ${playerLk}`);
+          }
+          if (updateData.primary_team_id) {
+            console.log(`[meeting-report] ✅ primary_team_id gesetzt für "${bestMatch.name}": ${primaryTeamId}`);
+            
+            // Erstelle auch team_membership, falls noch nicht vorhanden
+            try {
+              const { data: matchdayData } = await supabase
+                .from('matchdays')
+                .select('season')
+                .eq('id', matchdayId)
+                .maybeSingle();
+              
+              const season = matchdayData?.season || null;
+              
+              const { data: existingMembership } = await supabase
+                .from('team_memberships')
+                .select('id')
+                .eq('player_id', bestMatch.id)
+                .eq('team_id', primaryTeamId)
+                .eq('season', season || '')
+                .maybeSingle();
+              
+              if (!existingMembership) {
+                const { error: membershipError } = await supabase
+                  .from('team_memberships')
+                  .insert({
+                    player_id: bestMatch.id,
+                    team_id: primaryTeamId,
+                    season: season || null,
+                    role: 'player',
+                    is_active: true,
+                    is_primary: true
+                  });
+                
+                if (membershipError) {
+                  console.warn(`[meeting-report] ⚠️ Fehler beim Erstellen der team_membership:`, membershipError.message);
+                } else {
+                  console.log(`[meeting-report] ✅ Team-Membership erstellt für bestehenden Spieler ${bestMatch.id}`);
+                }
+              }
+            } catch (membershipError) {
+              console.warn(`[meeting-report] ⚠️ Fehler beim Erstellen der team_membership:`, membershipError.message);
+            }
+          }
         } catch (updateError) {
-          console.warn(`[meeting-report] ⚠️ Fehler beim LK-Update für "${bestMatch.name}":`, updateError.message);
+          console.warn(`[meeting-report] ⚠️ Fehler beim Update für "${bestMatch.name}":`, updateError.message);
         }
       }
       
@@ -525,7 +618,8 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
           current_lk: playerLk || null,
           import_source: 'ai_import', // WICHTIG: 'nuliga_scraper' ist nicht erlaubt, verwende 'ai_import'
           import_lk: playerLk || null,
-          is_active: false // Spieler aus nuLiga sind zunächst nicht aktiv (kein User-Account)
+          is_active: false, // Spieler aus nuLiga sind zunächst nicht aktiv (kein User-Account)
+          primary_team_id: primaryTeamId || null // WICHTIG: Setze primary_team_id basierend auf context.side
         })
         .select()
         .single();
@@ -561,7 +655,53 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
         return null;
       }
       
-      console.log(`[meeting-report] ✅ Neuer Spieler erstellt: "${name}" (ID: ${newPlayer.id}, LK: ${playerLk || 'keine'})`);
+      console.log(`[meeting-report] ✅ Neuer Spieler erstellt: "${name}" (ID: ${newPlayer.id}, LK: ${playerLk || 'keine'}, primary_team_id: ${primaryTeamId || 'keine'})`);
+      
+      // Wenn primary_team_id gesetzt wurde, erstelle auch eine team_membership
+      if (primaryTeamId && newPlayer.id) {
+        try {
+          // Lade season aus matchday
+          const { data: matchdayData } = await supabase
+            .from('matchdays')
+            .select('season')
+            .eq('id', matchdayId)
+            .maybeSingle();
+          
+          const season = matchdayData?.season || null;
+          
+          // Prüfe ob team_membership bereits existiert
+          const { data: existingMembership } = await supabase
+            .from('team_memberships')
+            .select('id')
+            .eq('player_id', newPlayer.id)
+            .eq('team_id', primaryTeamId)
+            .eq('season', season || '')
+            .maybeSingle();
+          
+          if (!existingMembership) {
+            // Erstelle team_membership
+            const { error: membershipError } = await supabase
+              .from('team_memberships')
+              .insert({
+                player_id: newPlayer.id,
+                team_id: primaryTeamId,
+                season: season || null,
+                role: 'player',
+                is_active: true,
+                is_primary: true // Markiere als primäres Team
+              });
+            
+            if (membershipError) {
+              console.warn(`[meeting-report] ⚠️ Fehler beim Erstellen der team_membership für Spieler ${newPlayer.id}:`, membershipError.message);
+            } else {
+              console.log(`[meeting-report] ✅ Team-Membership erstellt für Spieler ${newPlayer.id} (Team: ${primaryTeamId}, Season: ${season || 'keine'})`);
+            }
+          }
+        } catch (membershipError) {
+          console.warn(`[meeting-report] ⚠️ Fehler beim Erstellen der team_membership:`, membershipError.message);
+        }
+      }
+      
       playerCache.set(cacheKey, newPlayer.id);
       return newPlayer.id;
     } catch (createError) {
