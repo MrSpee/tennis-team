@@ -112,7 +112,7 @@ function OnboardingFlow() {
           is_captain,
           status,
           onboarding_status,
-          team_info!inner (
+          primary_team:team_info!players_unified_primary_team_id_fkey (
             club_name,
             team_name,
             category
@@ -1020,10 +1020,10 @@ function OnboardingFlow() {
                               ...prev,
                               name: player.name,
                               current_lk: player.import_lk || player.current_lk || '',
-                              customTeams: player.primary_team_id ? [{
+                              customTeams: player.primary_team_id && player.primary_team ? [{
                                 id: player.primary_team_id,
-                                club_name: player.team_info.club_name,
-                                category: player.team_info.team_name || player.team_info.category,
+                                club_name: player.primary_team.club_name,
+                                category: player.primary_team.team_name || player.primary_team.category,
                                 season: formData.currentSeason,
                                 league: 'Automatisch übernommen',
                                 team_size: 6
@@ -1046,7 +1046,7 @@ function OnboardingFlow() {
                             {player.is_captain && <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem' }}>👑 MF</span>}
                           </div>
                           <div style={{ fontSize: '0.85rem', color: '#78350f' }}>
-                            {player.team_info.club_name} • {player.team_info.team_name || player.team_info.category}
+                            {player.primary_team?.club_name || 'Unbekannter Club'} • {player.primary_team?.team_name || player.primary_team?.category || 'Unbekannt'}
                             {(player.import_lk || player.current_lk) && ` • LK ${player.import_lk || player.current_lk}`}
                           </div>
                         </div>
