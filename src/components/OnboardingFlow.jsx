@@ -118,8 +118,8 @@ function OnboardingFlow() {
             category
           )
         `)
-        .eq('status', 'pending') // Nur wartende Spieler (ehemalige imported_players)
-        .eq('onboarding_status', 'not_started')
+        .eq('onboarding_status', 'not_started') // Nur Spieler, die noch nicht onboarded sind
+        .is('user_id', null) // Nur Spieler ohne User-Account (noch nicht registriert)
         .ilike('name', `%${searchTerm}%`)
         .order('name', { ascending: true })
         .limit(10);
