@@ -355,15 +355,16 @@ function OnboardingFlow() {
         });
       }
 
-      // 4️⃣ Erstelle team_memberships für alle gewählten Teams
+      // 4️⃣ Erstelle/aktualisiere Team-Memberships für alle gewählten Teams
       let teamsFromDB = 0;
       let teamsManual = 0;
+      let primaryTeamId = null;
       
       for (let i = 0; i < formData.customTeams.length; i++) {
         const team = formData.customTeams[i];
         let teamId = team.id;
         
-        console.log(`🔗 Creating team_membership entry ${i + 1}/${formData.customTeams.length}:`, team);
+        console.log(`🔗 Linking player to team ${i + 1}/${formData.customTeams.length}:`, team);
 
         // Wenn Team ein custom_ Team ist, erstelle es zuerst in team_info
         if (team.id.startsWith('custom_')) {
@@ -388,7 +389,7 @@ function OnboardingFlow() {
           console.log('✅ Custom team created with ID:', teamId);
           teamsManual++;
           await LoggingService.logManualTeamEntry(newTeam);
-          
+
           // Erstelle auch team_seasons für custom Team
           if (team.league && team.league !== 'Unbekannt') {
             await supabase
@@ -409,28 +410,50 @@ function OnboardingFlow() {
           await LoggingService.logTeamSelectionFromDB(team);
         }
         
-        // Jetzt erstelle team_membership mit echter team_id
-        const { error: teamError } = await supabase
-          .from('team_memberships')
-          .insert({
-            player_id: finalPlayerId,
-            team_id: teamId,
-            is_active: true,
-            is_primary: i === 0, // Erstes Team ist primär
-            role: 'player',
-            season: formData.currentSeason,
-            created_at: new Date().toISOString()
-          });
+        // Merke primäres Team (erstes in der Liste)
+        if (!primaryTeamId) {
+          primaryTeamId = teamId;
+        }
 
-        if (teamError) {
-          console.error('❌ Error creating team_membership:', teamError);
+        // Upsert in team_memberships (ermöglicht Mehrfach-Teams)
+        const membershipPayload = {
+          player_id: finalPlayerId,
+          team_id: teamId,
+          season: formData.currentSeason,
+          role: 'player',
+          is_primary: i === 0,
+          is_active: true,
+          updated_at: new Date().toISOString()
+        };
+
+        const { error: membershipError } = await supabase
+          .from('team_memberships')
+          .upsert(membershipPayload, { onConflict: 'player_id,team_id,season' });
+
+        if (membershipError) {
+          console.error('❌ Error upserting team_membership:', membershipError);
           throw new Error(`Fehler beim Zuordnen zu Team ${team.category}`);
         }
 
-        console.log(`✅ Player assigned to team: ${team.category}`);
+        console.log(`✅ Team-Membership gespeichert für Team: ${team.category}`);
       }
 
-      console.log('✅ All teams assigned successfully');
+      if (primaryTeamId) {
+        console.log('✅ Updating primary_team_id for player:', primaryTeamId);
+        const { error: primaryTeamError } = await supabase
+          .from('players_unified')
+          .update({ primary_team_id: primaryTeamId, updated_at: new Date().toISOString() })
+          .eq('id', finalPlayerId);
+
+        if (primaryTeamError) {
+          console.error('❌ Error updating primary_team_id:', primaryTeamError);
+          throw new Error('Fehler beim Verknüpfen mit deiner Mannschaft');
+        }
+      } else {
+        console.warn('⚠️ Kein Team ausgewählt, primary_team_id bleibt unverändert');
+      }
+
+      console.log('✅ Team-Zuordnung abgeschlossen (team_memberships + primary_team_id)');
 
       // 5️⃣ Lösche LOCAL Storage
       localStorage.removeItem('localPlayerData');
