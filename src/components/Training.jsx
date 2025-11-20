@@ -229,8 +229,7 @@ function Training() {
 
   // Lade Trainings
   const loadTrainings = async () => {
-    // Wenn noch keine Teams geladen sind, skippe
-    if (!userTeams || userTeams.length === 0) {
+    if (!userTeams) {
       console.log('⏭️ Skipping loadTrainings - userTeams not loaded yet');
       return;
     }
@@ -331,9 +330,9 @@ function Training() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [player]);
 
-  // Lade Trainings wenn userTeams gesetzt wurde
+  // Lade Trainings wenn userTeams geladen wurde (auch wenn leer)
   useEffect(() => {
-    if (userTeams && userTeams.length > 0 && player?.id) {
+    if (userTeams && player?.id) {
       loadTrainings();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
