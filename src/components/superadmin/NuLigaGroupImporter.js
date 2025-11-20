@@ -353,21 +353,35 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
       }
       
       // Prüfe ob Match bereits existiert (primär über match_number)
+      // WICHTIG: match_number ist eindeutig, daher suchen wir auch über alle Saisons/Leagues/Groups
       let existingMatch = null;
       
       if (match.matchNumber) {
-        const { data } = await supabase
+        // Zuerst: Suche in aktueller Saison/League/Group
+        const { data: dataInGroup } = await supabase
           .from('matchdays')
-          .select('id, match_number, home_team_id, away_team_id, match_date')
+          .select('id, match_number, home_team_id, away_team_id, match_date, season, league, group_name')
           .eq('match_number', match.matchNumber)
           .eq('season', group.season)
           .eq('league', group.league)
           .eq('group_name', group.groupName)
           .maybeSingle();
         
-        existingMatch = data;
-        if (existingMatch) {
-          console.log(`[importMatches] ✅ Bestehendes Match gefunden über match_number #${match.matchNumber}`);
+        if (dataInGroup) {
+          existingMatch = dataInGroup;
+          console.log(`[importMatches] ✅ Bestehendes Match gefunden über match_number #${match.matchNumber} in Gruppe ${group.groupName}`);
+        } else {
+          // Fallback: Suche über alle Saisons/Leagues/Groups (match_number ist eindeutig)
+          const { data: dataAnywhere } = await supabase
+            .from('matchdays')
+            .select('id, match_number, home_team_id, away_team_id, match_date, season, league, group_name')
+            .eq('match_number', match.matchNumber)
+            .maybeSingle();
+          
+          if (dataAnywhere) {
+            existingMatch = dataAnywhere;
+            console.log(`[importMatches] ⚠️ Bestehendes Match gefunden über match_number #${match.matchNumber} in anderer Gruppe (${dataAnywhere.group_name}) - wird aktualisiert`);
+          }
         }
       }
       
@@ -376,7 +390,7 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
         const matchDateOnly = new Date(match.matchDateIso).toISOString().split('T')[0];
         const { data } = await supabase
           .from('matchdays')
-          .select('id, match_number, home_team_id, away_team_id, match_date')
+          .select('id, match_number, home_team_id, away_team_id, match_date, season, league, group_name')
           .eq('home_team_id', homeTeam.id)
           .eq('away_team_id', awayTeam.id)
           .gte('match_date', `${matchDateOnly}T00:00:00`)
@@ -434,18 +448,51 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
         console.log(`[importMatches] ✅ Match #${match.matchNumber} aktualisiert`);
       } else {
         // Erstelle neues Match
-        const { error } = await supabase
+        const { data: newMatch, error } = await supabase
           .from('matchdays')
           .insert(matchData)
           .select()
           .single();
         
         if (error) {
-          console.error(`[importMatches] ❌ Fehler beim Erstellen von Match #${match.matchNumber}:`, error);
-          throw error;
+          // WICHTIG: Wenn match_number bereits existiert (409 Conflict), finde das Match und update es
+          if (error.code === '23505' && error.message?.includes('match_number')) {
+            console.log(`[importMatches] ⚠️ Match #${match.matchNumber} existiert bereits (Unique Constraint), suche und update...`);
+            
+            // Suche das existierende Match (auch über alle Saisons/Leagues/Groups)
+            const { data: foundMatch } = await supabase
+              .from('matchdays')
+              .select('id, match_number, home_team_id, away_team_id, match_date, season, league, group_name')
+              .eq('match_number', match.matchNumber)
+              .maybeSingle();
+            
+            if (foundMatch) {
+              // Update das existierende Match
+              const { error: updateError } = await supabase
+                .from('matchdays')
+                .update(matchData)
+                .eq('id', foundMatch.id);
+              
+              if (updateError) {
+                console.error(`[importMatches] ❌ Fehler beim Update von Match #${match.matchNumber} nach Conflict:`, updateError);
+                throw updateError;
+              }
+              
+              result.matchesUpdated++;
+              console.log(`[importMatches] ✅ Match #${match.matchNumber} aktualisiert (nach Conflict-Erkennung)`);
+            } else {
+              // Match nicht gefunden trotz Unique Constraint - das sollte nicht passieren
+              console.error(`[importMatches] ❌ Match #${match.matchNumber} existiert laut Constraint, aber nicht gefunden!`);
+              throw error;
+            }
+          } else {
+            console.error(`[importMatches] ❌ Fehler beim Erstellen von Match #${match.matchNumber}:`, error);
+            throw error;
+          }
+        } else {
+          result.matchesImported++;
+          console.log(`[importMatches] ✅ Match #${match.matchNumber} erstellt (Datum: ${match.matchDateIso || 'kein Datum'})`);
         }
-        result.matchesImported++;
-        console.log(`[importMatches] ✅ Match #${match.matchNumber} erstellt (Datum: ${match.matchDateIso || 'kein Datum'})`);
       }
     } catch (error) {
       result.errors.push({
