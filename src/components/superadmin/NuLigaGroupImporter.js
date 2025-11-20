@@ -104,16 +104,50 @@ async function ensureClubs(scrapedData, existingClubs, supabase, result) {
           .select()
           .single();
         
-        if (error) throw error;
-        
-        clubMap.set(clubName, newClub);
-        result.clubsCreated++;
+        if (error) {
+          // Wenn Club bereits existiert (409 Conflict oder Unique Constraint), versuche ihn zu finden
+          if (error.code === '23505' || error.code === 'PGRST116' || error.status === 409) {
+            console.log(`[ensureClubs] ⚠️ Club "${clubName}" existiert bereits, suche in DB...`);
+            const { data: foundClub } = await supabase
+              .from('club_info')
+              .select('*')
+              .ilike('name', clubName)
+              .limit(1)
+              .maybeSingle();
+            
+            if (foundClub) {
+              clubMap.set(clubName, foundClub);
+              console.log(`[ensureClubs] ✅ Club gefunden: ${foundClub.name} (ID: ${foundClub.id})`);
+            } else {
+              // Versuche mit normalized_name
+              const { data: foundByNormalized } = await supabase
+                .from('club_info')
+                .select('*')
+                .eq('normalized_name', normalized)
+                .limit(1)
+                .maybeSingle();
+              
+              if (foundByNormalized) {
+                clubMap.set(clubName, foundByNormalized);
+                console.log(`[ensureClubs] ✅ Club gefunden via normalized_name: ${foundByNormalized.name}`);
+              } else {
+                throw error; // Wenn wirklich nicht gefunden, werfe Fehler
+              }
+            }
+          } else {
+            throw error;
+          }
+        } else {
+          clubMap.set(clubName, newClub);
+          result.clubsCreated++;
+        }
       } catch (error) {
         result.errors.push({
           type: 'club_creation_error',
           clubName,
           error: error.message
         });
+        console.error(`[ensureClubs] ❌ Fehler beim Erstellen/Suchen von Club "${clubName}":`, error);
       }
     }
   }
@@ -621,21 +655,30 @@ async function importMatchResults(scrapedData, group, supabase, result) {
         }
         result.matchResultsImported++;
       } else {
-        // WICHTIG: Bestimmte Fehler sind ok (z.B. MEETING_ID_NOT_AVAILABLE)
+        // WICHTIG: Bestimmte Fehler sind ok (z.B. MEETING_ID_NOT_AVAILABLE, MATCH_NOT_FOUND)
         const errorCode = responseData.errorCode;
+        const errorMessage = responseData.error || `HTTP ${response.status}: Unbekannter Fehler`;
         const isExpectedError = errorCode === 'MEETING_ID_NOT_AVAILABLE' || 
                                 errorCode === 'MATCH_NOT_FOUND' ||
-                                response.status === 200; // 200 mit success: false ist ok
+                                (response.status === 200 && !responseData.success); // 200 mit success: false ist ok
         
         if (!isExpectedError) {
+          // 500 Error oder andere unerwartete Fehler
+          console.error(`[importMatchResults] ❌ Fehler beim Import für Match #${match.matchNumber}:`, {
+            status: response.status,
+            errorCode,
+            error: errorMessage,
+            responseData
+          });
           result.errors.push({
             type: 'match_results_import_error',
             matchNumber: match.matchNumber,
-            error: responseData.error || `HTTP ${response.status}: Unbekannter Fehler`,
-            errorCode
+            error: errorMessage,
+            errorCode,
+            httpStatus: response.status
           });
         } else {
-          console.log(`[importMatchResults] ℹ️ Match-Results Import übersprungen für Match #${match.matchNumber}: ${responseData.error || 'Meeting-ID nicht verfügbar'}`);
+          console.log(`[importMatchResults] ℹ️ Match-Results Import übersprungen für Match #${match.matchNumber}: ${errorMessage}`);
         }
       }
     } catch (error) {
