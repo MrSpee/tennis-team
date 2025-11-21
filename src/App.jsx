@@ -98,10 +98,14 @@ function ProtectedRoute({ children }) {
     return <Navigate to="/login" />;
   }
   
-  // Eingeloggt aber kein Team → Onboarding (nur wenn nicht bereits auf /login)
-  if (needsOnboarding && window.location.pathname !== '/onboarding' && window.location.pathname !== '/login') {
+  // Eingeloggt aber kein Team → Onboarding (nur wenn nicht bereits auf /login oder /onboarding)
+  // In Development: Überspringe Onboarding-Weiterleitung komplett
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  if (needsOnboarding && !isDevelopment && window.location.pathname !== '/onboarding' && window.location.pathname !== '/login') {
     return <Navigate to="/onboarding" />;
   }
+  
+  // In Development: Onboarding-Weiterleitung deaktiviert - User bleibt auf aktueller Seite
   
   return children;
 }

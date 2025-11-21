@@ -48,6 +48,10 @@ function Dashboard() {
     mutualCount: 0             // Freunde (gegenseitig)
   });
 
+  // 🎾 State für Social Feed
+  const [socialFeed, setSocialFeed] = useState([]);
+  const [loadingFeed, setLoadingFeed] = useState(false);
+
   // Timer für Live-Updates (alle 30 Sekunden)
   useEffect(() => {
     const interval = setInterval(() => {
@@ -165,7 +169,7 @@ function Dashboard() {
     loadMatchResults();
   }, [matches]);
   
-  // 🎾 Lade Social Stats (Tennismates)
+  // 🎾 Lade Social Stats (Tennismates) und Feed
   useEffect(() => {
     const loadSocialStats = async () => {
       if (!player?.id) return;
@@ -212,6 +216,11 @@ function Dashboard() {
           mutual: mutual.length,
           calculation: `${tennismates.length} Mates + ${following.length} Folge = ${totalUniqueConnections} einzigartige Personen`
         });
+
+        // 🎾 Lade Social Feed für befreundete Spieler (mutual)
+        if (mutual.length > 0) {
+          await loadSocialFeed(mutual.map(m => m.follower_id));
+        }
         
       } catch (error) {
         console.error('Error loading social stats:', error);
@@ -220,6 +229,226 @@ function Dashboard() {
     
     loadSocialStats();
   }, [player?.id]);
+
+  // 🎾 Lade Social Feed für befreundete Spieler
+  const loadSocialFeed = async (friendIds) => {
+    if (!friendIds || friendIds.length === 0) return;
+    
+    setLoadingFeed(true);
+    try {
+      const twoWeeksAgo = new Date();
+      twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+      
+      const feedItems = [];
+
+      // 1. Lade Spieler-Infos
+      const { data: players, error: playersError } = await supabase
+        .from('players_unified')
+        .select('id, name, current_lk, updated_at')
+        .in('id', friendIds);
+      
+      if (playersError) throw playersError;
+
+      // 2. Lade Match-Ergebnisse der letzten 2 Wochen
+      const { data: matchResults, error: resultsError } = await supabase
+        .from('match_results')
+        .select(`
+          id,
+          matchday_id,
+          match_number,
+          match_type,
+          home_score,
+          away_score,
+          winner,
+          status,
+          created_at,
+          updated_at,
+          home_player_id,
+          guest_player_id,
+          home_player1_id,
+          home_player2_id,
+          guest_player1_id,
+          guest_player2_id
+        `)
+        .or(`home_player_id.in.(${friendIds.join(',')}),guest_player_id.in.(${friendIds.join(',')}),home_player1_id.in.(${friendIds.join(',')}),home_player2_id.in.(${friendIds.join(',')}),guest_player1_id.in.(${friendIds.join(',')}),guest_player2_id.in.(${friendIds.join(',')})`)
+        .gte('created_at', twoWeeksAgo.toISOString())
+        .order('created_at', { ascending: false })
+        .limit(30);
+
+      // Lade Matchday-Infos separat
+      const matchdayIds = matchResults ? [...new Set(matchResults.map(mr => mr.matchday_id).filter(Boolean))] : [];
+      let matchdaysMap = {};
+      
+      if (matchdayIds.length > 0) {
+        const { data: matchdays, error: matchdaysError } = await supabase
+          .from('matchdays')
+          .select(`
+            id,
+            match_date,
+            home_team_id,
+            away_team_id,
+            home_score,
+            away_score,
+            team_info!matchdays_home_team_id_fkey(club_name, team_name),
+            team_info!matchdays_away_team_id_fkey(club_name, team_name)
+          `)
+          .in('id', matchdayIds);
+
+        if (!matchdaysError && matchdays) {
+          matchdays.forEach(md => {
+            matchdaysMap[md.id] = md;
+          });
+        }
+      }
+
+      if (!resultsError && matchResults) {
+        matchResults.forEach(result => {
+          // Finde beteiligte Spieler
+          const involvedPlayers = [];
+          if (result.home_player_id && friendIds.includes(result.home_player_id)) {
+            involvedPlayers.push(result.home_player_id);
+          }
+          if (result.guest_player_id && friendIds.includes(result.guest_player_id)) {
+            involvedPlayers.push(result.guest_player_id);
+          }
+          if (result.home_player1_id && friendIds.includes(result.home_player1_id)) {
+            involvedPlayers.push(result.home_player1_id);
+          }
+          if (result.home_player2_id && friendIds.includes(result.home_player2_id)) {
+            involvedPlayers.push(result.home_player2_id);
+          }
+          if (result.guest_player1_id && friendIds.includes(result.guest_player1_id)) {
+            involvedPlayers.push(result.guest_player1_id);
+          }
+          if (result.guest_player2_id && friendIds.includes(result.guest_player2_id)) {
+            involvedPlayers.push(result.guest_player2_id);
+          }
+
+          involvedPlayers.forEach(playerId => {
+            const playerInfo = players.find(p => p.id === playerId);
+            if (!playerInfo) return;
+
+            const matchday = matchdaysMap[result.matchday_id];
+            if (!matchday) return; // Skip if matchday not found
+
+            const isHome = result.home_player_id === playerId || 
+                          result.home_player1_id === playerId || 
+                          result.home_player2_id === playerId;
+            const won = (isHome && result.winner === 'home') || 
+                       (!isHome && (result.winner === 'guest' || result.winner === 'away'));
+
+            const opponent = isHome 
+              ? (matchday.team_info_away_team_id_fkey?.club_name || '') + ' ' + (matchday.team_info_away_team_id_fkey?.team_name || '')
+              : (matchday.team_info_home_team_id_fkey?.club_name || '') + ' ' + (matchday.team_info_home_team_id_fkey?.team_name || '');
+
+            feedItems.push({
+              type: 'match_result',
+              playerId: playerId,
+              playerName: playerInfo.name,
+              timestamp: new Date(result.created_at || result.updated_at),
+              data: {
+                matchType: result.match_type,
+                won,
+                homeScore: result.home_score,
+                awayScore: result.away_score,
+                opponent: opponent.trim(),
+                matchDate: matchday.match_date
+              }
+            });
+          });
+        });
+      }
+
+      // 3. Lade neue Matches (Matchdays) der letzten 2 Wochen für Teams befreundeter Spieler
+      // Zuerst: Finde Teams der befreundeten Spieler
+      const { data: friendTeams, error: teamsError } = await supabase
+        .from('team_memberships')
+        .select('team_id, player_id')
+        .in('player_id', friendIds)
+        .eq('is_active', true);
+
+      if (!teamsError && friendTeams && friendTeams.length > 0) {
+        const teamIds = [...new Set(friendTeams.map(ft => ft.team_id))];
+        
+        const { data: newMatches, error: matchesError } = await supabase
+          .from('matchdays')
+          .select(`
+            id,
+            match_number,
+            match_date,
+            home_team_id,
+            away_team_id,
+            home_score,
+            away_score,
+            team_info!matchdays_home_team_id_fkey(club_name, team_name),
+            team_info!matchdays_away_team_id_fkey(club_name, team_name)
+          `)
+          .or(`home_team_id.in.(${teamIds.join(',')}),away_team_id.in.(${teamIds.join(',')})`)
+          .gte('match_date', twoWeeksAgo.toISOString())
+          .order('match_date', { ascending: false })
+          .limit(20);
+
+        if (!matchesError && newMatches) {
+          newMatches.forEach(match => {
+            // Finde befreundete Spieler in diesem Match
+            const homeTeamMembers = friendTeams
+              .filter(ft => ft.team_id === match.home_team_id)
+              .map(ft => ft.player_id);
+            
+            const awayTeamMembers = friendTeams
+              .filter(ft => ft.team_id === match.away_team_id)
+              .map(ft => ft.player_id);
+
+            [...homeTeamMembers, ...awayTeamMembers].forEach(playerId => {
+              const playerInfo = players.find(p => p.id === playerId);
+              if (!playerInfo) return;
+
+              const isHome = homeTeamMembers.includes(playerId);
+              const opponent = isHome
+                ? (match.team_info_away_team_id_fkey?.club_name || '') + ' ' + (match.team_info_away_team_id_fkey?.team_name || '')
+                : (match.team_info_home_team_id_fkey?.club_name || '') + ' ' + (match.team_info_home_team_id_fkey?.team_name || '');
+
+              feedItems.push({
+                type: 'new_match',
+                playerId: playerId,
+                playerName: playerInfo.name,
+                timestamp: new Date(match.match_date),
+                data: {
+                  opponent: opponent.trim(),
+                  matchDate: match.match_date,
+                  isHome
+                }
+              });
+            });
+          });
+        }
+      }
+
+      // Dedupliziere: Entferne doppelte Einträge (gleicher Spieler, gleicher Typ, gleicher Tag)
+      const uniqueFeedItems = [];
+      const seen = new Set();
+      
+      feedItems.forEach(item => {
+        const key = `${item.type}-${item.playerId}-${item.timestamp.toDateString()}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueFeedItems.push(item);
+        }
+      });
+
+      // Sortiere nach Timestamp (neueste zuerst)
+      uniqueFeedItems.sort((a, b) => b.timestamp - a.timestamp);
+
+      // Limitiere auf 10 neueste Items
+      setSocialFeed(uniqueFeedItems.slice(0, 10));
+      
+      console.log('🎾 Social feed loaded:', feedItems.length, 'items');
+    } catch (error) {
+      console.error('Error loading social feed:', error);
+    } finally {
+      setLoadingFeed(false);
+    }
+  };
   
   // Helper: Bestimme Match-Status (live, upcoming, finished)
   const getMatchStatus = (match) => {
@@ -1029,7 +1258,8 @@ function Dashboard() {
                 gridTemplateColumns: socialStats.newThisWeek > 0 || socialStats.mutualCount > 0 
                   ? 'repeat(auto-fit, minmax(90px, 1fr))' 
                   : 'repeat(2, 1fr)',
-                gap: '0.5rem'
+                gap: '0.5rem',
+                marginBottom: socialFeed.length > 0 ? '1rem' : '0'
               }}>
                 {/* Tennismates */}
                 <div style={{
@@ -1119,6 +1349,173 @@ function Dashboard() {
                   </div>
                 )}
               </div>
+
+              {/* 🎾 Social Feed - Aktivitäten befreundeter Spieler */}
+              {socialFeed.length > 0 && (
+                <div style={{
+                  marginTop: '1rem',
+                  paddingTop: '1rem',
+                  borderTop: '2px solid rgba(139, 92, 246, 0.2)'
+                }}>
+                  <div style={{
+                    fontSize: '0.75rem',
+                    fontWeight: '700',
+                    color: 'rgb(107, 114, 128)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                    marginBottom: '0.75rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem'
+                  }}>
+                    <span>📰</span>
+                    <span>Aktivitäten deiner Freunde</span>
+                  </div>
+                  
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.75rem',
+                    maxHeight: '300px',
+                    overflowY: 'auto'
+                  }}>
+                    {socialFeed.map((item, index) => {
+                      const timeAgo = Math.floor((now - item.timestamp) / (1000 * 60 * 60)); // Stunden
+                      const daysAgo = Math.floor(timeAgo / 24);
+                      
+                      let timeLabel = '';
+                      if (timeAgo < 1) timeLabel = 'vor weniger als 1h';
+                      else if (timeAgo < 24) timeLabel = `vor ${timeAgo}h`;
+                      else if (daysAgo === 1) timeLabel = 'gestern';
+                      else timeLabel = `vor ${daysAgo} Tagen`;
+
+                      if (item.type === 'match_result') {
+                        return (
+                          <div
+                            key={`${item.type}-${item.playerId}-${index}`}
+                            style={{
+                              padding: '0.75rem',
+                              background: item.data.won 
+                                ? 'linear-gradient(135deg, rgb(236, 253, 245) 0%, rgb(209, 250, 229) 100%)'
+                                : 'linear-gradient(135deg, rgb(254, 242, 242) 0%, rgb(254, 226, 226) 100%)',
+                              border: `2px solid ${item.data.won ? 'rgb(16, 185, 129)' : 'rgb(239, 68, 68)'}`,
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              transition: 'transform 0.2s'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                            onClick={() => navigate(`/player/${encodeURIComponent(item.playerName)}`)}
+                          >
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: '0.75rem'
+                            }}>
+                              <div style={{
+                                fontSize: '1.5rem',
+                                lineHeight: '1'
+                              }}>
+                                {item.data.won ? '🏆' : '😔'}
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{
+                                  fontSize: '0.875rem',
+                                  fontWeight: '700',
+                                  color: 'rgb(31, 41, 55)',
+                                  marginBottom: '0.25rem'
+                                }}>
+                                  {item.playerName}
+                                </div>
+                                <div style={{
+                                  fontSize: '0.8rem',
+                                  color: 'rgb(107, 114, 128)',
+                                  marginBottom: '0.25rem'
+                                }}>
+                                  {item.data.won ? 'hat gewonnen' : 'hat verloren'} • {item.data.matchType}
+                                </div>
+                                <div style={{
+                                  fontSize: '0.75rem',
+                                  color: 'rgb(156, 163, 175)',
+                                  fontWeight: '600'
+                                }}>
+                                  vs {item.data.opponent} • {timeLabel}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      } else if (item.type === 'new_match') {
+                        return (
+                          <div
+                            key={`${item.type}-${item.playerId}-${index}`}
+                            style={{
+                              padding: '0.75rem',
+                              background: 'linear-gradient(135deg, rgb(239, 246, 255) 0%, rgb(219, 234, 254) 100%)',
+                              border: '2px solid rgb(59, 130, 246)',
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              transition: 'transform 0.2s'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                            onClick={() => navigate(`/player/${encodeURIComponent(item.playerName)}`)}
+                          >
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: '0.75rem'
+                            }}>
+                              <div style={{
+                                fontSize: '1.5rem',
+                                lineHeight: '1'
+                              }}>
+                                🎾
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{
+                                  fontSize: '0.875rem',
+                                  fontWeight: '700',
+                                  color: 'rgb(31, 41, 55)',
+                                  marginBottom: '0.25rem'
+                                }}>
+                                  {item.playerName}
+                                </div>
+                                <div style={{
+                                  fontSize: '0.8rem',
+                                  color: 'rgb(107, 114, 128)',
+                                  marginBottom: '0.25rem'
+                                }}>
+                                  hat ein neues Match
+                                </div>
+                                <div style={{
+                                  fontSize: '0.75rem',
+                                  color: 'rgb(156, 163, 175)',
+                                  fontWeight: '600'
+                                }}>
+                                  vs {item.data.opponent} • {timeLabel}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })}
+                  </div>
+
+                  {loadingFeed && (
+                    <div style={{
+                      padding: '1rem',
+                      textAlign: 'center',
+                      color: 'rgb(107, 114, 128)',
+                      fontSize: '0.875rem'
+                    }}>
+                      ⏳ Lade Aktivitäten...
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
