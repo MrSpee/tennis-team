@@ -20,16 +20,16 @@ function Dashboard() {
     leagueStandings
   } = useData();
   
-  // Debug: Prüfe was geladen wurde (nur bei signifikanten Änderungen)
-  useEffect(() => {
-    console.log('🔍 Dashboard State Changed:', {
-      playerTeamsLength: playerTeams?.length,
-      hasTeamInfo: !!teamInfo,
-      hasPlayer: !!player,
-      totalMatches: matches.length
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playerTeams?.length, matches.length]);
+  // Debug: Prüfe was geladen wurde (nur bei signifikanten Änderungen) - REDUZIERT
+  // useEffect(() => {
+  //   console.log('🔍 Dashboard State Changed:', {
+  //     playerTeamsLength: playerTeams?.length,
+  //     hasTeamInfo: !!teamInfo,
+  //     hasPlayer: !!player,
+  //     totalMatches: matches.length
+  //   });
+  // // eslint-disable-next-line react-hooks/exhaustive-deps
+  // }, [playerTeams?.length, matches.length]);
   
   // State für Live-Timer
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -104,27 +104,27 @@ function Dashboard() {
     }
   };
   
-  // Debug: Zeige was geladen wurde (nur bei Änderungen)
-  useEffect(() => {
-    console.log('🔵 Dashboard Data:', {
-      totalMatches: matches.length,
-      currentSeason,
-      seasonDisplay
-    });
-    
-    // Debug: Zeige Details zu allen Matches
-    if (matches.length > 0) {
-      console.log('📋 All matches:', matches.map(m => ({
-        id: m.id,
-        date: m.date?.toISOString?.() || m.date,
-        opponent: m.opponent,
-        season: m.season,
-        isAfterNow: m.date > now,
-        seasonMatches: isCurrentSeason(m.season)
-      })));
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matches, currentSeason, seasonDisplay, now]);
+  // Debug: Zeige was geladen wurde (nur bei signifikanten Änderungen) - REDUZIERT
+  // useEffect(() => {
+  //   console.log('🔵 Dashboard Data:', {
+  //     totalMatches: matches.length,
+  //     currentSeason,
+  //     seasonDisplay
+  //   });
+  //   
+  //   // Debug: Zeige Details zu allen Matches
+  //   if (matches.length > 0) {
+  //     console.log('📋 All matches:', matches.map(m => ({
+  //       id: m.id,
+  //       date: m.date?.toISOString?.() || m.date,
+  //       opponent: m.opponent,
+  //       season: m.season,
+  //       isAfterNow: m.date > now,
+  //       seasonMatches: isCurrentSeason(m.season)
+  //     })));
+  //   }
+  // // eslint-disable-next-line react-hooks/exhaustive-deps
+  // }, [matches, currentSeason, seasonDisplay, now]);
   
   // 🔧 NEU: Lade match_results Counts für Live-Status
   const [matchResultCounts, setMatchResultCounts] = useState({});
@@ -208,18 +208,32 @@ function Dashboard() {
           mutualCount: mutual.length
         });
         
+        // 🎾 Lade Social Feed für alle Freunde (mutual + following)
+        // Zeige Feed für alle, denen du folgst ODER die dir folgen
+        const allFriendIds = [...new Set([
+          ...tennismates.map(t => t.follower_id),
+          ...following.map(f => f.following_id)
+        ])];
+        
         console.log('🎾 Social stats loaded:', {
           tennismates: tennismates.length,
           following: following.length,
           uniqueConnections: totalUniqueConnections,
           newThisWeek,
           mutual: mutual.length,
-          calculation: `${tennismates.length} Mates + ${following.length} Folge = ${totalUniqueConnections} einzigartige Personen`
+          calculation: `${tennismates.length} Mates + ${following.length} Folge = ${totalUniqueConnections} einzigartige Personen`,
+          mutualIds: mutual.map(m => m.follower_id),
+          allFriendIds: allFriendIds,
+          allFriendIdsLength: allFriendIds.length,
+          tennismateIds: tennismates.map(t => t.follower_id),
+          followingIds: following.map(f => f.following_id)
         });
-
-        // 🎾 Lade Social Feed für befreundete Spieler (mutual)
-        if (mutual.length > 0) {
-          await loadSocialFeed(mutual.map(m => m.follower_id));
+        
+        if (allFriendIds.length > 0) {
+          console.log('🎾 Loading social feed for friends:', allFriendIds.length, 'friends', allFriendIds);
+          await loadSocialFeed(allFriendIds);
+        } else {
+          console.warn('⚠️ No friends found for social feed - allFriendIds is empty!');
         }
         
       } catch (error) {
@@ -232,55 +246,64 @@ function Dashboard() {
 
   // 🎾 Lade Social Feed für befreundete Spieler
   const loadSocialFeed = async (friendIds) => {
-    if (!friendIds || friendIds.length === 0) return;
+    if (!friendIds || friendIds.length === 0) {
+      console.warn('⚠️ loadSocialFeed called with empty friendIds');
+      return;
+    }
+    
+    console.log('🎾 loadSocialFeed called with friendIds:', friendIds.length, 'friends', friendIds);
     
     setLoadingFeed(true);
     try {
-      const twoWeeksAgo = new Date();
-      twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+      const twoMonthsAgo = new Date();
+      twoMonthsAgo.setDate(twoMonthsAgo.getDate() - 60); // 2 Monate = ~60 Tage
       
       const feedItems = [];
 
-      // 1. Lade Spieler-Infos
+      // 1. Lade Spieler-Infos (inkl. Profilbilder)
       const { data: players, error: playersError } = await supabase
         .from('players_unified')
-        .select('id, name, current_lk, updated_at')
+        .select('id, name, current_lk, updated_at, profile_image')
         .in('id', friendIds);
       
-      if (playersError) throw playersError;
+      if (playersError) {
+        console.error('❌ Error loading players:', playersError);
+        throw playersError;
+      }
+      
+      console.log('🎾 Players loaded:', players?.length || 0, 'players for feed');
 
-      // 2. Lade Match-Ergebnisse der letzten 2 Wochen
-      const { data: matchResults, error: resultsError } = await supabase
-        .from('match_results')
-        .select(`
-          id,
-          matchday_id,
-          match_number,
-          match_type,
-          home_score,
-          away_score,
-          winner,
-          status,
-          created_at,
-          updated_at,
-          home_player_id,
-          guest_player_id,
-          home_player1_id,
-          home_player2_id,
-          guest_player1_id,
-          guest_player2_id
-        `)
-        .or(`home_player_id.in.(${friendIds.join(',')}),guest_player_id.in.(${friendIds.join(',')}),home_player1_id.in.(${friendIds.join(',')}),home_player2_id.in.(${friendIds.join(',')}),guest_player1_id.in.(${friendIds.join(',')}),guest_player2_id.in.(${friendIds.join(',')})`)
-        .gte('created_at', twoWeeksAgo.toISOString())
-        .order('created_at', { ascending: false })
-        .limit(30);
+      // 2. Lade Match-Ergebnisse der letzten 2 Monate
+      // Verwende separate Queries für bessere Performance (Supabase unterstützt kein .or() mit .in())
+      const matchResultsQueries = friendIds.length > 0 ? [
+        supabase.from('match_results').select('*').in('home_player_id', friendIds),
+        supabase.from('match_results').select('*').in('guest_player_id', friendIds),
+        supabase.from('match_results').select('*').in('home_player1_id', friendIds),
+        supabase.from('match_results').select('*').in('home_player2_id', friendIds),
+        supabase.from('match_results').select('*').in('guest_player1_id', friendIds),
+        supabase.from('match_results').select('*').in('guest_player2_id', friendIds)
+      ] : [];
 
-      // Lade Matchday-Infos separat
-      const matchdayIds = matchResults ? [...new Set(matchResults.map(mr => mr.matchday_id).filter(Boolean))] : [];
+      const allResults = await Promise.all(matchResultsQueries);
+      const allMatchResults = [];
+      
+      allResults.forEach(({ data, error }) => {
+        if (error) {
+          console.error('Error loading match results:', error);
+          return;
+        }
+        if (data) {
+          allMatchResults.push(...data);
+        }
+      });
+
+      // Lade Matchdays für alle gefundenen Results
+      const matchdayIds = [...new Set(allMatchResults.map(r => r.matchday_id).filter(Boolean))];
       let matchdaysMap = {};
       
       if (matchdayIds.length > 0) {
-        const { data: matchdays, error: matchdaysError } = await supabase
+        // Versuche zuerst mit Foreign Key Join
+        let { data: matchdays, error: matchdaysError } = await supabase
           .from('matchdays')
           .select(`
             id,
@@ -289,20 +312,94 @@ function Dashboard() {
             away_team_id,
             home_score,
             away_score,
-            team_info!matchdays_home_team_id_fkey(club_name, team_name),
-            team_info!matchdays_away_team_id_fkey(club_name, team_name)
+            home_team:team_info!matchdays_home_team_id_fkey(club_name, team_name),
+            away_team:team_info!matchdays_away_team_id_fkey(club_name, team_name)
           `)
           .in('id', matchdayIds);
 
-        if (!matchdaysError && matchdays) {
+        // Fallback: Wenn Foreign Key Join fehlschlägt, lade ohne Join
+        if (matchdaysError) {
+          console.warn('⚠️ Foreign key join failed, trying without join:', matchdaysError);
+          const result = await supabase
+            .from('matchdays')
+            .select('id, match_date, home_team_id, away_team_id, home_score, away_score')
+            .in('id', matchdayIds);
+          
+          matchdays = result.data;
+          matchdaysError = result.error;
+          
+          // Lade Team-Infos separat
+          if (matchdays && !matchdaysError) {
+            const teamIds = [...new Set([
+              ...matchdays.map(md => md.home_team_id).filter(Boolean),
+              ...matchdays.map(md => md.away_team_id).filter(Boolean)
+            ])];
+            
+            if (teamIds.length > 0) {
+              const { data: teams } = await supabase
+                .from('team_info')
+                .select('id, club_name, team_name')
+                .in('id', teamIds);
+              
+              if (teams) {
+                const teamsMap = {};
+                teams.forEach(t => { teamsMap[t.id] = t; });
+                
+                matchdays = matchdays.map(md => ({
+                  ...md,
+                  home_team: teamsMap[md.home_team_id] || null,
+                  away_team: teamsMap[md.away_team_id] || null
+                }));
+              }
+            }
+          }
+        }
+
+        if (matchdaysError) {
+          console.error('❌ Error loading matchdays for social feed:', matchdaysError);
+        } else if (matchdays) {
           matchdays.forEach(md => {
             matchdaysMap[md.id] = md;
           });
+          console.log('🎾 Matchdays loaded for feed:', matchdays.length, 'matchdays', Object.keys(matchdaysMap));
         }
       }
 
-      if (!resultsError && matchResults) {
-        matchResults.forEach(result => {
+      // Filtere Match-Results basierend auf Spieltag-Datum (nicht created_at!)
+      const matchResults = allMatchResults
+        .filter(result => {
+          const matchday = matchdaysMap[result.matchday_id];
+          if (!matchday || !matchday.match_date) {
+            return false; // Skip if matchday not found or no date
+          }
+          const matchDate = new Date(matchday.match_date);
+          return matchDate >= twoMonthsAgo;
+        })
+        .sort((a, b) => {
+          const dateA = matchdaysMap[a.matchday_id]?.match_date ? new Date(matchdaysMap[a.matchday_id].match_date) : new Date(0);
+          const dateB = matchdaysMap[b.matchday_id]?.match_date ? new Date(matchdaysMap[b.matchday_id].match_date) : new Date(0);
+          return dateB - dateA; // Neueste zuerst
+        })
+        .slice(0, 30);
+
+      console.log('🎾 Match results loaded:', {
+        total: matchResults.length,
+        friendIds: friendIds.length,
+        twoMonthsAgo: twoMonthsAgo.toISOString(),
+        sampleResults: matchResults.slice(0, 3).map(r => ({
+          id: r.id,
+          matchday_id: r.matchday_id,
+          match_date: matchdaysMap[r.matchday_id]?.match_date,
+          players: {
+            home: r.home_player_id || r.home_player1_id || r.home_player2_id,
+            guest: r.guest_player_id || r.guest_player1_id || r.guest_player2_id
+          }
+        }))
+      });
+
+      if (matchResults && matchResults.length > 0) {
+        // Verwende for...of statt forEach für async/await
+        for (const result of matchResults) {
           // Finde beteiligte Spieler
           const involvedPlayers = [];
           if (result.home_player_id && friendIds.includes(result.home_player_id)) {
@@ -324,12 +421,18 @@ function Dashboard() {
             involvedPlayers.push(result.guest_player2_id);
           }
 
-          involvedPlayers.forEach(playerId => {
+          for (const playerId of involvedPlayers) {
             const playerInfo = players.find(p => p.id === playerId);
-            if (!playerInfo) return;
+            if (!playerInfo) {
+              console.warn('⚠️ Player not found for feed:', playerId);
+              return;
+            }
 
             const matchday = matchdaysMap[result.matchday_id];
-            if (!matchday) return; // Skip if matchday not found
+            if (!matchday) {
+              console.warn('⚠️ Matchday not found for result:', result.id, 'matchday_id:', result.matchday_id);
+              return; // Skip if matchday not found
+            }
 
             const isHome = result.home_player_id === playerId || 
                           result.home_player1_id === playerId || 
@@ -337,26 +440,258 @@ function Dashboard() {
             const won = (isHome && result.winner === 'home') || 
                        (!isHome && (result.winner === 'guest' || result.winner === 'away'));
 
-            const opponent = isHome 
-              ? (matchday.team_info_away_team_id_fkey?.club_name || '') + ' ' + (matchday.team_info_away_team_id_fkey?.team_name || '')
-              : (matchday.team_info_home_team_id_fkey?.club_name || '') + ' ' + (matchday.team_info_home_team_id_fkey?.team_name || '');
+            // LK-Berechnungsformel (aus Rankings.jsx)
+            const pointsP = (diff) => {
+              if (diff <= -4) return 10;
+              if (diff >= 4) return 110;
+              if (diff < 0) {
+                const t = (diff + 4) / 4;
+                return 10 + 40 * (t * t);
+              }
+              const t = diff / 4;
+              return 50 + 60 * (t * t);
+            };
+            
+            const hurdleH = (ownLK) => 50 + 12.5 * (25 - ownLK);
+            
+            const calcMatchImprovement = (ownLK, oppLK, isTeamMatch = true) => {
+              const AGE_CLASS_FACTOR = 0.8; // M40/H40
+              const diff = ownLK - oppLK;
+              const P = pointsP(diff);
+              const A = AGE_CLASS_FACTOR;
+              const H = hurdleH(ownLK);
+              let improvement = (P * A) / H;
+              if (isTeamMatch) improvement *= 1.1;
+              return Math.max(0, Number(improvement.toFixed(3)));
+            };
+            
+            // Lade Gegner-Informationen
+            let opponentName = '';
+            let opponentLK = 25;
+            let lkImprovement = 0;
+            let playerLKBefore = 25;
+            let playerLKAfter = 25;
+            
+            const playerLKStr = playerInfo.current_lk || playerInfo.season_start_lk || playerInfo.ranking || '25';
+            const playerLK = parseFloat(playerLKStr.replace('LK ', '').replace(',', '.').replace('LK', '').trim()) || 25;
+            playerLKBefore = playerLK;
+            
+            if (result.match_type === 'Einzel') {
+              // Einzel: Lade direkten Gegner
+              const opponentId = isHome ? result.guest_player_id : result.home_player_id;
+              
+              if (opponentId) {
+                const { data: oppData } = await supabase
+                  .from('players_unified')
+                  .select('name, current_lk, season_start_lk, ranking')
+                  .eq('id', opponentId)
+                  .single();
+                
+                if (oppData) {
+                  opponentName = oppData.name || 'Unbekannt';
+                  const oppLKStr = oppData.current_lk || oppData.season_start_lk || oppData.ranking || '25';
+                  opponentLK = parseFloat(oppLKStr.replace('LK ', '').replace(',', '.').replace('LK', '').trim()) || 25;
+                  
+                  // Berechne LK-Verbesserung (nur bei Sieg)
+                  if (won) {
+                    lkImprovement = calcMatchImprovement(playerLK, opponentLK, true);
+                    playerLKAfter = Math.max(0, playerLK - lkImprovement);
+                  } else {
+                    playerLKAfter = playerLK;
+                  }
+                }
+              }
+            } else {
+              // Doppel: Lade Partner und Gegner
+              const partnerId = isHome ?
+                (result.home_player1_id === playerId ? result.home_player2_id : result.home_player1_id) :
+                (result.guest_player1_id === playerId ? result.guest_player2_id : result.guest_player1_id);
+              
+              const opp1Id = isHome ? result.guest_player1_id : result.home_player1_id;
+              const opp2Id = isHome ? result.guest_player2_id : result.home_player2_id;
+              
+              // Lade Partner-LK für Durchschnitt
+              let partnerLK = 25;
+              if (partnerId) {
+                const { data: partnerData } = await supabase
+                  .from('players_unified')
+                  .select('current_lk, season_start_lk, ranking')
+                  .eq('id', partnerId)
+                  .single();
+                
+                if (partnerData) {
+                  const partnerLKStr = partnerData.current_lk || partnerData.season_start_lk || partnerData.ranking || '25';
+                  partnerLK = parseFloat(partnerLKStr.replace('LK ', '').replace(',', '.').replace('LK', '').trim()) || 25;
+                }
+              }
+              
+              const ownLK = (playerLK + partnerLK) / 2;
+              
+              // Lade Gegner
+              const oppIds = [opp1Id, opp2Id].filter(Boolean);
+              if (oppIds.length > 0) {
+                const { data: oppData } = await supabase
+                  .from('players_unified')
+                  .select('name, current_lk, season_start_lk, ranking')
+                  .in('id', oppIds);
+                
+                if (oppData && oppData.length > 0) {
+                  const oppNames = oppData.map(o => o.name || '?');
+                  opponentName = oppNames.join(' & ');
+                  
+                  const oppLKs = oppData.map(o => {
+                    const oppLKStr = o.current_lk || o.season_start_lk || o.ranking || '25';
+                    return parseFloat(oppLKStr.replace('LK ', '').replace(',', '.').replace('LK', '').trim()) || 25;
+                  });
+                  opponentLK = oppLKs.reduce((a, b) => a + b, 0) / oppLKs.length;
+                  
+                  // Berechne LK-Verbesserung (nur bei Sieg)
+                  if (won) {
+                    lkImprovement = calcMatchImprovement(ownLK, opponentLK, true);
+                    // Bei Doppel: Verbesserung auf Durchschnitts-LK anwenden, dann zurück auf Einzel-LK umrechnen
+                    const ownLKAfter = Math.max(0, ownLK - lkImprovement);
+                    // Vereinfachte Umrechnung: Anteilige Verbesserung
+                    const improvementRatio = ownLKAfter / ownLK;
+                    playerLKAfter = Math.max(0, playerLK * improvementRatio);
+                  } else {
+                    playerLKAfter = playerLK;
+                  }
+                }
+              }
+            }
+            
+            // Fallback: Team-Name wenn kein Spieler gefunden
+            if (!opponentName || opponentName === 'Unbekannt') {
+              opponentName = isHome 
+                ? (matchday.away_team?.club_name || '') + ' ' + (matchday.away_team?.team_name || '')
+                : (matchday.home_team?.club_name || '') + ' ' + (matchday.home_team?.team_name || '');
+            }
+            
+            const opponent = opponentName.trim();
 
-            feedItems.push({
+            // Extrahiere Satzergebnisse
+            const isHomePlayer = result.home_player_id === playerId || 
+                          result.home_player1_id === playerId || 
+                          result.home_player2_id === playerId;
+            
+            // Satzergebnisse extrahieren
+            const set1Home = parseInt(result.set1_home) || 0;
+            const set1Guest = parseInt(result.set1_guest) || 0;
+            const set2Home = parseInt(result.set2_home) || 0;
+            const set2Guest = parseInt(result.set2_guest) || 0;
+            const set3Home = parseInt(result.set3_home) || 0;
+            const set3Guest = parseInt(result.set3_guest) || 0;
+            
+            // Baue Satzergebnis-String (z.B. "6:4, 6:2" oder "6:4, 4:6, 7:5")
+            const sets = [];
+            if (set1Home > 0 || set1Guest > 0) {
+              sets.push(isHomePlayer ? `${set1Home}:${set1Guest}` : `${set1Guest}:${set1Home}`);
+            }
+            if (set2Home > 0 || set2Guest > 0) {
+              sets.push(isHomePlayer ? `${set2Home}:${set2Guest}` : `${set2Guest}:${set2Home}`);
+            }
+            if (set3Home > 0 || set3Guest > 0) {
+              sets.push(isHomePlayer ? `${set3Home}:${set3Guest}` : `${set3Guest}:${set3Home}`);
+            }
+            const setScore = sets.join(', ');
+            
+            // Berechne Gesamtspiele für Dominanz-Bewertung
+            const playerGames = isHomePlayer ? (set1Home + set2Home + set3Home) : (set1Guest + set2Guest + set3Guest);
+            const opponentGames = isHomePlayer ? (set1Guest + set2Guest + set3Guest) : (set1Home + set2Home + set3Home);
+            const gameDiff = playerGames - opponentGames;
+            
+            // Zähle gewonnene Sätze (aus Spieler-Perspektive)
+            let playerSetsWon = 0;
+            let opponentSetsWon = 0;
+            
+            if (isHomePlayer) {
+              // Spieler ist auf Home-Seite
+              if (set1Home > set1Guest) playerSetsWon++;
+              else if (set1Guest > set1Home) opponentSetsWon++;
+              if (set2Home > set2Guest) playerSetsWon++;
+              else if (set2Guest > set2Home) opponentSetsWon++;
+              if (set3Home > set3Guest) playerSetsWon++;
+              else if (set3Guest > set3Home) opponentSetsWon++;
+            } else {
+              // Spieler ist auf Guest-Seite
+              if (set1Guest > set1Home) playerSetsWon++;
+              else if (set1Home > set1Guest) opponentSetsWon++;
+              if (set2Guest > set2Home) playerSetsWon++;
+              else if (set2Home > set2Guest) opponentSetsWon++;
+              if (set3Guest > set3Home) playerSetsWon++;
+              else if (set3Home > set3Guest) opponentSetsWon++;
+            }
+            
+            const setDiff = Math.abs(playerSetsWon - opponentSetsWon);
+            
+            let message = '';
+            let icon = '';
+            
+            // Erstelle Message mit Gegner-Name und LK
+            const opponentLKText = opponentLK !== 25 ? ` (LK ${opponentLK.toFixed(1)})` : '';
+            
+            if (won) {
+              // Gewonnen
+              if (setDiff === 2 && gameDiff > 10) {
+                // Klarer Sieg
+                message = `hat ${opponent}${opponentLKText} im ${result.match_type} klar geschlagen! ${setScore} 🏆`;
+                icon = '🏆';
+              } else if (setDiff === 2) {
+                // Normaler Sieg
+                message = `hat ${opponent}${opponentLKText} im ${result.match_type} besiegt! ${setScore} 🎾`;
+                icon = '🎾';
+              } else {
+                // Knapper Sieg
+                message = `hat ${opponent}${opponentLKText} im ${result.match_type} knapp geschlagen! ${setScore} 🎊`;
+                icon = '🎊';
+              }
+            } else {
+              // Verloren
+              if (setDiff === 2 && gameDiff < -10) {
+                // Klare Niederlage
+                message = `hat gegen ${opponent}${opponentLKText} im ${result.match_type} verloren. ${setScore} 😔`;
+                icon = '💔';
+              } else if (setDiff === 2) {
+                // Normale Niederlage
+                message = `hat gegen ${opponent}${opponentLKText} im ${result.match_type} verloren. ${setScore} 😤`;
+                icon = '😓';
+              } else {
+                // Knappe Niederlage
+                message = `hat gegen ${opponent}${opponentLKText} im ${result.match_type} knapp verloren. ${setScore} 😢`;
+                icon = '😞';
+              }
+            }
+            
+            const feedItem = {
               type: 'match_result',
               playerId: playerId,
               playerName: playerInfo.name,
-              timestamp: new Date(result.created_at || result.updated_at),
+              playerImage: playerInfo.profile_image,
+              playerLK: playerInfo.current_lk,
+              timestamp: new Date(matchday.match_date),
+              icon,
+              message,
               data: {
                 matchType: result.match_type,
                 won,
-                homeScore: result.home_score,
-                awayScore: result.away_score,
+                setScore,
+                playerSetsWon,
+                opponentSetsWon,
+                playerGames,
+                opponentGames,
                 opponent: opponent.trim(),
+                opponentLK: opponentLK,
+                lkImprovement: lkImprovement,
+                playerLK: playerLK,
+                playerLKBefore: playerLKBefore,
+                playerLKAfter: playerLKAfter,
                 matchDate: matchday.match_date
               }
-            });
-          });
-        });
+            };
+            
+            feedItems.push(feedItem);
+          }
+        }
       }
 
       // 3. Lade neue Matches (Matchdays) der letzten 2 Wochen für Teams befreundeter Spieler
@@ -370,7 +705,8 @@ function Dashboard() {
       if (!teamsError && friendTeams && friendTeams.length > 0) {
         const teamIds = [...new Set(friendTeams.map(ft => ft.team_id))];
         
-        const { data: newMatches, error: matchesError } = await supabase
+        // Verwende separate Queries statt .or() mit .in() (funktioniert nicht in Supabase)
+        const homeMatchesQuery = supabase
           .from('matchdays')
           .select(`
             id,
@@ -380,13 +716,47 @@ function Dashboard() {
             away_team_id,
             home_score,
             away_score,
-            team_info!matchdays_home_team_id_fkey(club_name, team_name),
-            team_info!matchdays_away_team_id_fkey(club_name, team_name)
+            home_team:team_info!matchdays_home_team_id_fkey(club_name, team_name),
+            away_team:team_info!matchdays_away_team_id_fkey(club_name, team_name)
           `)
-          .or(`home_team_id.in.(${teamIds.join(',')}),away_team_id.in.(${teamIds.join(',')})`)
-          .gte('match_date', twoWeeksAgo.toISOString())
+          .in('home_team_id', teamIds)
+          .gte('match_date', twoMonthsAgo.toISOString())
           .order('match_date', { ascending: false })
           .limit(20);
+        
+        const awayMatchesQuery = supabase
+          .from('matchdays')
+          .select(`
+            id,
+            match_number,
+            match_date,
+            home_team_id,
+            away_team_id,
+            home_score,
+            away_score,
+            home_team:team_info!matchdays_home_team_id_fkey(club_name, team_name),
+            away_team:team_info!matchdays_away_team_id_fkey(club_name, team_name)
+          `)
+          .in('away_team_id', teamIds)
+          .gte('match_date', twoMonthsAgo.toISOString())
+          .order('match_date', { ascending: false })
+          .limit(20);
+        
+        const [homeMatchesResult, awayMatchesResult] = await Promise.all([homeMatchesQuery, awayMatchesQuery]);
+        
+        const matchesMap = new Map();
+        if (homeMatchesResult.data) {
+          homeMatchesResult.data.forEach(m => matchesMap.set(m.id, m));
+        }
+        if (awayMatchesResult.data) {
+          awayMatchesResult.data.forEach(m => matchesMap.set(m.id, m));
+        }
+        
+        const newMatches = Array.from(matchesMap.values())
+          .sort((a, b) => new Date(b.match_date) - new Date(a.match_date))
+          .slice(0, 20);
+        
+        const matchesError = homeMatchesResult.error || awayMatchesResult.error;
 
         if (!matchesError && newMatches) {
           newMatches.forEach(match => {
@@ -405,20 +775,59 @@ function Dashboard() {
 
               const isHome = homeTeamMembers.includes(playerId);
               const opponent = isHome
-                ? (match.team_info_away_team_id_fkey?.club_name || '') + ' ' + (match.team_info_away_team_id_fkey?.team_name || '')
-                : (match.team_info_home_team_id_fkey?.club_name || '') + ' ' + (match.team_info_home_team_id_fkey?.team_name || '');
+                ? (match.away_team?.club_name || '') + ' ' + (match.away_team?.team_name || '')
+                : (match.home_team?.club_name || '') + ' ' + (match.home_team?.team_name || '');
 
-              feedItems.push({
+              const matchDate = new Date(match.match_date);
+              const isToday = matchDate.toDateString() === new Date().toDateString();
+              const isTomorrow = matchDate.toDateString() === new Date(Date.now() + 86400000).toDateString();
+              
+              let message = '';
+              let icon = '';
+              
+              if (isToday) {
+                const messages = [
+                  `spielt heute gegen ${opponent.trim()}! 🎾`,
+                  `hat heute ein Match gegen ${opponent.trim()} - viel Erfolg! 💪`,
+                  `steht heute gegen ${opponent.trim()} auf dem Platz! ⚡`
+                ];
+                message = messages[Math.floor(Math.random() * messages.length)];
+                icon = '🔥';
+              } else if (isTomorrow) {
+                const messages = [
+                  `spielt morgen gegen ${opponent.trim()}! 📅`,
+                  `hat morgen ein Match gegen ${opponent.trim()} - drücke die Daumen! 🤞`,
+                  `steht morgen gegen ${opponent.trim()} auf dem Platz! 🎯`
+                ];
+                message = messages[Math.floor(Math.random() * messages.length)];
+                icon = '📆';
+              } else {
+                const messages = [
+                  `hat ein Match gegen ${opponent.trim()} geplant! 🎾`,
+                  `spielt demnächst gegen ${opponent.trim()}! 💪`,
+                  `steht bald gegen ${opponent.trim()} auf dem Platz! ⚡`
+                ];
+                message = messages[Math.floor(Math.random() * messages.length)];
+                icon = '📅';
+              }
+              
+              const feedItem = {
                 type: 'new_match',
                 playerId: playerId,
                 playerName: playerInfo.name,
-                timestamp: new Date(match.match_date),
+                playerImage: playerInfo.profile_image,
+                playerLK: playerInfo.current_lk,
+                timestamp: matchDate,
+                icon,
+                message,
                 data: {
                   opponent: opponent.trim(),
                   matchDate: match.match_date,
                   isHome
                 }
-              });
+              };
+              
+              feedItems.push(feedItem);
             });
           });
         }
@@ -436,13 +845,62 @@ function Dashboard() {
         }
       });
 
-      // Sortiere nach Timestamp (neueste zuerst)
-      uniqueFeedItems.sort((a, b) => b.timestamp - a.timestamp);
+      // Sortiere: Spielergebnisse (match_result) immer vor neuen Matches (new_match)
+      // Innerhalb jeder Kategorie nach Timestamp (neueste zuerst)
+      uniqueFeedItems.sort((a, b) => {
+        // Priorität: match_result > new_match
+        const typePriority = {
+          'match_result': 1,
+          'new_match': 2
+        };
+        
+        const priorityA = typePriority[a.type] || 999;
+        const priorityB = typePriority[b.type] || 999;
+        
+        // Zuerst nach Typ-Priorität sortieren
+        if (priorityA !== priorityB) {
+          return priorityA - priorityB;
+        }
+        
+        // Bei gleichem Typ nach Timestamp (neueste zuerst)
+        return b.timestamp - a.timestamp;
+      });
 
-      // Limitiere auf 10 neueste Items
-      setSocialFeed(uniqueFeedItems.slice(0, 10));
+      // Limitiere: Max. 2 Ergebnisse pro Freund, insgesamt max. 5 Items auf der Startseite
+      const playerItemCounts = new Map(); // Zähle Items pro Spieler
+      const limitedFeedItems = [];
       
-      console.log('🎾 Social feed loaded:', feedItems.length, 'items');
+      for (const item of uniqueFeedItems) {
+        const playerId = item.playerId;
+        const currentCount = playerItemCounts.get(playerId) || 0;
+        
+        // Max. 2 Items pro Spieler
+        if (currentCount < 2) {
+          limitedFeedItems.push(item);
+          playerItemCounts.set(playerId, currentCount + 1);
+          
+          // Max. 5 Items insgesamt auf der Startseite
+          if (limitedFeedItems.length >= 5) {
+            break;
+          }
+        }
+      }
+
+      setSocialFeed(limitedFeedItems);
+      
+      console.log('🎾 Social feed loaded:', {
+        totalItems: feedItems.length,
+        uniqueItems: uniqueFeedItems.length,
+        displayedItems: Math.min(10, uniqueFeedItems.length),
+        friendIds: friendIds.length,
+        playersFound: players?.length || 0,
+        matchResultsFound: matchResults?.length || 0,
+        feedItems: uniqueFeedItems.slice(0, 5).map(item => ({
+          type: item.type,
+          player: item.playerName,
+          timestamp: item.timestamp.toISOString()
+        }))
+      });
     } catch (error) {
       console.error('Error loading social feed:', error);
     } finally {
@@ -507,15 +965,16 @@ function Dashboard() {
     })
     .sort((a, b) => a.date - b.date); // Älteste zuerst (dringendste)
 
-  console.log('🔵 Dashboard Matches Debug:', {
-    totalMatches: matches.length,
-    currentSeason,
-    seasonDisplay,
-    matchSeasons: [...new Set(matches.map(m => m.season))],
-    upcomingMatches: upcomingMatches.length,
-    finishedMatches: recentlyFinishedMatches.length,
-    pastWithoutResult: pastMatchesWithoutResult.length
-  });
+  // Debug-Logging reduziert (nur bei Bedarf aktivieren)
+  // console.log('🔵 Dashboard Matches Debug:', {
+  //   totalMatches: matches.length,
+  //   currentSeason,
+  //   seasonDisplay,
+  //   matchSeasons: [...new Set(matches.map(m => m.season))],
+  //   upcomingMatches: upcomingMatches.length,
+  //   finishedMatches: recentlyFinishedMatches.length,
+  //   pastWithoutResult: pastMatchesWithoutResult.length
+  // });
 
   // Für Countdown: Das allernächste ZUKÜNFTIGE Spiel (egal welche Saison)
   // Nur Spiele die noch nicht begonnen haben UND nicht live sind
@@ -1375,9 +1834,10 @@ function Dashboard() {
                   <div style={{
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '0.75rem',
-                    maxHeight: '300px',
-                    overflowY: 'auto'
+                    gap: '1rem',
+                    maxHeight: '500px',
+                    overflowY: 'auto',
+                    paddingRight: '0.5rem'
                   }}>
                     {socialFeed.map((item, index) => {
                       const timeAgo = Math.floor((now - item.timestamp) / (1000 * 60 * 60)); // Stunden
@@ -1389,57 +1849,164 @@ function Dashboard() {
                       else if (daysAgo === 1) timeLabel = 'gestern';
                       else timeLabel = `vor ${daysAgo} Tagen`;
 
+                      // Profilbild oder Fallback-Avatar
+                      const profileImageUrl = item.playerImage 
+                        ? (item.playerImage.startsWith('http') ? item.playerImage : `${supabase.supabaseUrl}/storage/v1/object/public/profiles/${item.playerImage}`)
+                        : null;
+                      
                       if (item.type === 'match_result') {
                         return (
                           <div
                             key={`${item.type}-${item.playerId}-${index}`}
                             style={{
-                              padding: '0.75rem',
+                              padding: '1rem',
                               background: item.data.won 
-                                ? 'linear-gradient(135deg, rgb(236, 253, 245) 0%, rgb(209, 250, 229) 100%)'
-                                : 'linear-gradient(135deg, rgb(254, 242, 242) 0%, rgb(254, 226, 226) 100%)',
+                                ? 'linear-gradient(135deg, rgba(236, 253, 245, 0.9) 0%, rgba(209, 250, 229, 0.9) 100%)'
+                                : 'linear-gradient(135deg, rgba(254, 242, 242, 0.9) 0%, rgba(254, 226, 226, 0.9) 100%)',
                               border: `2px solid ${item.data.won ? 'rgb(16, 185, 129)' : 'rgb(239, 68, 68)'}`,
-                              borderRadius: '8px',
+                              borderRadius: '12px',
                               cursor: 'pointer',
-                              transition: 'transform 0.2s'
+                              transition: 'all 0.3s ease',
+                              boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
                             }}
-                            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
-                            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.transform = 'translateY(-2px)';
+                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.transform = 'translateY(0)';
+                              e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+                            }}
                             onClick={() => navigate(`/player/${encodeURIComponent(item.playerName)}`)}
                           >
                             <div style={{
                               display: 'flex',
                               alignItems: 'flex-start',
-                              gap: '0.75rem'
+                              gap: '1rem'
                             }}>
+                              {/* Profilbild */}
                               <div style={{
+                                width: '48px',
+                                height: '48px',
+                                borderRadius: '50%',
+                                background: profileImageUrl 
+                                  ? `url(${profileImageUrl}) center/cover`
+                                  : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                border: `3px solid ${item.data.won ? 'rgb(16, 185, 129)' : 'rgb(239, 68, 68)'}`,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
                                 fontSize: '1.5rem',
-                                lineHeight: '1'
+                                flexShrink: 0,
+                                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                                color: 'white',
+                                fontWeight: '700'
                               }}>
-                                {item.data.won ? '🏆' : '😔'}
+                                {!profileImageUrl && item.playerName.charAt(0).toUpperCase()}
                               </div>
-                              <div style={{ flex: 1 }}>
+                              
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                {/* Header mit Name und Icon */}
                                 <div style={{
-                                  fontSize: '0.875rem',
-                                  fontWeight: '700',
-                                  color: 'rgb(31, 41, 55)',
-                                  marginBottom: '0.25rem'
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.5rem',
+                                  marginBottom: '0.5rem',
+                                  flexWrap: 'wrap'
                                 }}>
-                                  {item.playerName}
+                                  <div style={{
+                                    fontSize: '1.25rem'
+                                  }}>
+                                    {item.icon || (item.data.won ? '🏆' : '😔')}
+                                  </div>
+                                  <div style={{
+                                    fontSize: '0.875rem',
+                                    fontWeight: '700',
+                                    color: 'rgb(31, 41, 55)',
+                                    flex: 1
+                                  }}>
+                                    {item.playerName}
+                                  </div>
+                                  {item.playerLK && (
+                                    <div style={{
+                                      fontSize: '0.7rem',
+                                      fontWeight: '600',
+                                      color: 'rgb(107, 114, 128)',
+                                      background: 'rgba(255,255,255,0.7)',
+                                      padding: '0.2rem 0.5rem',
+                                      borderRadius: '12px'
+                                    }}>
+                                      {item.playerLK}
+                                    </div>
+                                  )}
                                 </div>
+                                
+                                {/* Match-Ergebnis Text */}
                                 <div style={{
-                                  fontSize: '0.8rem',
+                                  fontSize: '0.85rem',
+                                  color: 'rgb(55, 65, 81)',
+                                  marginBottom: '0.5rem',
+                                  lineHeight: '1.4',
+                                  fontWeight: '500'
+                                }}>
+                                  {item.message || (item.data.won ? 'hat gewonnen' : 'hat verloren')}
+                                </div>
+                                
+                                {/* Footer mit Details */}
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.5rem',
+                                  fontSize: '0.7rem',
                                   color: 'rgb(107, 114, 128)',
-                                  marginBottom: '0.25rem'
+                                  flexWrap: 'wrap'
                                 }}>
-                                  {item.data.won ? 'hat gewonnen' : 'hat verloren'} • {item.data.matchType}
-                                </div>
-                                <div style={{
-                                  fontSize: '0.75rem',
-                                  color: 'rgb(156, 163, 175)',
-                                  fontWeight: '600'
-                                }}>
-                                  vs {item.data.opponent} • {timeLabel}
+                                  <span style={{
+                                    background: 'rgba(255,255,255,0.7)',
+                                    padding: '0.2rem 0.5rem',
+                                    borderRadius: '8px',
+                                    fontWeight: '600'
+                                  }}>
+                                    {item.data.matchType}
+                                  </span>
+                                  <span>•</span>
+                                  <span style={{
+                                    fontWeight: '700',
+                                    color: item.data.won ? 'rgb(16, 185, 129)' : 'rgb(239, 68, 68)'
+                                  }}>
+                                    {item.data.setScore || 'N/A'}
+                                  </span>
+                                  {item.data.opponentLK && item.data.opponentLK !== 25 && (
+                                    <>
+                                      <span>•</span>
+                                      <span style={{
+                                        background: 'rgba(255,255,255,0.7)',
+                                        padding: '0.2rem 0.5rem',
+                                        borderRadius: '8px',
+                                        fontWeight: '600',
+                                        color: 'rgb(59, 130, 246)'
+                                      }}>
+                                        Gegner LK {item.data.opponentLK.toFixed(1)}
+                                      </span>
+                                    </>
+                                  )}
+                                  {item.data.won && item.data.playerLKBefore && item.data.playerLKAfter && 
+                                   Math.abs(item.data.playerLKBefore - item.data.playerLKAfter) > 0.01 && (
+                                    <>
+                                      <span>•</span>
+                                      <span style={{
+                                        background: 'rgba(16, 185, 129, 0.2)',
+                                        padding: '0.2rem 0.5rem',
+                                        borderRadius: '8px',
+                                        fontWeight: '700',
+                                        color: 'rgb(16, 185, 129)'
+                                      }}>
+                                        LK {item.data.playerLKBefore.toFixed(1)} → {item.data.playerLKAfter.toFixed(1)}
+                                      </span>
+                                    </>
+                                  )}
+                                  <span>•</span>
+                                  <span>{timeLabel}</span>
                                 </div>
                               </div>
                             </div>
@@ -1450,50 +2017,116 @@ function Dashboard() {
                           <div
                             key={`${item.type}-${item.playerId}-${index}`}
                             style={{
-                              padding: '0.75rem',
-                              background: 'linear-gradient(135deg, rgb(239, 246, 255) 0%, rgb(219, 234, 254) 100%)',
+                              padding: '1rem',
+                              background: 'linear-gradient(135deg, rgba(239, 246, 255, 0.9) 0%, rgba(219, 234, 254, 0.9) 100%)',
                               border: '2px solid rgb(59, 130, 246)',
-                              borderRadius: '8px',
+                              borderRadius: '12px',
                               cursor: 'pointer',
-                              transition: 'transform 0.2s'
+                              transition: 'all 0.3s ease',
+                              boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
                             }}
-                            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
-                            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.transform = 'translateY(-2px)';
+                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.transform = 'translateY(0)';
+                              e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+                            }}
                             onClick={() => navigate(`/player/${encodeURIComponent(item.playerName)}`)}
                           >
                             <div style={{
                               display: 'flex',
                               alignItems: 'flex-start',
-                              gap: '0.75rem'
+                              gap: '1rem'
                             }}>
+                              {/* Profilbild */}
                               <div style={{
+                                width: '48px',
+                                height: '48px',
+                                borderRadius: '50%',
+                                background: profileImageUrl 
+                                  ? `url(${profileImageUrl}) center/cover`
+                                  : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                border: '3px solid rgb(59, 130, 246)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
                                 fontSize: '1.5rem',
-                                lineHeight: '1'
+                                flexShrink: 0,
+                                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                                color: 'white',
+                                fontWeight: '700'
                               }}>
-                                🎾
+                                {!profileImageUrl && item.playerName.charAt(0).toUpperCase()}
                               </div>
-                              <div style={{ flex: 1 }}>
+                              
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                {/* Header mit Name und Icon */}
                                 <div style={{
-                                  fontSize: '0.875rem',
-                                  fontWeight: '700',
-                                  color: 'rgb(31, 41, 55)',
-                                  marginBottom: '0.25rem'
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.5rem',
+                                  marginBottom: '0.5rem',
+                                  flexWrap: 'wrap'
                                 }}>
-                                  {item.playerName}
+                                  <div style={{
+                                    fontSize: '1.25rem'
+                                  }}>
+                                    {item.icon || '📅'}
+                                  </div>
+                                  <div style={{
+                                    fontSize: '0.875rem',
+                                    fontWeight: '700',
+                                    color: 'rgb(31, 41, 55)',
+                                    flex: 1
+                                  }}>
+                                    {item.playerName}
+                                  </div>
+                                  {item.playerLK && (
+                                    <div style={{
+                                      fontSize: '0.7rem',
+                                      fontWeight: '600',
+                                      color: 'rgb(107, 114, 128)',
+                                      background: 'rgba(255,255,255,0.7)',
+                                      padding: '0.2rem 0.5rem',
+                                      borderRadius: '12px'
+                                    }}>
+                                      {item.playerLK}
+                                    </div>
+                                  )}
                                 </div>
+                                
+                                {/* Humorvoller Text */}
                                 <div style={{
-                                  fontSize: '0.8rem',
+                                  fontSize: '0.85rem',
+                                  color: 'rgb(55, 65, 81)',
+                                  marginBottom: '0.5rem',
+                                  lineHeight: '1.4',
+                                  fontWeight: '500'
+                                }}>
+                                  {item.message || 'hat ein neues Match geplant'}
+                                </div>
+                                
+                                {/* Footer mit Details */}
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.5rem',
+                                  fontSize: '0.7rem',
                                   color: 'rgb(107, 114, 128)',
-                                  marginBottom: '0.25rem'
+                                  flexWrap: 'wrap'
                                 }}>
-                                  hat ein neues Match
-                                </div>
-                                <div style={{
-                                  fontSize: '0.75rem',
-                                  color: 'rgb(156, 163, 175)',
-                                  fontWeight: '600'
-                                }}>
-                                  vs {item.data.opponent} • {timeLabel}
+                                  <span style={{
+                                    background: 'rgba(255,255,255,0.7)',
+                                    padding: '0.2rem 0.5rem',
+                                    borderRadius: '8px',
+                                    fontWeight: '600'
+                                  }}>
+                                    {item.data.isHome ? '🏠 Heim' : '✈️ Auswärts'}
+                                  </span>
+                                  <span>•</span>
+                                  <span>{timeLabel}</span>
                                 </div>
                               </div>
                             </div>
@@ -1887,15 +2520,15 @@ function Dashboard() {
                     matchResult = 'draw';
                   }
                   
-                  // Debug Log
-                  console.log(`🎾 Match ${match.opponent}:`, {
-                    location: match.location,
-                    home_score: match.home_score,
-                    away_score: match.away_score,
-                    myScore,
-                    opponentScore,
-                    result: matchResult
-                  });
+                  // Debug Log (reduziert)
+                  // console.log(`🎾 Match ${match.opponent}:`, {
+                  //   location: match.location,
+                  //   home_score: match.home_score,
+                  //   away_score: match.away_score,
+                  //   myScore,
+                  //   opponentScore,
+                  //   result: matchResult
+                  // });
                 } else {
                   console.warn('⚠️ Match vergangen aber ohne Ergebnis:', match.opponent);
                 }
@@ -2037,12 +2670,13 @@ function Dashboard() {
                     }}
                   >
                     {clubTeams.map((team) => {
-                      console.log('🔍 Rendering team:', team.team_name || team.category, {
-                        league: team.league,
-                        group_name: team.group_name,
-                        team_size: team.team_size,
-                        season: team.season
-                      });
+                      // Debug-Logging reduziert
+                      // console.log('🔍 Rendering team:', team.team_name || team.category, {
+                      //   league: team.league,
+                      //   group_name: team.group_name,
+                      //   team_size: team.team_size,
+                      //   season: team.season
+                      // });
                       return (
                       <div 
                         key={team.id} 

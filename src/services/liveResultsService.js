@@ -150,9 +150,9 @@ export const getMatchResults = async (matchId) => {
       .from('match_results')
       .select(`
         *,
-        home_player:players!home_player_id(name),
-        home_player1:players!home_player1_id(name),
-        home_player2:players!home_player2_id(name)
+        home_player:players_unified!match_results_home_player_id_fkey(name, current_lk),
+        home_player1:players_unified!match_results_home_player1_id_fkey(name, current_lk),
+        home_player2:players_unified!match_results_home_player2_id_fkey(name, current_lk)
       `)
       .eq('match_id', matchId)
       .order('match_number', { ascending: true });

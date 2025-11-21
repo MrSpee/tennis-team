@@ -52,15 +52,15 @@ export const computeStandings = (leagueTeams = [], matches = [], matchResults = 
   // Alle abgeschlossenen Match-Status (nicht nur 'completed')
   const FINISHED_STATUSES = ['completed', 'retired', 'walkover', 'disqualified', 'defaulted'];
   
-  // Debug: Log resultsByMatchId
-  if (Object.keys(resultsByMatchId).length > 0) {
-    console.log('🔍 [computeStandings] Results grouped by matchday_id:', Object.keys(resultsByMatchId).length, 'matchdays');
-    Object.keys(resultsByMatchId).forEach(matchdayId => {
-      const results = resultsByMatchId[matchdayId];
-      const finished = results.filter(r => FINISHED_STATUSES.includes(r.status) && r.winner);
-      console.log(`  Matchday ${matchdayId}: ${results.length} results, ${finished.length} finished with winner`);
-    });
-  }
+  // Debug: Log resultsByMatchId (reduziert - nur bei Bedarf aktivieren)
+  // if (Object.keys(resultsByMatchId).length > 0) {
+  //   console.log('🔍 [computeStandings] Results grouped by matchday_id:', Object.keys(resultsByMatchId).length, 'matchdays');
+  //   Object.keys(resultsByMatchId).forEach(matchdayId => {
+  //     const results = resultsByMatchId[matchdayId];
+  //     const finished = results.filter(r => FINISHED_STATUSES.includes(r.status) && r.winner);
+  //     console.log(`  Matchday ${matchdayId}: ${results.length} results, ${finished.length} finished with winner`);
+  //   });
+  // }
 
   (matches || []).forEach((match) => {
     if (!match) return;
@@ -83,22 +83,26 @@ export const computeStandings = (leagueTeams = [], matches = [], matchResults = 
 
     // FALLBACK: Wenn keine match_results vorhanden sind, verwende home_score/away_score
     if (matchResultsForGame.length === 0) {
-      console.log(`⚠️ [computeStandings] Match ${match.id} hat keine match_results, verwende home_score/away_score als Fallback`);
+      // Debug-Log reduziert (nur bei Bedarf aktivieren)
+      // console.log(`⚠️ [computeStandings] Match ${match.id} hat keine match_results, verwende home_score/away_score als Fallback`);
       
       // Verwende home_score und away_score aus dem matchday
       const homeScore = parseIntSafe(match.home_score);
       const awayScore = parseIntSafe(match.away_score);
       
       if (homeScore === 0 && awayScore === 0) {
-        console.log(`⚠️ [computeStandings] Match ${match.id}: home_score und away_score sind beide 0, überspringe Match`);
+        // Debug-Log reduziert
+        // console.log(`⚠️ [computeStandings] Match ${match.id}: home_score und away_score sind beide 0, überspringe Match`);
         return;
       }
       
       homeMatchPoints = homeScore;
       awayMatchPoints = awayScore;
-      console.log(`✅ [computeStandings] Match ${match.id}: ${homeMatchPoints}:${awayMatchPoints} (aus home_score/away_score)`);
+      // Debug-Log reduziert
+      // console.log(`✅ [computeStandings] Match ${match.id}: ${homeMatchPoints}:${awayMatchPoints} (aus home_score/away_score)`);
     } else {
-      console.log(`✅ [computeStandings] Match ${match.id} hat ${matchResultsForGame.length} match_results`);
+      // Debug-Log reduziert
+      // console.log(`✅ [computeStandings] Match ${match.id} hat ${matchResultsForGame.length} match_results`);
 
       let skippedResults = 0;
       matchResultsForGame.forEach((result) => {
@@ -151,11 +155,13 @@ export const computeStandings = (leagueTeams = [], matches = [], matchResults = 
       });
 
       if (homeMatchPoints + awayMatchPoints === 0) {
-        console.log(`⚠️ [computeStandings] Match ${match.id}: Keine Match-Punkte (${skippedResults} results übersprungen)`);
+        // Debug-Log reduziert (nur bei Bedarf aktivieren)
+        // console.log(`⚠️ [computeStandings] Match ${match.id}: Keine Match-Punkte (${skippedResults} results übersprungen)`);
         return;
       }
       
-      console.log(`✅ [computeStandings] Match ${match.id}: ${homeMatchPoints}:${awayMatchPoints} (${matchResultsForGame.length - skippedResults} results gezählt)`);
+      // Debug-Log reduziert
+      // console.log(`✅ [computeStandings] Match ${match.id}: ${homeMatchPoints}:${awayMatchPoints} (${matchResultsForGame.length - skippedResults} results gezählt)`);
     }
 
     const homeStats = teamStats[homeTeamId];

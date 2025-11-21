@@ -311,10 +311,11 @@ export function DataProvider({ children }) {
               player_id,
               status,
               comment,
-              player:player_id (
+              player:players_unified!match_availability_player_id_fkey (
                 id,
                 name,
-                ranking
+                current_lk,
+                season_start_lk
               )
             )
           `)
@@ -342,10 +343,11 @@ export function DataProvider({ children }) {
               player_id,
               status,
               comment,
-              players!inner (
+              players_unified!match_availability_player_id_fkey (
                 id,
                 name,
-                ranking
+                current_lk,
+                season_start_lk
               )
             )
           `)
@@ -1349,8 +1351,10 @@ export function DataProvider({ children }) {
         .from('match_availability')
         .select(`
           *,
-          players!match_availability_player_id_fkey (
-            name
+          players_unified!match_availability_player_id_fkey (
+            name,
+            current_lk,
+            season_start_lk
           ),
           matchday:matchday_id (
             id,
