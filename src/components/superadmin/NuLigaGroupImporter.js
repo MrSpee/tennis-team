@@ -202,7 +202,24 @@ async function ensureTeams(scrapedData, clubMap, existingTeams, group, supabase,
     );
     
     if (existingTeam) {
-      // Team existiert bereits
+      // Team existiert bereits – prüfe Kategorie
+      const normalizedExistingCategory = normalizeString(existingTeam.category || '');
+      const normalizedRequiredCategory = normalizeString(requiredCategory || '');
+      
+      if (normalizedExistingCategory !== normalizedRequiredCategory) {
+        console.log(`[ensureTeams] ⚠️ Kategorie-Mismatch für Team "${clubName} ${teamSuffix}" (aktuell: "${existingTeam.category}", erwartet: "${requiredCategory}") – aktualisiere Kategorie`);
+        const { error: updateError } = await supabase
+          .from('team_info')
+          .update({ category: requiredCategory })
+          .eq('id', existingTeam.id);
+        
+        if (updateError) {
+          console.warn(`[ensureTeams] ❌ Fehler beim Update der Kategorie für Team "${clubName} ${teamSuffix}":`, updateError);
+        } else {
+          existingTeam.category = requiredCategory;
+        }
+      }
+      
       const fullTeamName = scrapedTeam.teamName || `${clubName} ${teamSuffix}`.trim();
       teamMap.set(fullTeamName, existingTeam);
       teamMap.set(`${clubName} ${teamSuffix}`, existingTeam); // Auch mit Suffix als Key
@@ -263,10 +280,54 @@ async function ensureTeams(scrapedData, clubMap, existingTeams, group, supabase,
 
 /**
  * Stellt sicher, dass alle Team-Seasons existieren
+ * WICHTIG: Entfernt auch Teams, die nicht mehr in der nuLiga-Gruppe sind
  */
 async function ensureTeamSeasons(scrapedData, teamMap, group, supabase, result) {
   const scrapedTeams = scrapedData.teamsDetailed || [];
+  const scrapedTeamIds = new Set();
   
+  // Sammle alle Team-IDs aus scrapedData
+  for (const scrapedTeam of scrapedTeams) {
+    const fullTeamName = scrapedTeam.teamName || `${scrapedTeam.clubName} ${scrapedTeam.teamSuffix || ''}`.trim();
+    const teamName = `${scrapedTeam.clubName} ${scrapedTeam.teamSuffix || ''}`.trim();
+    const team = teamMap.get(fullTeamName) || teamMap.get(teamName);
+    if (team) {
+      scrapedTeamIds.add(team.id);
+    }
+  }
+  
+  // WICHTIG: Finde alle team_seasons für diese Gruppe, die nicht mehr in nuLiga sind
+  const { data: existingTeamSeasons } = await supabase
+    .from('team_seasons')
+    .select('id, team_id, team_info!inner(club_name, team_name)')
+    .eq('season', group.season)
+    .eq('league', group.league)
+    .eq('group_name', group.groupName);
+  
+  if (existingTeamSeasons) {
+    for (const existingSeason of existingTeamSeasons) {
+      // Wenn Team nicht mehr in nuLiga-Gruppe ist, entferne es
+      if (!scrapedTeamIds.has(existingSeason.team_id)) {
+        console.log(`[ensureTeamSeasons] ⚠️ Team "${existingSeason.team_info?.club_name} ${existingSeason.team_info?.team_name}" ist nicht mehr in nuLiga-Gruppe ${group.groupName}, entferne aus team_seasons`);
+        const { error } = await supabase
+          .from('team_seasons')
+          .delete()
+          .eq('id', existingSeason.id);
+        
+        if (error) {
+          result.errors.push({
+            type: 'team_season_removal_error',
+            teamId: existingSeason.team_id,
+            error: error.message
+          });
+        } else {
+          console.log(`[ensureTeamSeasons] ✅ Team entfernt aus Gruppe ${group.groupName}`);
+        }
+      }
+    }
+  }
+  
+  // Erstelle/Update team_seasons für alle Teams aus nuLiga
   for (const scrapedTeam of scrapedTeams) {
     const fullTeamName = scrapedTeam.teamName || `${scrapedTeam.clubName} ${scrapedTeam.teamSuffix || ''}`.trim();
     const teamName = `${scrapedTeam.clubName} ${scrapedTeam.teamSuffix || ''}`.trim();
@@ -292,7 +353,7 @@ async function ensureTeamSeasons(scrapedData, teamMap, group, supabase, result) 
           .insert({
             team_id: team.id,
             season: group.season,
-            league: group.league,
+            league: group.league, // WICHTIG: League aus nuLiga (nicht aus DB!)
             group_name: group.groupName,
             team_size: 6,
             is_active: true
@@ -311,6 +372,19 @@ async function ensureTeamSeasons(scrapedData, teamMap, group, supabase, result) 
           teamName,
           error: error.message
         });
+      }
+    } else {
+      // Update League/Kategorie falls sich geändert hat
+      const { error: updateError } = await supabase
+        .from('team_seasons')
+        .update({
+          league: group.league, // WICHTIG: League aus nuLiga übernehmen
+          is_active: true
+        })
+        .eq('id', existing.id);
+      
+      if (updateError) {
+        console.warn(`[ensureTeamSeasons] ⚠️ Fehler beim Update von team_season für Team ${teamName}:`, updateError);
       }
     }
   }
