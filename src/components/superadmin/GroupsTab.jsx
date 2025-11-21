@@ -344,13 +344,29 @@ function GroupsTab({
           const set3Home = parseInt(result.set3_home || 0, 10);
           const set3Guest = parseInt(result.set3_guest || 0, 10);
 
-          if (set1Home > set1Guest) homeSets += 1;
-          else if (set1Guest > set1Home) awaySets += 1;
-          if (set2Home > set2Guest) homeSets += 1;
-          else if (set2Guest > set2Home) awaySets += 1;
-          if (set3Home !== null && set3Guest !== null) {
-            if (set3Home > set3Guest) homeSets += 1;
-            else if (set3Guest > set3Home) awaySets += 1;
+          // Prüfe ob es ein Walkover ist (status='walkover' oder nur 1 Set gespielt, aber winner gesetzt)
+          const isWalkover = result.status === 'walkover' || 
+            (result.set2_home === null && result.set2_guest === null && 
+             result.set3_home === null && result.set3_guest === null && 
+             result.winner);
+
+          if (isWalkover) {
+            // Bei Walkover: Sets als 2:0 für den Gewinner werten
+            if (result.winner === 'home') {
+              homeSets += 2;
+            } else if (result.winner === 'guest' || result.winner === 'away') {
+              awaySets += 2;
+            }
+          } else {
+            // Normale Sets-Berechnung
+            if (set1Home > set1Guest) homeSets += 1;
+            else if (set1Guest > set1Home) awaySets += 1;
+            if (set2Home > set2Guest) homeSets += 1;
+            else if (set2Guest > set2Home) awaySets += 1;
+            if (set3Home !== null && set3Guest !== null) {
+              if (set3Home > set3Guest) homeSets += 1;
+              else if (set3Guest > set3Home) awaySets += 1;
+            }
           }
 
           // Games

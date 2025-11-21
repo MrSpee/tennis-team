@@ -534,8 +534,8 @@
   border-radius: 12px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
   padding: 1.5rem;
-  overflow-y: auto;
-  max-height: 600px;
+  overflow-y: visible;
+  max-height: none;
   display: flex;
   flex-direction: column;
 }
@@ -1199,7 +1199,7 @@
   .group-details-panel {
     width: 100%;
     min-width: unset;
-    max-height: 500px;
+    max-height: none;
   }
   
   .groups-grid {
