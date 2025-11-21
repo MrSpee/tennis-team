@@ -148,8 +148,10 @@ function SuperAdminRoute({ children }) {
 
 function AppContent() {
   const { isAuthenticated, loading, needsOnboarding } = useAuth();
-  const showNavigation = isAuthenticated && !needsOnboarding;
-  const showHeader = isAuthenticated && !needsOnboarding;
+  // In Development: Zeige Header/Navigation auch wenn needsOnboarding true ist
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  const showNavigation = isAuthenticated && (!needsOnboarding || isDevelopment);
+  const showHeader = isAuthenticated && (!needsOnboarding || isDevelopment);
 
   return (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
