@@ -194,7 +194,7 @@ function Training() {
         .from('team_memberships')
         .select(`
           *,
-          player:player_id (
+          player:players_unified!team_memberships_player_id_fkey (
             id,
             name,
             email,
