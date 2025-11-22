@@ -34,14 +34,19 @@ export const seededRandom = (seed) => {
 /**
  * Berechne Spieler-Priorität für Training (FAIR ROUND-ROBIN SYSTEM)
  * 
- * NEUE Formel (V7 - Fair Rotation):
+ * Formel (V8 - Mit Absagen-Berücksichtigung):
  * - ROUND-ROBIN CORE: Tage seit letzter Teilnahme (HÖCHSTE Priorität)
- * - ABSAGEN-BONUS: Höhere Priorität bei kürzlichen/multiple Absagen
- * - Zufallsfaktor für faire Rotation bei Gleichstand
+ * - ABSAGEN-BONUS: Höhere Priorität bei Absagen (verhindert mehrfaches Aussetzen)
+ *   * Konsekutive Absagen: +10 bis +50 (je nach Anzahl)
+ *   * Letzte Antwort war Absage: +15
+ *   * Gesamt-Absagen: +5 bis +20 (geringeres Gewicht)
+ *   * Wartelisten-Bonus: +20
+ * - Zufallsfaktor für faire Rotation bei Gleichstand: +0 bis +5
  * 
  * WICHTIG: 
  * - Ein Spieler kann NICHT 2x hintereinander aussetzen wenn Round-Robin aktiv ist
  * - Bei 5 Spielern und 4 Plätzen rotiert automatisch wer aussetzen muss
+ * - Spieler mit vielen Absagen bekommen automatisch höhere Priorität
  * 
  * @param {string} playerId - Player UUID
  * @param {object} training - Training Session Objekt
@@ -102,16 +107,38 @@ export const calculatePlayerPriority = (playerId, training, allPlayers) => {
   // 2. ABSAGEN-BONUS: Anti-Aussetz-Schutz + Bonus
   // ============================================================================
   // WICHTIG: ANTI-AUSSETZ-SCHUTZ
-  // Wenn jemand beim letzten Training abgesagt hat, bekommt er BONUS
-  // Damit kann er nicht 2x hintereinander aussetzen
+  // Spieler, die oft abgesagt haben, bekommen BONUS damit sie nicht immer aussetzen müssen
   let declineBonus = 0;
   
-  // WARTELISTEN-BONUS: Wer auf Warteliste gestanden hat, bekommt realistischen Bonus
-  // Nur was_on_waitlist = true → Bonus (nicht declined!)
+  // A) KONSEKUTIVE ABSAGEN: Höchster Bonus für Spieler die mehrfach hintereinander abgesagt haben
+  // Je mehr hintereinander abgesagt, desto höher der Bonus (max. +50)
+  if (stats.consecutive_declines > 0) {
+    // Exponentieller Bonus: 1x abgesagt = +10, 2x = +25, 3x = +40, 4x+ = +50
+    const consecutiveBonus = Math.min(10 + (stats.consecutive_declines - 1) * 15, 50);
+    declineBonus += consecutiveBonus;
+    console.log(`✅ Konsekutive Absagen-Bonus: ${stats.consecutive_declines}x hintereinander → Bonus +${consecutiveBonus}`);
+  }
   
+  // B) LETZTE ANTWORT WAR ABSAGE: Bonus wenn beim letzten Training abgesagt wurde
+  // Verhindert, dass jemand 2x hintereinander aussetzen muss
+  if (stats.last_response === 'declined') {
+    declineBonus += 15; // +15 Bonus für letzte Absage
+    console.log('✅ Letzte Absage-Bonus: letzte Antwort war "declined" → Bonus +15');
+  }
+  
+  // C) GESAMT-ABSAGEN: Bonus basierend auf Gesamtzahl der Absagen (geringeres Gewicht)
+  // Spieler mit vielen Absagen bekommen einen kleinen Bonus (max. +20)
+  if (stats.total_declined > 0) {
+    // Linearer Bonus: 1-2 Absagen = +5, 3-4 = +10, 5-6 = +15, 7+ = +20
+    const totalDeclinedBonus = Math.min(5 + Math.floor(stats.total_declined / 2) * 5, 20);
+    declineBonus += totalDeclinedBonus;
+    console.log(`✅ Gesamt-Absagen-Bonus: ${stats.total_declined}x insgesamt → Bonus +${totalDeclinedBonus}`);
+  }
+  
+  // D) WARTELISTEN-BONUS: Wer auf Warteliste gestanden hat, bekommt realistischen Bonus
+  // Nur was_on_waitlist = true → Bonus (nicht declined!)
   if (stats.was_on_waitlist) {
-    // Spieler war auf Warteliste → Realistischer Bonus beim nächsten Training
-    declineBonus = 20; // +20 = realistischer Bonus
+    declineBonus += 20; // +20 = realistischer Bonus
     console.log('✅ Wartelisten-Bonus: war auf Warteliste → Bonus +20');
   }
   
@@ -120,10 +147,15 @@ export const calculatePlayerPriority = (playerId, training, allPlayers) => {
   
   console.log('🔍 Final priority breakdown:', {
     playerId,
-    daysSinceLastTraining,
+    playerName: player?.name,
+    daysSinceLastTraining: daysSinceLastTraining.toFixed(2),
+    consecutiveDeclines: stats.consecutive_declines,
+    totalDeclined: stats.total_declined,
+    lastResponse: stats.last_response,
+    wasOnWaitlist: stats.was_on_waitlist,
     declineBonus,
-    randomFactor: breakdown.randomFactor,
-    finalPriority: priority
+    randomFactor: breakdown.randomFactor.toFixed(2),
+    finalPriority: priority.toFixed(2)
   });
 
   // ============================================================================
