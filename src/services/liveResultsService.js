@@ -201,6 +201,23 @@ export const saveMatchResult = async (resultData) => {
       throw error;
     }
 
+    // 🎾 Automatische LK-Berechnung für betroffene Spieler
+    if (data && data.length > 0) {
+      const savedResult = data[0];
+      
+      // Prüfe ob Match abgeschlossen ist
+      if (savedResult.status === 'completed' && savedResult.winner) {
+        console.log('✅ Match-Ergebnis gespeichert, starte automatische LK-Berechnung...');
+        
+        // Importiere dynamisch, um Circular Dependencies zu vermeiden
+        import('../services/lkCalculationService').then(({ recalculateLKForMatchResult }) => {
+          recalculateLKForMatchResult(savedResult);
+        }).catch(err => {
+          console.error('Error importing LK calculation service:', err);
+        });
+      }
+    }
+
     return { data, error: null };
   } catch (error) {
     console.error('Error in saveMatchResult:', error);

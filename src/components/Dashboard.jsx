@@ -1,12 +1,13 @@
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { ExternalLink, Edit, X } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
-import { parseLK } from '../lib/lkUtils';
+import { parseLK, calculateLKChange, formatLKChange } from '../lib/lkUtils';
 import { supabase } from '../lib/supabaseClient';
+import { recalculateLKForMatchResult, recalculateLKForAllActivePlayers } from '../services/lkCalculationService';
 import SurfaceInfo from './SurfaceInfo';
 import './Dashboard.css';
 
@@ -51,6 +52,95 @@ function Dashboard() {
   // 🎾 State für Social Feed
   const [socialFeed, setSocialFeed] = useState([]);
   const [loadingFeed, setLoadingFeed] = useState(false);
+  const [socialFeedPlayers, setSocialFeedPlayers] = useState({}); // Map von playerId zu Spieler-Daten
+  
+  // 🎾 Lade aktuelle Spieler-Daten neu, wenn Feed geladen wird (für aktuelle LK)
+  const refreshPlayerData = useCallback(async () => {
+    if (socialFeed.length === 0) {
+      console.log('⚠️ refreshPlayerData: socialFeed is empty');
+      return;
+    }
+    
+    // Sammle alle eindeutigen Player-IDs aus dem Feed
+    const playerIds = [...new Set(socialFeed.map(item => item.playerId))];
+    if (playerIds.length === 0) {
+      console.log('⚠️ refreshPlayerData: no player IDs found');
+      return;
+    }
+    
+    console.log('🔄 Refreshing player data for:', playerIds.length, 'players', playerIds);
+    
+    try {
+      // Lade aktuelle Spieler-Daten (inkl. neueste current_lk) - WICHTIG: Alle LK-Felder laden!
+      const { data: players, error } = await supabase
+        .from('players_unified')
+        .select('id, name, current_lk, season_start_lk, ranking, profile_image, updated_at')
+        .in('id', playerIds);
+      
+      if (error) {
+        console.error('❌ Error refreshing player data:', error);
+        return;
+      }
+      
+      if (players) {
+        const playersMap = {};
+        players.forEach(p => {
+          // WICHTIG: Verwende current_lk direkt (sollte die neueste sein)
+          // Fallback nur wenn current_lk NULL ist
+          playersMap[p.id] = {
+            id: p.id,
+            name: p.name,
+            current_lk: p.current_lk, // WICHTIG: Verwende current_lk direkt, nicht displayLK!
+            season_start_lk: p.season_start_lk,
+            ranking: p.ranking,
+            profile_image: p.profile_image,
+            updated_at: p.updated_at
+          };
+          
+          // Debug für Raoul - zeige ALLE LK-Felder
+          if (p.name === 'Raoul van Herwijnen') {
+            console.log('🔍 Raoul data loaded from DB (refreshPlayerData):', {
+              id: p.id,
+              name: p.name,
+              current_lk: p.current_lk,
+              season_start_lk: p.season_start_lk,
+              ranking: p.ranking,
+              updated_at: p.updated_at,
+              rawData: p
+            });
+          }
+        });
+        setSocialFeedPlayers(playersMap);
+        console.log('✅ Player data refreshed with current LK:', Object.keys(playersMap).length, 'players');
+      } else {
+        console.warn('⚠️ No players data returned from query');
+      }
+    } catch (error) {
+      console.error('❌ Error refreshing player data:', error);
+    }
+  }, [socialFeed]); // useCallback mit socialFeed als Dependency
+  
+  useEffect(() => {
+    if (socialFeed.length > 0) {
+      refreshPlayerData();
+    }
+  }, [socialFeed, refreshPlayerData]);
+  
+  // 🎾 Aktualisiere Spieler-Daten, wenn LK neu berechnet wird (Event von Rankings.jsx oder LK-Service)
+  useEffect(() => {
+    const handleReloadPlayers = () => {
+      console.log('🔄 Reload players event received, refreshing player data for Tennis Mates...');
+      // Warte kurz, damit DB-Update abgeschlossen ist
+      setTimeout(() => {
+        refreshPlayerData();
+      }, 1000); // 1 Sekunde Verzögerung, damit DB-Update abgeschlossen ist
+    };
+    
+    window.addEventListener('reloadPlayers', handleReloadPlayers);
+    return () => {
+      window.removeEventListener('reloadPlayers', handleReloadPlayers);
+    };
+  }, [refreshPlayerData]);
 
   // Timer für Live-Updates (alle 30 Sekunden)
   useEffect(() => {
@@ -243,6 +333,78 @@ function Dashboard() {
     
     loadSocialStats();
   }, [player?.id]);
+  
+  // 🎾 Automatische LK-Berechnung bei neuen Match-Ergebnissen
+  useEffect(() => {
+    console.log('🎾 Setting up match_results subscription for automatic LK calculation...');
+    
+    const subscription = supabase
+      .channel('match-results-lk-calculation')
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // INSERT, UPDATE, DELETE
+          schema: 'public',
+          table: 'match_results',
+          filter: 'status=eq.completed' // Nur abgeschlossene Matches
+        },
+        async (payload) => {
+          console.log('🔄 Match-Ergebnis geändert:', payload.eventType, payload.new || payload.old);
+          
+          // Nur bei INSERT oder UPDATE mit completed Status
+          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            const matchResult = payload.new;
+            
+            // Prüfe ob Match abgeschlossen ist
+            if (matchResult.status === 'completed' && matchResult.winner) {
+              console.log('✅ Neues abgeschlossenes Match-Ergebnis gefunden, berechne LK automatisch...');
+              
+              // Berechne LK für alle betroffenen Spieler
+              await recalculateLKForMatchResult(matchResult);
+            }
+          }
+        }
+      )
+      .subscribe();
+    
+    return () => {
+      console.log('🎾 Cleaning up match_results subscription');
+      subscription.unsubscribe();
+    };
+  }, []); // Nur einmal beim Mount
+  
+  // 🎾 Einmalige LK-Neuberechnung für alle aktiven Spieler beim ersten Laden
+  useEffect(() => {
+    const runInitialLKCalculation = async () => {
+      // Prüfe ob bereits berechnet wurde (in localStorage)
+      const hasCalculated = localStorage.getItem('lk_initial_calculation_done');
+      
+      if (!hasCalculated && player?.id) {
+        console.log('🔄 Erste LK-Neuberechnung für alle aktiven Spieler...');
+        
+        try {
+          const result = await recalculateLKForAllActivePlayers();
+          
+          if (result.success) {
+            console.log(`✅ Initiale LK-Berechnung abgeschlossen: ${result.calculated}/${result.total} Spieler`);
+            localStorage.setItem('lk_initial_calculation_done', 'true');
+            localStorage.setItem('lk_initial_calculation_date', new Date().toISOString());
+          } else {
+            console.error('❌ Fehler bei initialer LK-Berechnung:', result.error);
+          }
+        } catch (error) {
+          console.error('❌ Fehler bei initialer LK-Berechnung:', error);
+        }
+      }
+    };
+    
+    // Warte kurz, damit alles geladen ist
+    const timer = setTimeout(() => {
+      runInitialLKCalculation();
+    }, 2000);
+    
+    return () => clearTimeout(timer);
+  }, [player?.id]);
 
   // 🎾 Lade Social Feed für befreundete Spieler
   const loadSocialFeed = async (friendIds) => {
@@ -260,10 +422,10 @@ function Dashboard() {
       
       const feedItems = [];
 
-      // 1. Lade Spieler-Infos (inkl. Profilbilder)
+      // 1. Lade Spieler-Infos (inkl. Profilbilder und current_lk mit Saison-Verbesserungen)
       const { data: players, error: playersError } = await supabase
         .from('players_unified')
-        .select('id, name, current_lk, updated_at, profile_image')
+        .select('id, name, current_lk, season_start_lk, updated_at, profile_image')
         .in('id', friendIds);
       
       if (playersError) {
@@ -887,6 +1049,36 @@ function Dashboard() {
       }
 
       setSocialFeed(limitedFeedItems);
+      
+      // Speichere Spieler-Daten für die Anzeige (mit aktueller LK)
+      const playersMap = {};
+      if (players) {
+        players.forEach(p => {
+          // WICHTIG: Verwende current_lk direkt (sollte die neueste sein)
+          playersMap[p.id] = {
+            id: p.id,
+            name: p.name,
+            current_lk: p.current_lk, // WICHTIG: Verwende current_lk direkt!
+            season_start_lk: p.season_start_lk, // Für Vergleich und Formpfeil
+            ranking: p.ranking,
+            profile_image: p.profile_image
+          };
+          
+          // Debug für Raoul - zeige ALLE LK-Felder
+          if (p.name === 'Raoul van Herwijnen') {
+            console.log('🔍 Raoul data set in loadSocialFeed:', {
+              id: p.id,
+              name: p.name,
+              current_lk: p.current_lk,
+              season_start_lk: p.season_start_lk,
+              ranking: p.ranking,
+              rawData: p
+            });
+          }
+        });
+      }
+      setSocialFeedPlayers(playersMap);
+      console.log('✅ socialFeedPlayers set with', Object.keys(playersMap).length, 'players');
       
       console.log('🎾 Social feed loaded:', {
         totalItems: feedItems.length,
@@ -1810,345 +2002,436 @@ function Dashboard() {
               </div>
 
               {/* 🎾 Social Feed - Aktivitäten befreundeter Spieler */}
-              {socialFeed.length > 0 && (
-                <div style={{
-                  marginTop: '1rem',
-                  paddingTop: '1rem',
-                  borderTop: '2px solid rgba(139, 92, 246, 0.2)'
-                }}>
-                  <div style={{
-                    fontSize: '0.75rem',
-                    fontWeight: '700',
-                    color: 'rgb(107, 114, 128)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                    marginBottom: '0.75rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem'
-                  }}>
-                    <span>📰</span>
-                    <span>Aktivitäten deiner Freunde</span>
-                  </div>
-                  
-                  <div style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '1rem',
-                    maxHeight: '500px',
-                    overflowY: 'auto',
-                    paddingRight: '0.5rem'
-                  }}>
-                    {socialFeed.map((item, index) => {
-                      const timeAgo = Math.floor((now - item.timestamp) / (1000 * 60 * 60)); // Stunden
-                      const daysAgo = Math.floor(timeAgo / 24);
-                      
-                      let timeLabel = '';
-                      if (timeAgo < 1) timeLabel = 'vor weniger als 1h';
-                      else if (timeAgo < 24) timeLabel = `vor ${timeAgo}h`;
-                      else if (daysAgo === 1) timeLabel = 'gestern';
-                      else timeLabel = `vor ${daysAgo} Tagen`;
+              {socialFeed.length > 0 && (() => {
+                // Gruppiere Feed-Items nach Spieler
+                const groupedByPlayer = socialFeed.reduce((acc, item) => {
+                  if (!acc[item.playerId]) {
+                    // Verwende IMMER Spieler-Daten aus socialFeedPlayers (aktuellste LK aus DB)
+                    const playerData = socialFeedPlayers[item.playerId];
+                    
+                    // Debug: Zeige was geladen wurde
+                    if (item.playerName === 'Raoul van Herwijnen') {
+                      console.log('🔍 Raoul LK Debug:', {
+                        playerData: playerData,
+                        playerDataLK: playerData?.current_lk,
+                        itemLK: item.playerLK,
+                        socialFeedPlayers: socialFeedPlayers[item.playerId]
+                      });
+                    }
+                    
+                    acc[item.playerId] = {
+                      playerId: item.playerId,
+                      playerName: playerData?.name || item.playerName,
+                      playerImage: playerData?.profile_image || item.playerImage,
+                      // WICHTIG: Verwende IMMER current_lk aus Spieler-Daten (aktuellste aus DB)
+                      // Fallback zu Feed-Item nur wenn Spieler-Daten nicht verfügbar
+                      playerLK: playerData?.current_lk || item.playerLK,
+                      activities: []
+                    };
+                  }
+                  acc[item.playerId].activities.push(item);
+                  return acc;
+                }, {});
 
-                      // Profilbild oder Fallback-Avatar
-                      const profileImageUrl = item.playerImage 
-                        ? (item.playerImage.startsWith('http') ? item.playerImage : `${supabase.supabaseUrl}/storage/v1/object/public/profiles/${item.playerImage}`)
-                        : null;
-                      
-                      if (item.type === 'match_result') {
-                        return (
-                          <div
-                            key={`${item.type}-${item.playerId}-${index}`}
-                            style={{
-                              padding: '1rem',
-                              background: item.data.won 
-                                ? 'linear-gradient(135deg, rgba(236, 253, 245, 0.9) 0%, rgba(209, 250, 229, 0.9) 100%)'
-                                : 'linear-gradient(135deg, rgba(254, 242, 242, 0.9) 0%, rgba(254, 226, 226, 0.9) 100%)',
-                              border: `2px solid ${item.data.won ? 'rgb(16, 185, 129)' : 'rgb(239, 68, 68)'}`,
-                              borderRadius: '12px',
-                              cursor: 'pointer',
-                              transition: 'all 0.3s ease',
-                              boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.transform = 'translateY(-2px)';
-                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.transform = 'translateY(0)';
-                              e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
-                            }}
-                            onClick={() => navigate(`/player/${encodeURIComponent(item.playerName)}`)}
-                          >
-                            <div style={{
-                              display: 'flex',
-                              alignItems: 'flex-start',
-                              gap: '1rem'
-                            }}>
-                              {/* Profilbild */}
-                              <div style={{
-                                width: '48px',
-                                height: '48px',
-                                borderRadius: '50%',
-                                background: profileImageUrl 
-                                  ? `url(${profileImageUrl}) center/cover`
-                                  : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                                border: `3px solid ${item.data.won ? 'rgb(16, 185, 129)' : 'rgb(239, 68, 68)'}`,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '1.5rem',
-                                flexShrink: 0,
-                                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                                color: 'white',
-                                fontWeight: '700'
-                              }}>
-                                {!profileImageUrl && item.playerName.charAt(0).toUpperCase()}
-                              </div>
-                              
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                {/* Header mit Name und Icon */}
-                                <div style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '0.5rem',
-                                  marginBottom: '0.5rem',
-                                  flexWrap: 'wrap'
-                                }}>
-                                  <div style={{
-                                    fontSize: '1.25rem'
-                                  }}>
-                                    {item.icon || (item.data.won ? '🏆' : '😔')}
-                                  </div>
-                                  <div style={{
-                                    fontSize: '0.875rem',
-                                    fontWeight: '700',
-                                    color: 'rgb(31, 41, 55)',
-                                    flex: 1
-                                  }}>
-                                    {item.playerName}
-                                  </div>
-                                  {item.playerLK && (
-                                    <div style={{
-                                      fontSize: '0.7rem',
-                                      fontWeight: '600',
-                                      color: 'rgb(107, 114, 128)',
-                                      background: 'rgba(255,255,255,0.7)',
-                                      padding: '0.2rem 0.5rem',
-                                      borderRadius: '12px'
-                                    }}>
-                                      {item.playerLK}
-                                    </div>
-                                  )}
-                                </div>
-                                
-                                {/* Match-Ergebnis Text */}
-                                <div style={{
-                                  fontSize: '0.85rem',
-                                  color: 'rgb(55, 65, 81)',
-                                  marginBottom: '0.5rem',
-                                  lineHeight: '1.4',
-                                  fontWeight: '500'
-                                }}>
-                                  {item.message || (item.data.won ? 'hat gewonnen' : 'hat verloren')}
-                                </div>
-                                
-                                {/* Footer mit Details */}
-                                <div style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '0.5rem',
-                                  fontSize: '0.7rem',
-                                  color: 'rgb(107, 114, 128)',
-                                  flexWrap: 'wrap'
-                                }}>
-                                  <span style={{
-                                    background: 'rgba(255,255,255,0.7)',
-                                    padding: '0.2rem 0.5rem',
-                                    borderRadius: '8px',
-                                    fontWeight: '600'
-                                  }}>
-                                    {item.data.matchType}
-                                  </span>
-                                  <span>•</span>
-                                  <span style={{
-                                    fontWeight: '700',
-                                    color: item.data.won ? 'rgb(16, 185, 129)' : 'rgb(239, 68, 68)'
-                                  }}>
-                                    {item.data.setScore || 'N/A'}
-                                  </span>
-                                  {item.data.opponentLK && item.data.opponentLK !== 25 && (
-                                    <>
-                                      <span>•</span>
-                                      <span style={{
-                                        background: 'rgba(255,255,255,0.7)',
-                                        padding: '0.2rem 0.5rem',
-                                        borderRadius: '8px',
-                                        fontWeight: '600',
-                                        color: 'rgb(59, 130, 246)'
-                                      }}>
-                                        Gegner LK {item.data.opponentLK.toFixed(1)}
-                                      </span>
-                                    </>
-                                  )}
-                                  {item.data.won && item.data.playerLKBefore && item.data.playerLKAfter && 
-                                   Math.abs(item.data.playerLKBefore - item.data.playerLKAfter) > 0.01 && (
-                                    <>
-                                      <span>•</span>
-                                      <span style={{
-                                        background: 'rgba(16, 185, 129, 0.2)',
-                                        padding: '0.2rem 0.5rem',
-                                        borderRadius: '8px',
-                                        fontWeight: '700',
-                                        color: 'rgb(16, 185, 129)'
-                                      }}>
-                                        LK {item.data.playerLKBefore.toFixed(1)} → {item.data.playerLKAfter.toFixed(1)}
-                                      </span>
-                                    </>
-                                  )}
-                                  <span>•</span>
-                                  <span>{timeLabel}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      } else if (item.type === 'new_match') {
-                        return (
-                          <div
-                            key={`${item.type}-${item.playerId}-${index}`}
-                            style={{
-                              padding: '1rem',
-                              background: 'linear-gradient(135deg, rgba(239, 246, 255, 0.9) 0%, rgba(219, 234, 254, 0.9) 100%)',
-                              border: '2px solid rgb(59, 130, 246)',
-                              borderRadius: '12px',
-                              cursor: 'pointer',
-                              transition: 'all 0.3s ease',
-                              boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.transform = 'translateY(-2px)';
-                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.transform = 'translateY(0)';
-                              e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
-                            }}
-                            onClick={() => navigate(`/player/${encodeURIComponent(item.playerName)}`)}
-                          >
-                            <div style={{
-                              display: 'flex',
-                              alignItems: 'flex-start',
-                              gap: '1rem'
-                            }}>
-                              {/* Profilbild */}
-                              <div style={{
-                                width: '48px',
-                                height: '48px',
-                                borderRadius: '50%',
-                                background: profileImageUrl 
-                                  ? `url(${profileImageUrl}) center/cover`
-                                  : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                                border: '3px solid rgb(59, 130, 246)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '1.5rem',
-                                flexShrink: 0,
-                                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                                color: 'white',
-                                fontWeight: '700'
-                              }}>
-                                {!profileImageUrl && item.playerName.charAt(0).toUpperCase()}
-                              </div>
-                              
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                {/* Header mit Name und Icon */}
-                                <div style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '0.5rem',
-                                  marginBottom: '0.5rem',
-                                  flexWrap: 'wrap'
-                                }}>
-                                  <div style={{
-                                    fontSize: '1.25rem'
-                                  }}>
-                                    {item.icon || '📅'}
-                                  </div>
-                                  <div style={{
-                                    fontSize: '0.875rem',
-                                    fontWeight: '700',
-                                    color: 'rgb(31, 41, 55)',
-                                    flex: 1
-                                  }}>
-                                    {item.playerName}
-                                  </div>
-                                  {item.playerLK && (
-                                    <div style={{
-                                      fontSize: '0.7rem',
-                                      fontWeight: '600',
-                                      color: 'rgb(107, 114, 128)',
-                                      background: 'rgba(255,255,255,0.7)',
-                                      padding: '0.2rem 0.5rem',
-                                      borderRadius: '12px'
-                                    }}>
-                                      {item.playerLK}
-                                    </div>
-                                  )}
-                                </div>
-                                
-                                {/* Humorvoller Text */}
-                                <div style={{
-                                  fontSize: '0.85rem',
-                                  color: 'rgb(55, 65, 81)',
-                                  marginBottom: '0.5rem',
-                                  lineHeight: '1.4',
-                                  fontWeight: '500'
-                                }}>
-                                  {item.message || 'hat ein neues Match geplant'}
-                                </div>
-                                
-                                {/* Footer mit Details */}
-                                <div style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '0.5rem',
-                                  fontSize: '0.7rem',
-                                  color: 'rgb(107, 114, 128)',
-                                  flexWrap: 'wrap'
-                                }}>
-                                  <span style={{
-                                    background: 'rgba(255,255,255,0.7)',
-                                    padding: '0.2rem 0.5rem',
-                                    borderRadius: '8px',
-                                    fontWeight: '600'
-                                  }}>
-                                    {item.data.isHome ? '🏠 Heim' : '✈️ Auswärts'}
-                                  </span>
-                                  <span>•</span>
-                                  <span>{timeLabel}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      }
-                      return null;
-                    })}
-                  </div>
+                // Sortiere Aktivitäten pro Spieler nach Timestamp (neueste zuerst)
+                Object.values(groupedByPlayer).forEach(player => {
+                  player.activities.sort((a, b) => b.timestamp - a.timestamp);
+                });
 
-                  {loadingFeed && (
+                // Konvertiere zu Array und sortiere nach neuester Aktivität
+                const playersWithActivities = Object.values(groupedByPlayer).sort((a, b) => {
+                  const latestA = a.activities[0]?.timestamp || 0;
+                  const latestB = b.activities[0]?.timestamp || 0;
+                  return latestB - latestA;
+                });
+
+                return (
+                  <div style={{
+                    marginTop: '1rem',
+                    paddingTop: '1rem',
+                    borderTop: '2px solid rgba(139, 92, 246, 0.2)'
+                  }}>
                     <div style={{
-                      padding: '1rem',
-                      textAlign: 'center',
+                      fontSize: '0.75rem',
+                      fontWeight: '700',
                       color: 'rgb(107, 114, 128)',
-                      fontSize: '0.875rem'
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px',
+                      marginBottom: '0.75rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
                     }}>
-                      ⏳ Lade Aktivitäten...
+                      <span>📰</span>
+                      <span>Aktivitäten deiner Freunde</span>
                     </div>
-                  )}
-                </div>
-              )}
+                    
+                    <div style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '1rem',
+                      maxHeight: '500px',
+                      overflowY: 'auto',
+                      paddingRight: '0.5rem'
+                    }}>
+                      {playersWithActivities.map((playerData) => {
+                        // Debug: Zeige LK für Raoul
+                        if (playerData.playerName === 'Raoul van Herwijnen') {
+                          console.log('🔍 Rendering Raoul with LK:', {
+                            playerData: playerData,
+                            playerLK: playerData.playerLK,
+                            socialFeedPlayers: socialFeedPlayers[playerData.playerId]
+                          });
+                        }
+                        
+                        const profileImageUrl = playerData.playerImage 
+                          ? (playerData.playerImage.startsWith('http') ? playerData.playerImage : `${supabase.supabaseUrl}/storage/v1/object/public/profiles/${playerData.playerImage}`)
+                          : null;
+
+                        // Bestimme dominante Farbe basierend auf Aktivitäten (Sieg = grün, Niederlage = rot, Match = blau)
+                        const hasWin = playerData.activities.some(a => a.type === 'match_result' && a.data.won);
+                        const hasLoss = playerData.activities.some(a => a.type === 'match_result' && !a.data.won);
+                        const hasNewMatch = playerData.activities.some(a => a.type === 'new_match');
+                        
+                        let cardBackground = 'linear-gradient(135deg, rgba(249, 250, 251, 0.9) 0%, rgba(243, 244, 246, 0.9) 100%)';
+                        let cardBorder = 'rgb(209, 213, 219)';
+                        
+                        if (hasWin && !hasLoss) {
+                          cardBackground = 'linear-gradient(135deg, rgba(236, 253, 245, 0.9) 0%, rgba(209, 250, 229, 0.9) 100%)';
+                          cardBorder = 'rgb(16, 185, 129)';
+                        } else if (hasLoss && !hasWin) {
+                          cardBackground = 'linear-gradient(135deg, rgba(254, 242, 242, 0.9) 0%, rgba(254, 226, 226, 0.9) 100%)';
+                          cardBorder = 'rgb(239, 68, 68)';
+                        } else if (hasNewMatch && !hasWin && !hasLoss) {
+                          cardBackground = 'linear-gradient(135deg, rgba(239, 246, 255, 0.9) 0%, rgba(219, 234, 254, 0.9) 100%)';
+                          cardBorder = 'rgb(59, 130, 246)';
+                        }
+
+                        return (
+                          <div
+                            key={playerData.playerId}
+                            style={{
+                              padding: '1rem',
+                              background: cardBackground,
+                              border: `2px solid ${cardBorder}`,
+                              borderRadius: '12px',
+                              cursor: 'pointer',
+                              transition: 'all 0.3s ease',
+                              boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.transform = 'translateY(-2px)';
+                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.transform = 'translateY(0)';
+                              e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+                            }}
+                            onClick={() => navigate(`/player/${encodeURIComponent(playerData.playerName)}`)}
+                          >
+                            {/* Spieler Header */}
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: '1rem',
+                              marginBottom: playerData.activities.length > 1 ? '0.75rem' : '0'
+                            }}>
+                              {/* Profilbild */}
+                              <div style={{
+                                width: '48px',
+                                height: '48px',
+                                borderRadius: '50%',
+                                background: profileImageUrl 
+                                  ? `url(${profileImageUrl}) center/cover`
+                                  : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                border: `3px solid ${cardBorder}`,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '1.5rem',
+                                flexShrink: 0,
+                                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                                color: 'white',
+                                fontWeight: '700'
+                              }}>
+                                {!profileImageUrl && playerData.playerName.charAt(0).toUpperCase()}
+                              </div>
+                              
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                {/* Name und LK */}
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.5rem',
+                                  marginBottom: '0.25rem',
+                                  flexWrap: 'wrap'
+                                }}>
+                                  <div style={{
+                                    fontSize: '0.875rem',
+                                    fontWeight: '700',
+                                    color: 'rgb(31, 41, 55)',
+                                    flex: 1
+                                  }}>
+                                    {playerData.playerName}
+                                  </div>
+                                  {(() => {
+                                    // Hole aktuelle LK aus socialFeedPlayers (wird automatisch aktualisiert)
+                                    const currentPlayerData = socialFeedPlayers[playerData.playerId];
+                                    const displayLK = currentPlayerData?.current_lk || playerData.playerLK;
+                                    const seasonStartLK = currentPlayerData?.season_start_lk;
+                                    
+                                    if (!displayLK) return null;
+                                    
+                                    // Formatiere LK für Anzeige (kann "LK 12.6" oder "12.6" sein)
+                                    const lkDisplay = displayLK.toString().startsWith('LK ') 
+                                      ? displayLK 
+                                      : `LK ${displayLK}`;
+                                    
+                                    // Berechne LK-Änderung seit Saison-Start für Formpfeil
+                                    let lkChange = null;
+                                    let changeDisplay = null;
+                                    if (seasonStartLK && displayLK) {
+                                      lkChange = calculateLKChange(seasonStartLK, displayLK);
+                                      changeDisplay = formatLKChange(lkChange);
+                                    }
+                                    
+                                    // Debug für Raoul
+                                    if (playerData.playerName === 'Raoul van Herwijnen') {
+                                      console.log('🔍 Rendering Raoul LK:', {
+                                        displayLK,
+                                        lkDisplay,
+                                        seasonStartLK,
+                                        lkChange,
+                                        changeDisplay,
+                                        currentPlayerData: currentPlayerData,
+                                        playerDataLK: playerData.playerLK,
+                                        socialFeedPlayers: Object.keys(socialFeedPlayers).length
+                                      });
+                                    }
+                                    
+                                    return (
+                                      <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.25rem'
+                                      }}>
+                                        <div style={{
+                                          fontSize: '0.7rem',
+                                          fontWeight: '600',
+                                          color: 'rgb(107, 114, 128)',
+                                          background: 'rgba(255,255,255,0.7)',
+                                          padding: '0.2rem 0.5rem',
+                                          borderRadius: '12px'
+                                        }}>
+                                          {lkDisplay}
+                                        </div>
+                                        {changeDisplay && Math.abs(lkChange) >= 0.1 && (
+                                          <div style={{
+                                            fontSize: '0.65rem',
+                                            fontWeight: '700',
+                                            color: changeDisplay.color === 'green' ? 'rgb(16, 185, 129)' : changeDisplay.color === 'red' ? 'rgb(239, 68, 68)' : 'rgb(107, 114, 128)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.1rem'
+                                          }}
+                                          title={changeDisplay.label}
+                                          >
+                                            <span>{changeDisplay.icon}</span>
+                                            <span>{changeDisplay.text}</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Aktivitäten Liste */}
+                            <div style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '0.75rem',
+                              marginTop: playerData.activities.length > 1 ? '0.75rem' : '0',
+                              paddingTop: playerData.activities.length > 1 ? '0.75rem' : '0',
+                              borderTop: playerData.activities.length > 1 ? '1px solid rgba(0,0,0,0.1)' : 'none'
+                            }}>
+                              {playerData.activities.map((item, activityIndex) => {
+                                const timeAgo = Math.floor((now - item.timestamp) / (1000 * 60 * 60));
+                                const daysAgo = Math.floor(timeAgo / 24);
+                                
+                                let timeLabel = '';
+                                if (timeAgo < 1) timeLabel = 'vor weniger als 1h';
+                                else if (timeAgo < 24) timeLabel = `vor ${timeAgo}h`;
+                                else if (daysAgo === 1) timeLabel = 'gestern';
+                                else timeLabel = `vor ${daysAgo} Tagen`;
+
+                                if (item.type === 'match_result') {
+                                  return (
+                                    <div
+                                      key={`${item.type}-${item.playerId}-${activityIndex}`}
+                                      style={{
+                                        padding: '0.75rem',
+                                        background: item.data.won 
+                                          ? 'linear-gradient(135deg, rgba(236, 253, 245, 0.8) 0%, rgba(209, 250, 229, 0.6) 100%)'
+                                          : 'linear-gradient(135deg, rgba(254, 242, 242, 0.8) 0%, rgba(254, 226, 226, 0.6) 100%)',
+                                        borderRadius: '8px',
+                                        border: `1px solid ${item.data.won ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
+                                      }}
+                                    >
+                                      <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem',
+                                        marginBottom: '0.5rem',
+                                        flexWrap: 'wrap'
+                                      }}>
+                                        <span style={{ fontSize: '1rem' }}>
+                                          {item.icon || (item.data.won ? '🏆' : '😔')}
+                                        </span>
+                                        <div style={{
+                                          fontSize: '0.8rem',
+                                          color: 'rgb(55, 65, 81)',
+                                          lineHeight: '1.4',
+                                          fontWeight: '500',
+                                          flex: 1
+                                        }}>
+                                          {item.message || (item.data.won ? 'hat gewonnen' : 'hat verloren')}
+                                        </div>
+                                      </div>
+                                      
+                                      <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem',
+                                        fontSize: '0.7rem',
+                                        color: 'rgb(107, 114, 128)',
+                                        flexWrap: 'wrap'
+                                      }}>
+                                        <span style={{
+                                          background: 'rgba(255,255,255,0.8)',
+                                          padding: '0.2rem 0.5rem',
+                                          borderRadius: '8px',
+                                          fontWeight: '600'
+                                        }}>
+                                          {item.data.matchType}
+                                        </span>
+                                        <span>•</span>
+                                        <span style={{
+                                          fontWeight: '700',
+                                          color: item.data.won ? 'rgb(16, 185, 129)' : 'rgb(239, 68, 68)'
+                                        }}>
+                                          {item.data.setScore || 'N/A'}
+                                        </span>
+                                        {item.data.opponentLK && item.data.opponentLK !== 25 && (
+                                          <>
+                                            <span>•</span>
+                                            <span style={{
+                                              background: 'rgba(255,255,255,0.8)',
+                                              padding: '0.2rem 0.5rem',
+                                              borderRadius: '8px',
+                                              fontWeight: '600',
+                                              color: 'rgb(59, 130, 246)'
+                                            }}>
+                                              Gegner LK {item.data.opponentLK.toFixed(1)}
+                                            </span>
+                                          </>
+                                        )}
+                                        {item.data.won && item.data.playerLKBefore && item.data.playerLKAfter && 
+                                         Math.abs(item.data.playerLKBefore - item.data.playerLKAfter) > 0.01 && (
+                                          <>
+                                            <span>•</span>
+                                            <span style={{
+                                              background: 'rgba(16, 185, 129, 0.2)',
+                                              padding: '0.2rem 0.5rem',
+                                              borderRadius: '8px',
+                                              fontWeight: '700',
+                                              color: 'rgb(16, 185, 129)'
+                                            }}>
+                                              LK {item.data.playerLKBefore.toFixed(1)} → {item.data.playerLKAfter.toFixed(1)}
+                                            </span>
+                                          </>
+                                        )}
+                                        <span>•</span>
+                                        <span>{timeLabel}</span>
+                                      </div>
+                                    </div>
+                                  );
+                                } else if (item.type === 'new_match') {
+                                  return (
+                                    <div
+                                      key={`${item.type}-${item.playerId}-${activityIndex}`}
+                                      style={{
+                                        padding: '0.75rem',
+                                        background: 'linear-gradient(135deg, rgba(239, 246, 255, 0.8) 0%, rgba(219, 234, 254, 0.6) 100%)',
+                                        borderRadius: '8px',
+                                        border: '1px solid rgba(59, 130, 246, 0.3)'
+                                      }}
+                                    >
+                                      <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem',
+                                        marginBottom: '0.5rem',
+                                        flexWrap: 'wrap'
+                                      }}>
+                                        <span style={{ fontSize: '1rem' }}>
+                                          {item.icon || '📅'}
+                                        </span>
+                                        <div style={{
+                                          fontSize: '0.8rem',
+                                          color: 'rgb(55, 65, 81)',
+                                          lineHeight: '1.4',
+                                          fontWeight: '500',
+                                          flex: 1
+                                        }}>
+                                          {item.message || 'hat ein neues Match geplant'}
+                                        </div>
+                                      </div>
+                                      
+                                      <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem',
+                                        fontSize: '0.7rem',
+                                        color: 'rgb(107, 114, 128)',
+                                        flexWrap: 'wrap'
+                                      }}>
+                                        <span style={{
+                                          background: 'rgba(255,255,255,0.8)',
+                                          padding: '0.2rem 0.5rem',
+                                          borderRadius: '8px',
+                                          fontWeight: '600'
+                                        }}>
+                                          {item.data.isHome ? '🏠 Heim' : '✈️ Auswärts'}
+                                        </span>
+                                        <span>•</span>
+                                        <span>{timeLabel}</span>
+                                      </div>
+                                    </div>
+                                  );
+                                }
+                                return null;
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {loadingFeed && (
+                      <div style={{
+                        padding: '1rem',
+                        textAlign: 'center',
+                        color: 'rgb(107, 114, 128)',
+                        fontSize: '0.875rem'
+                      }}>
+                        ⏳ Lade Aktivitäten...
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
