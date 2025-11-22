@@ -1622,6 +1622,39 @@ const ImportTab = () => {
       let created = 0;
       let updated = 0;
       let skipped = 0;
+      const lkWarnings = [];
+
+      // 🎾 LK-VALIDIERUNG: Lade Team-Spieler für Vergleich
+      const teamIds = [...new Set(playersToImport.map(p => p.team_id).filter(Boolean))];
+      const teamPlayersMap = {};
+      
+      for (const teamId of teamIds) {
+        try {
+          // Lade alle Spieler dieses Teams
+          const { data: teamMembers } = await supabase
+            .from('team_memberships')
+            .select(`
+              player_id,
+              player:player_id (
+                id,
+                name,
+                current_lk,
+                season_start_lk,
+                ranking
+              )
+            `)
+            .eq('team_id', teamId)
+            .eq('is_active', true);
+          
+          if (teamMembers) {
+            teamPlayersMap[teamId] = teamMembers
+              .map(tm => tm.player)
+              .filter(p => p && (p.current_lk || p.season_start_lk || p.ranking));
+          }
+        } catch (error) {
+          console.warn('⚠️ Fehler beim Laden der Team-Spieler:', error);
+        }
+      }
 
       for (const playerData of playersToImport) {
         const matchResult = playerData.matchResult;
@@ -1632,6 +1665,31 @@ const ImportTab = () => {
           skipped++;
           continue;
         }
+
+        // 🎾 LK-VALIDIERUNG: Prüfe LK gegen Team
+        const { validateLKAgainstTeam, validateLK } = await import('../lib/lkUtils');
+        const teamPlayers = teamPlayersMap[playerData.team_id] || [];
+        const lkValidation = teamPlayers.length > 0 
+          ? validateLKAgainstTeam(playerData.lk, teamPlayers)
+          : validateLK(playerData.lk);
+        
+        if (lkValidation.warning) {
+          console.warn(`⚠️ LK-Warnung für ${playerData.name}:`, lkValidation.warning);
+          lkWarnings.push({
+            player: playerData.name,
+            lk: playerData.lk,
+            warning: lkValidation.warning
+          });
+        }
+        
+        if (!lkValidation.valid) {
+          console.error(`❌ Ungültige LK für ${playerData.name}:`, lkValidation.error);
+          skipped++;
+          continue;
+        }
+        
+        // Verwende normalisierte LK
+        const normalizedLK = lkValidation.normalized || playerData.lk;
 
         // ✅ FALL 1: Existierender Spieler (ALLE Match-Typen: exact, fuzzy, name_lk, etc.)
         if (matchResult?.playerId && matchResult.status !== 'new') {
@@ -1663,7 +1721,7 @@ const ImportTab = () => {
           .from('players_unified')
           .insert({
             name: playerData.name,
-            current_lk: playerData.lk, // ⚠️ PFLICHTFELD
+            current_lk: normalizedLK, // ✅ Verwende normalisierte LK
             tvm_id_number: playerData.id_number, // ⚠️ PFLICHTFELD
             is_captain: playerData.is_captain || false,
             player_type: 'app_user',
@@ -1708,12 +1766,20 @@ const ImportTab = () => {
         skipped
       });
 
-      setSuccessMessage(
-        `🎉 Spieler-Import erfolgreich!\n\n` +
+      // Erstelle Erfolgsmeldung mit Warnungen
+      let successMessage = `🎉 Spieler-Import erfolgreich!\n\n` +
         `🆕 ${created} neue Spieler erstellt\n` +
         `🔄 ${updated} Spieler aktualisiert\n` +
-        `⏭️ ${skipped} übersprungen`
-      );
+        `⏭️ ${skipped} übersprungen`;
+      
+      if (lkWarnings.length > 0) {
+        successMessage += `\n\n⚠️ ${lkWarnings.length} LK-Warnung(en):\n`;
+        lkWarnings.forEach((w, i) => {
+          successMessage += `${i + 1}. ${w.player} (LK: ${w.lk}): ${w.warning}\n`;
+        });
+      }
+      
+      setSuccessMessage(successMessage);
 
       // Reset
       setInputText('');

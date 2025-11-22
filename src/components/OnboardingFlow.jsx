@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { ChevronRight, ChevronLeft } from 'lucide-react';
 import ClubAutocomplete from './ClubAutocomplete';
-import { normalizeLK } from '../lib/lkUtils';
+import { normalizeLK, validateLKAgainstTeam } from '../lib/lkUtils';
 import LoggingService from '../services/activityLogger';
 import './Dashboard.css';
 
@@ -235,8 +235,70 @@ function OnboardingFlow() {
       if (selectedPlayer) {
         console.log('🔗 Updating selected player:', selectedPlayer.id);
         
-        // Normalisiere LK vor dem Speichern
-        const normalizedLK = formData.current_lk ? normalizeLK(formData.current_lk) : null;
+        // Normalisiere und validiere LK vor dem Speichern
+        let normalizedLK = formData.current_lk ? normalizeLK(formData.current_lk) : null;
+        
+        // 🎾 LK-VALIDIERUNG: Prüfe LK gegen Team (wenn Team vorhanden)
+        if (normalizedLK && selectedPlayer?.primary_team_id) {
+          try {
+            // Lade Team-Spieler für Vergleich
+            const { data: teamMembers } = await supabase
+              .from('team_memberships')
+              .select(`
+                player:player_id (
+                  id,
+                  name,
+                  current_lk,
+                  season_start_lk,
+                  ranking
+                )
+              `)
+              .eq('team_id', selectedPlayer.primary_team_id)
+              .eq('is_active', true)
+              .neq('player_id', selectedPlayer.id); // Exkludiere aktuellen Spieler
+            
+            if (teamMembers) {
+              const teamPlayers = teamMembers
+                .map(tm => tm.player)
+                .filter(p => p && (p.current_lk || p.season_start_lk || p.ranking));
+              
+              const lkValidation = validateLKAgainstTeam(formData.current_lk, teamPlayers);
+              
+              if (lkValidation.warning) {
+                console.warn(`⚠️ LK-Warnung für ${formData.name}:`, lkValidation.warning);
+                // Zeige Warnung, aber erlaube Speicherung
+                const proceed = window.confirm(`⚠️ LK-Warnung:\n\n${lkValidation.warning}\n\nMöchten Sie trotzdem fortfahren?`);
+                if (!proceed) {
+                  setLoading(false);
+                  return;
+                }
+              }
+              
+              if (lkValidation.normalized) {
+                normalizedLK = lkValidation.normalized;
+              }
+            }
+          } catch (error) {
+            console.warn('⚠️ Fehler bei LK-Validierung:', error);
+          }
+        } else if (normalizedLK) {
+          // Basis-Validierung wenn kein Team vorhanden
+          const { validateLK } = await import('../lib/lkUtils');
+          const lkValidation = validateLK(formData.current_lk);
+          
+          if (lkValidation.warning) {
+            console.warn(`⚠️ LK-Warnung für ${formData.name}:`, lkValidation.warning);
+            const proceed = window.confirm(`⚠️ LK-Warnung:\n\n${lkValidation.warning}\n\nMöchten Sie trotzdem fortfahren?`);
+            if (!proceed) {
+              setLoading(false);
+              return;
+            }
+          }
+          
+          if (lkValidation.normalized) {
+            normalizedLK = lkValidation.normalized;
+          }
+        }
         
         const { data: playerData, error: playerError } = await supabase
           .from('players_unified')
@@ -272,7 +334,28 @@ function OnboardingFlow() {
         // 3️⃣ Neuer Spieler: Prüfe ob bereits ein Eintrag existiert
         console.log('🆕 Creating/updating player in players_unified');
         
-        const normalizedLK = formData.current_lk ? normalizeLK(formData.current_lk) : null;
+        // Normalisiere und validiere LK vor dem Speichern
+        let normalizedLK = formData.current_lk ? normalizeLK(formData.current_lk) : null;
+        
+        // 🎾 LK-VALIDIERUNG: Prüfe LK (Basis-Validierung)
+        if (normalizedLK) {
+          const { validateLK } = await import('../lib/lkUtils');
+          const lkValidation = validateLK(formData.current_lk);
+          
+          if (lkValidation.warning) {
+            console.warn(`⚠️ LK-Warnung für ${formData.name}:`, lkValidation.warning);
+            // Zeige Warnung, aber erlaube Speicherung
+            const proceed = window.confirm(`⚠️ LK-Warnung:\n\n${lkValidation.warning}\n\nMöchten Sie trotzdem fortfahren?`);
+            if (!proceed) {
+              setLoading(false);
+              return;
+            }
+          }
+          
+          if (lkValidation.normalized) {
+            normalizedLK = lkValidation.normalized;
+          }
+        }
         
         // 🔧 Prüfe zuerst, ob bereits ein Eintrag für diesen User existiert
         const { data: existingPlayer } = await supabase

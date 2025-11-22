@@ -69,11 +69,11 @@ export function formatLK(lkNumber) {
 
 /**
  * Validiert LK-Eingabe
- * Gibt zurück: { valid: boolean, normalized: string|null, error: string|null }
+ * Gibt zurück: { valid: boolean, normalized: string|null, error: string|null, warning: string|null }
  */
 export function validateLK(input) {
   if (!input || input.trim() === '') {
-    return { valid: true, normalized: null, error: null }; // LK ist optional
+    return { valid: true, normalized: null, error: null, warning: null }; // LK ist optional
   }
   
   try {
@@ -83,18 +83,84 @@ export function validateLK(input) {
       return {
         valid: false,
         normalized: null,
-        error: 'Ungültige LK. Format: "LK 13.6" oder "13.6" (Werte zwischen 1 und 25)'
+        error: 'Ungültige LK. Format: "LK 13.6" oder "13.6" (Werte zwischen 1 und 25)',
+        warning: null
       };
     }
     
-    return { valid: true, normalized, error: null };
+    // Warnung für verdächtig niedrige oder hohe LK-Werte
+    const lkValue = parseLK(normalized);
+    let warning = null;
+    
+    if (lkValue < 7) {
+      warning = `⚠️ Verdächtig niedrige LK: ${normalized}. Bitte prüfen, ob dies wirklich die LK ist oder möglicherweise die Position in der Meldeliste.`;
+    } else if (lkValue > 20) {
+      warning = `⚠️ Verdächtig hohe LK: ${normalized}. Bitte prüfen, ob dies korrekt ist.`;
+    }
+    
+    return { valid: true, normalized, error: null, warning };
   } catch (error) {
     return {
       valid: false,
       normalized: null,
-      error: 'Fehler beim Validieren der LK'
+      error: 'Fehler beim Validieren der LK',
+      warning: null
     };
   }
+}
+
+/**
+ * Validiert LK gegen andere Spieler in der gleichen Mannschaft
+ * Gibt zurück: { valid: boolean, normalized: string|null, error: string|null, warning: string|null }
+ * @param {string} input - LK-Eingabe
+ * @param {Array} teamPlayers - Array von Spielern in der gleichen Mannschaft mit { current_lk, name }
+ */
+export function validateLKAgainstTeam(input, teamPlayers = []) {
+  const baseValidation = validateLK(input);
+  
+  if (!baseValidation.valid || !baseValidation.normalized) {
+    return baseValidation;
+  }
+  
+  if (!teamPlayers || teamPlayers.length === 0) {
+    return baseValidation; // Keine Team-Daten verfügbar
+  }
+  
+  const lkValue = parseLK(baseValidation.normalized);
+  
+  // Berechne LK-Range der Mannschaft
+  const teamLKs = teamPlayers
+    .map(p => {
+      const lk = parseLK(p.current_lk || p.season_start_lk || p.ranking);
+      return lk;
+    })
+    .filter(lk => lk >= 1 && lk <= 25); // Nur gültige LKs
+  
+  if (teamLKs.length === 0) {
+    return baseValidation; // Keine gültigen LKs im Team
+  }
+  
+  const minLK = Math.min(...teamLKs);
+  const maxLK = Math.max(...teamLKs);
+  const avgLK = teamLKs.reduce((sum, lk) => sum + lk, 0) / teamLKs.length;
+  const range = maxLK - minLK;
+  
+  // Warnung wenn LK deutlich außerhalb der Team-Range liegt
+  let warning = baseValidation.warning;
+  
+  // Prüfe ob LK außerhalb der Team-Range liegt (mit Toleranz)
+  const tolerance = Math.max(2.0, range * 0.3); // Mindestens 2.0, oder 30% der Range
+  
+  if (lkValue < minLK - tolerance) {
+    warning = `⚠️ LK ${baseValidation.normalized} ist deutlich besser als die anderen Spieler in der Mannschaft (Range: ${minLK.toFixed(1)} - ${maxLK.toFixed(1)}, Ø: ${avgLK.toFixed(1)}). Bitte prüfen, ob dies korrekt ist.`;
+  } else if (lkValue > maxLK + tolerance) {
+    warning = `⚠️ LK ${baseValidation.normalized} ist deutlich schlechter als die anderen Spieler in der Mannschaft (Range: ${minLK.toFixed(1)} - ${maxLK.toFixed(1)}, Ø: ${avgLK.toFixed(1)}). Bitte prüfen, ob dies korrekt ist.`;
+  }
+  
+  return {
+    ...baseValidation,
+    warning
+  };
 }
 
 /**
