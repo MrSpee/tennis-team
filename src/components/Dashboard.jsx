@@ -97,9 +97,9 @@ function Dashboard() {
             updated_at: p.updated_at
           };
           
-          // Debug für Raoul - zeige ALLE LK-Felder
-          if (p.name === 'Raoul van Herwijnen') {
-            console.log('🔍 Raoul data loaded from DB (refreshPlayerData):', {
+          // Debug für Raoul und Marc - zeige ALLE LK-Felder
+          if (p.name === 'Raoul van Herwijnen' || p.name === 'Marc Stoppenbach') {
+            console.log(`🔍 ${p.name} data loaded from DB (refreshPlayerData):`, {
               id: p.id,
               name: p.name,
               current_lk: p.current_lk,
@@ -1064,9 +1064,9 @@ function Dashboard() {
             profile_image: p.profile_image
           };
           
-          // Debug für Raoul - zeige ALLE LK-Felder
-          if (p.name === 'Raoul van Herwijnen') {
-            console.log('🔍 Raoul data set in loadSocialFeed:', {
+          // Debug für Raoul und Marc - zeige ALLE LK-Felder
+          if (p.name === 'Raoul van Herwijnen' || p.name === 'Marc Stoppenbach') {
+            console.log(`🔍 ${p.name} data set in loadSocialFeed:`, {
               id: p.id,
               name: p.name,
               current_lk: p.current_lk,
@@ -2046,34 +2046,34 @@ function Dashboard() {
                 });
 
                 return (
+                <div style={{
+                  marginTop: '1rem',
+                  paddingTop: '1rem',
+                  borderTop: '2px solid rgba(139, 92, 246, 0.2)'
+                }}>
                   <div style={{
-                    marginTop: '1rem',
-                    paddingTop: '1rem',
-                    borderTop: '2px solid rgba(139, 92, 246, 0.2)'
+                    fontSize: '0.75rem',
+                    fontWeight: '700',
+                    color: 'rgb(107, 114, 128)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                    marginBottom: '0.75rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem'
                   }}>
-                    <div style={{
-                      fontSize: '0.75rem',
-                      fontWeight: '700',
-                      color: 'rgb(107, 114, 128)',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.5px',
-                      marginBottom: '0.75rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem'
-                    }}>
-                      <span>📰</span>
-                      <span>Aktivitäten deiner Freunde</span>
-                    </div>
-                    
-                    <div style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '1rem',
-                      maxHeight: '500px',
-                      overflowY: 'auto',
-                      paddingRight: '0.5rem'
-                    }}>
+                    <span>📰</span>
+                    <span>Aktivitäten deiner Freunde</span>
+                  </div>
+                  
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '1rem',
+                    maxHeight: '500px',
+                    overflowY: 'auto',
+                    paddingRight: '0.5rem'
+                  }}>
                       {playersWithActivities.map((playerData) => {
                         // Debug: Zeige LK für Raoul
                         if (playerData.playerName === 'Raoul van Herwijnen') {
@@ -2086,8 +2086,8 @@ function Dashboard() {
                         
                         const profileImageUrl = playerData.playerImage 
                           ? (playerData.playerImage.startsWith('http') ? playerData.playerImage : `${supabase.supabaseUrl}/storage/v1/object/public/profiles/${playerData.playerImage}`)
-                          : null;
-
+                        : null;
+                      
                         // Bestimme dominante Farbe basierend auf Aktivitäten (Sieg = grün, Niederlage = rot, Match = blau)
                         const hasWin = playerData.activities.some(a => a.type === 'match_result' && a.data.won);
                         const hasLoss = playerData.activities.some(a => a.type === 'match_result' && !a.data.won);
@@ -2178,7 +2178,7 @@ function Dashboard() {
                                     // Hole aktuelle LK aus socialFeedPlayers (wird automatisch aktualisiert)
                                     const currentPlayerData = socialFeedPlayers[playerData.playerId];
                                     const displayLK = currentPlayerData?.current_lk || playerData.playerLK;
-                                    const seasonStartLK = currentPlayerData?.season_start_lk;
+                                    const seasonStartLK = currentPlayerData?.season_start_lk || playerData.season_start_lk;
                                     
                                     if (!displayLK) return null;
                                     
@@ -2188,6 +2188,7 @@ function Dashboard() {
                                       : `LK ${displayLK}`;
                                     
                                     // Berechne LK-Änderung seit Saison-Start für Formpfeil
+                                    // WICHTIG: Immer anzeigen, wenn season_start_lk vorhanden ist
                                     let lkChange = null;
                                     let changeDisplay = null;
                                     if (seasonStartLK && displayLK) {
@@ -2195,9 +2196,9 @@ function Dashboard() {
                                       changeDisplay = formatLKChange(lkChange);
                                     }
                                     
-                                    // Debug für Raoul
-                                    if (playerData.playerName === 'Raoul van Herwijnen') {
-                                      console.log('🔍 Rendering Raoul LK:', {
+                                    // Debug für Raoul und Marc
+                                    if (playerData.playerName === 'Raoul van Herwijnen' || playerData.playerName === 'Marc Stoppenbach') {
+                                      console.log(`🔍 Rendering ${playerData.playerName} LK:`, {
                                         displayLK,
                                         lkDisplay,
                                         seasonStartLK,
@@ -2205,7 +2206,8 @@ function Dashboard() {
                                         changeDisplay,
                                         currentPlayerData: currentPlayerData,
                                         playerDataLK: playerData.playerLK,
-                                        socialFeedPlayers: Object.keys(socialFeedPlayers).length
+                                        socialFeedPlayers: Object.keys(socialFeedPlayers).length,
+                                        playerId: playerData.playerId
                                       });
                                     }
                                     
@@ -2213,42 +2215,56 @@ function Dashboard() {
                                       <div style={{
                                         display: 'flex',
                                         alignItems: 'center',
-                                        gap: '0.25rem'
+                                        gap: '0.25rem',
+                                        flexWrap: 'wrap'
                                       }}>
-                                        <div style={{
-                                          fontSize: '0.7rem',
-                                          fontWeight: '600',
-                                          color: 'rgb(107, 114, 128)',
-                                          background: 'rgba(255,255,255,0.7)',
-                                          padding: '0.2rem 0.5rem',
-                                          borderRadius: '12px'
-                                        }}>
+                                    <div style={{
+                                      fontSize: '0.7rem',
+                                      fontWeight: '600',
+                                      color: 'rgb(107, 114, 128)',
+                                      background: 'rgba(255,255,255,0.7)',
+                                      padding: '0.2rem 0.5rem',
+                                      borderRadius: '12px'
+                                    }}>
                                           {lkDisplay}
                                         </div>
-                                        {changeDisplay && Math.abs(lkChange) >= 0.1 && (
+                                        {/* Formpfeil: Immer anzeigen wenn season_start_lk vorhanden ist */}
+                                        {changeDisplay && seasonStartLK && Math.abs(lkChange) >= 0.05 && (
                                           <div style={{
                                             fontSize: '0.65rem',
                                             fontWeight: '700',
                                             color: changeDisplay.color === 'green' ? 'rgb(16, 185, 129)' : changeDisplay.color === 'red' ? 'rgb(239, 68, 68)' : 'rgb(107, 114, 128)',
                                             display: 'flex',
                                             alignItems: 'center',
-                                            gap: '0.1rem'
+                                            gap: '0.15rem',
+                                            background: changeDisplay.color === 'green' 
+                                              ? 'rgba(16, 185, 129, 0.15)' 
+                                              : changeDisplay.color === 'red' 
+                                              ? 'rgba(239, 68, 68, 0.15)' 
+                                              : 'rgba(107, 114, 128, 0.1)',
+                                            padding: '0.2rem 0.5rem',
+                                            borderRadius: '8px',
+                                            border: `1.5px solid ${changeDisplay.color === 'green' 
+                                              ? 'rgba(16, 185, 129, 0.4)' 
+                                              : changeDisplay.color === 'red' 
+                                              ? 'rgba(239, 68, 68, 0.4)' 
+                                              : 'rgba(107, 114, 128, 0.3)'}`
                                           }}
-                                          title={changeDisplay.label}
+                                          title={`${changeDisplay.label} seit Saison-Start: ${seasonStartLK} → ${displayLK}`}
                                           >
-                                            <span>{changeDisplay.icon}</span>
-                                            <span>{changeDisplay.text}</span>
-                                          </div>
-                                        )}
+                                            <span style={{ fontSize: '0.75rem' }}>{changeDisplay.icon}</span>
+                                            <span>{Math.abs(lkChange).toFixed(1)}</span>
+                                    </div>
+                                  )}
                                       </div>
                                     );
                                   })()}
                                 </div>
                               </div>
-                            </div>
-
+                                </div>
+                                
                             {/* Aktivitäten Liste */}
-                            <div style={{
+                                <div style={{
                               display: 'flex',
                               flexDirection: 'column',
                               gap: '0.75rem',
@@ -2283,7 +2299,7 @@ function Dashboard() {
                                         display: 'flex',
                                         alignItems: 'center',
                                         gap: '0.5rem',
-                                        marginBottom: '0.5rem',
+                                  marginBottom: '0.5rem',
                                         flexWrap: 'wrap'
                                       }}>
                                         <span style={{ fontSize: '1rem' }}>
@@ -2292,144 +2308,144 @@ function Dashboard() {
                                         <div style={{
                                           fontSize: '0.8rem',
                                           color: 'rgb(55, 65, 81)',
-                                          lineHeight: '1.4',
+                                  lineHeight: '1.4',
                                           fontWeight: '500',
                                           flex: 1
-                                        }}>
-                                          {item.message || (item.data.won ? 'hat gewonnen' : 'hat verloren')}
+                                }}>
+                                  {item.message || (item.data.won ? 'hat gewonnen' : 'hat verloren')}
                                         </div>
-                                      </div>
-                                      
-                                      <div style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '0.5rem',
-                                        fontSize: '0.7rem',
-                                        color: 'rgb(107, 114, 128)',
-                                        flexWrap: 'wrap'
-                                      }}>
-                                        <span style={{
+                                </div>
+                                
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.5rem',
+                                  fontSize: '0.7rem',
+                                  color: 'rgb(107, 114, 128)',
+                                  flexWrap: 'wrap'
+                                }}>
+                                  <span style={{
                                           background: 'rgba(255,255,255,0.8)',
-                                          padding: '0.2rem 0.5rem',
-                                          borderRadius: '8px',
-                                          fontWeight: '600'
-                                        }}>
-                                          {item.data.matchType}
-                                        </span>
-                                        <span>•</span>
-                                        <span style={{
-                                          fontWeight: '700',
-                                          color: item.data.won ? 'rgb(16, 185, 129)' : 'rgb(239, 68, 68)'
-                                        }}>
-                                          {item.data.setScore || 'N/A'}
-                                        </span>
-                                        {item.data.opponentLK && item.data.opponentLK !== 25 && (
-                                          <>
-                                            <span>•</span>
-                                            <span style={{
+                                    padding: '0.2rem 0.5rem',
+                                    borderRadius: '8px',
+                                    fontWeight: '600'
+                                  }}>
+                                    {item.data.matchType}
+                                  </span>
+                                  <span>•</span>
+                                  <span style={{
+                                    fontWeight: '700',
+                                    color: item.data.won ? 'rgb(16, 185, 129)' : 'rgb(239, 68, 68)'
+                                  }}>
+                                    {item.data.setScore || 'N/A'}
+                                  </span>
+                                  {item.data.opponentLK && item.data.opponentLK !== 25 && (
+                                    <>
+                                      <span>•</span>
+                                      <span style={{
                                               background: 'rgba(255,255,255,0.8)',
-                                              padding: '0.2rem 0.5rem',
-                                              borderRadius: '8px',
-                                              fontWeight: '600',
-                                              color: 'rgb(59, 130, 246)'
-                                            }}>
-                                              Gegner LK {item.data.opponentLK.toFixed(1)}
-                                            </span>
-                                          </>
-                                        )}
-                                        {item.data.won && item.data.playerLKBefore && item.data.playerLKAfter && 
-                                         Math.abs(item.data.playerLKBefore - item.data.playerLKAfter) > 0.01 && (
-                                          <>
-                                            <span>•</span>
-                                            <span style={{
-                                              background: 'rgba(16, 185, 129, 0.2)',
-                                              padding: '0.2rem 0.5rem',
-                                              borderRadius: '8px',
-                                              fontWeight: '700',
-                                              color: 'rgb(16, 185, 129)'
-                                            }}>
-                                              LK {item.data.playerLKBefore.toFixed(1)} → {item.data.playerLKAfter.toFixed(1)}
-                                            </span>
-                                          </>
-                                        )}
-                                        <span>•</span>
-                                        <span>{timeLabel}</span>
-                                      </div>
-                                    </div>
-                                  );
-                                } else if (item.type === 'new_match') {
-                                  return (
-                                    <div
+                                        padding: '0.2rem 0.5rem',
+                                        borderRadius: '8px',
+                                        fontWeight: '600',
+                                        color: 'rgb(59, 130, 246)'
+                                      }}>
+                                        Gegner LK {item.data.opponentLK.toFixed(1)}
+                                      </span>
+                                    </>
+                                  )}
+                                  {item.data.won && item.data.playerLKBefore && item.data.playerLKAfter && 
+                                   Math.abs(item.data.playerLKBefore - item.data.playerLKAfter) > 0.01 && (
+                                    <>
+                                      <span>•</span>
+                                      <span style={{
+                                        background: 'rgba(16, 185, 129, 0.2)',
+                                        padding: '0.2rem 0.5rem',
+                                        borderRadius: '8px',
+                                        fontWeight: '700',
+                                        color: 'rgb(16, 185, 129)'
+                                      }}>
+                                        LK {item.data.playerLKBefore.toFixed(1)} → {item.data.playerLKAfter.toFixed(1)}
+                                      </span>
+                                    </>
+                                  )}
+                                  <span>•</span>
+                                  <span>{timeLabel}</span>
+                            </div>
+                          </div>
+                        );
+                      } else if (item.type === 'new_match') {
+                        return (
+                          <div
                                       key={`${item.type}-${item.playerId}-${activityIndex}`}
-                                      style={{
+                            style={{
                                         padding: '0.75rem',
                                         background: 'linear-gradient(135deg, rgba(239, 246, 255, 0.8) 0%, rgba(219, 234, 254, 0.6) 100%)',
                                         borderRadius: '8px',
                                         border: '1px solid rgba(59, 130, 246, 0.3)'
                                       }}
                                     >
-                                      <div style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '0.5rem',
-                                        marginBottom: '0.5rem',
-                                        flexWrap: 'wrap'
-                                      }}>
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.5rem',
+                                  marginBottom: '0.5rem',
+                                  flexWrap: 'wrap'
+                                }}>
                                         <span style={{ fontSize: '1rem' }}>
-                                          {item.icon || '📅'}
+                                    {item.icon || '📅'}
                                         </span>
-                                        <div style={{
+                                  <div style={{
                                           fontSize: '0.8rem',
-                                          color: 'rgb(55, 65, 81)',
-                                          lineHeight: '1.4',
+                                  color: 'rgb(55, 65, 81)',
+                                  lineHeight: '1.4',
                                           fontWeight: '500',
                                           flex: 1
-                                        }}>
-                                          {item.message || 'hat ein neues Match geplant'}
+                                }}>
+                                  {item.message || 'hat ein neues Match geplant'}
                                         </div>
-                                      </div>
-                                      
-                                      <div style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '0.5rem',
-                                        fontSize: '0.7rem',
-                                        color: 'rgb(107, 114, 128)',
-                                        flexWrap: 'wrap'
-                                      }}>
-                                        <span style={{
+                                </div>
+                                
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.5rem',
+                                  fontSize: '0.7rem',
+                                  color: 'rgb(107, 114, 128)',
+                                  flexWrap: 'wrap'
+                                }}>
+                                  <span style={{
                                           background: 'rgba(255,255,255,0.8)',
-                                          padding: '0.2rem 0.5rem',
-                                          borderRadius: '8px',
-                                          fontWeight: '600'
-                                        }}>
-                                          {item.data.isHome ? '🏠 Heim' : '✈️ Auswärts'}
-                                        </span>
-                                        <span>•</span>
-                                        <span>{timeLabel}</span>
-                                      </div>
-                                    </div>
-                                  );
-                                }
-                                return null;
+                                    padding: '0.2rem 0.5rem',
+                                    borderRadius: '8px',
+                                    fontWeight: '600'
+                                  }}>
+                                    {item.data.isHome ? '🏠 Heim' : '✈️ Auswärts'}
+                                  </span>
+                                  <span>•</span>
+                                  <span>{timeLabel}</span>
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
                               })}
                             </div>
                           </div>
                         );
-                      })}
-                    </div>
-
-                    {loadingFeed && (
-                      <div style={{
-                        padding: '1rem',
-                        textAlign: 'center',
-                        color: 'rgb(107, 114, 128)',
-                        fontSize: '0.875rem'
-                      }}>
-                        ⏳ Lade Aktivitäten...
-                      </div>
-                    )}
+                    })}
                   </div>
+
+                  {loadingFeed && (
+                    <div style={{
+                      padding: '1rem',
+                      textAlign: 'center',
+                      color: 'rgb(107, 114, 128)',
+                      fontSize: '0.875rem'
+                    }}>
+                      ⏳ Lade Aktivitäten...
+                    </div>
+                  )}
+                </div>
                 );
               })()}
             </div>

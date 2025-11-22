@@ -100,14 +100,19 @@ export function validateLK(input) {
 /**
  * Berechnet LK-Änderung (Start → Aktuell)
  * Eingabe: startLK = "LK 14.0", currentLK = "LK 13.2"
- * Ausgabe: -0.8 (negative Zahl = Verbesserung!)
+ * Ausgabe: -0.8 (negative Zahl = Verbesserung, da LK gesunken ist!)
+ * 
+ * Logik: current - start
+ * - Negativ = Verbesserung (LK ist gesunken, z.B. 12.6 → 12.2 = -0.4)
+ * - Positiv = Verschlechterung (LK ist gestiegen, z.B. 12.2 → 12.6 = +0.4)
  */
 export function calculateLKChange(startLK, currentLK) {
   const start = parseLK(startLK);
   const current = parseLK(currentLK);
   
-  // Niedrigere LK = besser, also Start - Current
-  return start - current;
+  // Niedrigere LK = besser
+  // current - start: Wenn LK sinkt (z.B. 12.6 → 12.2), ist das negativ = Verbesserung
+  return current - start;
 }
 
 /**

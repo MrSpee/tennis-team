@@ -353,12 +353,19 @@ function Rankings() {
   const calculatePlayerLK = async (player) => {
     try {
       console.log('🔮 Berechne LK für:', player.name);
+      console.log('📊 Spieler LK-Daten:', {
+        season_start_lk: player.season_start_lk,
+        current_lk: player.current_lk,
+        ranking: player.ranking
+      });
       
+      // WICHTIG: Verwende IMMER season_start_lk als Start-LK, wenn vorhanden!
+      // Nur wenn season_start_lk nicht gesetzt ist, verwende current_lk oder ranking
       const lkSource = player.season_start_lk || player.current_lk || player.ranking || '25';
-      const startLK = parseFloat(lkSource.replace('LK ', '').replace(',', '.'));
+      const startLK = parseFloat(lkSource.replace('LK ', '').replace(',', '.').replace('LK', '').trim());
       let begleitLK = startLK;
       
-      console.log('📊 Start-LK:', startLK);
+      console.log('📊 Start-LK für Berechnung:', startLK, '(Quelle:', player.season_start_lk ? 'season_start_lk' : player.current_lk ? 'current_lk' : 'ranking/fallback', ')');
       
       // 🔧 Lade Matches on-demand (für aktuellste Daten)
       let matchesToProcess = allMatches;
