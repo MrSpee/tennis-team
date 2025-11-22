@@ -49,11 +49,25 @@ function SurfaceInfo({ matchdayId, compact = false, hideShoes = false }) {
 
   // Keine Daten verfügbar
   if (loading) return null;
-  if (error) return null;
-  if (!surfaceData || !surfaceData.surface_name) return null;
+  // Wenn Fehler oder keine Surface-Daten, aber venue_name vorhanden, zeige trotzdem Venue
+  if (error && !surfaceData?.venue_name) return null;
+  if (!surfaceData) return null;
 
   // Compact Mode (für kleine Cards)
   if (compact) {
+    // Wenn keine Surface-Info, aber Venue-Name vorhanden, zeige nur Venue
+    if (!surfaceData.surface_name && surfaceData.venue_name) {
+      return (
+        <div className="surface-info-compact" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+          <span style={{ fontSize: '0.7rem' }}>🏟️</span>
+          <span style={{ fontSize: '0.7rem', color: 'rgb(107, 114, 128)' }}>{surfaceData.venue_name}</span>
+        </div>
+      );
+    }
+    
+    // Normale Surface-Info
+    if (!surfaceData.surface_name) return null;
+    
     return (
       <div className="surface-info-compact">
         <span className="surface-icon">{surfaceData.icon_emoji || '🎾'}</span>

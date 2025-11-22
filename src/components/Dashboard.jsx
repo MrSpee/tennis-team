@@ -856,7 +856,7 @@ function Dashboard() {
         }
       }
 
-      // 3. Lade neue Matches (Matchdays) der letzten 2 Wochen für Teams befreundeter Spieler
+      // 3. Lade NUR ZUKÜNFTIGE Matches für Teams befreundeter Spieler
       // Zuerst: Finde Teams der befreundeten Spieler
       const { data: friendTeams, error: teamsError } = await supabase
         .from('team_memberships')
@@ -866,8 +866,10 @@ function Dashboard() {
 
       if (!teamsError && friendTeams && friendTeams.length > 0) {
         const teamIds = [...new Set(friendTeams.map(ft => ft.team_id))];
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         
-        // Verwende separate Queries statt .or() mit .in() (funktioniert nicht in Supabase)
+        // WICHTIG: Nur zukünftige Matches laden (ab heute) MIT Verfügbarkeiten
         const homeMatchesQuery = supabase
           .from('matchdays')
           .select(`
@@ -878,13 +880,21 @@ function Dashboard() {
             away_team_id,
             home_score,
             away_score,
+            venue,
+            venue_id,
+            court_number,
+            court_number_end,
             home_team:team_info!matchdays_home_team_id_fkey(club_name, team_name),
-            away_team:team_info!matchdays_away_team_id_fkey(club_name, team_name)
+            away_team:team_info!matchdays_away_team_id_fkey(club_name, team_name),
+            match_availability(
+              player_id,
+              status
+            )
           `)
           .in('home_team_id', teamIds)
-          .gte('match_date', twoMonthsAgo.toISOString())
-          .order('match_date', { ascending: false })
-          .limit(20);
+          .gte('match_date', todayStart.toISOString()) // NUR zukünftige Matches
+          .order('match_date', { ascending: true }) // Aufsteigend: Nächste zuerst
+          .limit(50);
         
         const awayMatchesQuery = supabase
           .from('matchdays')
@@ -896,13 +906,21 @@ function Dashboard() {
             away_team_id,
             home_score,
             away_score,
+            venue,
+            venue_id,
+            court_number,
+            court_number_end,
             home_team:team_info!matchdays_home_team_id_fkey(club_name, team_name),
-            away_team:team_info!matchdays_away_team_id_fkey(club_name, team_name)
+            away_team:team_info!matchdays_away_team_id_fkey(club_name, team_name),
+            match_availability(
+              player_id,
+              status
+            )
           `)
           .in('away_team_id', teamIds)
-          .gte('match_date', twoMonthsAgo.toISOString())
-          .order('match_date', { ascending: false })
-          .limit(20);
+          .gte('match_date', todayStart.toISOString()) // NUR zukünftige Matches
+          .order('match_date', { ascending: true }) // Aufsteigend: Nächste zuerst
+          .limit(50);
         
         const [homeMatchesResult, awayMatchesResult] = await Promise.all([homeMatchesQuery, awayMatchesQuery]);
         
@@ -914,13 +932,16 @@ function Dashboard() {
           awayMatchesResult.data.forEach(m => matchesMap.set(m.id, m));
         }
         
+        // Sortiere aufsteigend (nächste Matches zuerst)
         const newMatches = Array.from(matchesMap.values())
-          .sort((a, b) => new Date(b.match_date) - new Date(a.match_date))
-          .slice(0, 20);
+          .sort((a, b) => new Date(a.match_date) - new Date(b.match_date));
         
         const matchesError = homeMatchesResult.error || awayMatchesResult.error;
 
         if (!matchesError && newMatches) {
+          // WICHTIG: Pro Spieler nur das NÄCHSTE Match anzeigen
+          const playerNextMatch = new Map(); // playerId -> nächstes Match
+          
           newMatches.forEach(match => {
             // Finde befreundete Spieler in diesem Match
             const homeTeamMembers = friendTeams
@@ -931,9 +952,24 @@ function Dashboard() {
               .filter(ft => ft.team_id === match.away_team_id)
               .map(ft => ft.player_id);
 
-            [...homeTeamMembers, ...awayTeamMembers].forEach(playerId => {
-              const playerInfo = players.find(p => p.id === playerId);
-              if (!playerInfo) return;
+            // Prüfe welche Spieler für dieses Match zugesagt haben
+            const matchAvailabilities = match.match_availability || [];
+            const availablePlayerIds = matchAvailabilities
+              .filter(avail => avail.status === 'available')
+              .map(avail => avail.player_id);
+            
+            // Nur Spieler die im Team sind UND zugesagt haben
+            const eligiblePlayers = [...homeTeamMembers, ...awayTeamMembers]
+              .filter(playerId => availablePlayerIds.includes(playerId));
+            
+            eligiblePlayers.forEach(playerId => {
+              // Nur das erste (nächste) Match für diesen Spieler speichern
+              if (!playerNextMatch.has(playerId)) {
+                const playerInfo = players.find(p => p.id === playerId);
+                if (!playerInfo) {
+                  console.warn('⚠️ Player not found in players array:', playerId);
+                  return;
+                }
 
               const isHome = homeTeamMembers.includes(playerId);
               const opponent = isHome
@@ -941,8 +977,39 @@ function Dashboard() {
                 : (match.home_team?.club_name || '') + ' ' + (match.home_team?.team_name || '');
 
               const matchDate = new Date(match.match_date);
-              const isToday = matchDate.toDateString() === new Date().toDateString();
-              const isTomorrow = matchDate.toDateString() === new Date(Date.now() + 86400000).toDateString();
+                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const matchDay = new Date(matchDate.getFullYear(), matchDate.getMonth(), matchDate.getDate());
+                
+                // Berechne Tage bis zum Spiel
+                const daysUntilMatch = Math.ceil((matchDay - today) / (1000 * 60 * 60 * 24));
+                
+                // Debug für Olivier
+                if (playerInfo.name === 'Olivier Michel') {
+                  console.log('🔍 Olivier Match Debug:', {
+                    playerId,
+                    matchId: match.id,
+                    matchDate: match.match_date,
+                    matchDay: matchDay.toISOString(),
+                    today: today.toISOString(),
+                    daysUntilMatch,
+                    opponent,
+                    isHome,
+                    homeTeam: match.home_team,
+                    awayTeam: match.away_team
+                  });
+                }
+                
+                // Nur positive Tage (zukünftige Matches)
+                if (daysUntilMatch < 0) {
+                  if (playerInfo.name === 'Olivier Michel') {
+                    console.warn('⚠️ Olivier match filtered out (negative days):', daysUntilMatch);
+                  }
+                  return;
+                }
+                
+                const isToday = daysUntilMatch === 0;
+                const isTomorrow = daysUntilMatch === 1;
+                const canSendWish = isToday || isTomorrow; // Nur heute oder morgen
               
               let message = '';
               let icon = '';
@@ -985,12 +1052,23 @@ function Dashboard() {
                 data: {
                   opponent: opponent.trim(),
                   matchDate: match.match_date,
-                  isHome
-                }
-              };
-              
-              feedItems.push(feedItem);
+                    isHome,
+                    daysUntilMatch,
+                    canSendWish,
+                    matchdayId: match.id,
+                    venue: match.venue,
+                    venue_id: match.venue_id
+                  }
+                };
+                
+                playerNextMatch.set(playerId, feedItem);
+              }
             });
+          });
+          
+          // Füge alle nächsten Matches zum Feed hinzu
+          playerNextMatch.forEach(feedItem => {
+            feedItems.push(feedItem);
           });
         }
       }
@@ -1008,7 +1086,7 @@ function Dashboard() {
       });
 
       // Sortiere: Spielergebnisse (match_result) immer vor neuen Matches (new_match)
-      // Innerhalb jeder Kategorie nach Timestamp (neueste zuerst)
+      // Innerhalb jeder Kategorie unterschiedlich sortieren
       uniqueFeedItems.sort((a, b) => {
         // Priorität: match_result > new_match
         const typePriority = {
@@ -1024,11 +1102,21 @@ function Dashboard() {
           return priorityA - priorityB;
         }
         
-        // Bei gleichem Typ nach Timestamp (neueste zuerst)
+        // Bei match_result: Neueste zuerst (absteigend)
+        if (a.type === 'match_result' && b.type === 'match_result') {
+          return b.timestamp - a.timestamp;
+        }
+        
+        // Bei new_match: Nächste zuerst (aufsteigend - frühere Matches zuerst)
+        if (a.type === 'new_match' && b.type === 'new_match') {
+          return a.timestamp - b.timestamp;
+        }
+        
+        // Fallback
         return b.timestamp - a.timestamp;
       });
 
-      // Limitiere: Max. 2 Ergebnisse pro Freund, insgesamt max. 5 Items auf der Startseite
+      // Limitiere: Max. 2 Ergebnisse pro Freund, insgesamt max. 10 Items auf der Startseite
       const playerItemCounts = new Map(); // Zähle Items pro Spieler
       const limitedFeedItems = [];
       
@@ -1041,12 +1129,25 @@ function Dashboard() {
           limitedFeedItems.push(item);
           playerItemCounts.set(playerId, currentCount + 1);
           
-          // Max. 5 Items insgesamt auf der Startseite
-          if (limitedFeedItems.length >= 5) {
+          // Max. 10 Items insgesamt auf der Startseite (erhöht von 5)
+          if (limitedFeedItems.length >= 10) {
             break;
           }
         }
       }
+
+      console.log('🎾 Social Feed Final:', {
+        totalItems: uniqueFeedItems.length,
+        limitedItems: limitedFeedItems.length,
+        players: [...new Set(limitedFeedItems.map(i => i.playerName))],
+        items: limitedFeedItems.map(i => ({
+          player: i.playerName,
+          type: i.type,
+          opponent: i.data?.opponent,
+          daysUntilMatch: i.data?.daysUntilMatch,
+          matchDate: i.data?.matchDate
+        }))
+      });
 
       setSocialFeed(limitedFeedItems);
       
@@ -2374,6 +2475,18 @@ function Dashboard() {
                           </div>
                         );
                       } else if (item.type === 'new_match') {
+                        // Berechne Tage-Anzeige
+                        let daysDisplay = '';
+                        if (item.data.daysUntilMatch === 0) {
+                          daysDisplay = 'heute';
+                        } else if (item.data.daysUntilMatch === 1) {
+                          daysDisplay = 'morgen';
+                        } else if (item.data.daysUntilMatch > 1) {
+                          daysDisplay = `in ${item.data.daysUntilMatch} Tagen`;
+                        } else {
+                          daysDisplay = timeLabel;
+                        }
+                        
                         return (
                           <div
                                       key={`${item.type}-${item.playerId}-${activityIndex}`}
@@ -2422,7 +2535,42 @@ function Dashboard() {
                                     {item.data.isHome ? '🏠 Heim' : '✈️ Auswärts'}
                                   </span>
                                   <span>•</span>
-                                  <span>{timeLabel}</span>
+                                  <span style={{
+                                    fontWeight: '700',
+                                    color: item.data.daysUntilMatch === 0 ? 'rgb(239, 68, 68)' : item.data.daysUntilMatch === 1 ? 'rgb(245, 158, 11)' : 'rgb(107, 114, 128)'
+                                  }}>
+                                    {daysDisplay}
+                                  </span>
+                                  {item.data.canSendWish && (
+                                    <>
+                                      <span>•</span>
+                                      <button
+                                        onClick={async () => {
+                                          // TODO: Implementiere Erfolgswunsch-Funktion
+                                          alert(`💪 Viel Erfolg für ${item.playerName} beim Match gegen ${item.data.opponent}!`);
+                                        }}
+                                        style={{
+                                          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.2) 100%)',
+                                          border: '1px solid rgba(16, 185, 129, 0.4)',
+                                          borderRadius: '8px',
+                                          padding: '0.2rem 0.5rem',
+                                          fontSize: '0.65rem',
+                                          fontWeight: '700',
+                                          color: 'rgb(16, 185, 129)',
+                                          cursor: 'pointer',
+                                          transition: 'all 0.2s ease'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                          e.target.style.background = 'linear-gradient(135deg, rgba(16, 185, 129, 0.3) 0%, rgba(5, 150, 105, 0.3) 100%)';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                          e.target.style.background = 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.2) 100%)';
+                                        }}
+                                      >
+                                        💪 Viel Erfolg!
+                                      </button>
+                                    </>
+                                  )}
                             </div>
                           </div>
                         );
