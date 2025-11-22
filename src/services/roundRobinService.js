@@ -212,15 +212,22 @@ export const calculateTrainingParticipants = (training, allPlayers) => {
  */
 export const updatePlayerStats = async (playerId, status) => {
   try {
-    // Hole aktuelle Statistiken
+    // Hole aktuelle Statistiken (mit Fallback falls Spalte nicht existiert)
     const { data: player, error: fetchError } = await supabase
       .from('players_unified')
       .select('training_stats')
       .eq('id', playerId)
       .single();
 
-    if (fetchError) {
+    // Wenn Spalte nicht existiert, ignoriere den Fehler (wird vom Trigger gehandhabt)
+    if (fetchError && fetchError.code !== '42703') { // 42703 = column does not exist
       console.error('❌ Error fetching player stats:', fetchError);
+      return;
+    }
+
+    // Nur updaten, wenn Spalte existiert
+    if (fetchError && fetchError.code === '42703') {
+      console.warn('⚠️ training_stats column does not exist, skipping update');
       return;
     }
 
@@ -255,6 +262,11 @@ export const updatePlayerStats = async (playerId, status) => {
       .eq('id', playerId);
 
     if (updateError) {
+      // Ignoriere Fehler wenn Spalte nicht existiert
+      if (updateError.code === '42703') {
+        console.warn('⚠️ training_stats column does not exist, skipping update');
+        return;
+      }
       console.error('❌ Error updating player stats:', updateError);
     } else {
       console.log(`✅ Stats updated for player ${playerId}:`, {
