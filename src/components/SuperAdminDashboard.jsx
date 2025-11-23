@@ -2543,14 +2543,55 @@ function SuperAdminDashboard() {
     if (!normalizedGroupId) {
       throw new Error('Ungültige Gruppen-ID.');
     }
+    
+    // ✅ NEU: Lade source_url aus team_seasons für diese Gruppe
+    let leagueUrl = null;
+    try {
+      // Versuche, die source_url aus team_seasons zu laden
+      // Dazu müssen wir zuerst die Gruppe finden (group_name, season, league)
+      const { data: matchdays } = await supabase
+        .from('matchdays')
+        .select('group_name, season, league')
+        .eq('group_name', `Gr. ${normalizedGroupId.padStart(3, '0')}`)
+        .limit(1)
+        .maybeSingle();
+      
+      if (matchdays) {
+        const { data: teamSeason } = await supabase
+          .from('team_seasons')
+          .select('source_url')
+          .eq('group_name', matchdays.group_name)
+          .eq('season', matchdays.season)
+          .eq('league', matchdays.league)
+          .not('source_url', 'is', null)
+          .limit(1)
+          .maybeSingle();
+        
+        if (teamSeason?.source_url) {
+          leagueUrl = teamSeason.source_url;
+          console.log(`[fetchGroupSnapshot] ✅ source_url aus team_seasons geladen: ${leagueUrl}`);
+        }
+      }
+    } catch (error) {
+      console.warn(`[fetchGroupSnapshot] ⚠️ Fehler beim Laden der source_url:`, error);
+      // Weiter ohne source_url - API wird Default-URL verwenden
+    }
+    
+    const payload = {
+      groups: normalizedGroupId,
+      includeMatches: true,
+      apply: false
+    };
+    
+    // ✅ NEU: Füge leagueUrl hinzu, falls vorhanden
+    if (leagueUrl) {
+      payload.leagueUrl = leagueUrl;
+    }
+    
     const response = await fetch('/api/import/scrape-nuliga', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        groups: normalizedGroupId,
-        includeMatches: true,
-        apply: false
-      })
+      body: JSON.stringify(payload)
     });
     
     // ✅ Verbesserte Fehlerbehandlung: Prüfe zuerst, ob Response Text enthält

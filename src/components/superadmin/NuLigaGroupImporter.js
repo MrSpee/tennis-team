@@ -551,15 +551,17 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
         continue;
       }
       
-      // Prüfe ob Match bereits existiert (primär über match_number)
-      // WICHTIG: match_number ist eindeutig, daher suchen wir auch über alle Saisons/Leagues/Groups
+      // ✅ KORRIGIERT: Prüfe ob Match bereits existiert
+      // WICHTIG: match_number ist NICHT eindeutig über Gruppen hinweg!
+      // Jede Gruppe hat ihre eigenen Matches (#1, #2, etc.)
+      // Daher: NUR in der aktuellen Gruppe suchen (season + league + group_name)
       let existingMatch = null;
       
       if (match.matchNumber) {
-        // Zuerst: Suche in aktueller Saison/League/Group
+        // ✅ NUR in aktueller Saison/League/Group suchen
         const { data: dataInGroup } = await supabase
           .from('matchdays')
-          .select('id, match_number, home_team_id, away_team_id, match_date, season, league, group_name')
+          .select('id, match_number, home_team_id, away_team_id, away_team_id, match_date, season, league, group_name, meeting_id')
           .eq('match_number', match.matchNumber)
           .eq('season', group.season)
           .eq('league', group.league)
@@ -567,29 +569,29 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
           .maybeSingle();
         
         if (dataInGroup) {
-          existingMatch = dataInGroup;
-          console.log(`[importMatches] ✅ Bestehendes Match gefunden über match_number #${match.matchNumber} in Gruppe ${group.groupName}`);
-        } else {
-          // Fallback: Suche über alle Saisons/Leagues/Groups (match_number ist eindeutig)
-          const { data: dataAnywhere } = await supabase
-            .from('matchdays')
-            .select('id, match_number, home_team_id, away_team_id, match_date, season, league, group_name')
-            .eq('match_number', match.matchNumber)
-            .maybeSingle();
+          // ✅ ZUSÄTZLICHE VALIDIERUNG: Prüfe ob Teams übereinstimmen
+          // Das verhindert, dass falsche Matches gefunden werden
+          const teamsMatch = 
+            (dataInGroup.home_team_id === homeTeam.id && dataInGroup.away_team_id === awayTeam.id) ||
+            (dataInGroup.home_team_id === awayTeam.id && dataInGroup.away_team_id === homeTeam.id);
           
-          if (dataAnywhere) {
-            existingMatch = dataAnywhere;
-            console.log(`[importMatches] ⚠️ Bestehendes Match gefunden über match_number #${match.matchNumber} in anderer Gruppe (${dataAnywhere.group_name}) - wird aktualisiert`);
+          if (teamsMatch) {
+            existingMatch = dataInGroup;
+            console.log(`[importMatches] ✅ Bestehendes Match gefunden über match_number #${match.matchNumber} in Gruppe ${group.groupName} (Teams stimmen überein)`);
+          } else {
+            console.warn(`[importMatches] ⚠️ Match #${match.matchNumber} in Gruppe ${group.groupName} gefunden, aber Teams stimmen nicht überein. Erstelle neues Match.`);
+            // Teams stimmen nicht überein - erstelle neues Match
+            existingMatch = null;
           }
         }
       }
       
-      // Fallback: Suche nach Datum + Teams (auch wenn match_number vorhanden ist, für doppelte Prüfung)
+      // ✅ Fallback: Suche nach Datum + Teams (NUR in aktueller Gruppe)
       if (!existingMatch && match.matchDateIso) {
         const matchDateOnly = new Date(match.matchDateIso).toISOString().split('T')[0];
         const { data } = await supabase
           .from('matchdays')
-          .select('id, match_number, home_team_id, away_team_id, match_date, season, league, group_name')
+          .select('id, match_number, home_team_id, away_team_id, match_date, season, league, group_name, meeting_id')
           .eq('home_team_id', homeTeam.id)
           .eq('away_team_id', awayTeam.id)
           .gte('match_date', `${matchDateOnly}T00:00:00`)
@@ -599,9 +601,9 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
           .eq('group_name', group.groupName)
           .maybeSingle();
         
-        existingMatch = data;
-        if (existingMatch) {
-          console.log(`[importMatches] ✅ Bestehendes Match gefunden über Datum + Teams für Match #${match.matchNumber}`);
+        if (data) {
+          existingMatch = data;
+          console.log(`[importMatches] ✅ Bestehendes Match gefunden über Datum + Teams für Match #${match.matchNumber || 'ohne Nummer'}`);
         }
       }
       
@@ -638,15 +640,22 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
       };
       
       if (existingMatch) {
-        // ✅ WICHTIG: Wenn bestehendes Match bereits eine meeting_id hat, behalte sie, es sei denn, es gibt eine neue
+        // ✅ WICHTIG: meeting_id nur aktualisieren wenn:
+        // 1. Bestehende meeting_id ist NULL (noch nicht gesetzt)
+        // 2. ODER neue meeting_id ist vorhanden UND Teams stimmen überein (bereits validiert oben)
         // Das verhindert, dass korrekte meeting_ids überschrieben werden
         if (existingMatch.meeting_id && !match.meetingId) {
           // Bestehende meeting_id behalten, keine neue vorhanden
           delete matchData.meeting_id;
+          delete matchData.meeting_report_url;
           console.log(`[importMatches] ℹ️  Behalte bestehende meeting_id ${existingMatch.meeting_id} für Match #${match.matchNumber}`);
-        } else if (match.meetingId && match.meetingId !== existingMatch.meeting_id) {
-          // Neue meeting_id vorhanden und unterschiedlich - aktualisiere
+        } else if (match.meetingId && (!existingMatch.meeting_id || match.meetingId !== existingMatch.meeting_id)) {
+          // Neue meeting_id vorhanden und (bestehende ist NULL oder unterschiedlich) - aktualisiere
           console.log(`[importMatches] 🔄 Aktualisiere meeting_id für Match #${match.matchNumber}: ${existingMatch.meeting_id || 'NULL'} → ${match.meetingId}`);
+        } else if (existingMatch.meeting_id && match.meetingId && match.meetingId === existingMatch.meeting_id) {
+          // meeting_id ist bereits korrekt - keine Änderung nötig
+          delete matchData.meeting_id;
+          delete matchData.meeting_report_url;
         }
         
         // ✅ ENTFERNT: source_url und source_type werden jetzt in team_seasons gespeichert, nicht in matchdays
