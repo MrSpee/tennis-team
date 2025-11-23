@@ -30,18 +30,67 @@ async function determineMeetingId({
     normalizeTeamLabel
   } = imports;
   const normalizedGroupId = groupId ? String(parseInt(groupId, 10)) : null;
-  const { results } = await scrape({
-    leagueUrl: leagueUrl || imports.DEFAULT_LEAGUE_URL,
-    groupFilter: normalizedGroupId,
-    requestDelayMs: 120,
-    applyChanges: false,
-    supabaseClient: null,
-    outputDir: null,
-    onLog: () => {}
-  });
+  
+  // VERBESSERT: Versuche beide Tab-Seiten, wenn leagueUrl keine source_url ist
+  let results = null;
+  let lastError = null;
+  let triedUrls = [];
+  
+  const urlsToTry = [];
+  if (leagueUrl) {
+    urlsToTry.push(leagueUrl);
+  }
+  
+  // Wenn leagueUrl eine Fallback-URL ist (enthält tab=), versuche auch die andere Tab-Seite
+  if (leagueUrl && leagueUrl.includes('tab=')) {
+    const otherTab = leagueUrl.includes('tab=2') ? 'tab=3' : 'tab=2';
+    const alternativeUrl = leagueUrl.replace(/tab=\d+/, otherTab);
+    urlsToTry.push(alternativeUrl);
+  }
+  
+  // Versuche jede URL
+  for (const urlToTry of urlsToTry) {
+    triedUrls.push(urlToTry);
+    try {
+      console.log(`[meeting-report] 🔍 Versuche Meeting-ID zu bestimmen mit URL: ${urlToTry}`);
+      const scrapeResult = await scrape({
+        leagueUrl: urlToTry,
+        groupFilter: normalizedGroupId,
+        requestDelayMs: 120,
+        applyChanges: false,
+        supabaseClient: null,
+        outputDir: null,
+        onLog: () => {}
+      });
+      
+      if (scrapeResult.results && scrapeResult.results.length > 0) {
+        results = scrapeResult.results;
+        console.log(`[meeting-report] ✅ Gruppeninformationen gefunden mit URL: ${urlToTry}`);
+        // Speichere erfolgreiche URL für später
+        results._successfulUrl = urlToTry;
+        break; // Erfolgreich, breche ab
+      }
+    } catch (error) {
+      console.warn(`[meeting-report] ⚠️ Fehler beim Scrapen mit URL ${urlToTry}:`, error.message);
+      lastError = error;
+      // Wenn es ein "Keine Gruppenlinks gefunden" Fehler ist, versuche nächste URL
+      if (error.message && error.message.includes('Keine Gruppenlinks')) {
+        continue;
+      }
+      // Bei anderen Fehlern, breche ab
+      throw error;
+    }
+  }
 
   if (!results || !results.length) {
-    throw new Error('Keine Gruppeninformationen gefunden, um Meeting-ID zu bestimmen.');
+    const error = new Error(
+      `Keine Gruppeninformationen gefunden, um Meeting-ID zu bestimmen. ` +
+      `Versuchte URLs: ${triedUrls.join(', ')}`
+    );
+    if (lastError) {
+      error.originalError = lastError.message;
+    }
+    throw error;
   }
 
   const targetGroup = results.find((entry) => {
@@ -147,7 +196,9 @@ async function determineMeetingId({
         normalizedHome: normalizeTeamLabel(matched.homeTeam || matched.home_team),
         normalizedAway: normalizeTeamLabel(matched.awayTeam || matched.away_team)
       }
-    }
+    },
+    // VERBESSERT: Speichere erfolgreiche URL für später
+    successfulUrl: results._successfulUrl || null
   };
 }
 
@@ -915,15 +966,62 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
     });
   };
 
+  // VERBESSERT: Erstelle Ergebnisse auch wenn Spieler fehlen
+  const skippedMatches = [];
+  const errorDetails = [];
+  
   for (const match of singles) {
-    await appendRow(match, 'Einzel');
+    try {
+      await appendRow(match, 'Einzel');
+    } catch (error) {
+      console.error(`[meeting-report] ❌ Fehler beim Erstellen von Einzel-Match #${match.matchNumber}:`, error.message);
+      skippedMatches.push({ type: 'Einzel', matchNumber: match.matchNumber, error: error.message });
+      errorDetails.push(`Einzel #${match.matchNumber}: ${error.message}`);
+    }
   }
   for (const match of doubles) {
-    await appendRow(match, 'Doppel');
+    try {
+      await appendRow(match, 'Doppel');
+    } catch (error) {
+      console.error(`[meeting-report] ❌ Fehler beim Erstellen von Doppel-Match #${match.matchNumber}:`, error.message);
+      skippedMatches.push({ type: 'Doppel', matchNumber: match.matchNumber, error: error.message });
+      errorDetails.push(`Doppel #${match.matchNumber}: ${error.message}`);
+    }
   }
 
+  // VERBESSERT: Detaillierte Fehlermeldung wenn keine Ergebnisse erstellt wurden
   if (!rows.length) {
-    return { inserted: [], deleted: 0, missingPlayers: [] };
+    const reason = [];
+    if (!singles || singles.length === 0) {
+      reason.push('Keine Einzel-Matches im Meeting-Report');
+    }
+    if (!doubles || doubles.length === 0) {
+      reason.push('Keine Doppel-Matches im Meeting-Report');
+    }
+    if (singles && singles.length > 0 && doubles && doubles.length > 0) {
+      reason.push('Alle Matches konnten nicht verarbeitet werden (siehe errorDetails)');
+    }
+    if (skippedMatches.length > 0) {
+      reason.push(`${skippedMatches.length} Matches übersprungen`);
+    }
+    
+    console.warn(`[meeting-report] ⚠️ Keine Ergebnisse erstellt:`, {
+      singlesCount: singles?.length || 0,
+      doublesCount: doubles?.length || 0,
+      rowsCreated: rows.length,
+      skippedMatches: skippedMatches.length,
+      reasons: reason,
+      errorDetails
+    });
+    
+    return { 
+      inserted: [], 
+      deleted: 0, 
+      missingPlayers: Array.from(pendingPlayers.values()),
+      error: `Keine Ergebnisse erstellt: ${reason.join('; ')}`,
+      errorDetails: errorDetails.length > 0 ? errorDetails : undefined,
+      skippedMatches: skippedMatches.length > 0 ? skippedMatches : undefined
+    };
   }
 
   const { error: deleteError } = await supabase.from('match_results').delete().eq('matchday_id', matchdayId);
@@ -1031,11 +1129,24 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
     }
   }
 
-  return {
+  // VERBESSERT: Füge Statistiken hinzu
+  const stats = {
     inserted: data || [],
     deleted: rows.length,
-    missingPlayers: Array.from(pendingPlayers.values())
+    missingPlayers: Array.from(pendingPlayers.values()),
+    totalProcessed: (singles?.length || 0) + (doubles?.length || 0),
+    successful: rows.length,
+    failed: skippedMatches.length
   };
+  
+  console.log(`[meeting-report] 📊 Import-Statistik:`, {
+    totalProcessed: stats.totalProcessed,
+    successful: stats.successful,
+    failed: stats.failed,
+    missingPlayers: stats.missingPlayers.length
+  });
+  
+  return stats;
 }
 
 const DEFAULT_IMPORTS = {
@@ -1085,9 +1196,12 @@ module.exports = async function handler(req, res) {
       matchdayId,
       homeTeam,
       awayTeam,
-      apply = false,
+      apply: applyParam,
       cleanupOnly = false
     } = req.body || {};
+    
+    // VERBESSERT: Wenn matchdayId vorhanden ist, setze apply standardmäßig auf true
+    const apply = applyParam !== undefined ? applyParam : (matchdayId ? true : false);
     requestContext = { matchdayId, apply, cleanupOnly };
 
     if (cleanupOnly) {
@@ -1228,6 +1342,39 @@ module.exports = async function handler(req, res) {
       resolvedMeetingUrl = result.meetingReportUrl || resolvedMeetingUrl;
       groupMeta = result.groupMeta;
       matchMeta = result.matchMeta;
+      
+      // VERBESSERT: Speichere erfolgreiche URL zurück in team_seasons, wenn sie eine Fallback-URL war
+      if (result.successfulUrl && matchdayId && matchdayData) {
+        try {
+          const supabase = createSupabaseClient(true);
+          // Finde team_seasons Eintrag für diese Gruppe
+          const { data: teamSeasons } = await supabase
+            .from('team_seasons')
+            .select('id')
+            .eq('group_name', matchdayData.group_name)
+            .eq('season', matchdayData.season)
+            .eq('league', matchdayData.league)
+            .limit(1);
+          
+          if (teamSeasons && teamSeasons.length > 0) {
+            // Update source_url für alle Einträge dieser Gruppe
+            const { error: updateError } = await supabase
+              .from('team_seasons')
+              .update({ source_url: result.successfulUrl })
+              .eq('group_name', matchdayData.group_name)
+              .eq('season', matchdayData.season)
+              .eq('league', matchdayData.league);
+            
+            if (!updateError) {
+              console.log(`[meeting-report] ✅ source_url gespeichert für Gruppe ${matchdayData.group_name}: ${result.successfulUrl}`);
+            } else {
+              console.warn(`[meeting-report] ⚠️ Fehler beim Speichern der source_url:`, updateError.message);
+            }
+          }
+        } catch (saveError) {
+          console.warn(`[meeting-report] ⚠️ Fehler beim Speichern der erfolgreichen URL:`, saveError.message);
+        }
+      }
     }
 
     if (groupId && !groupMeta) {
@@ -1263,16 +1410,39 @@ module.exports = async function handler(req, res) {
       meetingUrl: resolvedMeetingUrl
     });
     
+    // VERBESSERT: Validierung des Meeting-Reports
+    if (!meetingData) {
+      throw new Error('Meeting-Report konnte nicht geladen werden (keine Daten zurückgegeben)');
+    }
+    
+    const singlesCount = meetingData.singles?.length || 0;
+    const doublesCount = meetingData.doubles?.length || 0;
+    const totalMatches = singlesCount + doublesCount;
+    
     // DEBUG: Log extrahierte Daten
     console.log(`[meeting-report] 📥 Meeting-Report extrahiert:`, {
-      singlesCount: meetingData.singles?.length || 0,
-      doublesCount: meetingData.doubles?.length || 0,
+      singlesCount,
+      doublesCount,
+      totalMatches,
+      hasMetadata: !!meetingData.metadata,
+      metadata: meetingData.metadata ? {
+        homeTeam: meetingData.metadata.homeTeam,
+        awayTeam: meetingData.metadata.awayTeam
+      } : null,
       firstSingle: meetingData.singles?.[0] ? {
         matchNumber: meetingData.singles[0].matchNumber,
         homePlayers: meetingData.singles[0].homePlayers?.map(p => ({ name: p.name, lk: p.lk })) || [],
-        awayPlayers: meetingData.singles[0].awayPlayers?.map(p => ({ name: p.name, lk: p.lk })) || []
+        awayPlayers: meetingData.singles[0].awayPlayers?.map(p => ({ name: p.name, lk: p.lk })) || [],
+        hasSetScores: !!meetingData.singles[0].setScores,
+        setScoresCount: meetingData.singles[0].setScores?.length || 0
       } : null
     });
+    
+    // WARNUNG: Wenn keine Matches gefunden wurden
+    if (totalMatches === 0) {
+      console.warn(`[meeting-report] ⚠️ Meeting-Report enthält keine Matches (singles: ${singlesCount}, doubles: ${doublesCount})`);
+      console.warn(`[meeting-report] ⚠️ Meeting-ID: ${resolvedMeetingId}, Meeting-URL: ${resolvedMeetingUrl}`);
+    }
 
     const normalizeTeam = imports.normalizeTeamLabel || ((value) => (value ? value.toString().toLowerCase().trim() : ''));
     const diceCoefficient = imports.diceCoefficient || (() => 0);
@@ -1370,6 +1540,14 @@ module.exports = async function handler(req, res) {
       });
     }
 
+    // VERBESSERT: Prüfe applyResult auf Fehler
+    if (applyResult && applyResult.error) {
+      console.warn(`[meeting-report] ⚠️ Fehler beim Anwenden der Ergebnisse:`, applyResult.error);
+      if (applyResult.errorDetails) {
+        console.warn(`[meeting-report] ⚠️ Fehler-Details:`, applyResult.errorDetails);
+      }
+    }
+    
     // DEBUG: Log Rückgabe-Daten
     console.log(`[meeting-report] 📤 Rückgabe-Daten:`, {
       success: true,
@@ -1377,11 +1555,14 @@ module.exports = async function handler(req, res) {
       doublesCount: meetingData.doubles?.length || 0,
       applyResult: applyResult ? {
         inserted: applyResult.inserted?.length || 0,
-        missingPlayers: applyResult.missingPlayers?.length || 0
+        missingPlayers: applyResult.missingPlayers?.length || 0,
+        hasError: !!applyResult.error,
+        error: applyResult.error
       } : null
     });
     
-    return withCors(res, 200, {
+    // VERBESSERT: Wenn applyResult einen Fehler hat, aber trotzdem Daten vorhanden sind, geben wir eine Warnung zurück
+    const response = {
       success: true,
       applied: Boolean(apply),
       meetingId: meetingData.meetingId || resolvedMeetingId || null,
@@ -1393,7 +1574,17 @@ module.exports = async function handler(req, res) {
       groupMeta,
       matchMeta,
       applyResult
-    });
+    };
+    
+    // Wenn applyResult einen Fehler hat, setze success auf false für bessere Fehlerbehandlung
+    if (applyResult && applyResult.error && applyResult.inserted?.length === 0) {
+      response.success = false;
+      response.error = applyResult.error;
+      response.errorDetails = applyResult.errorDetails;
+      response.warning = 'Meeting-Report wurde geladen, aber keine Ergebnisse konnten importiert werden';
+    }
+    
+    return withCors(res, response.success ? 200 : 400, response);
   } catch (error) {
     console.error('[api/import/meeting-report] Fehler:', error);
     if (
