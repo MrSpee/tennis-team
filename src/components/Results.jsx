@@ -216,12 +216,24 @@ const Results = () => {
       }
       
       // Suche nach Spielern
+      // WICHTIG: Suche nach ALLEN Spielern, die den Namen matchen
+      // (auch inaktive oder externe Spieler, die Ergebnisse haben)
       const { data: playersList, error: playersError } = await supabase
         .from('players_unified')
-        .select('id, name, current_lk')
+        .select(`
+          id, 
+          name, 
+          current_lk,
+          season_start_lk,
+          is_active,
+          player_type,
+          primary_team_id,
+          user_id
+        `)
         .ilike('name', `%${term}%`)
-        .eq('status', 'active')
-        .limit(10);
+        // KEIN Filter nach status (existiert nicht) oder is_active
+        // Zeige alle Spieler, die den Namen matchen - auch externe Spieler mit Ergebnissen
+        .limit(20); // Erhöhe Limit für bessere Ergebnisse
       
       if (playersError) {
         console.error('❌ Error searching players:', playersError);

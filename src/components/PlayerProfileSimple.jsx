@@ -24,6 +24,12 @@ function PlayerProfileSimple() {
   const [performanceStats, setPerformanceStats] = useState(null);
   const [recentMatches, setRecentMatches] = useState([]);
   const [loadingStats, setLoadingStats] = useState(false);
+  const [allPlayerResults, setAllPlayerResults] = useState([]); // Alle Match-Ergebnisse für Modals
+  const [allMatchdayResults, setAllMatchdayResults] = useState([]); // Alle Matchday-Ergebnisse für Team-Details
+  const [playerDataMap, setPlayerDataMap] = useState({}); // Spieler-Daten für Gegner-Anzeige
+  
+  // ✅ NEU: Accordion States (für Einzel/Doppel Details)
+  const [expandedPersonalSection, setExpandedPersonalSection] = useState(null); // 'Einzel' oder 'Doppel' oder null
   
   // 🎯 SOCIAL FEATURES
   const [isFollowing, setIsFollowing] = useState(false);
@@ -56,18 +62,18 @@ function PlayerProfileSimple() {
       const decodedName = decodeURIComponent(playerName);
       console.log('🔍 Loading player profile for:', decodedName);
       
-      // Erste versuche mit allen Feldern
+      // Erste versuche mit allen Feldern (auch inaktive Spieler!)
       let { data, error } = await supabase
         .from('players_unified')
         .select('*')
         .eq('name', decodedName)
-        .eq('is_active', true)
-        .eq('player_type', 'app_user')
+        // WICHTIG: Entferne .eq('is_active', true) - auch inaktive Spieler können gefunden werden
+        // wenn sie in Teams sind oder Ergebnisse haben
         .single();
 
-      // Falls das fehlschlägt, versuche mit grundlegenden Feldern
+      // Falls das fehlschlägt, versuche mit grundlegenden Feldern (auch inaktive!)
       if (error) {
-        console.log('🔄 Trying with basic fields...');
+        console.log('🔄 Trying with basic fields (including inactive players)...');
         const result = await supabase
           .from('players_unified')
           .select(`
@@ -86,12 +92,27 @@ function PlayerProfileSimple() {
             updated_at
           `)
           .eq('name', decodedName)
-          .eq('is_active', true)
-          .eq('player_type', 'app_user')
+          // WICHTIG: Entferne .eq('is_active', true) - auch inaktive Spieler können gefunden werden
           .single();
         
         data = result.data;
         error = result.error;
+      }
+      
+      // Falls immer noch nicht gefunden, versuche auch mit ILIKE (für Varianten)
+      if (error && error.code === 'PGRST116') {
+        console.log('🔄 Trying with ILIKE search (case-insensitive)...');
+        const result = await supabase
+          .from('players_unified')
+          .select('*')
+          .ilike('name', decodedName)
+          .limit(1)
+          .maybeSingle();
+        
+        if (result.data) {
+          data = result.data;
+          error = null;
+        }
       }
 
       console.log('🔍 Query result:', { data, error });
@@ -167,12 +188,48 @@ function PlayerProfileSimple() {
       console.log('✅ Match results loaded (Raouls Spiele):', results?.length || 0);
       console.log('📋 Raw results:', results);
       
+      // ✅ Speichere alle Ergebnisse für Modals
+      setAllPlayerResults(results || []);
+      
+      // ✅ Lade Spieler-Daten für alle Gegner (für Modal-Anzeige)
+      const allPlayerIds = new Set();
+      (results || []).forEach(r => {
+        if (r.home_player_id) allPlayerIds.add(r.home_player_id);
+        if (r.guest_player_id) allPlayerIds.add(r.guest_player_id);
+        if (r.home_player1_id) allPlayerIds.add(r.home_player1_id);
+        if (r.home_player2_id) allPlayerIds.add(r.home_player2_id);
+        if (r.guest_player1_id) allPlayerIds.add(r.guest_player1_id);
+        if (r.guest_player2_id) allPlayerIds.add(r.guest_player2_id);
+      });
+      
+      if (allPlayerIds.size > 0) {
+        const playerDataMapTemp = {};
+        await Promise.all(
+          Array.from(allPlayerIds).map(async (id) => {
+            try {
+              const { data, error } = await supabase
+                .from('players_unified')
+                .select('id, name, current_lk, season_start_lk')
+                .eq('id', id)
+                .single();
+              
+              if (!error && data) {
+                playerDataMapTemp[id] = data;
+              }
+            } catch (err) {
+              console.error('Error loading player data:', err);
+            }
+          })
+        );
+        setPlayerDataMap(playerDataMapTemp);
+      }
+      
       // ✅ Hole ALLE Matchday-IDs wo Raoul gespielt hat
       const matchdayIds = [...new Set((results || []).map(r => r.matchday_id).filter(Boolean))];
       console.log('📋 Matchday IDs wo Raoul gespielt hat:', matchdayIds);
       
       // ✅ Lade ALLE Ergebnisse dieser Matchdays (für Team-Bilanz!)
-      let allMatchdayResults = [];
+      let allMatchdayResultsData = [];
       if (matchdayIds.length > 0) {
         const { data: fullResults, error: fullError } = await supabase
           .from('match_results')
@@ -180,10 +237,13 @@ function PlayerProfileSimple() {
           .in('matchday_id', matchdayIds);
         
         if (!fullError) {
-          allMatchdayResults = fullResults || [];
-          console.log('✅ ALLE Ergebnisse geladen (für Team-Bilanz):', allMatchdayResults.length);
+          allMatchdayResultsData = fullResults || [];
+          console.log('✅ ALLE Ergebnisse geladen (für Team-Bilanz):', allMatchdayResultsData.length);
         }
       }
+      
+      // ✅ Speichere alle Matchday-Ergebnisse für Team-Details-Modal
+      setAllMatchdayResults(allMatchdayResultsData);
       
       // ✅ Berechne PERSÖNLICHE Statistiken (nur Raouls Spiele!)
       let einzelWins = 0, einzelLosses = 0, einzelDraws = 0;
@@ -254,7 +314,7 @@ function PlayerProfileSimple() {
         console.log(`\n🏆 Processing Matchday ${idx + 1}:`, m.matchday.id);
         
         // ✅ Hole ALLE Ergebnisse dieses Matchdays (nicht nur Raouls!)
-        const allResultsForThisMatch = allMatchdayResults.filter(r => r.matchday_id === m.matchday.id);
+        const allResultsForThisMatch = allMatchdayResultsData.filter(r => r.matchday_id === m.matchday.id);
         
         console.log(`   Raouls Results: ${m.results.length}`);
         console.log(`   ALLE Results: ${allResultsForThisMatch.length}`);
@@ -825,9 +885,29 @@ function PlayerProfileSimple() {
               
               {/* Einzel Stats */}
               <div style={{ marginBottom: '1.5rem' }}>
-                <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1rem', fontWeight: '700', color: '#1f2937' }}>
-                  👤 Einzel
-                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: '700', color: '#1f2937' }}>
+                    👤 Einzel
+                  </h3>
+                  {performanceStats.personal.einzel.total > 0 && (
+                    <button
+                      onClick={() => setExpandedPersonalSection(expandedPersonalSection === 'Einzel' ? null : 'Einzel')}
+                      style={{
+                        padding: '0.375rem 0.75rem',
+                        background: expandedPersonalSection === 'Einzel' ? '#eff6ff' : 'transparent',
+                        border: '1px solid #3b82f6',
+                        borderRadius: '6px',
+                        color: '#3b82f6',
+                        fontSize: '0.75rem',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      {expandedPersonalSection === 'Einzel' ? '▼ Ausblenden' : '▶ Details anzeigen'}
+                    </button>
+                  )}
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '0.75rem' }}>
                   <div style={{
                     padding: '0.75rem',
@@ -866,13 +946,165 @@ function PlayerProfileSimple() {
                     <div style={{ fontSize: '0.7rem', fontWeight: '600', color: '#92400e' }}>QUOTE</div>
                   </div>
                 </div>
+                
+                {/* ✅ Accordion: Einzel Details */}
+                {expandedPersonalSection === 'Einzel' && (
+                  <div style={{
+                    marginTop: '1rem',
+                    padding: '1rem',
+                    background: '#f9fafb',
+                    borderRadius: '8px',
+                    border: '1px solid #e5e7eb',
+                    maxHeight: '400px',
+                    overflowY: 'auto'
+                  }}>
+                    {allPlayerResults
+                      .filter(r => r.match_type === 'Einzel')
+                      .sort((a, b) => {
+                        const dateA = a.matchday?.match_date ? new Date(a.matchday.match_date) : new Date(0);
+                        const dateB = b.matchday?.match_date ? new Date(b.matchday.match_date) : new Date(0);
+                        return dateB - dateA; // Neueste zuerst
+                      })
+                      .map((result, idx) => {
+                        const isInHomeTeam = 
+                          result.home_player_id === player?.id ||
+                          result.home_player1_id === player?.id ||
+                          result.home_player2_id === player?.id;
+                        
+                        const didWin = isInHomeTeam 
+                          ? result.winner === 'home'
+                          : result.winner === 'guest';
+                        
+                        // Lade Gegner-Daten
+                        let opponentName = 'Unbekannt';
+                        let opponentLK = null;
+                        
+                        const opponentId = isInHomeTeam ? result.guest_player_id : result.home_player_id;
+                        const oppData = opponentId ? playerDataMap[opponentId] : null;
+                        if (oppData) {
+                          opponentName = oppData.name;
+                          opponentLK = oppData.current_lk || oppData.season_start_lk;
+                        }
+                        
+                        const matchDate = result.matchday?.match_date 
+                          ? new Date(result.matchday.match_date).toLocaleDateString('de-DE', { 
+                              day: '2-digit', 
+                              month: '2-digit', 
+                              year: 'numeric' 
+                            })
+                          : 'Unbekannt';
+                        
+                        const opponent = isInHomeTeam 
+                          ? result.matchday?.away_team 
+                          : result.matchday?.home_team;
+                        
+                        const opponentLabel = opponent 
+                          ? `${opponent.club_name} ${opponent.team_name || ''} (${opponent.category})`.trim()
+                          : 'Unbekannt';
+                        
+                        return (
+                          <div
+                            key={idx}
+                            style={{
+                              padding: '0.75rem',
+                              background: didWin ? '#ecfdf5' : '#fee2e2',
+                              border: `2px solid ${didWin ? '#10b981' : '#ef4444'}`,
+                              borderRadius: '8px',
+                              marginBottom: '0.5rem'
+                            }}
+                          >
+                            <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#1f2937', marginBottom: '0.25rem' }}>
+                              {opponentLabel}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>
+                              📅 {matchDate} • vs. <strong>{opponentName}</strong> {opponentLK && `(LK ${opponentLK})`}
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+                              <span style={{
+                                padding: '0.25rem 0.5rem',
+                                background: 'white',
+                                borderRadius: '4px',
+                                fontSize: '0.75rem',
+                                fontWeight: '600',
+                                color: didWin ? '#059669' : '#dc2626'
+                              }}>
+                                {didWin ? '✅ Sieg' : '❌ Niederlage'}
+                              </span>
+                              {result.set1_home !== null && result.set1_guest !== null && (
+                                <span style={{
+                                  padding: '0.25rem 0.5rem',
+                                  background: 'white',
+                                  borderRadius: '4px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '700',
+                                  color: '#1f2937'
+                                }}>
+                                  {isInHomeTeam ? `${result.set1_home}:${result.set1_guest}` : `${result.set1_guest}:${result.set1_home}`}
+                                </span>
+                              )}
+                              {result.set2_home !== null && result.set2_guest !== null && (
+                                <span style={{
+                                  padding: '0.25rem 0.5rem',
+                                  background: 'white',
+                                  borderRadius: '4px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '700',
+                                  color: '#1f2937'
+                                }}>
+                                  {isInHomeTeam ? `${result.set2_home}:${result.set2_guest}` : `${result.set2_guest}:${result.set2_home}`}
+                                </span>
+                              )}
+                              {result.set3_home !== null && result.set3_guest !== null && (
+                                <span style={{
+                                  padding: '0.25rem 0.5rem',
+                                  background: 'white',
+                                  borderRadius: '4px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '700',
+                                  color: '#1f2937'
+                                }}>
+                                  {isInHomeTeam ? `${result.set3_home}:${result.set3_guest}` : `${result.set3_guest}:${result.set3_home}`}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    
+                    {allPlayerResults.filter(r => r.match_type === 'Einzel').length === 0 && (
+                      <div style={{ textAlign: 'center', padding: '1rem', color: '#6b7280' }}>
+                        Keine Einzel-Matches gefunden.
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               
               {/* Doppel Stats */}
               <div style={{ marginBottom: '1.5rem' }}>
-                <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1rem', fontWeight: '700', color: '#1f2937' }}>
-                  👥 Doppel
-                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: '700', color: '#1f2937' }}>
+                    👥 Doppel
+                  </h3>
+                  {performanceStats.personal.doppel.total > 0 && (
+                    <button
+                      onClick={() => setExpandedPersonalSection(expandedPersonalSection === 'Doppel' ? null : 'Doppel')}
+                      style={{
+                        padding: '0.375rem 0.75rem',
+                        background: expandedPersonalSection === 'Doppel' ? '#eff6ff' : 'transparent',
+                        border: '1px solid #3b82f6',
+                        borderRadius: '6px',
+                        color: '#3b82f6',
+                        fontSize: '0.75rem',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      {expandedPersonalSection === 'Doppel' ? '▼ Ausblenden' : '▶ Details anzeigen'}
+                    </button>
+                  )}
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '0.75rem' }}>
                   <div style={{
                     padding: '0.75rem',
@@ -911,6 +1143,159 @@ function PlayerProfileSimple() {
                     <div style={{ fontSize: '0.7rem', fontWeight: '600', color: '#92400e' }}>QUOTE</div>
                   </div>
                 </div>
+                
+                {/* ✅ Accordion: Doppel Details */}
+                {expandedPersonalSection === 'Doppel' && (
+                  <div style={{
+                    marginTop: '1rem',
+                    padding: '1rem',
+                    background: '#f9fafb',
+                    borderRadius: '8px',
+                    border: '1px solid #e5e7eb',
+                    maxHeight: '400px',
+                    overflowY: 'auto'
+                  }}>
+                    {allPlayerResults
+                      .filter(r => r.match_type === 'Doppel')
+                      .sort((a, b) => {
+                        const dateA = a.matchday?.match_date ? new Date(a.matchday.match_date) : new Date(0);
+                        const dateB = b.matchday?.match_date ? new Date(b.matchday.match_date) : new Date(0);
+                        return dateB - dateA; // Neueste zuerst
+                      })
+                      .map((result, idx) => {
+                        const isInHomeTeam = 
+                          result.home_player_id === player?.id ||
+                          result.home_player1_id === player?.id ||
+                          result.home_player2_id === player?.id;
+                        
+                        const didWin = isInHomeTeam 
+                          ? result.winner === 'home'
+                          : result.winner === 'guest';
+                        
+                        // Lade Gegner-Daten
+                        let opponentName = 'Unbekannt';
+                        let opponentLK = null;
+                        let partnerName = null;
+                        let partnerLK = null;
+                        
+                        const opp1Id = isInHomeTeam ? result.guest_player1_id : result.home_player1_id;
+                        const opp2Id = isInHomeTeam ? result.guest_player2_id : result.home_player2_id;
+                        const opp1Data = opp1Id ? playerDataMap[opp1Id] : null;
+                        const opp2Data = opp2Id ? playerDataMap[opp2Id] : null;
+                        
+                        if (opp1Data && opp2Data) {
+                          opponentName = `${opp1Data.name} / ${opp2Data.name}`;
+                          opponentLK = opp1Data.current_lk || opp1Data.season_start_lk;
+                        } else if (opp1Data) {
+                          opponentName = opp1Data.name;
+                          opponentLK = opp1Data.current_lk || opp1Data.season_start_lk;
+                        }
+                        
+                        // Partner
+                        const partnerId = isInHomeTeam
+                          ? (result.home_player1_id === player?.id ? result.home_player2_id : result.home_player1_id)
+                          : (result.guest_player1_id === player?.id ? result.guest_player2_id : result.guest_player1_id);
+                        const partnerData = partnerId ? playerDataMap[partnerId] : null;
+                        if (partnerData) {
+                          partnerName = partnerData.name;
+                          partnerLK = partnerData.current_lk || partnerData.season_start_lk;
+                        }
+                        
+                        const matchDate = result.matchday?.match_date 
+                          ? new Date(result.matchday.match_date).toLocaleDateString('de-DE', { 
+                              day: '2-digit', 
+                              month: '2-digit', 
+                              year: 'numeric' 
+                            })
+                          : 'Unbekannt';
+                        
+                        const opponent = isInHomeTeam 
+                          ? result.matchday?.away_team 
+                          : result.matchday?.home_team;
+                        
+                        const opponentLabel = opponent 
+                          ? `${opponent.club_name} ${opponent.team_name || ''} (${opponent.category})`.trim()
+                          : 'Unbekannt';
+                        
+                        return (
+                          <div
+                            key={idx}
+                            style={{
+                              padding: '0.75rem',
+                              background: didWin ? '#ecfdf5' : '#fee2e2',
+                              border: `2px solid ${didWin ? '#10b981' : '#ef4444'}`,
+                              borderRadius: '8px',
+                              marginBottom: '0.5rem'
+                            }}
+                          >
+                            <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#1f2937', marginBottom: '0.25rem' }}>
+                              {opponentLabel}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>
+                              📅 {matchDate}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.5rem' }}>
+                              mit <strong>{partnerName || 'Partner'}</strong> {partnerLK && `(LK ${partnerLK})`} vs. <strong>{opponentName}</strong>
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+                              <span style={{
+                                padding: '0.25rem 0.5rem',
+                                background: 'white',
+                                borderRadius: '4px',
+                                fontSize: '0.75rem',
+                                fontWeight: '600',
+                                color: didWin ? '#059669' : '#dc2626'
+                              }}>
+                                {didWin ? '✅ Sieg' : '❌ Niederlage'}
+                              </span>
+                              {result.set1_home !== null && result.set1_guest !== null && (
+                                <span style={{
+                                  padding: '0.25rem 0.5rem',
+                                  background: 'white',
+                                  borderRadius: '4px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '700',
+                                  color: '#1f2937'
+                                }}>
+                                  {isInHomeTeam ? `${result.set1_home}:${result.set1_guest}` : `${result.set1_guest}:${result.set1_home}`}
+                                </span>
+                              )}
+                              {result.set2_home !== null && result.set2_guest !== null && (
+                                <span style={{
+                                  padding: '0.25rem 0.5rem',
+                                  background: 'white',
+                                  borderRadius: '4px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '700',
+                                  color: '#1f2937'
+                                }}>
+                                  {isInHomeTeam ? `${result.set2_home}:${result.set2_guest}` : `${result.set2_guest}:${result.set2_home}`}
+                                </span>
+                              )}
+                              {result.set3_home !== null && result.set3_guest !== null && (
+                                <span style={{
+                                  padding: '0.25rem 0.5rem',
+                                  background: 'white',
+                                  borderRadius: '4px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '700',
+                                  color: '#1f2937'
+                                }}>
+                                  {isInHomeTeam ? `${result.set3_home}:${result.set3_guest}` : `${result.set3_guest}:${result.set3_home}`}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    
+                    {allPlayerResults.filter(r => r.match_type === 'Doppel').length === 0 && (
+                      <div style={{ textAlign: 'center', padding: '1rem', color: '#6b7280' }}>
+                        Keine Doppel-Matches gefunden.
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               
               {/* Gesamt Persönlich */}
@@ -1050,7 +1435,7 @@ function PlayerProfileSimple() {
                       return (
                         <div
                           key={match.id}
-                          onClick={() => navigate(`/results?match=${match.id}`)}
+                          onClick={() => navigate(`/ergebnisse/${match.id}`)}
                           style={{
                             padding: '0.75rem 1rem',
                             background: outcome === 'win' ? '#ecfdf5' : outcome === 'loss' ? '#fee2e2' : '#fef3c7',
@@ -1830,6 +2215,9 @@ function PlayerProfileSimple() {
           </div>
         </div>
       )}
+      
+      {/* Modals entfernt - jetzt Accordion für persönliche Matches, Navigation für Team-Matches */}
+      
     </div>
   );
 }
