@@ -1,4 +1,13 @@
-function OverviewTab({ stats, buildInfo, matchdaysWithoutResults = [], onNavigateToTab }) {
+function OverviewTab({ 
+  stats, 
+  buildInfo, 
+  matchdaysWithoutResults = [], 
+  matchdaysNeedingMeetingIdUpdate = [],
+  updatingMeetingIds = false,
+  meetingIdUpdateResult = null,
+  onUpdateMeetingIds,
+  onNavigateToTab 
+}) {
   return (
     <div className="lk-card-full">
       <div className="formkurve-header">
@@ -173,6 +182,116 @@ function OverviewTab({ stats, buildInfo, matchdaysWithoutResults = [], onNavigat
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+          
+          {/* ✅ NEU: Info-Card für Matchdays ohne meeting_id (vergangene Spiele ohne Detailsergebnisse) */}
+          {matchdaysNeedingMeetingIdUpdate.length > 0 && (
+            <div style={{
+              padding: '1.25rem',
+              marginBottom: '1rem',
+              background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(37, 99, 235, 0.15) 100%)',
+              border: '2px solid rgba(59, 130, 246, 0.4)',
+              borderRadius: '12px',
+              boxShadow: '0 4px 12px rgba(59, 130, 246, 0.2)'
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '0.75rem',
+                marginBottom: '0.75rem'
+              }}>
+                <span style={{ fontSize: '1.75rem' }}>🔍</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    marginBottom: '0.5rem',
+                    flexWrap: 'wrap',
+                    gap: '0.5rem'
+                  }}>
+                    <div>
+                      <div style={{
+                        fontSize: '1.125rem',
+                        fontWeight: 700,
+                        color: 'rgb(37, 99, 235)',
+                        marginBottom: '0.25rem'
+                      }}                      >
+                        {matchdaysNeedingMeetingIdUpdate.length} vergangene Spiel{matchdaysNeedingMeetingIdUpdate.length !== 1 ? 'e' : ''} ohne meeting_id
+                      </div>
+                      <div style={{
+                        fontSize: '0.875rem',
+                        color: 'rgb(107, 114, 128)',
+                        lineHeight: 1.5
+                      }}>
+                        Diese vergangenen Spiele haben noch keine Detailsergebnisse. meeting_id wird benötigt, um die Ergebnisse zu importieren.
+                      </div>
+                    </div>
+                    {onUpdateMeetingIds && (
+                      <button
+                        onClick={onUpdateMeetingIds}
+                        disabled={updatingMeetingIds}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          background: updatingMeetingIds ? 'rgb(156, 163, 175)' : 'rgb(59, 130, 246)',
+                          border: 'none',
+                          borderRadius: '8px',
+                          color: 'white',
+                          fontSize: '0.875rem',
+                          fontWeight: '600',
+                          cursor: updatingMeetingIds ? 'not-allowed' : 'pointer',
+                          transition: 'all 0.2s',
+                          whiteSpace: 'nowrap'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!updatingMeetingIds) {
+                            e.currentTarget.style.background = 'rgb(37, 99, 235)';
+                            e.currentTarget.style.transform = 'translateY(-1px)';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!updatingMeetingIds) {
+                            e.currentTarget.style.background = 'rgb(59, 130, 246)';
+                            e.currentTarget.style.transform = 'translateY(0)';
+                          }
+                        }}
+                      >
+                        {updatingMeetingIds ? '⏳ Aktualisiere...' : '🔄 meeting_id aktualisieren'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Ergebnis-Anzeige */}
+              {meetingIdUpdateResult && (
+                <div style={{
+                  padding: '0.75rem',
+                  marginTop: '0.75rem',
+                  background: meetingIdUpdateResult.type === 'success' 
+                    ? 'rgba(16, 185, 129, 0.1)' 
+                    : meetingIdUpdateResult.type === 'error'
+                    ? 'rgba(239, 68, 68, 0.1)'
+                    : 'rgba(245, 158, 11, 0.1)',
+                  border: `1px solid ${
+                    meetingIdUpdateResult.type === 'success' 
+                      ? 'rgba(16, 185, 129, 0.3)' 
+                      : meetingIdUpdateResult.type === 'error'
+                      ? 'rgba(239, 68, 68, 0.3)'
+                      : 'rgba(245, 158, 11, 0.3)'
+                  }`,
+                  borderRadius: '8px',
+                  fontSize: '0.875rem',
+                  color: meetingIdUpdateResult.type === 'success' 
+                    ? 'rgb(5, 150, 105)' 
+                    : meetingIdUpdateResult.type === 'error'
+                    ? 'rgb(185, 28, 28)'
+                    : 'rgb(146, 64, 14)'
+                }}>
+                  {meetingIdUpdateResult.message}
+                </div>
+              )}
             </div>
           )}
           

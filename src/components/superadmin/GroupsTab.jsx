@@ -750,12 +750,15 @@ function GroupsTab({
         .from('team_info')
         .select('*');
 
+      // ✅ WICHTIG: Übergebe die sourceUrl (leagueUrl), damit jeder Spieltag weiß, von welcher URL er stammt
+      const sourceUrl = savedUrl || groupImportLeagueUrl || null;
       const importResult = await importGroupFromNuLiga(
         group,
         scrapedData,
         supabase,
         clubsData || [],
-        teamsData || []
+        teamsData || [],
+        sourceUrl
       );
 
       // Zeige Ergebnis
@@ -923,12 +926,15 @@ function GroupsTab({
         teamsData = teams || [];
       }
 
+      // ✅ WICHTIG: Übergebe die sourceUrl (groupImportLeagueUrl), damit jeder Spieltag weiß, von welcher URL er stammt
+      const sourceUrl = groupImportLeagueUrl || null;
       const importResult = await importGroupFromNuLiga(
         groupMeta,
         scrapedData,
         supabase,
         clubsData,
-        teamsData
+        teamsData,
+        sourceUrl
       );
 
       const summary = summarizeImportResult(importResult);

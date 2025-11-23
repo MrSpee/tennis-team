@@ -18,9 +18,10 @@ import { normalizeString } from '../../services/matchdayImportService';
  * @param {Object} supabase - Supabase Client
  * @param {Array} clubs - Alle Clubs aus DB
  * @param {Array} teams - Alle Teams aus DB
+ * @param {string} sourceUrl - URL, von der die Daten stammen (optional, für zukünftige Erweiterungen)
  * @returns {Object} Import-Ergebnis
  */
-export async function importGroupFromNuLiga(group, scrapedData, supabase, clubs, teams) {
+export async function importGroupFromNuLiga(group, scrapedData, supabase, clubs, teams, sourceUrl = null) {
   const result = {
     clubsCreated: 0,
     teamsCreated: 0,
@@ -42,7 +43,8 @@ export async function importGroupFromNuLiga(group, scrapedData, supabase, clubs,
     await ensureTeamSeasons(scrapedData, teamMap, group, supabase, result);
     
     // Schritt 4: Matches importieren (primär über match_number)
-    await importMatches(scrapedData, teamMap, group, supabase, result);
+    // ✅ WICHTIG: Übergebe sourceUrl, damit jeder Spieltag weiß, von welcher URL er stammt
+    await importMatches(scrapedData, teamMap, group, supabase, result, sourceUrl);
     
     // Schritt 5: Match-Results importieren (wenn meetingId vorhanden)
     await importMatchResults(scrapedData, group, supabase, result);
@@ -392,11 +394,17 @@ async function ensureTeamSeasons(scrapedData, teamMap, group, supabase, result) 
 
 /**
  * Importiert Matches (primär über match_number)
+ * @param {Object} scrapedData - Die gescrapten Daten
+ * @param {Map} teamMap - Map von Team-Namen zu Team-IDs
+ * @param {Object} group - Die Gruppe aus der DB
+ * @param {Object} supabase - Supabase Client
+ * @param {Object} result - Ergebnis-Objekt
+ * @param {string} sourceUrl - URL, von der die Daten stammen (optional)
  */
-async function importMatches(scrapedData, teamMap, group, supabase, result) {
+async function importMatches(scrapedData, teamMap, group, supabase, result, sourceUrl = null) {
   const matches = scrapedData.matches || [];
   
-  console.log(`[importMatches] 🔍 Importiere ${matches.length} Matches für Gruppe ${group.groupName}`);
+  console.log(`[importMatches] 🔍 Importiere ${matches.length} Matches für Gruppe ${group.groupName}${sourceUrl ? ` (von ${sourceUrl})` : ''}`);
   
   for (const match of matches) {
     try {
@@ -508,7 +516,10 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
         // 2. ODER bestehendes Match hat keine meeting_id (NULL)
         // 3. ODER neue meeting_id ist vorhanden (Update von NULL zu Wert oder Update zu neuem Wert)
         meeting_id: match.meetingId || null,
-        meeting_report_url: match.meetingReportUrl || null
+        meeting_report_url: match.meetingReportUrl || null,
+        // ✅ NEU: Source URL und Type für flexible URL-Unterstützung
+        source_url: sourceUrl || null,
+        source_type: 'nuliga'
       };
       
       if (existingMatch) {
@@ -521,6 +532,15 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
         } else if (match.meetingId && match.meetingId !== existingMatch.meeting_id) {
           // Neue meeting_id vorhanden und unterschiedlich - aktualisiere
           console.log(`[importMatches] 🔄 Aktualisiere meeting_id für Match #${match.matchNumber}: ${existingMatch.meeting_id || 'NULL'} → ${match.meetingId}`);
+        }
+        
+        // ✅ WICHTIG: source_url nur aktualisieren, wenn sie noch nicht gesetzt ist oder wenn eine neue URL vorhanden ist
+        if (existingMatch.source_url && !sourceUrl) {
+          // Bestehende source_url behalten, keine neue vorhanden
+          delete matchData.source_url;
+        } else if (sourceUrl && sourceUrl !== existingMatch.source_url) {
+          // Neue source_url vorhanden und unterschiedlich - aktualisiere
+          console.log(`[importMatches] 🔄 Aktualisiere source_url für Match #${match.matchNumber}: ${existingMatch.source_url || 'NULL'} → ${sourceUrl}`);
         }
         
         // Update bestehendes Match

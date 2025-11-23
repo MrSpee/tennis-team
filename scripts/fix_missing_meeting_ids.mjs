@@ -53,12 +53,18 @@ if (!supabaseUrl || !supabaseKey) {
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function findMatchdaysWithoutMeetingId() {
-  console.log('🔍 Suche Matchdays ohne meeting_id...');
+  console.log('🔍 Suche Matchdays ohne meeting_id (nur vergangene Spiele)...');
   
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  
+  // ✅ WICHTIG: Nur vergangene Spiele (match_date < heute)
+  // ✅ NEU: Lade auch source_url, damit wir die richtige nuLiga-URL verwenden können
   const { data, error } = await supabase
     .from('matchdays')
-    .select('id, match_date, home_team_id, away_team_id, season, league, group_name, status')
+    .select('id, match_date, home_team_id, away_team_id, season, league, group_name, status, source_url, source_type')
     .is('meeting_id', null)
+    .lt('match_date', today.toISOString()) // Nur vergangene Spiele
     .order('match_date', { ascending: true });
   
   if (error) {
@@ -66,7 +72,7 @@ async function findMatchdaysWithoutMeetingId() {
     return [];
   }
   
-  console.log(`✅ ${data.length} Matchdays ohne meeting_id gefunden`);
+  console.log(`✅ ${data.length} vergangene Matchdays ohne meeting_id gefunden`);
   return data || [];
 }
 
@@ -155,9 +161,13 @@ async function findMeetingIdFromNuLiga(matchday) {
       return null;
     }
     
+    // ✅ NEU: Verwende source_url, falls vorhanden (für flexible URL-Unterstützung)
+    const leagueUrl = matchday.source_url || null;
+    
     // Scrape nuLiga für diese Gruppe
-    console.log(`🔍 Scrape nuLiga für Gruppe ${groupId}...`);
+    console.log(`🔍 Scrape nuLiga für Gruppe ${groupId}${leagueUrl ? ` (URL: ${leagueUrl})` : ''}...`);
     const scrapeResult = await scrapeNuLiga({
+      leagueUrl: leagueUrl, // ✅ NEU: Verwende source_url, falls vorhanden
       groupFilter: groupId,
       requestDelayMs: 200,
       applyChanges: false,

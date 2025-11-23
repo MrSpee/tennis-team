@@ -364,6 +364,9 @@ function SuperAdminDashboard() {
   const [matchResultsData, setMatchResultsData] = useState({});
   const [matchdayDuplicates, setMatchdayDuplicates] = useState([]);
   const [matchdaysWithoutResults, setMatchdaysWithoutResults] = useState([]);
+  const [matchdaysNeedingMeetingIdUpdate, setMatchdaysNeedingMeetingIdUpdate] = useState([]);
+  const [updatingMeetingIds, setUpdatingMeetingIds] = useState(false);
+  const [meetingIdUpdateResult, setMeetingIdUpdateResult] = useState(null);
 
   const buildInfo = useMemo(getDefaultBuildInfo, []);
 
@@ -550,10 +553,10 @@ function SuperAdminDashboard() {
           // Aktualisiere den Lookup-Cache
           const existingKey = buildSeasonKey(teamId, season, league, groupName);
           if (existingKey) {
-            setTeamSeasons((prev) => {
-              if (prev.some((entry) => entry.id === existingSeason.id)) return prev;
-              return [existingSeason, ...prev];
-            });
+          setTeamSeasons((prev) => {
+            if (prev.some((entry) => entry.id === existingSeason.id)) return prev;
+            return [existingSeason, ...prev];
+          });
           }
           return existingSeason;
         }
@@ -957,6 +960,39 @@ function SuperAdminDashboard() {
       } catch (error) {
         console.warn('⚠️ Fehler beim Laden der Matches ohne Ergebnisse:', error);
         setMatchdaysWithoutResults([]);
+      }
+      
+      // Lade auch Matchdays ohne meeting_id (für Update-Funktion)
+      try {
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const { data: matchdaysWithoutMeetingId } = await supabase
+          .from('matchdays')
+          .select('id, match_date, meeting_id, source_url, source_type, group_name, match_results(count)')
+          .lt('match_date', today.toISOString())
+          .order('match_date', { ascending: false })
+          .limit(100);
+        
+        // Filtere nur die ohne Detailsergebnisse
+        const withoutResults = (matchdaysWithoutMeetingId || []).filter(md => {
+          const resultsCount = Array.isArray(md.match_results) && md.match_results.length 
+            ? md.match_results[0]?.count || 0 
+            : 0;
+          return resultsCount === 0;
+        });
+        
+        // Speichere in State für Update-Funktion (nur IDs und source_url)
+        setMatchdaysNeedingMeetingIdUpdate(withoutResults.map(md => ({
+          id: md.id,
+          match_date: md.match_date,
+          meeting_id: md.meeting_id,
+          source_url: md.source_url,
+          source_type: md.source_type,
+          group_name: md.group_name
+        })));
+      } catch (error) {
+        console.warn('⚠️ Fehler beim Laden der Matchdays ohne meeting_id:', error);
+        setMatchdaysNeedingMeetingIdUpdate([]);
       }
     } catch (error) {
       console.error('❌ Fehler beim Laden des Dashboards:', error);
@@ -1563,7 +1599,7 @@ function SuperAdminDashboard() {
                   inferTeamSize(preferredTeamName)
                 );
                 if (seasonRecord) {
-                  console.log(`✅ Team-Season erstellt/aktualisiert für Team-ID ${resolvedTeamId}`);
+                console.log(`✅ Team-Season erstellt/aktualisiert für Team-ID ${resolvedTeamId}`);
                 } else {
                   // Eintrag existiert bereits (409 Conflict wurde abgefangen)
                   console.log(`ℹ️ Team-Season existiert bereits für Team-ID ${resolvedTeamId}`);
@@ -1573,7 +1609,7 @@ function SuperAdminDashboard() {
                 if (seasonError?.code === '23505' || seasonError?.message?.includes('409') || seasonError?.message?.includes('Conflict')) {
                   console.log(`ℹ️ Team-Season existiert bereits für Team-ID ${resolvedTeamId} (409 Conflict - kein Problem)`);
                 } else {
-                  console.warn(`⚠️ Fehler beim Erstellen der Team-Season für Team-ID ${resolvedTeamId}:`, seasonError);
+                console.warn(`⚠️ Fehler beim Erstellen der Team-Season für Team-ID ${resolvedTeamId}:`, seasonError);
                 }
               }
             }
@@ -3654,7 +3690,216 @@ function SuperAdminDashboard() {
     });
   }, []);
 
-  const renderOverview = () => <OverviewTab stats={stats} buildInfo={buildInfo} matchdaysWithoutResults={matchdaysWithoutResults} onNavigateToTab={setSelectedTab} />;
+  // Funktion zum Aktualisieren der meeting_id für vergangene Spiele ohne Detailsergebnisse
+  const handleUpdateMeetingIdsForPastMatches = useCallback(async () => {
+    if (updatingMeetingIds) return;
+    
+    setUpdatingMeetingIds(true);
+    setMeetingIdUpdateResult(null);
+    
+    try {
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      
+      // Finde alle vergangenen Matchdays ohne Detailsergebnisse
+      const { data: matchdays, error: fetchError } = await supabase
+        .from('matchdays')
+        .select(`
+          id,
+          match_date,
+          meeting_id,
+          source_url,
+          source_type,
+          group_name,
+          home_team_id,
+          away_team_id,
+          season,
+          league,
+          match_results(count)
+        `)
+        .lt('match_date', today.toISOString())
+        .order('match_date', { ascending: false });
+      
+      if (fetchError) throw fetchError;
+      
+      // Filtere nur die ohne Detailsergebnisse
+      const matchdaysWithoutResults = (matchdays || []).filter(md => {
+        const resultsCount = Array.isArray(md.match_results) && md.match_results.length 
+          ? md.match_results[0]?.count || 0 
+          : 0;
+        return resultsCount === 0;
+      });
+      
+      if (matchdaysWithoutResults.length === 0) {
+        setMeetingIdUpdateResult({
+          type: 'success',
+          message: 'Keine vergangenen Spiele ohne Detailsergebnisse gefunden.'
+        });
+        setUpdatingMeetingIds(false);
+        return;
+      }
+      
+      console.log(`🔍 Aktualisiere meeting_id für ${matchdaysWithoutResults.length} vergangene Spiele ohne Detailsergebnisse...`);
+      
+      let updated = 0;
+      let failed = 0;
+      const errors = [];
+      
+      // Gruppiere nach source_url, um effizienter zu scrapen
+      const groupedByUrl = new Map();
+      matchdaysWithoutResults.forEach(md => {
+        const url = md.source_url || 'default';
+        if (!groupedByUrl.has(url)) {
+          groupedByUrl.set(url, []);
+        }
+        groupedByUrl.get(url).push(md);
+      });
+      
+      // Verarbeite jede URL-Gruppe
+      for (const [sourceUrl, matchdays] of groupedByUrl.entries()) {
+        // Extrahiere groupId aus group_name für diese Gruppe
+        const groupIds = new Set();
+        matchdays.forEach(md => {
+          const groupIdMatch = md.group_name?.match(/(\d+)/);
+          if (groupIdMatch) {
+            groupIds.add(groupIdMatch[1]);
+          }
+        });
+        
+        // Scrape nuLiga für alle Gruppen dieser URL
+        for (const groupId of groupIds) {
+          try {
+            console.log(`🔍 Scrape nuLiga für Gruppe ${groupId}${sourceUrl !== 'default' ? ` (URL: ${sourceUrl})` : ''}...`);
+            
+            const response = await fetch('/api/import/scrape-nuliga', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                groups: groupId,
+                leagueUrl: sourceUrl !== 'default' ? sourceUrl : undefined,
+                includeMatches: true
+              })
+            });
+            
+            const rawText = await response.text();
+            let data;
+            try {
+              data = rawText ? JSON.parse(rawText) : null;
+            } catch (parseError) {
+              throw new Error('Antwort konnte nicht geparst werden');
+            }
+            
+            if (!response.ok || !data?.success) {
+              throw new Error(data?.error || `HTTP ${response.status}`);
+            }
+            
+            // Finde die passende Gruppe in den Ergebnissen
+            const details = Array.isArray(data.details) ? data.details : [];
+            const groupDetail = details.find(entry => {
+              const entryGroupId = entry.group?.groupId ? String(entry.group.groupId) : null;
+              return entryGroupId === groupId;
+            });
+            
+            if (!groupDetail || !groupDetail.matches) {
+              console.warn(`⚠️ Keine Matches gefunden für Gruppe ${groupId}`);
+              continue;
+            }
+            
+            // Finde passende Matches und aktualisiere meeting_id
+            for (const matchday of matchdays) {
+              if (!matchday.group_name?.includes(groupId)) continue;
+              
+              // Lade Team-Informationen
+              const homeTeam = teamById.get(matchday.home_team_id);
+              const awayTeam = teamById.get(matchday.away_team_id);
+              
+              if (!homeTeam || !awayTeam) {
+                failed++;
+                errors.push({ matchdayId: matchday.id, error: 'Teams nicht gefunden' });
+                continue;
+              }
+              
+              const homeLabel = buildTeamLabel(homeTeam);
+              const awayLabel = buildTeamLabel(awayTeam);
+              const matchDateKey = matchday.match_date ? new Date(matchday.match_date).toISOString().split('T')[0] : null;
+              
+              // Finde passendes Match in den gescrapten Daten
+              const matchedMatch = groupDetail.matches.find(m => {
+                const mDate = m.matchDateIso ? new Date(m.matchDateIso).toISOString().split('T')[0] : null;
+                const homeMatch = normalizeString(m.homeTeam || '').includes(normalizeString(homeLabel)) || 
+                                 normalizeString(homeLabel).includes(normalizeString(m.homeTeam || ''));
+                const awayMatch = normalizeString(m.awayTeam || '').includes(normalizeString(awayLabel)) || 
+                                 normalizeString(awayLabel).includes(normalizeString(m.awayTeam || ''));
+                
+                return mDate === matchDateKey && (homeMatch || awayMatch) && m.meetingId;
+              });
+              
+              if (matchedMatch && matchedMatch.meetingId) {
+                // Aktualisiere meeting_id in der Datenbank
+                const { error: updateError } = await supabase
+                  .from('matchdays')
+                  .update({ 
+                    meeting_id: matchedMatch.meetingId,
+                    meeting_report_url: matchedMatch.meetingReportUrl || null
+                  })
+                  .eq('id', matchday.id);
+                
+                if (updateError) {
+                  failed++;
+                  errors.push({ matchdayId: matchday.id, error: updateError.message });
+                } else {
+                  updated++;
+                  console.log(`✅ meeting_id ${matchedMatch.meetingId} für Matchday ${matchday.id} aktualisiert`);
+                }
+              } else {
+                failed++;
+                errors.push({ matchdayId: matchday.id, error: 'Keine meeting_id in nuLiga gefunden' });
+              }
+              
+              // Rate limiting
+              await new Promise(resolve => setTimeout(resolve, 200));
+            }
+          } catch (error) {
+            console.error(`❌ Fehler beim Scrapen für Gruppe ${groupId}:`, error);
+            failed += matchdays.filter(md => md.group_name?.includes(groupId)).length;
+            errors.push({ groupId, error: error.message });
+          }
+        }
+      }
+      
+      setMeetingIdUpdateResult({
+        type: updated > 0 ? 'success' : 'warning',
+        message: `${updated} meeting_id${updated !== 1 ? 's' : ''} aktualisiert, ${failed} fehlgeschlagen.`,
+        updated,
+        failed,
+        errors: errors.slice(0, 10) // Zeige nur erste 10 Fehler
+      });
+      
+      // Lade Daten neu
+      await loadDashboardData();
+    } catch (error) {
+      console.error('❌ Fehler beim Aktualisieren der meeting_id:', error);
+      setMeetingIdUpdateResult({
+        type: 'error',
+        message: error.message || 'Fehler beim Aktualisieren der meeting_id'
+      });
+    } finally {
+      setUpdatingMeetingIds(false);
+    }
+  }, [updatingMeetingIds, supabase, teamById, loadDashboardData]);
+
+  const renderOverview = () => (
+    <OverviewTab 
+      stats={stats} 
+      buildInfo={buildInfo} 
+      matchdaysWithoutResults={matchdaysWithoutResults}
+      matchdaysNeedingMeetingIdUpdate={matchdaysNeedingMeetingIdUpdate}
+      updatingMeetingIds={updatingMeetingIds}
+      meetingIdUpdateResult={meetingIdUpdateResult}
+      onUpdateMeetingIds={handleUpdateMeetingIdsForPastMatches}
+      onNavigateToTab={setSelectedTab} 
+    />
+  );
 
   const renderClubs = () => <ClubsTab clubs={clubs} teams={teams} players={players} />;
 
