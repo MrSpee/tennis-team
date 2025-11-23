@@ -552,13 +552,14 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
       }
       
       // ✅ KORRIGIERT: Prüfe ob Match bereits existiert
-      // WICHTIG: match_number ist NICHT eindeutig über Gruppen hinweg!
-      // Jede Gruppe hat ihre eigenen Matches (#1, #2, etc.)
-      // Daher: NUR in der aktuellen Gruppe suchen (season + league + group_name)
+      // WICHTIG: match_number ist eindeutig pro Saison (z.B. Gr. 001: #1-21, Gr. 002: #22-36)
+      // ABER: Wir filtern trotzdem nach group_name für zusätzliche Sicherheit
+      // UND: Wir validieren die Teams, falls match_number doch falsch zugeordnet wurde
       let existingMatch = null;
       
       if (match.matchNumber) {
-        // ✅ NUR in aktueller Saison/League/Group suchen
+        // ✅ Suche in aktueller Saison/League/Group (zusätzliche Sicherheit)
+        // Auch wenn match_number eindeutig ist, verhindert group_name-Filter falsche Zuordnungen
         const { data: dataInGroup } = await supabase
           .from('matchdays')
           .select('id, match_number, home_team_id, away_team_id, away_team_id, match_date, season, league, group_name, meeting_id')
@@ -570,7 +571,7 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
         
         if (dataInGroup) {
           // ✅ ZUSÄTZLICHE VALIDIERUNG: Prüfe ob Teams übereinstimmen
-          // Das verhindert, dass falsche Matches gefunden werden
+          // Das verhindert, dass falsche Matches gefunden werden (z.B. wenn match_number falsch zugeordnet wurde)
           const teamsMatch = 
             (dataInGroup.home_team_id === homeTeam.id && dataInGroup.away_team_id === awayTeam.id) ||
             (dataInGroup.home_team_id === awayTeam.id && dataInGroup.away_team_id === homeTeam.id);
@@ -580,7 +581,7 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
             console.log(`[importMatches] ✅ Bestehendes Match gefunden über match_number #${match.matchNumber} in Gruppe ${group.groupName} (Teams stimmen überein)`);
           } else {
             console.warn(`[importMatches] ⚠️ Match #${match.matchNumber} in Gruppe ${group.groupName} gefunden, aber Teams stimmen nicht überein. Erstelle neues Match.`);
-            // Teams stimmen nicht überein - erstelle neues Match
+            // Teams stimmen nicht überein - erstelle neues Match (match_number war falsch zugeordnet)
             existingMatch = null;
           }
         }
