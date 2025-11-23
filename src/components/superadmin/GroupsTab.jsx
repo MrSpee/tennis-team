@@ -509,10 +509,6 @@ function GroupsTab({
     });
   };
 
-  const getGroupKey = (group) => {
-    return `${group.category}::${group.league}::${group.groupName}::${group.season}`;
-  };
-
   // Extrahiere Gruppen-ID aus groupName (z.B. "Gr. 034" → "034")
   const extractGroupId = (groupName) => {
     if (!groupName) return null;
