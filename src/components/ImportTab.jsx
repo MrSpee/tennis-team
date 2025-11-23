@@ -1623,6 +1623,7 @@ const ImportTab = () => {
       let updated = 0;
       let skipped = 0;
       const lkWarnings = [];
+      const playersNeedingConfirmation = []; // Für Bestätigungsdialoge
 
       // 🎾 LK-VALIDIERUNG: Lade Team-Spieler für Vergleich
       const teamIds = [...new Set(playersToImport.map(p => p.team_id).filter(Boolean))];
@@ -1693,12 +1694,164 @@ const ImportTab = () => {
 
         // ✅ FALL 1: Existierender Spieler (ALLE Match-Typen: exact, fuzzy, name_lk, etc.)
         if (matchResult?.playerId && matchResult.status !== 'new') {
-          console.log(`✅ Spieler existiert bereits (${matchResult.status}):`, playerData.name, '→ Nur Team-Zuordnung');
+          console.log(`✅ Spieler existiert bereits (${matchResult.status}):`, playerData.name, '→ Aktualisiere Daten aus Meldeliste');
           
-          // ✅ NEU: Nur Team-Zuordnung hinzufügen (Spieler-Daten NICHT ändern!)
+          // ✅ WICHTIG: Lade aktuelle Spieler-Daten für Vergleich
+          const { data: existingPlayer, error: fetchError } = await supabase
+            .from('players_unified')
+            .select('id, name, current_lk, season_start_lk, tvm_id_number')
+            .eq('id', matchResult.playerId)
+            .single();
+          
+          if (fetchError) {
+            console.error('❌ Fehler beim Laden des existierenden Spielers:', fetchError);
+            skipped++;
+            continue;
+          }
+          
+          // ✅ WICHTIG: Meldelisten-Daten haben IMMER Priorität!
+          // Bereite Update-Daten vor
+          const updateData = {};
+          const updateWarnings = [];
+          
+          // 1. TVM ID-Nummer: IMMER übernehmen wenn vorhanden
+          if (playerData.id_number && playerData.id_number.trim() !== '') {
+            if (existingPlayer.tvm_id_number && existingPlayer.tvm_id_number !== playerData.id_number) {
+              console.log(`  ⚠️ TVM-ID ändert sich: ${existingPlayer.tvm_id_number} → ${playerData.id_number}`);
+              updateWarnings.push(`TVM-ID geändert: ${existingPlayer.tvm_id_number} → ${playerData.id_number}`);
+            }
+            updateData.tvm_id_number = playerData.id_number.trim();
+          }
+          
+          // 2. season_start_lk: IMMER aus Meldeliste übernehmen (das ist die Saison-Start-LK!)
+          if (normalizedLK) {
+            // Die LK aus der Meldeliste ist die season_start_lk
+            updateData.season_start_lk = normalizedLK;
+            
+            // 3. Prüfe Abweichung zwischen current_lk und season_start_lk
+            let needsConfirmation = false;
+            if (existingPlayer.current_lk) {
+              const { calculateLKChange, parseLK } = await import('../lib/lkUtils');
+              const currentLKValue = parseLK(existingPlayer.current_lk);
+              const seasonStartLKValue = parseLK(normalizedLK);
+              const difference = Math.abs(currentLKValue - seasonStartLKValue);
+              
+              // Warnung wenn Abweichung > 2.0
+              if (difference > 2.0) {
+                const change = calculateLKChange(normalizedLK, existingPlayer.current_lk);
+                const changeText = change > 0 ? `+${change.toFixed(1)}` : change.toFixed(1);
+                updateWarnings.push(
+                  `⚠️ Große LK-Abweichung: current_lk (${existingPlayer.current_lk}) weicht stark von season_start_lk (${normalizedLK}) ab (${changeText}). ` +
+                  `Die season_start_lk wird auf ${normalizedLK} aktualisiert.`
+                );
+                
+                // ✅ NEU: Bestätigungsdialog bei sehr großen Abweichungen (> 3.0)
+                if (difference > 3.0) {
+                  needsConfirmation = true;
+                }
+              }
+            }
+            
+            // 4. current_lk: Nur aktualisieren wenn noch nicht gesetzt oder wenn explizit gewünscht
+            // Standard: current_lk bleibt unverändert, nur season_start_lk wird aktualisiert
+            // ABER: Wenn current_lk fehlt, setze es auf season_start_lk
+            if (!existingPlayer.current_lk || existingPlayer.current_lk === 'LK 25.0' || existingPlayer.current_lk === null) {
+              updateData.current_lk = normalizedLK;
+              console.log(`  ✅ current_lk gesetzt (war leer/Default): ${normalizedLK}`);
+            } else {
+              console.log(`  ℹ️ current_lk bleibt unverändert: ${existingPlayer.current_lk} (season_start_lk wird auf ${normalizedLK} aktualisiert)`);
+            }
+            
+            // ✅ NEU: Wenn Bestätigung nötig, speichere für später
+            if (needsConfirmation) {
+              const { calculateLKChange, parseLK } = await import('../lib/lkUtils');
+              const currentLKValue = parseLK(existingPlayer.current_lk);
+              const seasonStartLKValue = parseLK(normalizedLK);
+              const difference = Math.abs(currentLKValue - seasonStartLKValue);
+              const change = calculateLKChange(normalizedLK, existingPlayer.current_lk);
+              const changeText = change > 0 ? `+${change.toFixed(1)}` : change.toFixed(1);
+              
+              playersNeedingConfirmation.push({
+                playerId: matchResult.playerId,
+                playerName: playerData.name,
+                currentLK: existingPlayer.current_lk,
+                newSeasonStartLK: normalizedLK,
+                difference: difference,
+                changeText: changeText,
+                updateData: { ...updateData }, // Kopie des vollständigen updateData
+                updateWarnings: [...updateWarnings], // Kopie der Warnungen
+                teamId: playerData.team_id,
+                isCaptain: playerData.is_captain
+              });
+              // Überspringe diesen Spieler vorerst, wird nach Bestätigung verarbeitet
+              continue;
+            }
+          }
+          
+          // 5. Führe Update durch
+          if (Object.keys(updateData).length > 0) {
+            // ✅ NEU: Speichere alte Werte für Logging
+            const oldValues = {
+              tvm_id_number: existingPlayer.tvm_id_number,
+              season_start_lk: existingPlayer.season_start_lk,
+              current_lk: existingPlayer.current_lk
+            };
+            
+            const { error: updateError } = await supabase
+              .from('players_unified')
+              .update(updateData)
+              .eq('id', matchResult.playerId);
+            
+            if (updateError) {
+              console.error('❌ Fehler beim Aktualisieren des Spielers:', updateError);
+              skipped++;
+              continue;
+            }
+            
+            console.log(`  ✅ Spieler-Daten aktualisiert:`, updateData);
+            
+            // ✅ NEU: Logging der Änderungen
+            try {
+              const changes = [];
+              if (updateData.tvm_id_number && updateData.tvm_id_number !== oldValues.tvm_id_number) {
+                changes.push(`TVM-ID: ${oldValues.tvm_id_number || 'null'} → ${updateData.tvm_id_number}`);
+              }
+              if (updateData.season_start_lk && updateData.season_start_lk !== oldValues.season_start_lk) {
+                changes.push(`season_start_lk: ${oldValues.season_start_lk || 'null'} → ${updateData.season_start_lk}`);
+              }
+              if (updateData.current_lk && updateData.current_lk !== oldValues.current_lk) {
+                changes.push(`current_lk: ${oldValues.current_lk || 'null'} → ${updateData.current_lk}`);
+              }
+              
+              if (changes.length > 0) {
+                await LoggingService.logActivity('roster_import_player_update', 'player', matchResult.playerId, {
+                  player_name: playerData.name,
+                  changes: changes,
+                  old_values: oldValues,
+                  new_values: updateData,
+                  import_source: 'tvm_roster_import',
+                  team_id: playerData.team_id,
+                  warnings: updateWarnings.length > 0 ? updateWarnings : null
+                });
+              }
+            } catch (logError) {
+              console.warn('⚠️ Logging failed (non-critical):', logError);
+            }
+            
+            // Füge Warnungen zu lkWarnings hinzu
+            if (updateWarnings.length > 0) {
+              lkWarnings.push({
+                player: playerData.name,
+                lk: normalizedLK || existingPlayer.current_lk,
+                warning: updateWarnings.join(' ')
+              });
+            }
+          }
+          
+          // 6. Team-Zuordnung hinzufügen
           if (playerData.team_id) {
             await linkPlayerToTeam(matchResult.playerId, playerData.team_id, playerData.is_captain);
-            console.log(`  ✅ Team-Membership erstellt für ${playerData.name}`);
+            console.log(`  ✅ Team-Membership erstellt/aktualisiert für ${playerData.name}`);
           }
           
           updated++;
@@ -1722,6 +1875,7 @@ const ImportTab = () => {
           .insert({
             name: playerData.name,
             current_lk: normalizedLK, // ✅ Verwende normalisierte LK
+            season_start_lk: normalizedLK, // ✅ WICHTIG: season_start_lk = LK aus Meldeliste
             tvm_id_number: playerData.id_number, // ⚠️ PFLICHTFELD
             is_captain: playerData.is_captain || false,
             player_type: 'app_user',
@@ -1743,19 +1897,121 @@ const ImportTab = () => {
           // Verknüpfe Spieler mit Team (WICHTIG: Verwende targetTeamId!)
           await linkPlayerToTeam(newImportedPlayer.id, targetTeamId, playerData.is_captain);
 
-          // Log KI-Import Aktivität
+          // ✅ NEU: Log KI-Import Aktivität (erweitert)
           try {
-            await LoggingService.logActivity('ki_import_player', 'player', newImportedPlayer.id, {
+            await LoggingService.logActivity('roster_import_player_created', 'player', newImportedPlayer.id, {
               player_name: playerData.name,
-              player_lk: playerData.lk,
+              player_lk: normalizedLK,
+              season_start_lk: normalizedLK,
               tvm_id_number: playerData.id_number,
               is_captain: playerData.is_captain,
               team_id: targetTeamId,
-              import_source: 'tvm_import'
+              import_source: 'tvm_roster_import',
+              match_status: matchResult?.status || 'new'
             });
           } catch (logError) {
             console.warn('⚠️ Logging failed (non-critical):', logError);
           }
+        }
+      }
+
+      // ✅ NEU: Verarbeite Spieler mit großen LK-Abweichungen (> 3.0) nach Bestätigung
+      if (playersNeedingConfirmation.length > 0) {
+        const confirmedPlayers = [];
+        const cancelledPlayers = [];
+        
+        for (const playerInfo of playersNeedingConfirmation) {
+          const confirmMessage = 
+            `⚠️ Große LK-Abweichung bei ${playerInfo.playerName}!\n\n` +
+            `Aktuelle LK: ${playerInfo.currentLK}\n` +
+            `Neue Saison-Start-LK (aus Meldeliste): ${playerInfo.newSeasonStartLK}\n` +
+            `Abweichung: ${playerInfo.difference.toFixed(1)} (${playerInfo.changeText})\n\n` +
+            `Möchtest du die season_start_lk trotzdem auf ${playerInfo.newSeasonStartLK} aktualisieren?`;
+          
+          const confirmed = window.confirm(confirmMessage);
+          
+          if (confirmed) {
+            confirmedPlayers.push(playerInfo);
+          } else {
+            cancelledPlayers.push(playerInfo);
+          }
+        }
+        
+        // Verarbeite bestätigte Spieler
+        for (const playerInfo of confirmedPlayers) {
+          try {
+            // Speichere alte Werte für Logging
+            const { data: existingPlayer } = await supabase
+              .from('players_unified')
+              .select('tvm_id_number, season_start_lk, current_lk')
+              .eq('id', playerInfo.playerId)
+              .single();
+            
+            const oldValues = existingPlayer || {};
+            
+            // Führe Update durch
+            const { error: updateError } = await supabase
+              .from('players_unified')
+              .update(playerInfo.updateData)
+              .eq('id', playerInfo.playerId);
+            
+            if (updateError) {
+              console.error('❌ Fehler beim Aktualisieren des bestätigten Spielers:', updateError);
+              skipped++;
+              continue;
+            }
+            
+            // Logging
+            try {
+              const changes = [];
+              if (playerInfo.updateData.tvm_id_number && playerInfo.updateData.tvm_id_number !== oldValues.tvm_id_number) {
+                changes.push(`TVM-ID: ${oldValues.tvm_id_number || 'null'} → ${playerInfo.updateData.tvm_id_number}`);
+              }
+              if (playerInfo.updateData.season_start_lk && playerInfo.updateData.season_start_lk !== oldValues.season_start_lk) {
+                changes.push(`season_start_lk: ${oldValues.season_start_lk || 'null'} → ${playerInfo.updateData.season_start_lk}`);
+              }
+              if (playerInfo.updateData.current_lk && playerInfo.updateData.current_lk !== oldValues.current_lk) {
+                changes.push(`current_lk: ${oldValues.current_lk || 'null'} → ${playerInfo.updateData.current_lk}`);
+              }
+              
+              if (changes.length > 0) {
+                await LoggingService.logActivity('roster_import_player_update_confirmed', 'player', playerInfo.playerId, {
+                  player_name: playerInfo.playerName,
+                  changes: changes,
+                  old_values: oldValues,
+                  new_values: playerInfo.updateData,
+                  import_source: 'tvm_roster_import',
+                  team_id: playerInfo.teamId,
+                  lk_difference: playerInfo.difference,
+                  user_confirmed: true,
+                  warnings: playerInfo.updateWarnings
+                });
+              }
+            } catch (logError) {
+              console.warn('⚠️ Logging failed (non-critical):', logError);
+            }
+            
+            // Team-Zuordnung
+            if (playerInfo.teamId) {
+              await linkPlayerToTeam(playerInfo.playerId, playerInfo.teamId, playerInfo.isCaptain);
+            }
+            
+            updated++;
+            lkWarnings.push({
+              player: playerInfo.playerName,
+              lk: playerInfo.newSeasonStartLK,
+              warning: playerInfo.updateWarnings.join(' ') + ' (vom Benutzer bestätigt)'
+            });
+          } catch (error) {
+            console.error('❌ Fehler beim Verarbeiten des bestätigten Spielers:', error);
+            skipped++;
+          }
+        }
+        
+        // Zähle abgebrochene Spieler
+        skipped += cancelledPlayers.length;
+        if (cancelledPlayers.length > 0) {
+          console.log(`⏭️ ${cancelledPlayers.length} Spieler-Update(s) abgebrochen (große LK-Abweichung)`);
         }
       }
 
