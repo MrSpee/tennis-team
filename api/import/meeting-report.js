@@ -1299,8 +1299,8 @@ module.exports = async function handler(req, res) {
     }
 
     // WICHTIG: Für bestimmte Error-Codes einen anderen HTTP-Status zurückgeben
-    // MEETING_ID_NOT_AVAILABLE ist kein Server-Fehler, sondern eine erwartete Situation
-    const statusCode = error.code === 'MEETING_ID_NOT_AVAILABLE' ? 200 : 500;
+    // MEETING_ID_NOT_AVAILABLE und MEETING_NOT_FOUND sind keine Server-Fehler, sondern erwartete Situationen
+    const statusCode = ['MEETING_ID_NOT_AVAILABLE', 'MEETING_NOT_FOUND'].includes(error.code) ? 200 : 500;
 
     return withCors(res, statusCode, {
       success: false,

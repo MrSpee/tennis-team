@@ -503,11 +503,26 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
         away_score: match.matchPoints?.away || null,
         final_score: match.matchPoints ? `${match.matchPoints.home}:${match.matchPoints.away}` : null,
         notes: match.notes || null,
-        meeting_id: match.meetingId || null, // WICHTIG: meetingId speichern (wird in DB gespeichert)
-        meeting_report_url: match.meetingReportUrl || null // WICHTIG: meetingReportUrl speichern
+        // ✅ WICHTIG: meeting_id nur setzen, wenn:
+        // 1. Kein bestehendes Match vorhanden (neues Match)
+        // 2. ODER bestehendes Match hat keine meeting_id (NULL)
+        // 3. ODER neue meeting_id ist vorhanden (Update von NULL zu Wert oder Update zu neuem Wert)
+        meeting_id: match.meetingId || null,
+        meeting_report_url: match.meetingReportUrl || null
       };
       
       if (existingMatch) {
+        // ✅ WICHTIG: Wenn bestehendes Match bereits eine meeting_id hat, behalte sie, es sei denn, es gibt eine neue
+        // Das verhindert, dass korrekte meeting_ids überschrieben werden
+        if (existingMatch.meeting_id && !match.meetingId) {
+          // Bestehende meeting_id behalten, keine neue vorhanden
+          delete matchData.meeting_id;
+          console.log(`[importMatches] ℹ️  Behalte bestehende meeting_id ${existingMatch.meeting_id} für Match #${match.matchNumber}`);
+        } else if (match.meetingId && match.meetingId !== existingMatch.meeting_id) {
+          // Neue meeting_id vorhanden und unterschiedlich - aktualisiere
+          console.log(`[importMatches] 🔄 Aktualisiere meeting_id für Match #${match.matchNumber}: ${existingMatch.meeting_id || 'NULL'} → ${match.meetingId}`);
+        }
+        
         // Update bestehendes Match
         const { error } = await supabase
           .from('matchdays')
