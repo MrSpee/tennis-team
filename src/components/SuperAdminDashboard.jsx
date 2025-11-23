@@ -526,7 +526,9 @@ function SuperAdminDashboard() {
 
       const { data, error } = await supabase.from('team_seasons').insert(payload).select().maybeSingle();
 
-      if (error?.code === '23505') {
+      // ✅ 409 Conflict (Duplikat) - Eintrag existiert bereits
+      if (error?.code === '23505' || error?.message?.includes('409') || error?.message?.includes('Conflict')) {
+        // Versuche den bestehenden Eintrag zu finden
         const { data: existingSeason, error: fetchError } = await supabase
           .from('team_seasons')
           .select('*')
@@ -535,17 +537,28 @@ function SuperAdminDashboard() {
           .eq('league', league || null)
           .eq('group_name', groupName || null)
           .maybeSingle();
-        if (fetchError) throw fetchError;
+        
+        if (fetchError) {
+          // Wenn auch das Abrufen fehlschlägt, logge es, aber wirf keinen Fehler
+          console.warn(`⚠️ Konnte bestehende Team-Season nicht abrufen:`, fetchError);
+          return null;
+        }
+        
         if (existingSeason) {
-          setTeamSeasons((prev) => {
-            if (prev.some((entry) => entry.id === existingSeason.id)) return prev;
-            return [existingSeason, ...prev];
-          });
+          // Aktualisiere den Lookup-Cache
+          const existingKey = buildSeasonKey(teamId, season, league, groupName);
+          if (existingKey) {
+            setTeamSeasons((prev) => {
+              if (prev.some((entry) => entry.id === existingSeason.id)) return prev;
+              return [existingSeason, ...prev];
+            });
+          }
           return existingSeason;
         }
         return null;
       }
 
+      // ✅ Andere Fehler: weiterwerfen
       if (error) throw error;
       if (data) {
         setTeamSeasons((prev) => [data, ...prev]);
@@ -1531,16 +1544,26 @@ function SuperAdminDashboard() {
             // Stelle sicher, dass team_season existiert (auch für bestehende Teams)
             if (!teamMapping?.existingTeamSeasonId) {
               try {
-                await ensureTeamSeason(
+                const seasonRecord = await ensureTeamSeason(
                   resolvedTeamId,
                   team.season || scraperData?.season || null,
                   team.league || summary.leagues?.[0] || null,
                   team.groupName || summary.groups?.[0] || null,
                   inferTeamSize(preferredTeamName)
                 );
-                console.log(`✅ Team-Season erstellt/aktualisiert für Team-ID ${resolvedTeamId}`);
+                if (seasonRecord) {
+                  console.log(`✅ Team-Season erstellt/aktualisiert für Team-ID ${resolvedTeamId}`);
+                } else {
+                  // Eintrag existiert bereits (409 Conflict wurde abgefangen)
+                  console.log(`ℹ️ Team-Season existiert bereits für Team-ID ${resolvedTeamId}`);
+                }
               } catch (seasonError) {
-                console.warn(`⚠️ Fehler beim Erstellen der Team-Season für Team-ID ${resolvedTeamId}:`, seasonError);
+                // Ignoriere 409 Conflict Fehler (Duplikat) - das ist kein Problem
+                if (seasonError?.code === '23505' || seasonError?.message?.includes('409') || seasonError?.message?.includes('Conflict')) {
+                  console.log(`ℹ️ Team-Season existiert bereits für Team-ID ${resolvedTeamId} (409 Conflict - kein Problem)`);
+                } else {
+                  console.warn(`⚠️ Fehler beim Erstellen der Team-Season für Team-ID ${resolvedTeamId}:`, seasonError);
+                }
               }
             }
           }

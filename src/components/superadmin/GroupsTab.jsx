@@ -98,6 +98,8 @@ function GroupsTab({
   const [meetingDetails, setMeetingDetails] = useState({});
   // URL-State
   const [urlMatchHandledKey, setUrlMatchHandledKey] = useState(null);
+  // ✅ NEU: Benutzerdefinierte nuLiga-URL für Gruppen-Updates
+  const [customLeagueUrl, setCustomLeagueUrl] = useState('');
 
   // Query-Param Utilities
   const getQueryParams = () => {
@@ -598,6 +600,13 @@ function GroupsTab({
       if (selectedGroup) return; // bereits ausgewählt
       const params = new URLSearchParams(window.location.search);
       const groupParam = params.get('group');
+      const leagueUrlParam = params.get('leagueUrl');
+      
+      // ✅ NEU: Lade benutzerdefinierte URL aus Query-Parameter
+      if (leagueUrlParam) {
+        setCustomLeagueUrl(leagueUrlParam);
+      }
+      
       if (!groupParam) return;
       const target = groupedData.find((g) => extractGroupId(g.groupName) === groupParam);
       if (target) {
@@ -617,6 +626,10 @@ function GroupsTab({
       if (!selectedGroup) {
         // Gruppe schließen → Param entfernen
         params.delete('group');
+        // ✅ NEU: URL-Parameter beibehalten, wenn vorhanden
+        if (!customLeagueUrl) {
+          params.delete('leagueUrl');
+        }
         url.search = params.toString();
         window.history.replaceState({}, '', url.toString());
         return;
@@ -624,13 +637,19 @@ function GroupsTab({
       const gid = extractGroupId(selectedGroup.groupName);
       if (gid) {
         params.set('group', gid);
+        // ✅ NEU: Speichere benutzerdefinierte URL im Query-Parameter
+        if (customLeagueUrl) {
+          params.set('leagueUrl', customLeagueUrl);
+        } else {
+          params.delete('leagueUrl');
+        }
         url.search = params.toString();
         window.history.replaceState({}, '', url.toString());
       }
     } catch {
       // ignore
     }
-  }, [selectedGroup]);
+  }, [selectedGroup, customLeagueUrl]);
 
   // Scraper-Funktionen
   const handleScrapeGroup = async (group) => {
@@ -647,14 +666,21 @@ function GroupsTab({
         throw new Error('Gruppen-ID konnte nicht extrahiert werden');
       }
 
+      // ✅ NEU: Verwende benutzerdefinierte URL, falls vorhanden
+      const payload = {
+        groups: groupId,
+        includeMatches: true
+      };
+      
+      if (customLeagueUrl && customLeagueUrl.trim()) {
+        payload.leagueUrl = customLeagueUrl.trim();
+      }
+
       // Lade Scraper-Daten für diese spezifische Gruppe
       const response = await fetch('/api/import/scrape-nuliga', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          groups: groupId,
-          includeMatches: true
-        })
+        body: JSON.stringify(payload)
       });
 
       const rawText = await response.text();
@@ -800,6 +826,11 @@ function GroupsTab({
       }
       if (groupImportSeason) {
         payload.season = groupImportSeason;
+      }
+      
+      // ✅ NEU: Verwende benutzerdefinierte URL, falls vorhanden
+      if (customLeagueUrl && customLeagueUrl.trim()) {
+        payload.leagueUrl = customLeagueUrl.trim();
       }
 
       const response = await fetch('/api/import/scrape-nuliga', {
@@ -2819,6 +2850,66 @@ function GroupsTab({
                 >
                   ✕
                 </button>
+              </div>
+            </div>
+
+            {/* ✅ NEU: Eingabefeld für benutzerdefinierte nuLiga-URL */}
+            <div className="details-section" style={{ marginTop: '1rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.9rem', color: '#475569' }}>
+                📋 nuLiga Übersichts-URL (optional):
+              </label>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input
+                  type="url"
+                  value={customLeagueUrl}
+                  onChange={(e) => {
+                    const newUrl = e.target.value;
+                    setCustomLeagueUrl(newUrl);
+                    // ✅ Speichere URL im Query-Parameter
+                    updateQueryParams((params) => {
+                      if (newUrl && newUrl.trim()) {
+                        params.set('leagueUrl', newUrl.trim());
+                      } else {
+                        params.delete('leagueUrl');
+                      }
+                    });
+                  }}
+                  placeholder="https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=..."
+                  style={{
+                    flex: 1,
+                    padding: '0.75rem',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '6px',
+                    fontSize: '0.9rem',
+                    background: 'white'
+                  }}
+                />
+                {customLeagueUrl && (
+                  <button
+                    onClick={() => {
+                      setCustomLeagueUrl('');
+                      updateQueryParams((params) => params.delete('leagueUrl'));
+                    }}
+                    style={{
+                      padding: '0.5rem',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '6px',
+                      background: 'white',
+                      cursor: 'pointer',
+                      fontSize: '0.9rem'
+                    }}
+                    title="URL zurücksetzen"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.5rem' }}>
+                {customLeagueUrl ? (
+                  <>✅ Benutzerdefinierte URL wird verwendet. Die Gruppe wird von dieser URL aktualisiert.</>
+                ) : (
+                  <>Wenn die Gruppe auf einer anderen nuLiga-Übersichtsseite liegt, gib hier die URL ein.</>
+                )}
               </div>
             </div>
 
