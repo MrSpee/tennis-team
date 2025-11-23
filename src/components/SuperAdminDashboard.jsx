@@ -2590,20 +2590,67 @@ function SuperAdminDashboard() {
             // WICHTIG: "Köln-Leverkusen" Ligen brauchen einen anderen championship-Parameter!
             const league = matchdays.league || '';
             let baseUrl;
+            let tab = 2; // Default: Damen/Herren
             
             // Prüfe Liga-Name für championship-Parameter
             if (league.includes('Köln-Leverkusen')) {
               // Köln-Leverkusen Ligen verwenden championship=Köln-Leverkusen+Winter+2025%2F2026
               baseUrl = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026';
-              // Köln-Leverkusen Ligen sind meist auf tab=3
-              leagueUrl = `${baseUrl}&tab=3`;
-              console.log(`[fetchGroupSnapshot] ⚠️ Keine source_url gefunden, verwende Fallback (Köln-Leverkusen, tab=3) für Liga "${league}": ${leagueUrl}`);
+              
+              // Bestimme Tab basierend auf Altersklasse:
+              // - "Herren 30/40/50/55/60/65/70" = Senioren (tab=3)
+              // - "Herren" (ohne Altersklasse) = Offene Herren (tab=2)
+              // - "Herren 1/2/3" = Mannschaftsnummern, KEINE Altersklassen!
+              // - "Damen 30/40/50/55/60" = Senioren (tab=3)
+              // - "Damen" (ohne Altersklasse) = Offene Damen (tab=2)
+              // Pattern erkennt nur Altersklassen ab 30, nicht Mannschaftsnummern 1/2/3
+              if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(league)) {
+                tab = 3; // Senioren
+              } else {
+                tab = 2; // Offene Herren/Damen
+              }
+              
+              leagueUrl = `${baseUrl}&tab=${tab}`;
+              console.log(`[fetchGroupSnapshot] ⚠️ Keine source_url gefunden, verwende Fallback (Köln-Leverkusen, tab=${tab}) für Liga "${league}": ${leagueUrl}`);
             } else {
               // Andere Ligen (z.B. Verbandsliga, Mittelrheinliga) verwenden championship=TVM+Winter+2025%2F2026
               baseUrl = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=TVM+Winter+2025%2F2026';
-              // Meist auf tab=2
-              leagueUrl = `${baseUrl}&tab=2`;
-              console.log(`[fetchGroupSnapshot] ⚠️ Keine source_url gefunden, verwende Fallback (TVM, tab=2) für Liga "${league}": ${leagueUrl}`);
+              
+              // Versuche Kategorie aus einem Team dieser Gruppe zu holen, um Tab-Seite zu bestimmen
+              try {
+                const { data: teamSeason } = await supabase
+                  .from('team_seasons')
+                  .select('team_id')
+                  .eq('group_name', matchdays.group_name)
+                  .eq('season', matchdays.season)
+                  .eq('league', matchdays.league)
+                  .limit(1)
+                  .maybeSingle();
+                
+                if (teamSeason?.team_id) {
+                  const { data: teamInfo } = await supabase
+                    .from('team_info')
+                    .select('category')
+                    .eq('id', teamSeason.team_id)
+                    .maybeSingle();
+                  
+                  if (teamInfo?.category) {
+                    // Bestimme Tab basierend auf Kategorie: "Herren 30/40/50/etc." = Senioren (tab=3)
+                    if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(teamInfo.category)) {
+                      tab = 3; // Senioren
+                    } else {
+                      tab = 2; // Offene Herren/Damen
+                    }
+                  }
+                }
+              } catch (error) {
+                console.warn(`[fetchGroupSnapshot] ⚠️ Fehler beim Laden der Kategorie:`, error);
+                // Fallback zu tab=2
+                tab = 2;
+              }
+              
+              leagueUrl = `${baseUrl}&tab=${tab}`;
+              console.log(`[fetchGroupSnapshot] ⚠️ Keine source_url gefunden, verwende Fallback (TVM, tab=${tab}) für Liga "${league}": ${leagueUrl}`);
             }
           }
         }
