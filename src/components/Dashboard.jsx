@@ -8,6 +8,7 @@ import { useData } from '../context/DataContext';
 import { parseLK, calculateLKChange, formatLKChange } from '../lib/lkUtils';
 import { supabase } from '../lib/supabaseClient';
 import { recalculateLKForMatchResult, recalculateLKForAllActivePlayers } from '../services/lkCalculationService';
+import { runAutoImport } from '../services/autoMatchResultImportService';
 import SurfaceInfo from './SurfaceInfo';
 import './Dashboard.css';
 
@@ -150,6 +151,44 @@ function Dashboard() {
 
     return () => clearInterval(interval);
   }, []);
+
+  // 🎾 Auto-Import von Match-Ergebnissen (Empfehlung 3)
+  // Watcher-System: Prüft täglich einmal Matches der letzten 4 Tage
+  useEffect(() => {
+    if (!player || !currentUser) return; // Nur für eingeloggte User
+    
+    // Prüfe ob heute bereits ein Import durchgeführt wurde (localStorage)
+    const today = new Date().toISOString().split('T')[0];
+    const lastImportDate = localStorage.getItem('matchResultImportLastRun');
+    
+    if (lastImportDate === today) {
+      console.log('[Dashboard] Match-Ergebnis-Import wurde heute bereits durchgeführt');
+      return;
+    }
+    
+    // Führe Import nach 5 Sekunden aus (damit Dashboard geladen ist)
+    const runDailyImport = async () => {
+      try {
+        console.log('[Dashboard] Starte täglichen Match-Ergebnis-Watcher...');
+        const result = await runAutoImport(supabase, { 
+          delayBetweenImports: 2000 // 2 Sekunden Pause
+        });
+        if (result.success > 0) {
+          console.log(`[Dashboard] ✅ ${result.success} Spieltage automatisch importiert`);
+        }
+        // Speichere heutiges Datum
+        localStorage.setItem('matchResultImportLastRun', today);
+      } catch (error) {
+        console.error('[Dashboard] Fehler beim automatischen Import:', error);
+      }
+    };
+    
+    const initialTimeout = setTimeout(runDailyImport, 5000);
+    
+    return () => {
+      clearTimeout(initialTimeout);
+    };
+  }, [player, currentUser]);
 
   const now = currentTime;
   
@@ -965,7 +1004,7 @@ function Dashboard() {
             eligiblePlayers.forEach(playerId => {
               // Nur das erste (nächste) Match für diesen Spieler speichern
               if (!playerNextMatch.has(playerId)) {
-                const playerInfo = players.find(p => p.id === playerId);
+              const playerInfo = players.find(p => p.id === playerId);
                 if (!playerInfo) {
                   console.warn('⚠️ Player not found in players array:', playerId);
                   return;

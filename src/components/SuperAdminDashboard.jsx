@@ -21,6 +21,7 @@ import ScraperTab from './superadmin/ScraperTab';
 import TeamPortraitImportTab from './superadmin/TeamPortraitImportTab';
 import GroupsTab from './superadmin/GroupsTab';
 import ActivityLogTab from './superadmin/ActivityLogTab';
+import { findMatchdaysWithoutResultsAfter4Days } from '../services/autoMatchResultImportService';
 import './Dashboard.css';
 import './SuperAdminDashboard.css';
 
@@ -362,6 +363,7 @@ function SuperAdminDashboard() {
   const [deletingMatchdayId, setDeletingMatchdayId] = useState(null);
   const [matchResultsData, setMatchResultsData] = useState({});
   const [matchdayDuplicates, setMatchdayDuplicates] = useState([]);
+  const [matchdaysWithoutResults, setMatchdaysWithoutResults] = useState([]);
 
   const buildInfo = useMemo(getDefaultBuildInfo, []);
 
@@ -947,6 +949,15 @@ function SuperAdminDashboard() {
       })();
 
       setStats(derivedStats);
+
+      // Lade Matches ohne Ergebnisse nach 4 Tagen (für Warnung)
+      try {
+        const missingResults = await findMatchdaysWithoutResultsAfter4Days(supabase);
+        setMatchdaysWithoutResults(missingResults || []);
+      } catch (error) {
+        console.warn('⚠️ Fehler beim Laden der Matches ohne Ergebnisse:', error);
+        setMatchdaysWithoutResults([]);
+      }
     } catch (error) {
       console.error('❌ Fehler beim Laden des Dashboards:', error);
     } finally {
@@ -3630,7 +3641,7 @@ function SuperAdminDashboard() {
     });
   }, []);
 
-  const renderOverview = () => <OverviewTab stats={stats} buildInfo={buildInfo} />;
+  const renderOverview = () => <OverviewTab stats={stats} buildInfo={buildInfo} matchdaysWithoutResults={matchdaysWithoutResults} />;
 
   const renderClubs = () => <ClubsTab clubs={clubs} teams={teams} players={players} />;
 
