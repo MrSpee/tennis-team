@@ -8,7 +8,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { config } from 'dotenv';
+import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { scrapeNuLiga } from '../lib/nuligaScraper.mjs';
@@ -16,8 +16,31 @@ import { scrapeNuLiga } from '../lib/nuligaScraper.mjs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Lade .env Datei
-config({ path: join(__dirname, '..', '.env.local') });
+// Lade .env Datei manuell
+function loadEnv() {
+  let envPath = join(__dirname, '..', '.env.local');
+  try {
+    readFileSync(envPath); // Check if .env.local exists
+  } catch (e) {
+    envPath = join(__dirname, '..', '.env'); // Fallback to .env
+  }
+  
+  try {
+    const envFile = readFileSync(envPath, 'utf-8');
+    envFile.split('\n').forEach(line => {
+      const match = line.match(/^([^=]+)=(.*)$/);
+      if (match) {
+        const key = match[1].trim();
+        const value = match[2].trim().replace(/^["']|["']$/g, '');
+        process.env[key] = value;
+      }
+    });
+  } catch (error) {
+    console.warn('⚠️  .env Datei nicht gefunden, verwende Umgebungsvariablen');
+  }
+}
+
+loadEnv();
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
@@ -134,7 +157,7 @@ async function findMeetingIdFromNuLiga(matchday) {
     
     // Scrape nuLiga für diese Gruppe
     console.log(`🔍 Scrape nuLiga für Gruppe ${groupId}...`);
-    const results = await scrapeNuLiga({
+    const scrapeResult = await scrapeNuLiga({
       groupFilter: groupId,
       requestDelayMs: 200,
       applyChanges: false,
@@ -143,7 +166,10 @@ async function findMeetingIdFromNuLiga(matchday) {
       onLog: (msg) => console.log(`  ${msg}`)
     });
     
-    if (!results || results.length === 0) {
+    // scrapeNuLiga gibt { results, unmappedTeams } zurück
+    const results = scrapeResult?.results || scrapeResult || [];
+    
+    if (!results || !Array.isArray(results) || results.length === 0) {
       console.warn(`⚠️  Keine Ergebnisse für Gruppe ${groupId}`);
       return null;
     }

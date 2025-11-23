@@ -152,9 +152,28 @@ module.exports = async function handler(req, res) {
     return withCors(res, 200, payload);
   } catch (error) {
     console.error('[api/import/scrape-nuliga] Fehler:', error);
-    return withCors(res, 500, {
-      success: false,
-      error: error.message || 'Unbekannter Fehler beim Scraper-Aufruf.'
+    const errorMessage = error?.message || error?.toString() || 'Unbekannter Fehler beim Scraper-Aufruf.';
+    console.error('[api/import/scrape-nuliga] Fehler-Details:', {
+      message: errorMessage,
+      stack: error?.stack,
+      name: error?.name
     });
+    
+    try {
+      return withCors(res, 500, {
+        success: false,
+        error: errorMessage
+      });
+    } catch (corsError) {
+      // Fallback: Direkte Response, falls withCors fehlschlägt
+      console.error('[api/import/scrape-nuliga] Fehler bei withCors:', corsError);
+      Object.entries(corsHeaders).forEach(([key, value]) => {
+        res.setHeader(key, value);
+      });
+      return res.status(500).json({
+        success: false,
+        error: errorMessage
+      });
+    }
   }
 };

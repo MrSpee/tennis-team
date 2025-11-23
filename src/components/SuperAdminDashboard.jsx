@@ -2516,9 +2516,22 @@ function SuperAdminDashboard() {
         apply: false
       })
     });
-    const result = await response.json();
+    
+    // ✅ Verbesserte Fehlerbehandlung: Prüfe zuerst, ob Response Text enthält
+    const rawText = await response.text();
+    let result;
+    try {
+      result = rawText ? JSON.parse(rawText) : null;
+    } catch (parseError) {
+      throw new Error(
+        response.ok
+          ? 'Antwort des Scraper-Endpunkts konnte nicht gelesen werden.'
+          : rawText || response.statusText || `Fehler beim Abruf des Scraper-Endpunkts (HTTP ${response.status}).`
+      );
+    }
+    
     if (!response.ok || !result?.success) {
-      throw new Error(result?.error || 'Scraper antwortete ohne Erfolg.');
+      throw new Error(result?.error || `Scraper antwortete ohne Erfolg (HTTP ${response.status}).`);
     }
     return result;
   }, []);
@@ -3641,7 +3654,7 @@ function SuperAdminDashboard() {
     });
   }, []);
 
-  const renderOverview = () => <OverviewTab stats={stats} buildInfo={buildInfo} matchdaysWithoutResults={matchdaysWithoutResults} />;
+  const renderOverview = () => <OverviewTab stats={stats} buildInfo={buildInfo} matchdaysWithoutResults={matchdaysWithoutResults} onNavigateToTab={setSelectedTab} />;
 
   const renderClubs = () => <ClubsTab clubs={clubs} teams={teams} players={players} />;
 
