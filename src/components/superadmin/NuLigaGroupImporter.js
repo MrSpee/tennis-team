@@ -350,19 +350,24 @@ async function ensureTeamSeasons(scrapedData, teamMap, group, supabase, result, 
     if (!team) continue;
     
     // Prüfe ob team_season bereits existiert
-    const { data: existing } = await supabase
+    const { data: existing, error: checkError } = await supabase
       .from('team_seasons')
-      .select('id')
+      .select('id, source_url, source_type')
       .eq('team_id', team.id)
       .eq('season', group.season)
       .eq('league', group.league)
       .eq('group_name', group.groupName)
       .maybeSingle();
     
+    if (checkError && checkError.code !== 'PGRST116') {
+      // PGRST116 = "not found" - das ist OK
+      console.warn(`[ensureTeamSeasons] ⚠️ Fehler beim Prüfen der team_season für Team ${team.id}:`, checkError);
+    }
+    
     if (!existing) {
       // Erstelle team_season
       try {
-        const { error } = await supabase
+        const { data: newSeason, error } = await supabase
           .from('team_seasons')
           .insert({
             team_id: team.id,
@@ -373,21 +378,73 @@ async function ensureTeamSeasons(scrapedData, teamMap, group, supabase, result, 
             is_active: true,
             source_url: sourceUrl || null, // ✅ NEU: URL auf Gruppenebene speichern
             source_type: 'nuliga' // ✅ NEU: Typ der Quelle
-          });
+          })
+          .select()
+          .maybeSingle();
         
-        if (error && error.code !== '23505') {
-          throw error;
+        // ✅ VERBESSERT: Behandle 409 Conflict (HTTP) und 23505 (PostgreSQL Unique Constraint)
+        if (error) {
+          if (error.code === '23505' || error.status === 409 || error.message?.includes('409') || error.message?.includes('Conflict')) {
+            // Duplikat - versuche den bestehenden Eintrag zu finden
+            console.log(`[ensureTeamSeasons] ℹ️ Team-Season existiert bereits (409/23505), suche bestehenden Eintrag...`);
+            const { data: foundExisting } = await supabase
+              .from('team_seasons')
+              .select('id, source_url, source_type')
+              .eq('team_id', team.id)
+              .eq('season', group.season)
+              .eq('league', group.league)
+              .eq('group_name', group.groupName)
+              .maybeSingle();
+            
+            if (foundExisting) {
+              // Aktualisiere source_url, falls sie noch nicht gesetzt ist
+              if (sourceUrl && !foundExisting.source_url) {
+                const { error: updateError } = await supabase
+                  .from('team_seasons')
+                  .update({ source_url: sourceUrl, source_type: 'nuliga' })
+                  .eq('id', foundExisting.id);
+                
+                if (updateError) {
+                  console.warn(`[ensureTeamSeasons] ⚠️ Fehler beim Update der source_url:`, updateError);
+                } else {
+                  console.log(`[ensureTeamSeasons] ✅ source_url aktualisiert für Team-Season ${foundExisting.id}`);
+                }
+              }
+              result.teamSeasonsCreated++;
+              continue; // Weiter zum nächsten Team
+            } else {
+              // Nicht gefunden, aber Conflict - das ist seltsam, logge es
+              console.warn(`[ensureTeamSeasons] ⚠️ 409 Conflict, aber Eintrag nicht gefunden für Team ${team.id}`);
+              result.errors.push({
+                type: 'team_season_creation_error',
+                teamId: team.id,
+                error: '409 Conflict, aber Eintrag nicht gefunden'
+              });
+              continue;
+            }
+          } else {
+            // Anderer Fehler - werfe ihn
+            throw error;
+          }
         }
         
-        if (!error) {
+        if (newSeason) {
           result.teamSeasonsCreated++;
+          console.log(`[ensureTeamSeasons] ✅ Team-Season erstellt für Team ${team.id} (${group.groupName})`);
         }
       } catch (error) {
-        result.errors.push({
-          type: 'team_season_creation_error',
-          teamName,
-          error: error.message
-        });
+        // Fehler wurde bereits oben behandelt (409/23505)
+        if (error.code !== '23505' && error.status !== 409 && !error.message?.includes('409') && !error.message?.includes('Conflict')) {
+          result.errors.push({
+            type: 'team_season_creation_error',
+            teamName: `${scrapedTeam.clubName} ${scrapedTeam.teamSuffix || ''}`,
+            error: error.message
+          });
+          console.error(`[ensureTeamSeasons] ❌ Fehler beim Erstellen der Team-Season:`, error);
+        } else {
+          // 409 Conflict wurde bereits behandelt - nur loggen
+          console.log(`[ensureTeamSeasons] ℹ️ Team-Season existiert bereits (409/23505) - wurde bereits behandelt`);
+        }
       }
     } else {
       // Update League/Kategorie und source_url falls sich geändert hat

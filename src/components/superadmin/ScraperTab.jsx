@@ -106,6 +106,52 @@ function ScraperTab({
         </div>
       </div>
 
+      {/* ✅ Match-Import Ergebnis - Ganz oben */}
+      {matchImportResult && (
+        <div
+          style={{
+            marginTop: '1rem',
+            marginBottom: '1.5rem',
+            padding: '1rem',
+            background: matchImportResult.type === 'error' ? '#fee2e2' : matchImportResult.type === 'warning' ? '#fef3c7' : '#dcfce7',
+            border: `1px solid ${matchImportResult.type === 'error' ? '#fecaca' : matchImportResult.type === 'warning' ? '#fde68a' : '#bbf7d0'}`,
+            borderRadius: '8px',
+            color: matchImportResult.type === 'error' ? '#991b1b' : matchImportResult.type === 'warning' ? '#92400e' : '#166534'
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '1rem' }}>
+            {matchImportResult.type === 'error' ? '❌ Fehler beim Match-Import' : matchImportResult.type === 'warning' ? '⚠️ Warnung beim Match-Import' : '✅ Match-Import erfolgreich'}
+          </div>
+          <div style={{ fontSize: '0.9rem', lineHeight: '1.5' }}>{matchImportResult.message}</div>
+          
+          {/* Zeige Matches mit fehlenden Teams */}
+          {matchImportResult.meta?.matchIssues && matchImportResult.meta.matchIssues.filter(issue => issue.type === 'missing-team').length > 0 && (
+            <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(0,0,0,0.1)' }}>
+              <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                ⚠️ Matches mit fehlenden Teams ({matchImportResult.meta.matchIssues.filter(issue => issue.type === 'missing-team').length}):
+              </div>
+              <div style={{ fontSize: '0.85rem', maxHeight: '200px', overflowY: 'auto' }}>
+                {matchImportResult.meta.matchIssues
+                  .filter(issue => issue.type === 'missing-team')
+                  .map((issue, idx) => (
+                    <div key={idx} style={{ marginBottom: '0.5rem', padding: '0.5rem', background: '#fff', borderRadius: '4px' }}>
+                      <div><strong>{issue.homeTeam}</strong> vs <strong>{issue.awayTeam}</strong></div>
+                      <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
+                        {!issue.homeTeamFound && <span>❌ Heimteam fehlt</span>}
+                        {!issue.awayTeamFound && <span style={{ marginLeft: '0.5rem' }}>❌ Gastteam fehlt</span>}
+                        {issue.matchNumber && <span style={{ marginLeft: '0.5rem' }}>Match-Nr: {issue.matchNumber}</span>}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
+                        💡 Diese Matches wurden als "Placeholder" gespeichert und können in der Matchdays-Ansicht manuell korrigiert werden.
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Vereinfachte Konfiguration */}
       <div className="scraper-config-section" style={{ marginBottom: '1.5rem', padding: '1.5rem', background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
         {/* ✅ NEU: Übersichts-URL Eingabefeld */}
@@ -601,51 +647,6 @@ function ScraperTab({
         </div>
       )}
 
-      {matchImportResult && (
-        <div
-          style={{
-            marginTop: '1rem',
-            marginBottom: '1rem',
-            padding: '1rem',
-            background: matchImportResult.type === 'error' ? '#fee2e2' : matchImportResult.type === 'warning' ? '#fef3c7' : '#dcfce7',
-            border: `1px solid ${matchImportResult.type === 'error' ? '#fecaca' : matchImportResult.type === 'warning' ? '#fde68a' : '#bbf7d0'}`,
-            borderRadius: '8px',
-            color: matchImportResult.type === 'error' ? '#991b1b' : matchImportResult.type === 'warning' ? '#92400e' : '#166534',
-            order: -1 // ✅ Verschiebe nach oben
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '1rem' }}>
-            {matchImportResult.type === 'error' ? '❌ Fehler beim Match-Import' : matchImportResult.type === 'warning' ? '⚠️ Warnung beim Match-Import' : '✅ Match-Import erfolgreich'}
-          </div>
-          <div style={{ fontSize: '0.9rem', lineHeight: '1.5' }}>{matchImportResult.message}</div>
-          
-          {/* Zeige Matches mit fehlenden Teams */}
-          {matchImportResult.meta?.matchIssues && matchImportResult.meta.matchIssues.filter(issue => issue.type === 'missing-team').length > 0 && (
-            <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(0,0,0,0.1)' }}>
-              <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-                ⚠️ Matches mit fehlenden Teams ({matchImportResult.meta.matchIssues.filter(issue => issue.type === 'missing-team').length}):
-              </div>
-              <div style={{ fontSize: '0.85rem', maxHeight: '200px', overflowY: 'auto' }}>
-                {matchImportResult.meta.matchIssues
-                  .filter(issue => issue.type === 'missing-team')
-                  .map((issue, idx) => (
-                    <div key={idx} style={{ marginBottom: '0.5rem', padding: '0.5rem', background: '#fff', borderRadius: '4px' }}>
-                      <div><strong>{issue.homeTeam}</strong> vs <strong>{issue.awayTeam}</strong></div>
-                      <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
-                        {!issue.homeTeamFound && <span>❌ Heimteam fehlt</span>}
-                        {!issue.awayTeamFound && <span style={{ marginLeft: '0.5rem' }}>❌ Gastteam fehlt</span>}
-                        {issue.matchNumber && <span style={{ marginLeft: '0.5rem' }}>Match-Nr: {issue.matchNumber}</span>}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
-                        💡 Diese Matches wurden als "Placeholder" gespeichert und können in der Matchdays-Ansicht manuell korrigiert werden.
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
