@@ -1105,13 +1105,63 @@ module.exports = async function handler(req, res) {
     let groupMeta = null;
     let matchMeta = null;
     let resolvedMeetingUrl = meetingUrl || null;
+    let effectiveLeagueUrl = null;
+
+    // ✅ NEU: Lade leagueUrl aus team_seasons, wenn matchdayId vorhanden ist
+    if (matchdayId && groupId) {
+      try {
+        const supabase = createSupabaseClient(true);
+        // Lade matchday, um group_name, season, league zu bekommen
+        const { data: matchdayData } = await supabase
+          .from('matchdays')
+          .select('group_name, season, league')
+          .eq('id', matchdayId)
+          .maybeSingle();
+        
+        if (matchdayData) {
+          // Versuche, source_url aus team_seasons zu laden
+          const { data: teamSeason } = await supabase
+            .from('team_seasons')
+            .select('source_url')
+            .eq('group_name', matchdayData.group_name)
+            .eq('season', matchdayData.season)
+            .eq('league', matchdayData.league)
+            .not('source_url', 'is', null)
+            .limit(1)
+            .maybeSingle();
+          
+          if (teamSeason?.source_url) {
+            effectiveLeagueUrl = teamSeason.source_url;
+            console.log(`[meeting-report] ✅ source_url aus team_seasons geladen: ${effectiveLeagueUrl}`);
+          } else {
+            // ✅ FALLBACK: Basierend auf Liga-Name die richtige Tab-Seite bestimmen
+            const league = matchdayData.league || '';
+            const baseUrl = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=TVM+Winter+2025%2F2026';
+            
+            if (league.includes('Köln-Leverkusen') || league.includes('Bezirksliga') || league.includes('Kreisliga')) {
+              effectiveLeagueUrl = `${baseUrl}&tab=2`;
+              console.log(`[meeting-report] ⚠️ Keine source_url gefunden, verwende Fallback für Liga "${league}": ${effectiveLeagueUrl}`);
+            } else {
+              effectiveLeagueUrl = `${baseUrl}&tab=2`;
+              console.log(`[meeting-report] ⚠️ Keine source_url gefunden, verwende Fallback (tab=2) für Liga "${league}": ${effectiveLeagueUrl}`);
+            }
+          }
+        }
+      } catch (urlError) {
+        console.warn('[meeting-report] ⚠️ Fehler beim Laden der source_url:', urlError);
+        // Weiter mit DEFAULT_LEAGUE_URL
+      }
+    }
+
+    // Verwende effectiveLeagueUrl, falls vorhanden, sonst DEFAULT_LEAGUE_URL
+    const leagueUrlToUse = effectiveLeagueUrl || imports.DEFAULT_LEAGUE_URL;
 
     if (!resolvedMeetingId) {
       if (!groupId) {
         throw new Error('groupId erforderlich, wenn keine meetingId übergeben wird.');
       }
       const result = await determineMeetingId({
-        leagueUrl: imports.DEFAULT_LEAGUE_URL,
+        leagueUrl: leagueUrlToUse,
         groupId,
         matchNumber,
         homeTeam,
@@ -1128,7 +1178,7 @@ module.exports = async function handler(req, res) {
     if (groupId && !groupMeta) {
       try {
         const metaResult = await determineMeetingId({
-          leagueUrl: imports.DEFAULT_LEAGUE_URL,
+          leagueUrl: leagueUrlToUse,
           groupId,
           matchNumber,
           homeTeam,

@@ -2570,6 +2570,38 @@ function SuperAdminDashboard() {
         if (teamSeason?.source_url) {
           leagueUrl = teamSeason.source_url;
           console.log(`[fetchGroupSnapshot] ✅ source_url aus team_seasons geladen: ${leagueUrl}`);
+        } else {
+          // ✅ FALLBACK: Wenn keine source_url vorhanden, versuche basierend auf Liga die richtige Tab-Seite zu finden
+          // Prüfe, ob andere Gruppen derselben Liga eine source_url haben
+          const { data: otherTeamSeason } = await supabase
+            .from('team_seasons')
+            .select('source_url')
+            .eq('season', matchdays.season)
+            .eq('league', matchdays.league)
+            .not('source_url', 'is', null)
+            .limit(1)
+            .maybeSingle();
+          
+          if (otherTeamSeason?.source_url) {
+            leagueUrl = otherTeamSeason.source_url;
+            console.log(`[fetchGroupSnapshot] ✅ source_url aus anderer Gruppe derselben Liga geladen: ${leagueUrl}`);
+          } else {
+            // ✅ FALLBACK 2: Basierend auf Liga-Name die richtige Tab-Seite bestimmen
+            // Die meisten Ligen sind auf tab=2, nur einige auf tab=3
+            const league = matchdays.league || '';
+            const baseUrl = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=TVM+Winter+2025%2F2026';
+            
+            // Prüfe Liga-Name für Tab-Bestimmung
+            if (league.includes('Köln-Leverkusen') || league.includes('Bezirksliga') || league.includes('Kreisliga')) {
+              // Köln-Leverkusen Ligen sind meist auf tab=2
+              leagueUrl = `${baseUrl}&tab=2`;
+              console.log(`[fetchGroupSnapshot] ⚠️ Keine source_url gefunden, verwende Fallback für Liga "${league}": ${leagueUrl}`);
+            } else {
+              // Andere Ligen (z.B. Verbandsliga, Mittelrheinliga) sind auf tab=2
+              leagueUrl = `${baseUrl}&tab=2`;
+              console.log(`[fetchGroupSnapshot] ⚠️ Keine source_url gefunden, verwende Fallback (tab=2) für Liga "${league}": ${leagueUrl}`);
+            }
+          }
         }
       }
     } catch (error) {
