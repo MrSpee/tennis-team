@@ -98,8 +98,11 @@ function GroupsTab({
   const [meetingDetails, setMeetingDetails] = useState({});
   // URL-State
   const [urlMatchHandledKey, setUrlMatchHandledKey] = useState(null);
-  // ✅ NEU: Benutzerdefinierte nuLiga-URL für Gruppen-Updates
-  const [customLeagueUrl, setCustomLeagueUrl] = useState('');
+  // ✅ NEU: Benutzerdefinierte nuLiga-URLs pro Gruppe speichern
+  // Key: "category::league::groupName::season" -> URL
+  const [groupLeagueUrls, setGroupLeagueUrls] = useState(new Map());
+  // URL für den Gruppen-Importer (wird beim Import verwendet)
+  const [groupImportLeagueUrl, setGroupImportLeagueUrl] = useState('');
 
   // Query-Param Utilities
   const getQueryParams = () => {
@@ -600,12 +603,6 @@ function GroupsTab({
       if (selectedGroup) return; // bereits ausgewählt
       const params = new URLSearchParams(window.location.search);
       const groupParam = params.get('group');
-      const leagueUrlParam = params.get('leagueUrl');
-      
-      // ✅ NEU: Lade benutzerdefinierte URL aus Query-Parameter
-      if (leagueUrlParam) {
-        setCustomLeagueUrl(leagueUrlParam);
-      }
       
       if (!groupParam) return;
       const target = groupedData.find((g) => extractGroupId(g.groupName) === groupParam);
@@ -626,10 +623,6 @@ function GroupsTab({
       if (!selectedGroup) {
         // Gruppe schließen → Param entfernen
         params.delete('group');
-        // ✅ NEU: URL-Parameter beibehalten, wenn vorhanden
-        if (!customLeagueUrl) {
-          params.delete('leagueUrl');
-        }
         url.search = params.toString();
         window.history.replaceState({}, '', url.toString());
         return;
@@ -637,19 +630,42 @@ function GroupsTab({
       const gid = extractGroupId(selectedGroup.groupName);
       if (gid) {
         params.set('group', gid);
-        // ✅ NEU: Speichere benutzerdefinierte URL im Query-Parameter
-        if (customLeagueUrl) {
-          params.set('leagueUrl', customLeagueUrl);
-        } else {
-          params.delete('leagueUrl');
-        }
         url.search = params.toString();
         window.history.replaceState({}, '', url.toString());
       }
     } catch {
       // ignore
     }
-  }, [selectedGroup, customLeagueUrl]);
+  }, [selectedGroup]);
+  
+  // ✅ Hilfsfunktion: Gruppe-Key erstellen
+  const getGroupKey = (group) => {
+    if (!group) return null;
+    return `${group.category || ''}::${group.league || ''}::${group.groupName || ''}::${group.season || ''}`;
+  };
+  
+  // ✅ Hilfsfunktion: URL für Gruppe abrufen
+  const getGroupLeagueUrl = (group) => {
+    if (!group) return null;
+    const key = getGroupKey(group);
+    return key ? groupLeagueUrls.get(key) || null : null;
+  };
+  
+  // ✅ Hilfsfunktion: URL für Gruppe speichern
+  const setGroupLeagueUrl = (group, url) => {
+    if (!group) return;
+    const key = getGroupKey(group);
+    if (!key) return;
+    setGroupLeagueUrls((prev) => {
+      const next = new Map(prev);
+      if (url && url.trim()) {
+        next.set(key, url.trim());
+      } else {
+        next.delete(key);
+      }
+      return next;
+    });
+  };
 
   // Scraper-Funktionen
   const handleScrapeGroup = async (group) => {
@@ -666,14 +682,15 @@ function GroupsTab({
         throw new Error('Gruppen-ID konnte nicht extrahiert werden');
       }
 
-      // ✅ NEU: Verwende benutzerdefinierte URL, falls vorhanden
+      // ✅ NEU: Verwende gespeicherte URL für diese Gruppe, falls vorhanden
       const payload = {
         groups: groupId,
         includeMatches: true
       };
       
-      if (customLeagueUrl && customLeagueUrl.trim()) {
-        payload.leagueUrl = customLeagueUrl.trim();
+      const savedUrl = getGroupLeagueUrl(group);
+      if (savedUrl) {
+        payload.leagueUrl = savedUrl;
       }
 
       // Lade Scraper-Daten für diese spezifische Gruppe
@@ -828,9 +845,9 @@ function GroupsTab({
         payload.season = groupImportSeason;
       }
       
-      // ✅ NEU: Verwende benutzerdefinierte URL, falls vorhanden
-      if (customLeagueUrl && customLeagueUrl.trim()) {
-        payload.leagueUrl = customLeagueUrl.trim();
+      // ✅ NEU: Verwende URL aus dem Importer-Eingabefeld
+      if (groupImportLeagueUrl && groupImportLeagueUrl.trim()) {
+        payload.leagueUrl = groupImportLeagueUrl.trim();
       }
 
       const response = await fetch('/api/import/scrape-nuliga', {
@@ -856,7 +873,9 @@ function GroupsTab({
         ...detail,
         __importKey: buildDetailKey(detail),
         __importStatus: 'pending',
-        __importSummary: null
+        __importSummary: null,
+        // ✅ NEU: Speichere die verwendete URL für diese Gruppe
+        __leagueUrl: groupImportLeagueUrl && groupImportLeagueUrl.trim() ? groupImportLeagueUrl.trim() : null
       }));
 
       setGroupImportDetails(mappedDetails);
@@ -864,6 +883,16 @@ function GroupsTab({
       setSelectedGroupsForImport(new Set(mappedDetails.map(d => d.__importKey)));
       if (!groupImportSeason && data.season) {
         setGroupImportSeason(data.season);
+      }
+      
+      // ✅ NEU: Speichere die URL für alle importierten Gruppen
+      if (groupImportLeagueUrl && groupImportLeagueUrl.trim()) {
+        mappedDetails.forEach((detail) => {
+          const groupMeta = buildGroupMetaFromDetail(detail, data.season || groupImportSeason);
+          if (groupMeta) {
+            setGroupLeagueUrl(groupMeta, groupImportLeagueUrl.trim());
+          }
+        });
       }
     } catch (error) {
       console.error('❌ Fehler beim Laden der nuLiga-Daten:', error);
@@ -880,6 +909,11 @@ function GroupsTab({
     updateImportDetailStatus(detailKey, 'running');
 
     try {
+      // ✅ NEU: Speichere die URL für diese Gruppe (falls beim Import verwendet)
+      if (detail.__leagueUrl) {
+        setGroupLeagueUrl(groupMeta, detail.__leagueUrl);
+      }
+      
       // Verwende vorher geladene Daten oder lade neu (für einzelne Imports)
       let clubsData = preloadedClubs;
       let teamsData = preloadedTeams;
@@ -2585,6 +2619,25 @@ function GroupsTab({
               </span>
             </div>
           </div>
+          
+          {/* ✅ NEU: URL-Eingabefeld für nuLiga-Übersichtsseite */}
+          <div className="group-importer-field" style={{ marginTop: '1rem' }}>
+            <label>📋 nuLiga Übersichts-URL (optional)</label>
+            <input
+              type="url"
+              value={groupImportLeagueUrl}
+              onChange={(e) => setGroupImportLeagueUrl(e.target.value)}
+              placeholder="https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=..."
+              style={{ width: '100%' }}
+            />
+            <span className="group-importer-hint">
+              {groupImportLeagueUrl ? (
+                <>✅ URL wird verwendet. Beim Import werden die Gruppen von dieser URL geladen.</>
+              ) : (
+                <>Wenn die Gruppen auf einer anderen nuLiga-Übersichtsseite liegen, gib hier die URL ein. Die URL wird pro Gruppe gespeichert.</>
+              )}
+            </span>
+          </div>
 
           <div className="group-importer-buttons">
             <button
@@ -2853,65 +2906,34 @@ function GroupsTab({
               </div>
             </div>
 
-            {/* ✅ NEU: Eingabefeld für benutzerdefinierte nuLiga-URL */}
-            <div className="details-section" style={{ marginTop: '1rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.9rem', color: '#475569' }}>
-                📋 nuLiga Übersichts-URL (optional):
-              </label>
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <input
-                  type="url"
-                  value={customLeagueUrl}
-                  onChange={(e) => {
-                    const newUrl = e.target.value;
-                    setCustomLeagueUrl(newUrl);
-                    // ✅ Speichere URL im Query-Parameter
-                    updateQueryParams((params) => {
-                      if (newUrl && newUrl.trim()) {
-                        params.set('leagueUrl', newUrl.trim());
-                      } else {
-                        params.delete('leagueUrl');
-                      }
-                    });
-                  }}
-                  placeholder="https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=..."
-                  style={{
-                    flex: 1,
-                    padding: '0.75rem',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: '6px',
-                    fontSize: '0.9rem',
-                    background: 'white'
-                  }}
-                />
-                {customLeagueUrl && (
+            {/* ✅ NEU: Anzeige der gespeicherten URL für diese Gruppe */}
+            {selectedGroup && getGroupLeagueUrl(selectedGroup) && (
+              <div className="details-section" style={{ marginTop: '1rem', padding: '0.75rem', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #86efac' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: '#166534' }}>
+                  <span>✅</span>
+                  <span style={{ flex: 1 }}>
+                    <strong>nuLiga-URL gespeichert:</strong> Diese Gruppe wird von einer benutzerdefinierten URL aktualisiert.
+                  </span>
                   <button
                     onClick={() => {
-                      setCustomLeagueUrl('');
-                      updateQueryParams((params) => params.delete('leagueUrl'));
+                      setGroupLeagueUrl(selectedGroup, '');
                     }}
                     style={{
-                      padding: '0.5rem',
-                      border: '1px solid #cbd5e1',
-                      borderRadius: '6px',
+                      padding: '0.25rem 0.5rem',
+                      border: '1px solid #86efac',
+                      borderRadius: '4px',
                       background: 'white',
                       cursor: 'pointer',
-                      fontSize: '0.9rem'
+                      fontSize: '0.75rem',
+                      color: '#166534'
                     }}
-                    title="URL zurücksetzen"
+                    title="URL entfernen"
                   >
-                    ✕
+                    Entfernen
                   </button>
-                )}
+                </div>
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.5rem' }}>
-                {customLeagueUrl ? (
-                  <>✅ Benutzerdefinierte URL wird verwendet. Die Gruppe wird von dieser URL aktualisiert.</>
-                ) : (
-                  <>Wenn die Gruppe auf einer anderen nuLiga-Übersichtsseite liegt, gib hier die URL ein.</>
-                )}
-              </div>
-            </div>
+            )}
 
             {groupDetails.error ? (
               <div className="details-error">
