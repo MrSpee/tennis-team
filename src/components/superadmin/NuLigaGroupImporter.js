@@ -223,8 +223,13 @@ async function ensureTeams(scrapedData, clubMap, existingTeams, group, supabase,
       }
       
       const fullTeamName = scrapedTeam.teamName || `${clubName} ${teamSuffix}`.trim();
+      // ✅ VERBESSERT: Speichere alle möglichen Varianten des Team-Namens
       teamMap.set(fullTeamName, existingTeam);
-      teamMap.set(`${clubName} ${teamSuffix}`, existingTeam); // Auch mit Suffix als Key
+      teamMap.set(`${clubName} ${teamSuffix}`, existingTeam);
+      teamMap.set(fullTeamName.trim(), existingTeam);
+      teamMap.set(`${clubName} ${teamSuffix}`.trim(), existingTeam);
+      // Normalisierte Variante für besseres Matching
+      teamMap.set(normalizeString(fullTeamName), existingTeam);
     } else {
       // Team erstellen (mit Kategorie!)
       try {
@@ -263,9 +268,15 @@ async function ensureTeams(scrapedData, clubMap, existingTeams, group, supabase,
           }
         } else {
           const fullTeamName = scrapedTeam.teamName || `${clubName} ${teamSuffix}`.trim();
+          // ✅ VERBESSERT: Speichere alle möglichen Varianten des Team-Namens
           teamMap.set(fullTeamName, newTeam);
-          teamMap.set(`${clubName} ${teamSuffix}`, newTeam); // Auch mit Suffix als Key
+          teamMap.set(`${clubName} ${teamSuffix}`, newTeam);
+          teamMap.set(fullTeamName.trim(), newTeam);
+          teamMap.set(`${clubName} ${teamSuffix}`.trim(), newTeam);
+          // Normalisierte Variante für besseres Matching
+          teamMap.set(normalizeString(fullTeamName), newTeam);
           result.teamsCreated++;
+          console.log(`[ensureTeams] ✅ Team erstellt: "${fullTeamName}" (ID: ${newTeam.id})`);
         }
       } catch (error) {
         result.errors.push({
@@ -415,14 +426,44 @@ async function ensureTeamSeasons(scrapedData, teamMap, group, supabase, result, 
 async function importMatches(scrapedData, teamMap, group, supabase, result) {
   const matches = scrapedData.matches || [];
   
-  console.log(`[importMatches] 🔍 Importiere ${matches.length} Matches für Gruppe ${group.groupName}${sourceUrl ? ` (von ${sourceUrl})` : ''}`);
+  console.log(`[importMatches] 🔍 Importiere ${matches.length} Matches für Gruppe ${group.groupName}`);
+  console.log(`[importMatches] 📊 Team-Map enthält ${teamMap.size} Teams:`, Array.from(teamMap.keys()).slice(0, 10));
   
   for (const match of matches) {
     try {
       const homeTeamName = match.homeTeam || '';
       const awayTeamName = match.awayTeam || '';
-      const homeTeam = teamMap.get(homeTeamName);
-      const awayTeam = teamMap.get(awayTeamName);
+      
+      // ✅ VERBESSERT: Versuche verschiedene Varianten des Team-Namens zu finden
+      let homeTeam = teamMap.get(homeTeamName);
+      let awayTeam = teamMap.get(awayTeamName);
+      
+      // Fallback: Versuche mit verschiedenen Varianten
+      if (!homeTeam) {
+        // Versuche ohne führende/trailing Leerzeichen
+        homeTeam = teamMap.get(homeTeamName.trim());
+        // Versuche mit verschiedenen Schreibweisen
+        if (!homeTeam) {
+          for (const [key, value] of teamMap.entries()) {
+            if (normalizeString(key) === normalizeString(homeTeamName)) {
+              homeTeam = value;
+              break;
+            }
+          }
+        }
+      }
+      
+      if (!awayTeam) {
+        awayTeam = teamMap.get(awayTeamName.trim());
+        if (!awayTeam) {
+          for (const [key, value] of teamMap.entries()) {
+            if (normalizeString(key) === normalizeString(awayTeamName)) {
+              awayTeam = value;
+              break;
+            }
+          }
+        }
+      }
       
       // DEBUG: Log Match-Info
       console.log(`[importMatches] 🔍 Prüfe Match #${match.matchNumber}:`, {
@@ -436,12 +477,20 @@ async function importMatches(scrapedData, teamMap, group, supabase, result) {
       });
       
       if (!homeTeam || !awayTeam) {
+        const missingTeams = [];
+        if (!homeTeam) missingTeams.push(`Home: ${homeTeamName}`);
+        if (!awayTeam) missingTeams.push(`Away: ${awayTeamName}`);
+        
         result.errors.push({
           type: 'match_import_error',
           matchNumber: match.matchNumber,
-          error: `Teams nicht gefunden: ${homeTeamName} oder ${awayTeamName}`
+          error: `Teams nicht gefunden: ${missingTeams.join(', ')}`
         });
-        console.warn(`[importMatches] ⚠️ Teams nicht gefunden für Match #${match.matchNumber}`);
+        console.warn(`[importMatches] ⚠️ Teams nicht gefunden für Match #${match.matchNumber}: ${missingTeams.join(', ')}`);
+        console.warn(`[importMatches] 💡 Verfügbare Teams in Map:`, Array.from(teamMap.keys()).filter(k => 
+          normalizeString(k).includes(normalizeString(homeTeamName)) || 
+          normalizeString(k).includes(normalizeString(awayTeamName))
+        ));
         continue;
       }
       
