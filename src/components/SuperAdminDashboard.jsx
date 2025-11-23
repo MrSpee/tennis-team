@@ -3757,26 +3757,74 @@ function SuperAdminDashboard() {
       
       // Verarbeite jede URL-Gruppe
       for (const [sourceUrl, matchdays] of groupedByUrl.entries()) {
-        // Extrahiere groupId aus group_name für diese Gruppe
-        const groupIds = new Set();
+        // Prüfe, ob source_url eine Gruppen-URL oder eine Übersichts-URL ist
+        let isGroupUrl = false;
+        let groupIdFromUrl = null;
+        let leagueOverviewUrl = sourceUrl;
+        
+        if (sourceUrl && sourceUrl !== 'default') {
+          try {
+            const url = new URL(sourceUrl);
+            // Prüfe, ob es eine Gruppen-URL ist (enthält groupPage und group= Parameter)
+            if (url.pathname.includes('groupPage') && url.searchParams.has('group')) {
+              isGroupUrl = true;
+              groupIdFromUrl = url.searchParams.get('group');
+              // Konvertiere Gruppen-URL zu Übersichts-URL (leaguePage)
+              // Extrahiere championship Parameter
+              const championship = url.searchParams.get('championship');
+              if (championship) {
+                leagueOverviewUrl = `https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=${encodeURIComponent(championship)}&tab=3`;
+              }
+            }
+          } catch (e) {
+            // URL-Parsing fehlgeschlagen, verwende sourceUrl wie sie ist
+            console.warn(`⚠️ Konnte URL nicht parsen: ${sourceUrl}`, e);
+          }
+        }
+        
+        // Sammle alle eindeutigen Gruppen-IDs für diese URL-Gruppe
+        const groupIdToMatchdays = new Map();
+        
         matchdays.forEach(md => {
-          const groupIdMatch = md.group_name?.match(/(\d+)/);
-          if (groupIdMatch) {
-            groupIds.add(groupIdMatch[1]);
+          let groupId = null;
+          
+          // Priorität 1: groupId aus URL (wenn source_url eine Gruppen-URL ist)
+          if (isGroupUrl && groupIdFromUrl) {
+            groupId = groupIdFromUrl;
+          } else {
+            // Priorität 2: Extrahiere groupId aus group_name
+            const groupNameMatch = md.group_name?.match(/Gr\.\s*(\d+)/i) || md.group_name?.match(/(\d{3})/);
+            if (groupNameMatch) {
+              groupId = groupNameMatch[1];
+            }
+          }
+          
+          if (groupId) {
+            if (!groupIdToMatchdays.has(groupId)) {
+              groupIdToMatchdays.set(groupId, []);
+            }
+            groupIdToMatchdays.get(groupId).push(md);
           }
         });
         
+        if (groupIdToMatchdays.size === 0) {
+          console.warn(`⚠️ Keine Gruppen-IDs gefunden für URL: ${sourceUrl}`);
+          failed += matchdays.length;
+          errors.push({ url: sourceUrl, error: 'Keine Gruppen-IDs gefunden' });
+          continue;
+        }
+        
         // Scrape nuLiga für alle Gruppen dieser URL
-        for (const groupId of groupIds) {
+        for (const [groupId, groupMatchdays] of groupIdToMatchdays.entries()) {
           try {
-            console.log(`🔍 Scrape nuLiga für Gruppe ${groupId}${sourceUrl !== 'default' ? ` (URL: ${sourceUrl})` : ''}...`);
+            console.log(`🔍 Scrape nuLiga für Gruppe ${groupId}${sourceUrl !== 'default' ? ` (URL: ${leagueOverviewUrl})` : ''}...`);
             
             const response = await fetch('/api/import/scrape-nuliga', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 groups: groupId,
-                leagueUrl: sourceUrl !== 'default' ? sourceUrl : undefined,
+                leagueUrl: leagueOverviewUrl !== 'default' ? leagueOverviewUrl : undefined,
                 includeMatches: true
               })
             });
@@ -3797,18 +3845,21 @@ function SuperAdminDashboard() {
             const details = Array.isArray(data.details) ? data.details : [];
             const groupDetail = details.find(entry => {
               const entryGroupId = entry.group?.groupId ? String(entry.group.groupId) : null;
-              return entryGroupId === groupId;
+              // Normalisiere groupId (entferne führende Nullen)
+              const normalizedEntryId = entryGroupId ? String(parseInt(entryGroupId, 10)) : null;
+              const normalizedSearchId = String(parseInt(groupId, 10));
+              return normalizedEntryId === normalizedSearchId;
             });
             
-            if (!groupDetail || !groupDetail.matches) {
+            if (!groupDetail || !groupDetail.matches || groupDetail.matches.length === 0) {
               console.warn(`⚠️ Keine Matches gefunden für Gruppe ${groupId}`);
+              failed += groupMatchdays.length;
+              errors.push({ groupId, error: 'Keine Matches in nuLiga gefunden' });
               continue;
             }
             
             // Finde passende Matches und aktualisiere meeting_id
-            for (const matchday of matchdays) {
-              if (!matchday.group_name?.includes(groupId)) continue;
-              
+            for (const matchday of groupMatchdays) {
               // Lade Team-Informationen
               const homeTeam = teamById.get(matchday.home_team_id);
               const awayTeam = teamById.get(matchday.away_team_id);
@@ -3853,7 +3904,10 @@ function SuperAdminDashboard() {
                 }
               } else {
                 failed++;
-                errors.push({ matchdayId: matchday.id, error: 'Keine meeting_id in nuLiga gefunden' });
+                errors.push({ 
+                  matchdayId: matchday.id, 
+                  error: `Keine meeting_id gefunden (Datum: ${matchDateKey}, Teams: ${homeLabel} vs ${awayLabel})` 
+                });
               }
               
               // Rate limiting
@@ -3861,7 +3915,7 @@ function SuperAdminDashboard() {
             }
           } catch (error) {
             console.error(`❌ Fehler beim Scrapen für Gruppe ${groupId}:`, error);
-            failed += matchdays.filter(md => md.group_name?.includes(groupId)).length;
+            failed += groupMatchdays.length;
             errors.push({ groupId, error: error.message });
           }
         }
