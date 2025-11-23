@@ -352,6 +352,7 @@ function SuperAdminDashboard() {
 
   const [scraperApiLoading, setScraperApiLoading] = useState(false);
   const [scraperApiGroups, setScraperApiGroups] = useState('');
+  const [scraperApiLeagueUrl, setScraperApiLeagueUrl] = useState('');
   const [scraperApiApplyMode, setScraperApiApplyMode] = useState(false);
   const [matchParserStates, setMatchParserStates] = useState({});
   const [parserMessage, setParserMessage] = useState(null);
@@ -980,6 +981,11 @@ function SuperAdminDashboard() {
         payload.groups = sanitizedGroups;
       }
 
+      // ✅ NEU: Übersichts-URL unterstützen
+      if (scraperApiLeagueUrl && scraperApiLeagueUrl.trim()) {
+        payload.leagueUrl = scraperApiLeagueUrl.trim();
+      }
+
       if (scraperApiApplyMode) {
         const confirmed = window.confirm(
           'Direktimport aktiv: Ergebnisse werden in Supabase geschrieben. Möchtest du fortfahren?'
@@ -1051,7 +1057,7 @@ function SuperAdminDashboard() {
     } finally {
       setScraperApiLoading(false);
     }
-  }, [scraperApiApplyMode, scraperApiGroups]);
+  }, [scraperApiApplyMode, scraperApiGroups, scraperApiLeagueUrl]);
 
   const ensureClubMapping = useCallback((summary) => {
     if (!summary) return null;
@@ -3650,6 +3656,8 @@ function SuperAdminDashboard() {
       scraperApiLoading={scraperApiLoading}
       scraperApiGroups={scraperApiGroups}
       setScraperApiGroups={setScraperApiGroups}
+      scraperApiLeagueUrl={scraperApiLeagueUrl}
+      setScraperApiLeagueUrl={setScraperApiLeagueUrl}
       scraperApiApplyMode={scraperApiApplyMode}
       setScraperApiApplyMode={setScraperApiApplyMode}
       scraperError={scraperError}

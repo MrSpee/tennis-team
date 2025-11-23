@@ -16,6 +16,8 @@ function ScraperTab({
   scraperApiLoading,
   scraperApiGroups,
   setScraperApiGroups,
+  scraperApiLeagueUrl,
+  setScraperApiLeagueUrl,
   scraperApiApplyMode,
   setScraperApiApplyMode,
   scraperError,
@@ -106,6 +108,30 @@ function ScraperTab({
 
       {/* Vereinfachte Konfiguration */}
       <div className="scraper-config-section" style={{ marginBottom: '1.5rem', padding: '1.5rem', background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+        {/* ✅ NEU: Übersichts-URL Eingabefeld */}
+        <div style={{ marginBottom: '1rem' }}>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.9rem', color: '#475569' }}>
+            📋 nuLiga Übersichts-URL (optional):
+          </label>
+          <input
+            type="url"
+            value={scraperApiLeagueUrl}
+            onChange={(e) => setScraperApiLeagueUrl(e.target.value)}
+            placeholder="https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=..."
+            style={{
+              width: '100%',
+              padding: '0.75rem',
+              border: '1px solid #cbd5e1',
+              borderRadius: '6px',
+              fontSize: '0.95rem',
+              background: 'white'
+            }}
+          />
+          <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
+            URL einer nuLiga Übersichtsseite mit mehreren Gruppen. Wenn leer, wird die Standard-URL verwendet.
+          </div>
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
           <div>
             <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.9rem', color: '#475569' }}>
@@ -152,7 +178,7 @@ function ScraperTab({
               </button>
             </div>
             <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
-              Leer lassen = alle Gruppen der Saison
+              Leer lassen = alle Gruppen der Saison/URL
             </div>
           </div>
 
