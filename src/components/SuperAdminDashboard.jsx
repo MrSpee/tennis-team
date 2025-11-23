@@ -2586,20 +2586,24 @@ function SuperAdminDashboard() {
             leagueUrl = otherTeamSeason.source_url;
             console.log(`[fetchGroupSnapshot] ✅ source_url aus anderer Gruppe derselben Liga geladen: ${leagueUrl}`);
           } else {
-            // ✅ FALLBACK 2: Basierend auf Liga-Name die richtige Tab-Seite bestimmen
-            // Die meisten Ligen sind auf tab=2, nur einige auf tab=3
+            // ✅ FALLBACK 2: Basierend auf Liga-Name die richtige URL bestimmen
+            // WICHTIG: "Köln-Leverkusen" Ligen brauchen einen anderen championship-Parameter!
             const league = matchdays.league || '';
-            const baseUrl = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=TVM+Winter+2025%2F2026';
+            let baseUrl;
             
-            // Prüfe Liga-Name für Tab-Bestimmung
-            if (league.includes('Köln-Leverkusen') || league.includes('Bezirksliga') || league.includes('Kreisliga')) {
-              // Köln-Leverkusen Ligen sind meist auf tab=2
-              leagueUrl = `${baseUrl}&tab=2`;
-              console.log(`[fetchGroupSnapshot] ⚠️ Keine source_url gefunden, verwende Fallback für Liga "${league}": ${leagueUrl}`);
+            // Prüfe Liga-Name für championship-Parameter
+            if (league.includes('Köln-Leverkusen')) {
+              // Köln-Leverkusen Ligen verwenden championship=Köln-Leverkusen+Winter+2025%2F2026
+              baseUrl = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026';
+              // Köln-Leverkusen Ligen sind meist auf tab=3
+              leagueUrl = `${baseUrl}&tab=3`;
+              console.log(`[fetchGroupSnapshot] ⚠️ Keine source_url gefunden, verwende Fallback (Köln-Leverkusen, tab=3) für Liga "${league}": ${leagueUrl}`);
             } else {
-              // Andere Ligen (z.B. Verbandsliga, Mittelrheinliga) sind auf tab=2
+              // Andere Ligen (z.B. Verbandsliga, Mittelrheinliga) verwenden championship=TVM+Winter+2025%2F2026
+              baseUrl = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=TVM+Winter+2025%2F2026';
+              // Meist auf tab=2
               leagueUrl = `${baseUrl}&tab=2`;
-              console.log(`[fetchGroupSnapshot] ⚠️ Keine source_url gefunden, verwende Fallback (tab=2) für Liga "${league}": ${leagueUrl}`);
+              console.log(`[fetchGroupSnapshot] ⚠️ Keine source_url gefunden, verwende Fallback (TVM, tab=2) für Liga "${league}": ${leagueUrl}`);
             }
           }
         }

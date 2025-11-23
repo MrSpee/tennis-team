@@ -1134,16 +1134,24 @@ module.exports = async function handler(req, res) {
             effectiveLeagueUrl = teamSeason.source_url;
             console.log(`[meeting-report] ✅ source_url aus team_seasons geladen: ${effectiveLeagueUrl}`);
           } else {
-            // ✅ FALLBACK: Basierend auf Liga-Name die richtige Tab-Seite bestimmen
+            // ✅ FALLBACK: Basierend auf Liga-Name die richtige URL bestimmen
+            // WICHTIG: "Köln-Leverkusen" Ligen brauchen einen anderen championship-Parameter!
             const league = matchdayData.league || '';
-            const baseUrl = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=TVM+Winter+2025%2F2026';
+            let baseUrl;
             
-            if (league.includes('Köln-Leverkusen') || league.includes('Bezirksliga') || league.includes('Kreisliga')) {
-              effectiveLeagueUrl = `${baseUrl}&tab=2`;
-              console.log(`[meeting-report] ⚠️ Keine source_url gefunden, verwende Fallback für Liga "${league}": ${effectiveLeagueUrl}`);
+            // Prüfe Liga-Name für championship-Parameter
+            if (league.includes('Köln-Leverkusen')) {
+              // Köln-Leverkusen Ligen verwenden championship=Köln-Leverkusen+Winter+2025%2F2026
+              baseUrl = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026';
+              // Köln-Leverkusen Ligen sind meist auf tab=3
+              effectiveLeagueUrl = `${baseUrl}&tab=3`;
+              console.log(`[meeting-report] ⚠️ Keine source_url gefunden, verwende Fallback (Köln-Leverkusen, tab=3) für Liga "${league}": ${effectiveLeagueUrl}`);
             } else {
+              // Andere Ligen (z.B. Verbandsliga, Mittelrheinliga) verwenden championship=TVM+Winter+2025%2F2026
+              baseUrl = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=TVM+Winter+2025%2F2026';
+              // Meist auf tab=2
               effectiveLeagueUrl = `${baseUrl}&tab=2`;
-              console.log(`[meeting-report] ⚠️ Keine source_url gefunden, verwende Fallback (tab=2) für Liga "${league}": ${effectiveLeagueUrl}`);
+              console.log(`[meeting-report] ⚠️ Keine source_url gefunden, verwende Fallback (TVM, tab=2) für Liga "${league}": ${effectiveLeagueUrl}`);
             }
           }
         }
