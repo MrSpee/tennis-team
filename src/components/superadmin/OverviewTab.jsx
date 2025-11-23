@@ -97,7 +97,7 @@ function OverviewTab({
                         e.currentTarget.style.transform = 'translateY(0)';
                       }}
                     >
-                      → Zu Matchdays
+                      → Zu Spieltage
                     </button>
                   )}
                 </div>
@@ -390,7 +390,7 @@ function OverviewTab({
                 >
                   <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>📅</div>
                   <div style={{ fontSize: '0.875rem', fontWeight: '700', marginBottom: '0.25rem' }}>
-                    Matchdays verwalten
+                    Spieltage verwalten
                   </div>
                   <div style={{ fontSize: '0.75rem', opacity: 0.9 }}>
                     {stats.pendingMatches ?? '–'} offene Matches

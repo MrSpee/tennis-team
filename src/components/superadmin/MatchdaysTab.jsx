@@ -120,11 +120,11 @@ function MatchdaysTab({
     <div className="lk-card-full matchday-board">
       <div className="formkurve-header">
         <div>
-          <div className="formkurve-title">Matchdays</div>
+          <div className="formkurve-title">Spieltage</div>
           <div className="formkurve-subtitle">
             {seasonMatchdays.length > 0
               ? `${seasonMatchdays.length} Spiel${seasonMatchdays.length === 1 ? '' : 'e'}`
-              : 'Keine Matchdays gefunden'}
+              : 'Keine Spieltage gefunden'}
           </div>
         </div>
       </div>

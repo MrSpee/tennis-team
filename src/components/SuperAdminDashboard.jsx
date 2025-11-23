@@ -4164,8 +4164,8 @@ function SuperAdminDashboard() {
         <button className={selectedTab === 'players' ? 'active' : ''} onClick={() => setSelectedTab('players')}>
           <Users size={16} /> Spieler
         </button>
-        <button className={selectedTab === 'matchdays' ? 'active' : ''} onClick={() => setSelectedTab('matchdays')}>
-          <CalendarDays size={16} /> Matchdays
+        <button className={selectedTab === 'matchdays' ? 'active' : ''} onClick={() => setSelectedTab('matchdays')} title="Spieltage">
+          <CalendarDays size={16} /> Spieltage
         </button>
         <button className={selectedTab === 'scraper' ? 'active' : ''} onClick={() => setSelectedTab('scraper')}>
           <Activity size={16} /> Scraper

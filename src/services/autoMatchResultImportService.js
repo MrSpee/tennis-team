@@ -94,8 +94,11 @@ async function getAttemptCount(supabase, matchdayId) {
 export async function findMatchdaysForAutoImport(supabase) {
   const now = new Date();
   const fourDaysAgo = new Date(now.getTime() - 4 * 24 * 60 * 60 * 1000);
+  // Erweitere auf 30 Tage zurück, um auch ältere Matches zu erfassen, die noch nie versucht wurden
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   
-  // Finde alle vergangenen Matches der letzten 4 Tage mit meeting_id
+  // Finde alle vergangenen Matches mit meeting_id
+  // WICHTIG: Erweitere auf 30 Tage, um auch ältere Matches zu erfassen, die noch nie versucht wurden
   const { data, error } = await supabase
     .from('matchdays')
     .select(`
@@ -109,7 +112,7 @@ export async function findMatchdaysForAutoImport(supabase) {
       away_team:away_team_id(id, club_name, team_name)
     `)
     .not('meeting_id', 'is', null)
-    .gte('match_date', fourDaysAgo.toISOString())
+    .gte('match_date', thirtyDaysAgo.toISOString())
     .lt('match_date', now.toISOString())
     .order('match_date', { ascending: false });
   
@@ -152,11 +155,17 @@ export async function findMatchdaysForAutoImport(supabase) {
       continue;
     }
     
-    // Prüfe ob Match bereits mehr als 4 Tage alt ist
     const daysSinceMatch = getDaysSinceMatch(matchday.match_date);
+    
+    // ✅ KORRIGIERT: Versuche auch ältere Matches, wenn sie noch nie versucht wurden
+    // Oder wenn sie weniger als 4 Versuche haben und innerhalb der letzten 4 Tage waren
     if (daysSinceMatch > 4) {
-      // Mehr als 4 Tage alt - überspringe (wird als Warnung angezeigt)
-      continue;
+      // Älter als 4 Tage: Nur versuchen, wenn noch nie versucht wurde (attemptCount === 0)
+      if (attemptCount > 0) {
+        // Bereits versucht, aber älter als 4 Tage - überspringe (wird als Warnung angezeigt)
+        continue;
+      }
+      // Noch nie versucht, auch wenn älter als 4 Tage - versuche es!
     }
     
     matchdaysToImport.push({
