@@ -3708,8 +3708,6 @@ function SuperAdminDashboard() {
           id,
           match_date,
           meeting_id,
-          source_url,
-          source_type,
           group_name,
           home_team_id,
           away_team_id,
@@ -3741,26 +3739,62 @@ function SuperAdminDashboard() {
       
       console.log(`🔍 Aktualisiere meeting_id für ${matchdaysWithoutResults.length} vergangene Spiele ohne Detailsergebnisse...`);
       
+      // ✅ NEU: Lade URLs aus team_seasons (nicht aus matchdays)
+      // Gruppiere Matchdays nach group_name + season + league
+      const groupKeys = new Set();
+      matchdaysWithoutResults.forEach(md => {
+        if (md.group_name && md.season && md.league) {
+          groupKeys.add(`${md.group_name}::${md.season}::${md.league}`);
+        }
+      });
+      
+      // Lade source_url für alle Gruppen aus team_seasons
+      const { data: teamSeasons, error: teamSeasonsError } = await supabase
+        .from('team_seasons')
+        .select('group_name, season, league, source_url, source_type')
+        .in('group_name', Array.from(new Set(matchdaysWithoutResults.map(md => md.group_name).filter(Boolean))))
+        .in('season', Array.from(new Set(matchdaysWithoutResults.map(md => md.season).filter(Boolean))))
+        .in('league', Array.from(new Set(matchdaysWithoutResults.map(md => md.league).filter(Boolean))));
+      
+      if (teamSeasonsError) {
+        console.warn('⚠️ Fehler beim Laden der team_seasons:', teamSeasonsError);
+      }
+      
+      // Erstelle Map: group_name::season::league -> source_url
+      const urlMap = new Map();
+      (teamSeasons || []).forEach(ts => {
+        const key = `${ts.group_name}::${ts.season}::${ts.league}`;
+        if (ts.source_url && !urlMap.has(key)) {
+          urlMap.set(key, ts.source_url);
+        }
+      });
+      
       let updated = 0;
       let failed = 0;
       const errors = [];
       
-      // Gruppiere nach source_url, um effizienter zu scrapen
+      // Gruppiere nach source_url (aus team_seasons), um effizienter zu scrapen
       const groupedByUrl = new Map();
       matchdaysWithoutResults.forEach(md => {
-        const url = md.source_url || 'default';
+        const key = md.group_name && md.season && md.league 
+          ? `${md.group_name}::${md.season}::${md.league}` 
+          : null;
+        const url = key && urlMap.has(key) ? urlMap.get(key) : 'default';
         if (!groupedByUrl.has(url)) {
           groupedByUrl.set(url, []);
         }
         groupedByUrl.get(url).push(md);
       });
       
+      // Standard-Übersichts-URL für Winter 2025/26 (wird verwendet, wenn source_url NULL ist)
+      const DEFAULT_LEAGUE_OVERVIEW_URL = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&tab=3';
+      
       // Verarbeite jede URL-Gruppe
       for (const [sourceUrl, matchdays] of groupedByUrl.entries()) {
         // Prüfe, ob source_url eine Gruppen-URL oder eine Übersichts-URL ist
         let isGroupUrl = false;
         let groupIdFromUrl = null;
-        let leagueOverviewUrl = sourceUrl;
+        let leagueOverviewUrl = DEFAULT_LEAGUE_OVERVIEW_URL; // Default: Standard-Übersichts-URL
         
         if (sourceUrl && sourceUrl !== 'default') {
           try {
@@ -3774,11 +3808,22 @@ function SuperAdminDashboard() {
               const championship = url.searchParams.get('championship');
               if (championship) {
                 leagueOverviewUrl = `https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=${encodeURIComponent(championship)}&tab=3`;
+              } else {
+                // Falls kein championship Parameter, verwende Standard-URL
+                leagueOverviewUrl = DEFAULT_LEAGUE_OVERVIEW_URL;
               }
+            } else if (url.pathname.includes('leaguePage')) {
+              // Es ist bereits eine Übersichts-URL
+              leagueOverviewUrl = sourceUrl;
+            } else {
+              // Unbekannte URL-Struktur, verwende Standard-URL
+              console.warn(`⚠️ Unbekannte URL-Struktur: ${sourceUrl}, verwende Standard-URL`);
+              leagueOverviewUrl = DEFAULT_LEAGUE_OVERVIEW_URL;
             }
           } catch (e) {
-            // URL-Parsing fehlgeschlagen, verwende sourceUrl wie sie ist
-            console.warn(`⚠️ Konnte URL nicht parsen: ${sourceUrl}`, e);
+            // URL-Parsing fehlgeschlagen, verwende Standard-URL
+            console.warn(`⚠️ Konnte URL nicht parsen: ${sourceUrl}, verwende Standard-URL`, e);
+            leagueOverviewUrl = DEFAULT_LEAGUE_OVERVIEW_URL;
           }
         }
         
@@ -3817,14 +3862,17 @@ function SuperAdminDashboard() {
         // Scrape nuLiga für alle Gruppen dieser URL
         for (const [groupId, groupMatchdays] of groupIdToMatchdays.entries()) {
           try {
-            console.log(`🔍 Scrape nuLiga für Gruppe ${groupId}${sourceUrl !== 'default' ? ` (URL: ${leagueOverviewUrl})` : ''}...`);
+            const urlInfo = sourceUrl && sourceUrl !== 'default' 
+              ? ` (source_url: ${sourceUrl}, verwendet: ${leagueOverviewUrl})`
+              : ` (source_url: NULL, verwendet Standard-URL: ${leagueOverviewUrl})`;
+            console.log(`🔍 Scrape nuLiga für Gruppe ${groupId}${urlInfo}...`);
             
             const response = await fetch('/api/import/scrape-nuliga', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 groups: groupId,
-                leagueUrl: leagueOverviewUrl !== 'default' ? leagueOverviewUrl : undefined,
+                leagueUrl: leagueOverviewUrl, // Immer die leagueOverviewUrl verwenden (kann auch die Standard-URL sein)
                 includeMatches: true
               })
             });

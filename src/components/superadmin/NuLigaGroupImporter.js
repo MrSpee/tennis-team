@@ -39,12 +39,12 @@ export async function importGroupFromNuLiga(group, scrapedData, supabase, clubs,
     // Schritt 2: Automatisch fehlende Teams erstellen (mit Kategorie aus Group!)
     const teamMap = await ensureTeams(scrapedData, clubMap, teams, group, supabase, result);
     
-    // Schritt 3: Team-Seasons sicherstellen
-    await ensureTeamSeasons(scrapedData, teamMap, group, supabase, result);
+    // Schritt 3: Team-Seasons sicherstellen (inkl. sourceUrl)
+    // ✅ WICHTIG: Übergebe sourceUrl, damit die URL auf Gruppenebene in team_seasons gespeichert wird
+    await ensureTeamSeasons(scrapedData, teamMap, group, supabase, result, sourceUrl);
     
     // Schritt 4: Matches importieren (primär über match_number)
-    // ✅ WICHTIG: Übergebe sourceUrl, damit jeder Spieltag weiß, von welcher URL er stammt
-    await importMatches(scrapedData, teamMap, group, supabase, result, sourceUrl);
+    await importMatches(scrapedData, teamMap, group, supabase, result);
     
     // Schritt 5: Match-Results importieren (wenn meetingId vorhanden)
     await importMatchResults(scrapedData, group, supabase, result);
@@ -283,8 +283,9 @@ async function ensureTeams(scrapedData, clubMap, existingTeams, group, supabase,
 /**
  * Stellt sicher, dass alle Team-Seasons existieren
  * WICHTIG: Entfernt auch Teams, die nicht mehr in der nuLiga-Gruppe sind
+ * ✅ NEU: Speichert sourceUrl in team_seasons für die Gruppe
  */
-async function ensureTeamSeasons(scrapedData, teamMap, group, supabase, result) {
+async function ensureTeamSeasons(scrapedData, teamMap, group, supabase, result, sourceUrl = null) {
   const scrapedTeams = scrapedData.teamsDetailed || [];
   const scrapedTeamIds = new Set();
   
@@ -358,7 +359,9 @@ async function ensureTeamSeasons(scrapedData, teamMap, group, supabase, result) 
             league: group.league, // WICHTIG: League aus nuLiga (nicht aus DB!)
             group_name: group.groupName,
             team_size: 6,
-            is_active: true
+            is_active: true,
+            source_url: sourceUrl || null, // ✅ NEU: URL auf Gruppenebene speichern
+            source_type: 'nuliga' // ✅ NEU: Typ der Quelle
           });
         
         if (error && error.code !== '23505') {
@@ -376,13 +379,21 @@ async function ensureTeamSeasons(scrapedData, teamMap, group, supabase, result) 
         });
       }
     } else {
-      // Update League/Kategorie falls sich geändert hat
+      // Update League/Kategorie und source_url falls sich geändert hat
+      const updateData = {
+        league: group.league, // WICHTIG: League aus nuLiga übernehmen
+        is_active: true
+      };
+      
+      // ✅ NEU: Aktualisiere source_url, wenn eine neue vorhanden ist
+      if (sourceUrl) {
+        updateData.source_url = sourceUrl;
+        updateData.source_type = 'nuliga';
+      }
+      
       const { error: updateError } = await supabase
         .from('team_seasons')
-        .update({
-          league: group.league, // WICHTIG: League aus nuLiga übernehmen
-          is_active: true
-        })
+        .update(updateData)
         .eq('id', existing.id);
       
       if (updateError) {
@@ -401,7 +412,7 @@ async function ensureTeamSeasons(scrapedData, teamMap, group, supabase, result) 
  * @param {Object} result - Ergebnis-Objekt
  * @param {string} sourceUrl - URL, von der die Daten stammen (optional)
  */
-async function importMatches(scrapedData, teamMap, group, supabase, result, sourceUrl = null) {
+async function importMatches(scrapedData, teamMap, group, supabase, result) {
   const matches = scrapedData.matches || [];
   
   console.log(`[importMatches] 🔍 Importiere ${matches.length} Matches für Gruppe ${group.groupName}${sourceUrl ? ` (von ${sourceUrl})` : ''}`);
@@ -517,9 +528,7 @@ async function importMatches(scrapedData, teamMap, group, supabase, result, sour
         // 3. ODER neue meeting_id ist vorhanden (Update von NULL zu Wert oder Update zu neuem Wert)
         meeting_id: match.meetingId || null,
         meeting_report_url: match.meetingReportUrl || null,
-        // ✅ NEU: Source URL und Type für flexible URL-Unterstützung
-        source_url: sourceUrl || null,
-        source_type: 'nuliga'
+        // ✅ ENTFERNT: source_url und source_type werden jetzt in team_seasons gespeichert, nicht in matchdays
       };
       
       if (existingMatch) {
@@ -534,14 +543,7 @@ async function importMatches(scrapedData, teamMap, group, supabase, result, sour
           console.log(`[importMatches] 🔄 Aktualisiere meeting_id für Match #${match.matchNumber}: ${existingMatch.meeting_id || 'NULL'} → ${match.meetingId}`);
         }
         
-        // ✅ WICHTIG: source_url nur aktualisieren, wenn sie noch nicht gesetzt ist oder wenn eine neue URL vorhanden ist
-        if (existingMatch.source_url && !sourceUrl) {
-          // Bestehende source_url behalten, keine neue vorhanden
-          delete matchData.source_url;
-        } else if (sourceUrl && sourceUrl !== existingMatch.source_url) {
-          // Neue source_url vorhanden und unterschiedlich - aktualisiere
-          console.log(`[importMatches] 🔄 Aktualisiere source_url für Match #${match.matchNumber}: ${existingMatch.source_url || 'NULL'} → ${sourceUrl}`);
-        }
+        // ✅ ENTFERNT: source_url und source_type werden jetzt in team_seasons gespeichert, nicht in matchdays
         
         // Update bestehendes Match
         const { error } = await supabase
