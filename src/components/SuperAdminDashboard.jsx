@@ -4302,40 +4302,104 @@ function SuperAdminDashboard() {
               const awayLabel = buildTeamLabel(awayTeam);
               const matchDateKey = matchday.match_date ? new Date(matchday.match_date).toISOString().split('T')[0] : null;
               
-              // Finde passendes Match in den gescrapten Daten
-              const matchedMatch = groupDetail.matches.find(m => {
-                const mDate = m.matchDateIso ? new Date(m.matchDateIso).toISOString().split('T')[0] : null;
-                const homeMatch = normalizeString(m.homeTeam || '').includes(normalizeString(homeLabel)) || 
-                                 normalizeString(homeLabel).includes(normalizeString(m.homeTeam || ''));
-                const awayMatch = normalizeString(m.awayTeam || '').includes(normalizeString(awayLabel)) || 
-                                 normalizeString(awayLabel).includes(normalizeString(m.awayTeam || ''));
-                
-                return mDate === matchDateKey && (homeMatch || awayMatch) && m.meetingId;
-              });
+              // VERBESSERT: Finde passendes Match in den gescrapten Daten mit robusterem Matching
+              const normalizedHomeLabel = normalizeString(homeLabel);
+              const normalizedAwayLabel = normalizeString(awayLabel);
               
-              if (matchedMatch && matchedMatch.meetingId) {
+              // Sammle alle Kandidaten für besseres Debugging
+              const candidates = groupDetail.matches
+                .map(m => {
+                  const mDate = m.matchDateIso ? new Date(m.matchDateIso).toISOString().split('T')[0] : null;
+                  const normalizedMHome = normalizeString(m.homeTeam || '');
+                  const normalizedMAway = normalizeString(m.awayTeam || '');
+                  
+                  // Berechne Similarity für beide Teams
+                  const homeSimilarity = calculateSimilarity(normalizedHomeLabel, normalizedMHome);
+                  const awaySimilarity = calculateSimilarity(normalizedAwayLabel, normalizedMAway);
+                  
+                  // Prüfe auch umgekehrte Zuordnung (Heim/Gast vertauscht)
+                  const homeSimilarityReversed = calculateSimilarity(normalizedHomeLabel, normalizedMAway);
+                  const awaySimilarityReversed = calculateSimilarity(normalizedAwayLabel, normalizedMHome);
+                  
+                  const dateMatch = mDate === matchDateKey;
+                  const hasMeetingId = !!m.meetingId;
+                  
+                  // Match-Score: Datum muss stimmen, mindestens ein Team muss ähnlich sein (>0.7)
+                  const score = dateMatch && hasMeetingId 
+                    ? Math.max(
+                        (homeSimilarity + awaySimilarity) / 2, // Normale Zuordnung
+                        (homeSimilarityReversed + awaySimilarityReversed) / 2 // Vertauschte Zuordnung
+                      )
+                    : 0;
+                  
+                  return {
+                    match: m,
+                    dateMatch,
+                    hasMeetingId,
+                    homeSimilarity,
+                    awaySimilarity,
+                    homeSimilarityReversed,
+                    awaySimilarityReversed,
+                    score,
+                    date: mDate,
+                    scrapedHome: m.homeTeam,
+                    scrapedAway: m.awayTeam
+                  };
+                })
+                .filter(c => c.dateMatch && c.hasMeetingId) // Nur Kandidaten mit passendem Datum und meeting_id
+                .sort((a, b) => b.score - a.score); // Sortiere nach Score (beste zuerst)
+              
+              // Bestes Match finden (Score > 0.7)
+              const bestCandidate = candidates.find(c => c.score > 0.7);
+              
+              if (bestCandidate && bestCandidate.match.meetingId) {
                 // Aktualisiere meeting_id in der Datenbank
                 const { error: updateError } = await supabase
                   .from('matchdays')
                   .update({ 
-                    meeting_id: matchedMatch.meetingId,
-                    meeting_report_url: matchedMatch.meetingReportUrl || null
+                    meeting_id: bestCandidate.match.meetingId,
+                    meeting_report_url: bestCandidate.match.meetingReportUrl || null
                   })
                   .eq('id', matchday.id);
                 
                 if (updateError) {
                   failed++;
-                  errors.push({ matchdayId: matchday.id, error: updateError.message });
+                  errors.push({ 
+                    matchdayId: matchday.id, 
+                    error: `DB-Update fehlgeschlagen: ${updateError.message}`,
+                    details: { homeLabel, awayLabel, matchDate: matchDateKey }
+                  });
                 } else {
                   updated++;
-                  console.log(`✅ meeting_id ${matchedMatch.meetingId} für Matchday ${matchday.id} aktualisiert`);
+                  console.log(`✅ meeting_id ${bestCandidate.match.meetingId} für Matchday ${matchday.id} aktualisiert (Score: ${(bestCandidate.score * 100).toFixed(1)}%)`);
                 }
               } else {
+                // VERBESSERT: Detaillierte Fehlermeldung mit allen Kandidaten
+                const candidateInfo = candidates.slice(0, 3).map(c => 
+                  `"${c.scrapedHome}" vs "${c.scrapedAway}" (Score: ${(c.score * 100).toFixed(1)}%, Datum: ${c.date})`
+                ).join('; ');
+                
                 failed++;
+                const errorMsg = `Keine meeting_id gefunden`;
+                const errorDetails = {
+                  matchdayId: matchday.id,
+                  matchDate: matchDateKey,
+                  searchedHome: homeLabel,
+                  searchedAway: awayLabel,
+                  groupId: groupId,
+                  totalCandidates: candidates.length,
+                  bestCandidates: candidateInfo || 'Keine Kandidaten gefunden',
+                  availableMatches: groupDetail.matches.length,
+                  availableDates: [...new Set(groupDetail.matches.map(m => m.matchDateIso ? new Date(m.matchDateIso).toISOString().split('T')[0] : null).filter(Boolean))].join(', ')
+                };
+                
                 errors.push({ 
                   matchdayId: matchday.id, 
-                  error: `Keine meeting_id gefunden (Datum: ${matchDateKey}, Teams: ${homeLabel} vs ${awayLabel})` 
+                  error: errorMsg,
+                  details: errorDetails
                 });
+                
+                console.warn(`⚠️ Keine meeting_id gefunden für Matchday ${matchday.id}:`, errorDetails);
               }
               
               // Rate limiting
@@ -4349,13 +4413,35 @@ function SuperAdminDashboard() {
         }
       }
       
+      // VERBESSERT: Detaillierte Fehlermeldungen
+      const errorSummary = errors.length > 0 ? errors.map((e, idx) => {
+        if (e.details) {
+          const detailsStr = JSON.stringify(e.details).substring(0, 150);
+          return `${idx + 1}. ${e.matchdayId || e.groupId || 'Unbekannt'}: ${e.error}\n   Details: ${detailsStr}`;
+        }
+        return `${idx + 1}. ${e.matchdayId || e.groupId || 'Unbekannt'}: ${e.error}`;
+      }).join('\n') : '';
+      
       setMeetingIdUpdateResult({
         type: updated > 0 ? 'success' : 'warning',
-        message: `${updated} meeting_id${updated !== 1 ? 's' : ''} aktualisiert, ${failed} fehlgeschlagen.`,
+        message: `${updated} meeting_id${updated !== 1 ? 's' : ''} aktualisiert, ${failed} fehlgeschlagen.${failed > 0 ? ' Siehe Konsole für Details.' : ''}`,
         updated,
         failed,
-        errors: errors.slice(0, 10) // Zeige nur erste 10 Fehler
+        errors: errors.slice(0, 20), // Zeige erste 20 Fehler
+        errorSummary: errorSummary.substring(0, 3000) // Erste 3000 Zeichen der Zusammenfassung
       });
+      
+      // Logge alle Fehler in die Konsole für besseres Debugging
+      if (errors.length > 0) {
+        console.group(`❌ ${failed} meeting_id Updates fehlgeschlagen:`);
+        errors.forEach((e, idx) => {
+          console.error(`${idx + 1}. ${e.matchdayId || e.groupId || 'Unbekannt'}:`, e.error);
+          if (e.details) {
+            console.error('   Details:', e.details);
+          }
+        });
+        console.groupEnd();
+      }
       
       // Lade Daten neu
       await loadDashboardData();
