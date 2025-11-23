@@ -605,17 +605,19 @@ function ScraperTab({
         <div
           style={{
             marginTop: '1rem',
+            marginBottom: '1rem',
             padding: '1rem',
             background: matchImportResult.type === 'error' ? '#fee2e2' : matchImportResult.type === 'warning' ? '#fef3c7' : '#dcfce7',
             border: `1px solid ${matchImportResult.type === 'error' ? '#fecaca' : matchImportResult.type === 'warning' ? '#fde68a' : '#bbf7d0'}`,
             borderRadius: '8px',
-            color: matchImportResult.type === 'error' ? '#991b1b' : matchImportResult.type === 'warning' ? '#92400e' : '#166534'
+            color: matchImportResult.type === 'error' ? '#991b1b' : matchImportResult.type === 'warning' ? '#92400e' : '#166534',
+            order: -1 // ✅ Verschiebe nach oben
           }}
         >
-          <div style={{ fontWeight: 600, marginBottom: '0.5rem' }}>
-            {matchImportResult.type === 'error' ? '❌ Fehler' : matchImportResult.type === 'warning' ? '⚠️ Warnung' : '✅ Match-Import'}
+          <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '1rem' }}>
+            {matchImportResult.type === 'error' ? '❌ Fehler beim Match-Import' : matchImportResult.type === 'warning' ? '⚠️ Warnung beim Match-Import' : '✅ Match-Import erfolgreich'}
           </div>
-          <div>{matchImportResult.message}</div>
+          <div style={{ fontSize: '0.9rem', lineHeight: '1.5' }}>{matchImportResult.message}</div>
           
           {/* Zeige Matches mit fehlenden Teams */}
           {matchImportResult.meta?.matchIssues && matchImportResult.meta.matchIssues.filter(issue => issue.type === 'missing-team').length > 0 && (

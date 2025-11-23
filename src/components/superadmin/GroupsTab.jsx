@@ -556,13 +556,23 @@ function GroupsTab({
 
   const summarizeImportResult = (importResult = {}) => {
     const parts = [];
-    const matchTotal = (importResult.matchesImported || 0) + (importResult.matchesUpdated || 0);
-    if (matchTotal > 0) parts.push(`${matchTotal} Matches`);
-    if (importResult.matchResultsImported) parts.push(`${importResult.matchResultsImported} Ergebnisse`);
-    if (importResult.clubsCreated) parts.push(`${importResult.clubsCreated} Vereine`);
-    if (importResult.teamsCreated) parts.push(`${importResult.teamsCreated} Teams`);
-    if (importResult.teamSeasonsCreated) parts.push(`${importResult.teamSeasonsCreated} Team-Seasons`);
-    return parts.length > 0 ? parts.join(' · ') : 'Import abgeschlossen';
+    const matchesImported = importResult.matchesImported || 0;
+    const matchesUpdated = importResult.matchesUpdated || 0;
+    const matchTotal = matchesImported + matchesUpdated;
+    
+    // ✅ VERBESSERT: Klarere Meldungen
+    if (matchesImported > 0) parts.push(`${matchesImported} neue Matchdays`);
+    if (matchesUpdated > 0) parts.push(`${matchesUpdated} Matchdays aktualisiert`);
+    if (importResult.matchResultsImported > 0) parts.push(`${importResult.matchResultsImported} Match-Ergebnisse`);
+    if (importResult.clubsCreated > 0) parts.push(`${importResult.clubsCreated} Vereine erstellt`);
+    if (importResult.teamsCreated > 0) parts.push(`${importResult.teamsCreated} Teams erstellt`);
+    if (importResult.teamSeasonsCreated > 0) parts.push(`${importResult.teamSeasonsCreated} Team-Seasons erstellt`);
+    
+    if (importResult.errors && importResult.errors.length > 0) {
+      parts.push(`⚠️ ${importResult.errors.length} Fehler`);
+    }
+    
+    return parts.length > 0 ? parts.join(' · ') : 'Import abgeschlossen (keine Änderungen)';
   };
 
   const updateImportDetailStatus = (detailKey, status, summary = null) => {
@@ -761,25 +771,53 @@ function GroupsTab({
         sourceUrl
       );
 
-      // Zeige Ergebnis
-      const successMessage = [
-        `✅ Import abgeschlossen!`,
-        `${importResult.clubsCreated} Clubs erstellt`,
-        `${importResult.teamsCreated} Teams erstellt`,
-        `${importResult.teamSeasonsCreated} Team-Seasons erstellt`,
-        `${importResult.matchesImported} Matches importiert`,
-        `${importResult.matchesUpdated} Matches aktualisiert`,
-        `${importResult.matchResultsImported} Match-Results importiert`
-      ].filter(Boolean).join('\n');
+      // ✅ VERBESSERT: Zeige detailliertes Ergebnis
+      const successParts = [];
+      if (importResult.matchesImported > 0) {
+        successParts.push(`✅ ${importResult.matchesImported} neue Matchdays importiert`);
+      }
+      if (importResult.matchesUpdated > 0) {
+        successParts.push(`🔄 ${importResult.matchesUpdated} Matchdays aktualisiert`);
+      }
+      if (importResult.matchResultsImported > 0) {
+        successParts.push(`📊 ${importResult.matchResultsImported} Match-Ergebnisse importiert`);
+      }
+      if (importResult.clubsCreated > 0) {
+        successParts.push(`🏢 ${importResult.clubsCreated} Vereine erstellt`);
+      }
+      if (importResult.teamsCreated > 0) {
+        successParts.push(`👥 ${importResult.teamsCreated} Teams erstellt`);
+      }
+      if (importResult.teamSeasonsCreated > 0) {
+        successParts.push(`📅 ${importResult.teamSeasonsCreated} Team-Seasons erstellt`);
+      }
+      
+      const successMessage = successParts.length > 0 
+        ? `✅ Import erfolgreich!\n\n${successParts.join('\n')}`
+        : '✅ Import abgeschlossen (keine neuen Daten)';
 
       if (importResult.errors.length > 0) {
         const errorMessage = importResult.errors
-          .map(e => `- ${e.type}: ${e.error || e.message}`)
+          .slice(0, 10) // Zeige nur erste 10 Fehler
+          .map(e => `- ${e.type}: ${e.error || e.message || JSON.stringify(e)}`)
           .join('\n');
-        alert(`${successMessage}\n\n⚠️ Fehler:\n${errorMessage}`);
+        const moreErrors = importResult.errors.length > 10 ? `\n... und ${importResult.errors.length - 10} weitere Fehler` : '';
+        alert(`${successMessage}\n\n⚠️ Fehler (${importResult.errors.length}):\n${errorMessage}${moreErrors}`);
       } else {
         alert(successMessage);
       }
+      
+      // ✅ ZUSÄTZLICH: Logge detailliertes Ergebnis in Console
+      console.log('📊 Import-Ergebnis:', {
+        matchesImported: importResult.matchesImported,
+        matchesUpdated: importResult.matchesUpdated,
+        matchResultsImported: importResult.matchResultsImported,
+        clubsCreated: importResult.clubsCreated,
+        teamsCreated: importResult.teamsCreated,
+        teamSeasonsCreated: importResult.teamSeasonsCreated,
+        errors: importResult.errors.length,
+        group: group.groupName
+      });
 
       // Lade Gruppen-Details neu (WICHTIG: forceReload = true)
       await loadGroupDetails(group, true);
