@@ -319,7 +319,8 @@ export async function findMatchdaysWithoutResultsAfter4Days(supabase) {
   const now = new Date();
   const fourDaysAgo = new Date(now.getTime() - 4 * 24 * 60 * 60 * 1000);
   
-  // Finde alle Matches, die mehr als 4 Tage alt sind, aber noch keine Ergebnisse haben
+  // ✅ VERBESSERT: Finde alle Matches, die mehr als 4 Tage alt sind, aber noch keine Ergebnisse haben
+  // WICHTIG: Prüfe auch Matchdays OHNE meeting_id, wenn sie in der Vergangenheit liegen
   const { data, error } = await supabase
     .from('matchdays')
     .select(`
@@ -332,7 +333,7 @@ export async function findMatchdaysWithoutResultsAfter4Days(supabase) {
       home_team:home_team_id(id, club_name, team_name),
       away_team:away_team_id(id, club_name, team_name)
     `)
-    .not('meeting_id', 'is', null)
+    // ✅ ENTFERNT: .not('meeting_id', 'is', null) - prüfe auch Matchdays ohne meeting_id
     .lt('match_date', fourDaysAgo.toISOString())
     .order('match_date', { ascending: false });
   
@@ -344,21 +345,37 @@ export async function findMatchdaysWithoutResultsAfter4Days(supabase) {
   // Filtere nur die ohne Ergebnisse
   const matchdaysWithoutResults = [];
   for (const matchday of data || []) {
-    // Prüfe ob bereits Ergebnisse vorhanden sind
+    // ✅ VERBESSERT: Prüfe nicht nur ob Einträge existieren, sondern ob Ergebnisse vollständig sind
+    // Ein Ergebnis ist vollständig, wenn:
+    // 1. Es existiert
+    // 2. Es Spieler-IDs hat (home_player_id oder home_player1_id)
+    // 3. Es Set-Ergebnisse hat (set1_home und set1_guest)
     const { data: results, error: resultsError } = await supabase
       .from('match_results')
-      .select('id')
-      .eq('matchday_id', matchday.id)
-      .limit(1);
+      .select('id, home_player_id, home_player1_id, set1_home, set1_guest, status')
+      .eq('matchday_id', matchday.id);
     
     if (resultsError) {
       console.warn(`[autoMatchResultImport] Fehler beim Prüfen der Ergebnisse für ${matchday.id}:`, resultsError.message);
       continue;
     }
     
-    // Wenn bereits Ergebnisse vorhanden, überspringe
+    // ✅ VERBESSERT: Prüfe ob Ergebnisse vollständig sind
     if (results && results.length > 0) {
-      continue;
+      // Prüfe ob mindestens ein Ergebnis vollständig ist (hat Spieler UND Set-Ergebnisse)
+      const hasCompleteResults = results.some(r => {
+        const hasPlayers = r.home_player_id || r.home_player1_id;
+        const hasSets = r.set1_home !== null && r.set1_guest !== null;
+        return hasPlayers && hasSets;
+      });
+      
+      // Wenn vollständige Ergebnisse vorhanden sind, überspringe
+      if (hasCompleteResults) {
+        continue;
+      }
+      
+      // Wenn nur unvollständige Ergebnisse vorhanden sind, zähle als "ohne Ergebnisse"
+      console.log(`[autoMatchResultImport] ⚠️ Matchday ${matchday.id} hat ${results.length} unvollständige Ergebnisse`);
     }
     
     // Prüfe Anzahl der Versuche
