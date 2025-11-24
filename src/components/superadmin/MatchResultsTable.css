@@ -6,6 +6,8 @@
   background: #ffffff;
   margin-bottom: 1.5rem;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+  width: 100%;
+  max-width: 100%;
 }
 
 .match-results-table-title {
@@ -21,9 +23,11 @@
 
 .match-results-table-scroll {
   width: 100%;
+  max-width: 100%;
   overflow-x: auto;
   overflow-y: visible;
   -webkit-overflow-scrolling: touch;
+  position: relative;
 }
 
 .match-results-table {
@@ -31,6 +35,7 @@
   border-collapse: collapse;
   table-layout: fixed;
   min-width: 100%;
+  max-width: 100%;
 }
 
 .match-results-table th,
@@ -68,70 +73,140 @@
   background: #f8fafc;
 }
 
-/* Spaltenbreiten für iPad */
+/* Spaltenbreiten - Optimiert für verschiedene Bildschirmgrößen */
 .match-results-col-number {
-  width: 50px;
-  min-width: 50px;
-  max-width: 50px;
-  padding: 0.85rem 0.5rem !important;
+  width: 45px;
+  min-width: 45px;
+  max-width: 45px;
+  padding: 0.85rem 0.4rem !important;
   font-weight: 600;
   color: #64748b;
 }
 
 .match-results-col-players {
-  width: 220px;
-  min-width: 220px;
+  width: 180px;
+  min-width: 150px;
+  max-width: 200px;
   text-align: left !important;
-  padding: 1rem 1.1rem !important;
+  padding: 0.9rem 0.8rem !important;
 }
 
 .match-results-players-cell {
   color: #0f172a;
-  line-height: 1.7;
-  font-size: 1rem;
+  line-height: 1.6;
+  font-size: 0.95rem;
   font-weight: 500;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .match-results-col-set {
-  width: 100px;
-  min-width: 100px;
-  padding: 1rem 0.7rem !important;
+  width: 85px;
+  min-width: 75px;
+  max-width: 95px;
+  padding: 0.9rem 0.5rem !important;
   font-weight: 600;
-  font-size: 1rem;
+  font-size: 0.95rem;
   color: #334155;
 }
 
 .match-results-col-points {
-  width: 110px;
-  min-width: 110px;
-  padding: 1rem 0.8rem !important;
+  width: 95px;
+  min-width: 85px;
+  max-width: 105px;
+  padding: 0.9rem 0.6rem !important;
   font-weight: 700;
-  font-size: 1.05rem;
+  font-size: 1rem;
   color: #1d4ed8;
   background: #f0f9ff;
 }
 
-/* Responsive für kleinere iPads */
+/* Responsive für Tablets */
 @media screen and (max-width: 1024px) {
   .match-results-table th,
   .match-results-table td {
-    padding: 0.75rem 0.7rem;
-    font-size: 0.85rem;
+    padding: 0.75rem 0.6rem;
+    font-size: 0.9rem;
+  }
+
+  .match-results-col-number {
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    padding: 0.75rem 0.3rem !important;
   }
 
   .match-results-col-players {
-    width: 180px;
-    min-width: 180px;
+    width: 160px;
+    min-width: 140px;
+    max-width: 180px;
+    padding: 0.75rem 0.7rem !important;
+  }
+
+  .match-results-players-cell {
+    font-size: 0.9rem;
+    line-height: 1.5;
   }
 
   .match-results-col-set {
-    width: 80px;
-    min-width: 80px;
+    width: 75px;
+    min-width: 70px;
+    max-width: 85px;
+    padding: 0.75rem 0.4rem !important;
+    font-size: 0.9rem;
   }
 
   .match-results-col-points {
-    width: 90px;
-    min-width: 90px;
+    width: 85px;
+    min-width: 80px;
+    max-width: 95px;
+    padding: 0.75rem 0.5rem !important;
+    font-size: 0.95rem;
+  }
+}
+
+/* Responsive für Mobile */
+@media screen and (max-width: 768px) {
+  .match-results-table th,
+  .match-results-table td {
+    padding: 0.6rem 0.4rem;
+    font-size: 0.85rem;
+  }
+
+  .match-results-col-number {
+    width: 35px;
+    min-width: 35px;
+    max-width: 35px;
+    padding: 0.6rem 0.25rem !important;
+    font-size: 0.8rem;
+  }
+
+  .match-results-col-players {
+    width: 140px;
+    min-width: 120px;
+    max-width: 160px;
+    padding: 0.6rem 0.5rem !important;
+  }
+
+  .match-results-players-cell {
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
+
+  .match-results-col-set {
+    width: 65px;
+    min-width: 60px;
+    max-width: 75px;
+    padding: 0.6rem 0.3rem !important;
+    font-size: 0.85rem;
+  }
+
+  .match-results-col-points {
+    width: 75px;
+    min-width: 70px;
+    max-width: 85px;
+    padding: 0.6rem 0.4rem !important;
+    font-size: 0.9rem;
   }
 }
 
