@@ -53,7 +53,8 @@ const getDefaultBuildInfo = () => {
 };
 
 const splitTeamLabel = (value = '') => {
-  const trimmed = value.trim();
+  // Safeguard against null/undefined values coming from Supabase rows
+  const trimmed = typeof value === 'string' ? value.trim() : String(value || '').trim();
   if (!trimmed) return { clubName: '', suffix: null };
   const match = trimmed.match(/^(.*?)(?:\s+([IVXLCM]+|\d+))$/iu);
   if (!match) return { clubName: trimmed, suffix: null };
@@ -204,6 +205,39 @@ const extractMeetingMeta = (match) => {
   }
 
   return meta;
+};
+
+/**
+ * Normalisiert Kategorien: "Damen 1/2/3" → "Damen", "Herren 1/2/3" → "Herren"
+ * Altersklassen (30+) bleiben unverändert: "Damen 30" → "Damen 30", "Herren 40" → "Herren 40"
+ */
+const normalizeCategory = (category) => {
+  if (!category || typeof category !== 'string') {
+    return category;
+  }
+  
+  const trimmed = category.trim();
+  
+  // Prüfe ob es eine Mannschaftsnummer ist (1, 2, 3) oder eine Altersklasse (30+)
+  // Pattern: "Damen 1", "Damen 2", "Damen 3" → "Damen"
+  // Pattern: "Herren 1", "Herren 2", "Herren 3" → "Herren"
+  // Pattern: "Damen 30", "Herren 40" etc. → unverändert (Altersklassen)
+  const match = trimmed.match(/^(Damen|Herren)\s+(\d+)$/i);
+  
+  if (match) {
+    const gender = match[1]; // "Damen" oder "Herren"
+    const number = parseInt(match[2], 10);
+    
+    // Wenn die Zahl 1, 2 oder 3 ist → Mannschaftsnummer, normalisiere zu "Damen" oder "Herren"
+    if (number >= 1 && number <= 3) {
+      return gender;
+    }
+    // Wenn die Zahl >= 30 ist → Altersklasse, behalte unverändert
+    // (z.B. "Damen 30", "Herren 40", "Herren 50")
+  }
+  
+  // Keine Normalisierung nötig oder Pattern nicht erkannt
+  return trimmed;
 };
 
 const resolveGroupId = (value) => {
@@ -2600,14 +2634,25 @@ function SuperAdminDashboard() {
               // Köln-Leverkusen Ligen verwenden championship=Köln-Leverkusen+Winter+2025%2F2026
               baseUrl = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026';
               
+              // ✅ Normalisiere Liga-Name: "Damen 1/2/3" → "Damen", "Herren 1/2/3" → "Herren"
+              // Extrahiere Kategorie aus Liga-Name für Tab-Bestimmung
+              const categoryMatch = league.match(/(Damen|Herren)(?:\s+(\d+))?/i);
+              let categoryForTab = categoryMatch ? categoryMatch[1] : '';
+              if (categoryMatch && categoryMatch[2]) {
+                const number = parseInt(categoryMatch[2], 10);
+                // Wenn Zahl >= 30 → Altersklasse, sonst Mannschaftsnummer (1-3)
+                if (number >= 30) {
+                  categoryForTab = `${categoryMatch[1]} ${number}`;
+                }
+              }
+              
               // Bestimme Tab basierend auf Altersklasse:
               // - "Herren 30/40/50/55/60/65/70" = Senioren (tab=3)
               // - "Herren" (ohne Altersklasse) = Offene Herren (tab=2)
-              // - "Herren 1/2/3" = Mannschaftsnummern, KEINE Altersklassen!
+              // - "Herren 1/2/3" = Mannschaftsnummern, KEINE Altersklassen! → "Herren" (tab=2)
               // - "Damen 30/40/50/55/60" = Senioren (tab=3)
               // - "Damen" (ohne Altersklasse) = Offene Damen (tab=2)
-              // Pattern erkennt nur Altersklassen ab 30, nicht Mannschaftsnummern 1/2/3
-              if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(league)) {
+              if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(categoryForTab)) {
                 tab = 3; // Senioren
               } else {
                 tab = 2; // Offene Herren/Damen
@@ -2638,8 +2683,11 @@ function SuperAdminDashboard() {
                     .maybeSingle();
                   
                   if (teamInfo?.category) {
+                    // ✅ Normalisiere Kategorie: "Damen 1/2/3" → "Damen", "Herren 1/2/3" → "Herren"
+                    const normalizedCategory = normalizeCategory(teamInfo.category);
+                    
                     // Bestimme Tab basierend auf Kategorie: "Herren 30/40/50/etc." = Senioren (tab=3)
-                    if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(teamInfo.category)) {
+                    if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(normalizedCategory)) {
                       tab = 3; // Senioren
                     } else {
                       tab = 2; // Offene Herren/Damen
@@ -2697,9 +2745,9 @@ function SuperAdminDashboard() {
           leagueUrl: tryUrl
         };
         
-        const response = await fetch('/api/import/scrape-nuliga', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+    const response = await fetch('/api/import/scrape-nuliga', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
         
@@ -2717,7 +2765,7 @@ function SuperAdminDashboard() {
           continue; // Versuche nächste URL
         }
         
-        if (!response.ok || !result?.success) {
+    if (!response.ok || !result?.success) {
           lastError = new Error(result?.error || `Scraper antwortete ohne Erfolg (HTTP ${response.status}).`);
           continue; // Versuche nächste URL
         }
@@ -3994,14 +4042,25 @@ function SuperAdminDashboard() {
           // Köln-Leverkusen Ligen verwenden championship=Köln-Leverkusen+Winter+2025%2F2026
           baseUrl = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026';
           
+          // ✅ Normalisiere Liga-Name: "Damen 1/2/3" → "Damen", "Herren 1/2/3" → "Herren"
+          // Extrahiere Kategorie aus Liga-Name für Tab-Bestimmung
+          const categoryMatch = league.match(/(Damen|Herren)(?:\s+(\d+))?/i);
+          let categoryForTab = categoryMatch ? categoryMatch[1] : '';
+          if (categoryMatch && categoryMatch[2]) {
+            const number = parseInt(categoryMatch[2], 10);
+            // Wenn Zahl >= 30 → Altersklasse, sonst Mannschaftsnummer (1-3)
+            if (number >= 30) {
+              categoryForTab = `${categoryMatch[1]} ${number}`;
+            }
+          }
+          
           // Bestimme Tab basierend auf Altersklasse:
           // - "Herren 30/40/50/55/60/65/70" = Senioren (tab=3)
           // - "Herren" (ohne Altersklasse) = Offene Herren (tab=2)
-          // - "Herren 1/2/3" = Mannschaftsnummern, KEINE Altersklassen!
+          // - "Herren 1/2/3" = Mannschaftsnummern, KEINE Altersklassen! → "Herren" (tab=2)
           // - "Damen 30/40/50/55/60" = Senioren (tab=3)
           // - "Damen" (ohne Altersklasse) = Offene Damen (tab=2)
-          // Pattern erkennt nur Altersklassen ab 30, nicht Mannschaftsnummern 1/2/3
-          if (league && /Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(league)) {
+          if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(categoryForTab)) {
             tab = 3; // Senioren
           } else {
             tab = 2; // Offene Herren/Damen
@@ -4031,8 +4090,11 @@ function SuperAdminDashboard() {
                 .maybeSingle();
               
               if (teamInfo?.category) {
+                // ✅ Normalisiere Kategorie: "Damen 1/2/3" → "Damen", "Herren 1/2/3" → "Herren"
+                const normalizedCategory = normalizeCategory(teamInfo.category);
+                
                 // Bestimme Tab basierend auf Kategorie: "Herren 30/40/50/etc." = Senioren (tab=3)
-                if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(teamInfo.category)) {
+                if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(normalizedCategory)) {
                   tab = 3; // Senioren
                 } else {
                   tab = 2; // Offene Herren/Damen

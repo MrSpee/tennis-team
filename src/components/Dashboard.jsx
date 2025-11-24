@@ -154,6 +154,7 @@ function Dashboard() {
 
   // 🎾 Auto-Import von Match-Ergebnissen (Empfehlung 3)
   // Watcher-System: Prüft täglich einmal Matches der letzten 4 Tage
+  // ✅ OPTIMIERT: Läuft im Hintergrund, blockiert nicht das UI
   useEffect(() => {
     if (!player || !currentUser) return; // Nur für eingeloggte User
     
@@ -166,7 +167,7 @@ function Dashboard() {
       return;
     }
     
-    // Führe Import nach 5 Sekunden aus (damit Dashboard geladen ist)
+    // ✅ LAZY LOADING: Führe Import im Hintergrund aus, blockiert nicht das UI
     const runDailyImport = async () => {
       try {
         console.log('[Dashboard] Starte täglichen Match-Ergebnis-Watcher...');
@@ -183,10 +184,22 @@ function Dashboard() {
       }
     };
     
-    const initialTimeout = setTimeout(runDailyImport, 5000);
+    // ✅ OPTIMIERT: Verwende requestIdleCallback für bessere Performance
+    // Falls nicht verfügbar, verwende setTimeout mit 0 (asynchron, blockiert nicht)
+    const scheduleImport = () => {
+      if ('requestIdleCallback' in window) {
+        requestIdleCallback(runDailyImport, { timeout: 10000 }); // Max. 10 Sekunden warten
+      } else {
+        // Fallback: setTimeout mit 0 - läuft asynchron nach dem ersten Render
+        setTimeout(runDailyImport, 0);
+      }
+    };
+    
+    // Warte auf ersten Render, dann starte im Hintergrund
+    scheduleImport();
     
     return () => {
-      clearTimeout(initialTimeout);
+      // Cleanup: Kein expliziter Cleanup nötig, da asynchron
     };
   }, [player, currentUser]);
 

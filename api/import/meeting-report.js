@@ -248,6 +248,39 @@ function determineMatchWinner(setScores = [], matchPoints = null) {
   return null;
 }
 
+/**
+ * Normalisiert Kategorien: "Damen 1/2/3" → "Damen", "Herren 1/2/3" → "Herren"
+ * Altersklassen (30+) bleiben unverändert: "Damen 30" → "Damen 30", "Herren 40" → "Herren 40"
+ */
+function normalizeCategory(category) {
+  if (!category || typeof category !== 'string') {
+    return category;
+  }
+  
+  const trimmed = category.trim();
+  
+  // Prüfe ob es eine Mannschaftsnummer ist (1, 2, 3) oder eine Altersklasse (30+)
+  // Pattern: "Damen 1", "Damen 2", "Damen 3" → "Damen"
+  // Pattern: "Herren 1", "Herren 2", "Herren 3" → "Herren"
+  // Pattern: "Damen 30", "Herren 40" etc. → unverändert (Altersklassen)
+  const match = trimmed.match(/^(Damen|Herren)\s+(\d+)$/i);
+  
+  if (match) {
+    const gender = match[1]; // "Damen" oder "Herren"
+    const number = parseInt(match[2], 10);
+    
+    // Wenn die Zahl 1, 2 oder 3 ist → Mannschaftsnummer, normalisiere zu "Damen" oder "Herren"
+    if (number >= 1 && number <= 3) {
+      return gender;
+    }
+    // Wenn die Zahl >= 30 ist → Altersklasse, behalte unverändert
+    // (z.B. "Damen 30", "Herren 40", "Herren 50")
+  }
+  
+  // Keine Normalisierung nötig oder Pattern nicht erkannt
+  return trimmed;
+}
+
 function normalizeLk(value) {
   if (!value) return null;
   const text = String(value).trim().replace(',', '.');
@@ -1259,14 +1292,25 @@ module.exports = async function handler(req, res) {
               // Köln-Leverkusen Ligen verwenden championship=Köln-Leverkusen+Winter+2025%2F2026
               baseUrl = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026';
               
+              // ✅ Normalisiere Liga-Name: "Damen 1/2/3" → "Damen", "Herren 1/2/3" → "Herren"
+              // Extrahiere Kategorie aus Liga-Name für Tab-Bestimmung
+              const categoryMatch = league.match(/(Damen|Herren)(?:\s+(\d+))?/i);
+              let categoryForTab = categoryMatch ? categoryMatch[1] : '';
+              if (categoryMatch && categoryMatch[2]) {
+                const number = parseInt(categoryMatch[2], 10);
+                // Wenn Zahl >= 30 → Altersklasse, sonst Mannschaftsnummer (1-3)
+                if (number >= 30) {
+                  categoryForTab = `${categoryMatch[1]} ${number}`;
+                }
+              }
+              
               // Bestimme Tab basierend auf Altersklasse:
               // - "Herren 30/40/50/55/60/65/70" = Senioren (tab=3)
               // - "Herren" (ohne Altersklasse) = Offene Herren (tab=2)
-              // - "Herren 1/2/3" = Mannschaftsnummern, KEINE Altersklassen!
+              // - "Herren 1/2/3" = Mannschaftsnummern, KEINE Altersklassen! → "Herren" (tab=2)
               // - "Damen 30/40/50/55/60" = Senioren (tab=3)
               // - "Damen" (ohne Altersklasse) = Offene Damen (tab=2)
-              // Pattern erkennt nur Altersklassen ab 30, nicht Mannschaftsnummern 1/2/3
-              if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(league)) {
+              if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(categoryForTab)) {
                 tab = 3; // Senioren
               } else {
                 tab = 2; // Offene Herren/Damen
@@ -1297,8 +1341,11 @@ module.exports = async function handler(req, res) {
                     .maybeSingle();
                   
                   if (teamInfo?.category) {
+                    // ✅ Normalisiere Kategorie: "Damen 1/2/3" → "Damen", "Herren 1/2/3" → "Herren"
+                    const normalizedCategory = normalizeCategory(teamInfo.category);
+                    
                     // Bestimme Tab basierend auf Kategorie: "Herren 30/40/50/etc." = Senioren (tab=3)
-                    if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(teamInfo.category)) {
+                    if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(normalizedCategory)) {
                       tab = 3; // Senioren
                     } else {
                       tab = 2; // Offene Herren/Damen
