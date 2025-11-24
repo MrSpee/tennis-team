@@ -4386,12 +4386,20 @@ function SuperAdminDashboard() {
                   const dateMatch = mDate === matchDateKey;
                   const hasMeetingId = !!m.meetingId;
                   
-                  // Match-Score: Datum muss stimmen, mindestens ein Team muss ähnlich sein (>0.7)
-                  const score = dateMatch && hasMeetingId 
-                    ? Math.max(
-                        (homeSimilarity + awaySimilarity) / 2, // Normale Zuordnung
-                        (homeSimilarityReversed + awaySimilarityReversed) / 2 // Vertauschte Zuordnung
-                      )
+                  // ✅ VERBESSERT: Match-Score berechnen
+                  // Priorität 1: Exakte Matches (100% Similarity) - auch ohne meeting_id akzeptieren
+                  // Priorität 2: Matches mit meeting_id und hoher Similarity (>0.7)
+                  const normalScore = (homeSimilarity + awaySimilarity) / 2;
+                  const reversedScore = (homeSimilarityReversed + awaySimilarityReversed) / 2;
+                  const maxScore = Math.max(normalScore, reversedScore);
+                  
+                  // Score: Datum muss immer stimmen
+                  // Wenn exakt (100% Similarity), akzeptiere auch ohne meeting_id
+                  // Sonst nur mit meeting_id
+                  const score = dateMatch 
+                    ? (maxScore >= 0.99 && !hasMeetingId) 
+                      ? maxScore * 0.95 // Exakte Matches ohne meeting_id: leicht reduzierter Score
+                      : (hasMeetingId ? maxScore : 0) // Mit meeting_id: normaler Score, ohne: 0 (außer exakt)
                     : 0;
                   
                   return {
@@ -4408,32 +4416,81 @@ function SuperAdminDashboard() {
                     scrapedAway: m.awayTeam
                   };
                 })
-                .filter(c => c.dateMatch && c.hasMeetingId) // Nur Kandidaten mit passendem Datum und meeting_id
-                .sort((a, b) => b.score - a.score); // Sortiere nach Score (beste zuerst)
+                .filter(c => c.dateMatch) // ✅ Datum muss stimmen, meeting_id ist optional für exakte Matches
+                .sort((a, b) => {
+                  // Sortiere: Zuerst nach Score, dann bevorzuge Matches mit meeting_id
+                  if (Math.abs(a.score - b.score) > 0.01) {
+                    return b.score - a.score;
+                  }
+                  // Bei gleichem Score: bevorzuge Matches mit meeting_id
+                  if (a.hasMeetingId !== b.hasMeetingId) {
+                    return a.hasMeetingId ? -1 : 1;
+                  }
+                  return 0;
+                });
               
-              // Bestes Match finden (Score > 0.7)
-              const bestCandidate = candidates.find(c => c.score > 0.7);
+              // ✅ VERBESSERT: Bestes Match finden
+              // Akzeptiere exakte Matches (Score >= 0.95) auch ohne meeting_id
+              // Oder Matches mit meeting_id und Score > 0.7
+              const bestCandidate = candidates.find(c => 
+                (c.score >= 0.95) || // Exakte Matches (auch ohne meeting_id)
+                (c.hasMeetingId && c.score > 0.7) // Matches mit meeting_id und hoher Similarity
+              );
               
-              if (bestCandidate && bestCandidate.match.meetingId) {
-                // Aktualisiere meeting_id in der Datenbank
-                const { error: updateError } = await supabase
-                  .from('matchdays')
-                  .update({ 
-                    meeting_id: bestCandidate.match.meetingId,
-                    meeting_report_url: bestCandidate.match.meetingReportUrl || null
-                  })
-                  .eq('id', matchday.id);
-                
-                if (updateError) {
+              // ✅ VERBESSERT: Akzeptiere auch Matches ohne meeting_id, wenn sie exakt sind
+              if (bestCandidate) {
+                if (bestCandidate.match.meetingId) {
+                  // Match hat meeting_id → aktualisiere direkt
+                  const { error: updateError } = await supabase
+                    .from('matchdays')
+                    .update({ 
+                      meeting_id: bestCandidate.match.meetingId,
+                      meeting_report_url: bestCandidate.match.meetingReportUrl || null
+                    })
+                    .eq('id', matchday.id);
+                  
+                  if (updateError) {
+                    failed++;
+                    errors.push({ 
+                      matchdayId: matchday.id, 
+                      error: `DB-Update fehlgeschlagen: ${updateError.message}`,
+                      details: { homeLabel, awayLabel, matchDate: matchDateKey }
+                    });
+                  } else {
+                    updated++;
+                    console.log(`✅ meeting_id ${bestCandidate.match.meetingId} für Matchday ${matchday.id} aktualisiert (Score: ${(bestCandidate.score * 100).toFixed(1)}%)`);
+                  }
+                } else if (bestCandidate.score >= 0.95) {
+                  // ✅ Match gefunden, aber noch keine meeting_id (exakte Übereinstimmung)
+                  // Speichere match_number für spätere Zuordnung
+                  const updateData = {};
+                  if (bestCandidate.match.matchNumber) {
+                    // Speichere match_number in notes oder einem anderen Feld für spätere Zuordnung
+                    // Oder wir können es einfach loggen und später manuell aktualisieren
+                    console.log(`ℹ️ Match gefunden (Score: ${(bestCandidate.score * 100).toFixed(1)}%), aber noch keine meeting_id. Match Number: ${bestCandidate.match.matchNumber}`);
+                    console.log(`   Matchday ID: ${matchday.id}, ${homeLabel} vs. ${awayLabel}, Datum: ${matchDateKey}`);
+                  }
+                  
+                  // Markiere als "gefunden, aber noch ohne meeting_id" - nicht als Fehler
+                  // Das Match existiert in nuLiga, hat aber noch keine meeting_id (noch nicht gespielt/Ergebnisse nicht eingetragen)
+                  console.log(`✅ Match gefunden für Matchday ${matchday.id}, aber noch keine meeting_id verfügbar (Match existiert in nuLiga, Status: ${bestCandidate.match.status || 'scheduled'})`);
+                  
+                  // Zähle als "gefunden, aber ohne meeting_id" - nicht als Fehler
+                  // Diese Matches können später aktualisiert werden, wenn die meeting_id verfügbar wird
+                } else {
+                  // Match gefunden, aber Score zu niedrig und keine meeting_id
                   failed++;
                   errors.push({ 
                     matchdayId: matchday.id, 
-                    error: `DB-Update fehlgeschlagen: ${updateError.message}`,
-                    details: { homeLabel, awayLabel, matchDate: matchDateKey }
+                    error: `Match gefunden, aber Score zu niedrig (${(bestCandidate.score * 100).toFixed(1)}% < 95%) und keine meeting_id`,
+                    details: { 
+                      homeLabel, 
+                      awayLabel, 
+                      matchDate: matchDateKey,
+                      foundMatch: `${bestCandidate.scrapedHome} vs. ${bestCandidate.scrapedAway}`,
+                      score: bestCandidate.score
+                    }
                   });
-                } else {
-                  updated++;
-                  console.log(`✅ meeting_id ${bestCandidate.match.meetingId} für Matchday ${matchday.id} aktualisiert (Score: ${(bestCandidate.score * 100).toFixed(1)}%)`);
                 }
               } else {
                 // VERBESSERT: Detaillierte Fehlermeldung mit allen Kandidaten
