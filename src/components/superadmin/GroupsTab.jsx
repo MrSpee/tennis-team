@@ -7,6 +7,39 @@ import './GroupsTab.css';
 
 const FINISHED_STATUSES = ['completed'];
 
+/**
+ * Normalisiert Kategorien: "Damen 1/2/3" → "Damen", "Herren 1/2/3" → "Herren"
+ * Altersklassen (30+) bleiben unverändert: "Damen 30" → "Damen 30", "Herren 40" → "Herren 40"
+ */
+const normalizeCategory = (category) => {
+  if (!category || typeof category !== 'string') {
+    return category;
+  }
+  
+  const trimmed = category.trim();
+  
+  // Prüfe ob es eine Mannschaftsnummer ist (1, 2, 3) oder eine Altersklasse (30+)
+  // Pattern: "Damen 1", "Damen 2", "Damen 3" → "Damen"
+  // Pattern: "Herren 1", "Herren 2", "Herren 3" → "Herren"
+  // Pattern: "Damen 30", "Herren 40" etc. → unverändert (Altersklassen)
+  const match = trimmed.match(/^(Damen|Herren)\s+(\d+)$/i);
+  
+  if (match) {
+    const gender = match[1]; // "Damen" oder "Herren"
+    const number = parseInt(match[2], 10);
+    
+    // Wenn die Zahl 1, 2 oder 3 ist → Mannschaftsnummer, normalisiere zu "Damen" oder "Herren"
+    if (number >= 1 && number <= 3) {
+      return gender;
+    }
+    // Wenn die Zahl >= 30 ist → Altersklasse, behalte unverändert
+    // (z.B. "Damen 30", "Herren 40", "Herren 50")
+  }
+  
+  // Keine Normalisierung nötig oder Pattern nicht erkannt
+  return trimmed;
+};
+
 // Sync-Prüfung: Prüfe ob alle abgeschlossenen Matches match_results haben MIT Spieler-IDs
 const checkMatchResultsSync = (matchdays, matchResults) => {
   const finishedMatches = matchdays.filter(m => 
@@ -163,7 +196,8 @@ function GroupsTab({
     (teamSeasons || []).forEach((ts) => {
       if (!ts.is_active || !ts.season || !ts.league || !ts.group_name) return;
 
-      const category = ts.team_info?.category || 'Unbekannt';
+      const rawCategory = ts.team_info?.category || 'Unbekannt';
+      const category = normalizeCategory(rawCategory); // Normalisiere Kategorie
       const league = ts.league || 'Unbekannt';
       const groupName = ts.group_name || 'Unbekannt';
       const season = ts.season || 'Unbekannt';
@@ -1325,8 +1359,9 @@ function GroupsTab({
         return;
       }
 
-      // WICHTIG: Kategorie aus dem Scraped-Team oder Group-Header
-      const expectedCategory = scrapedTeam.category || group?.category || null;
+      // WICHTIG: Kategorie aus dem Scraped-Team oder Group-Header (normalisiert)
+      const rawExpectedCategory = scrapedTeam.category || group?.category || null;
+      const expectedCategory = rawExpectedCategory ? normalizeCategory(rawExpectedCategory) : null;
       
       // Suche Team in DB - ZUERST in der aktuellen Gruppe (mit Kategorie-Prüfung)
       const teamKey = `${normalizeString(dbClub.name || '')}_${normalizeString(teamSuffix)}`;
@@ -1335,8 +1370,8 @@ function GroupsTab({
       // VALIDIERUNG: Prüfe ob gefundenes Team die richtige Kategorie hat
       let wrongCategoryTeam = null;
       if (dbTeam && expectedCategory) {
-        const teamCategory = normalizeString(dbTeam.category || '');
-        const groupCategory = normalizeString(expectedCategory);
+        const teamCategory = normalizeCategory(dbTeam.category || '');
+        const groupCategory = normalizeCategory(expectedCategory);
         if (teamCategory && groupCategory && teamCategory !== groupCategory) {
           // Kategorie stimmt nicht - Team ist falsch zugeordnet!
           console.warn(`⚠️ Team "${dbTeam.club_name} ${dbTeam.team_name}" hat falsche Kategorie: ${dbTeam.category} (erwartet: ${expectedCategory})`);
@@ -1358,9 +1393,9 @@ function GroupsTab({
         });
 
         if (expectedCategory) {
-          const normalizedExpectedCategory = normalizeString(expectedCategory);
+          const normalizedExpectedCategory = normalizeCategory(expectedCategory);
           dbTeam = candidateTeams.find((team) => {
-            const teamCategory = normalizeString(team.category || '');
+            const teamCategory = normalizeCategory(team.category || '');
             return teamCategory === normalizedExpectedCategory;
           });
         } else {
@@ -1485,8 +1520,9 @@ function GroupsTab({
             return null;
           }
 
-          // WICHTIG: Kategorie aus Group-Kontext verwenden
-          const expectedCategory = group?.category || null;
+          // WICHTIG: Kategorie aus Group-Kontext verwenden (normalisiert)
+          const rawExpectedCategory = group?.category || null;
+          const expectedCategory = rawExpectedCategory ? normalizeCategory(rawExpectedCategory) : null;
 
           // WICHTIG: Filtere zuerst nach Club, dann nach Team-Name, dann nach Kategorie
           // Das stellt sicher, dass wir das Team mit der RICHTIGEN Kategorie finden
@@ -1504,10 +1540,10 @@ function GroupsTab({
           // Wenn mehrere Teams mit gleichem Namen existieren, wähle das mit der richtigen Kategorie
           let dbTeam = null;
           if (expectedCategory) {
-            const normalizedExpectedCategory = normalizeString(expectedCategory);
+            const normalizedExpectedCategory = normalizeCategory(expectedCategory);
             // Priorität 1: Team mit exakt passender Kategorie
             dbTeam = candidateTeams.find((team) => {
-              const teamCategory = normalizeString(team.category || '');
+              const teamCategory = normalizeCategory(team.category || '');
               return teamCategory === normalizedExpectedCategory;
             });
             
@@ -1899,7 +1935,9 @@ function GroupsTab({
             return;
           }
 
-          if (teamCheck.category !== selectedGroup.category) {
+          const normalizedTeamCategory = normalizeCategory(teamCheck.category || '');
+          const normalizedGroupCategory = normalizeCategory(selectedGroup.category || '');
+          if (normalizedTeamCategory !== normalizedGroupCategory) {
             console.error(`❌ Team hat Kategorie "${teamCheck.category}", aber Gruppe erfordert "${selectedGroup.category}"!`);
             return;
           }
@@ -2023,8 +2061,10 @@ function GroupsTab({
 
         let teamId;
         if (existingTeam) {
-          // VALIDIERUNG: Prüfe ob Kategorie übereinstimmt
-          if (existingTeam.category !== requiredCategory) {
+          // VALIDIERUNG: Prüfe ob Kategorie übereinstimmt (normalisiert)
+          const normalizedExistingCategory = normalizeCategory(existingTeam.category || '');
+          const normalizedRequiredCategory = normalizeCategory(requiredCategory || '');
+          if (normalizedExistingCategory !== normalizedRequiredCategory) {
             console.error(`❌ Team "${existingTeam.club_name} ${existingTeam.team_name}" hat Kategorie "${existingTeam.category}", aber Gruppe erfordert "${requiredCategory}"!`);
             return;
           }
@@ -2142,9 +2182,9 @@ function GroupsTab({
             const normalizedScrapedSuffix = normalizeString(teamSuffix);
             const teamNameMatch = normalizedDbTeam === normalizedScrapedSuffix;
             
-            // WICHTIG: Prüfe auch Kategorie-Übereinstimmung
+            // WICHTIG: Prüfe auch Kategorie-Übereinstimmung (normalisiert)
             if (requiredCategory && team.category) {
-              const categoryMatch = normalizeString(team.category) === normalizeString(requiredCategory);
+              const categoryMatch = normalizeCategory(team.category) === normalizeCategory(requiredCategory);
               return teamNameMatch && categoryMatch;
             }
             
@@ -2441,11 +2481,11 @@ function GroupsTab({
             })
             .filter(Boolean);
           
-          // VALIDIERUNG: Prüfe ob alle Teams die richtige Kategorie haben
+          // VALIDIERUNG: Prüfe ob alle Teams die richtige Kategorie haben (normalisiert)
           if (group.category) {
             const categoryMismatches = updatedTeams.filter(team => {
-              const teamCategory = normalizeString(team.category || '');
-              const groupCategory = normalizeString(group.category);
+              const teamCategory = normalizeCategory(team.category || '');
+              const groupCategory = normalizeCategory(group.category);
               return teamCategory && groupCategory && teamCategory !== groupCategory;
             });
             

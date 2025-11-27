@@ -446,14 +446,14 @@
 }
 
 .matchday-meeting-section {
-  margin-top: 1.25rem;
-  padding: 1rem 1.2rem;
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
-  border-radius: 14px;
+  border-radius: 10px;
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 0.5rem;
   width: 100%;
   max-width: 100%;
   overflow: hidden;
@@ -469,15 +469,15 @@
 }
 
 .matchday-meeting-title {
-  font-size: 1rem;
+  font-size: 0.9rem;
   font-weight: 700;
   color: #0f172a;
 }
 
 .matchday-meeting-meta {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: #475569;
-  margin-top: 0.15rem;
+  margin-top: 0.1rem;
 }
 
 .matchday-meeting-actions {
@@ -500,7 +500,7 @@
 .matchday-meeting-content {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 0.5rem;
   width: 100%;
   max-width: 100%;
   overflow: hidden;

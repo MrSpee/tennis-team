@@ -987,47 +987,67 @@ function SuperAdminDashboard() {
 
       setStats(derivedStats);
 
-      // Lade Matches ohne Ergebnisse nach 4 Tagen (für Warnung)
-      try {
-        const missingResults = await findMatchdaysWithoutResultsAfter4Days(supabase);
-        setMatchdaysWithoutResults(missingResults || []);
-      } catch (error) {
-        console.warn('⚠️ Fehler beim Laden der Matches ohne Ergebnisse:', error);
-        setMatchdaysWithoutResults([]);
-      }
+      // ✅ LAZY LOADING: Lade Matches ohne Ergebnisse im Hintergrund, blockiert nicht das UI
+      const loadMissingResults = async () => {
+        try {
+          const missingResults = await findMatchdaysWithoutResultsAfter4Days(supabase);
+          setMatchdaysWithoutResults(missingResults || []);
+        } catch (error) {
+          console.warn('⚠️ Fehler beim Laden der Matches ohne Ergebnisse:', error);
+          setMatchdaysWithoutResults([]);
+        }
+      };
       
-      // Lade auch Matchdays ohne meeting_id (für Update-Funktion)
-      try {
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const { data: matchdaysWithoutMeetingId } = await supabase
-          .from('matchdays')
-          .select('id, match_date, meeting_id, source_url, source_type, group_name, match_results(count)')
-          .lt('match_date', today.toISOString())
-          .order('match_date', { ascending: false })
-          .limit(100);
-        
-        // Filtere nur die ohne Detailsergebnisse
-        const withoutResults = (matchdaysWithoutMeetingId || []).filter(md => {
-          const resultsCount = Array.isArray(md.match_results) && md.match_results.length 
-            ? md.match_results[0]?.count || 0 
-            : 0;
-          return resultsCount === 0;
-        });
-        
-        // Speichere in State für Update-Funktion (nur IDs und source_url)
-        setMatchdaysNeedingMeetingIdUpdate(withoutResults.map(md => ({
-          id: md.id,
-          match_date: md.match_date,
-          meeting_id: md.meeting_id,
-          source_url: md.source_url,
-          source_type: md.source_type,
-          group_name: md.group_name
-        })));
-      } catch (error) {
-        console.warn('⚠️ Fehler beim Laden der Matchdays ohne meeting_id:', error);
-        setMatchdaysNeedingMeetingIdUpdate([]);
-      }
+      // ✅ LAZY LOADING: Lade Matchdays ohne meeting_id im Hintergrund
+      const loadMatchdaysWithoutMeetingId = async () => {
+        try {
+          const now = new Date();
+          const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          const { data: matchdaysWithoutMeetingId } = await supabase
+            .from('matchdays')
+            .select('id, match_date, meeting_id, source_url, source_type, group_name, match_results(count)')
+            .lt('match_date', today.toISOString())
+            .order('match_date', { ascending: false })
+            .limit(100);
+          
+          // Filtere nur die ohne Detailsergebnisse
+          const withoutResults = (matchdaysWithoutMeetingId || []).filter(md => {
+            const resultsCount = Array.isArray(md.match_results) && md.match_results.length 
+              ? md.match_results[0]?.count || 0 
+              : 0;
+            return resultsCount === 0;
+          });
+          
+          // Speichere in State für Update-Funktion (nur IDs und source_url)
+          setMatchdaysNeedingMeetingIdUpdate(withoutResults.map(md => ({
+            id: md.id,
+            match_date: md.match_date,
+            meeting_id: md.meeting_id,
+            source_url: md.source_url,
+            source_type: md.source_type,
+            group_name: md.group_name
+          })));
+        } catch (error) {
+          console.warn('⚠️ Fehler beim Laden der Matchdays ohne meeting_id:', error);
+          setMatchdaysNeedingMeetingIdUpdate([]);
+        }
+      };
+      
+      // ✅ OPTIMIERT: Verwende requestIdleCallback für bessere Performance
+      // Falls nicht verfügbar, verwende setTimeout mit 0 (asynchron, blockiert nicht)
+      const scheduleBackgroundLoads = () => {
+        if ('requestIdleCallback' in window) {
+          requestIdleCallback(loadMissingResults, { timeout: 5000 });
+          requestIdleCallback(loadMatchdaysWithoutMeetingId, { timeout: 5000 });
+        } else {
+          // Fallback: setTimeout mit 0 - läuft asynchron nach dem ersten Render
+          setTimeout(loadMissingResults, 0);
+          setTimeout(loadMatchdaysWithoutMeetingId, 0);
+        }
+      };
+      
+      // Starte Hintergrund-Ladevorgänge
+      scheduleBackgroundLoads();
     } catch (error) {
       console.error('❌ Fehler beim Laden des Dashboards:', error);
     } finally {

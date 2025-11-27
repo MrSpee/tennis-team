@@ -20,6 +20,15 @@ function MatchResultsTable({ title, entries }) {
       <div className="match-results-table-title">{title}</div>
       <div className="match-results-table-scroll">
         <table className="match-results-table">
+          <colgroup>
+            <col className="match-results-col-number" />
+            <col className="match-results-col-players" />
+            <col className="match-results-col-players" />
+            <col className="match-results-col-set" />
+            <col className="match-results-col-set" />
+            <col className="match-results-col-set" />
+            <col className="match-results-col-points" />
+          </colgroup>
           <thead>
             <tr>
               <th className="match-results-col-number">#</th>
