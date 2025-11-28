@@ -72,6 +72,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   transition: all 0.3s ease;
+  cursor: pointer;
+  user-select: none;
+}
+
+.app-title:hover {
+  opacity: 0.9;
+  transform: scale(1.02);
 }
 
 .app-sub {

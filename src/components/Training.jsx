@@ -50,11 +50,39 @@ function Training() {
     if (players && players.length > 0) {
       setRotationList(prev => {
         const updated = prev.map(rotPlayer => {
-          const found = players.find(p => p.name === rotPlayer.name);
+          // Suche nach exaktem Namen (case-insensitive)
+          let found = players.find(p => p.name && p.name.toLowerCase().trim() === rotPlayer.name.toLowerCase().trim());
+          
+          // Falls nicht gefunden, versuche Fuzzy-Match (enthält den Namen)
+          if (!found) {
+            found = players.find(p => p.name && 
+              (p.name.toLowerCase().includes(rotPlayer.name.toLowerCase()) || 
+               rotPlayer.name.toLowerCase().includes(p.name.toLowerCase()))
+            );
+          }
+          
+          if (!found) {
+            console.warn(`⚠️ Rotation: Spieler "${rotPlayer.name}" nicht in players-Liste gefunden!`);
+            console.warn(`   Verfügbare Spieler:`, players.map(p => p.name).slice(0, 10).join(', '));
+          } else {
+            console.log(`✅ Rotation: "${rotPlayer.name}" → ID: ${found.id} (${found.name})`);
+          }
+          
           return found ? { ...rotPlayer, id: found.id } : rotPlayer;
         });
+        
+        // Filtere Spieler ohne ID aus und warne
+        const playersWithoutId = updated.filter(p => !p.id);
+        if (playersWithoutId.length > 0) {
+          console.warn(`⚠️ Rotation: ${playersWithoutId.length} Spieler ohne ID gefunden:`, 
+            playersWithoutId.map(p => p.name).join(', '));
+          console.warn(`⚠️ Diese Spieler werden in der Rotation übersprungen!`);
+        }
+        
         return updated;
       });
+    } else {
+      console.warn('⚠️ Rotation: players-Liste ist leer oder nicht geladen!');
     }
   }, [players]); // eslint-disable-next-line react-hooks/exhaustive-deps
   
@@ -240,6 +268,7 @@ function Training() {
       const playerTeamIds = userTeams.map(t => t.id);
       console.log('🔒 Loading trainings for player teams:', playerTeamIds);
 
+      // Lade nur zukünftige Trainings für die Anzeige
       let teamTrainings = [];
       let teamError = null;
       
@@ -248,7 +277,7 @@ function Training() {
           .from('training_sessions')
           .select(`*, organizer:organizer_id (id, name, profile_image)`)
           .in('team_id', playerTeamIds)
-          .gte('date', new Date().toISOString())
+          .gte('date', new Date().toISOString()) // Nur zukünftige Trainings
           .order('date', { ascending: true });
         
         teamTrainings = data;
@@ -262,7 +291,7 @@ function Training() {
         .select(`*, organizer:organizer_id (id, name, profile_image)`)
         .is('team_id', null)
         .eq('type', 'private')
-        .gte('date', new Date().toISOString())
+        .gte('date', new Date().toISOString()) // Nur zukünftige Trainings
         .order('date', { ascending: true });
 
       if (privateError) throw privateError;
@@ -276,12 +305,82 @@ function Training() {
 
       const sessionsData = [...(teamTrainings || []), ...(filteredPrivate || [])];
 
+      // Lade Attendance für zukünftige Trainings (für Anzeige)
+      const futureTrainingIds = sessionsData.map(t => t.id);
       const { data: attendanceData, error: attendanceError } = await supabase
         .from('training_attendance')
-        .select('*');
+        .select(`
+          *,
+          player:players_unified!training_attendance_player_id_fkey (
+            id,
+            name,
+            current_lk,
+            season_start_lk
+          )
+        `)
+        .in('session_id', futureTrainingIds.length > 0 ? futureTrainingIds : ['00000000-0000-0000-0000-000000000000']); // Dummy-ID wenn keine Trainings
 
       if (attendanceError) throw attendanceError;
 
+      // Lade auch vergangene Trainings für Rotation-Berechnung (letzten 30 Tage)
+      // WICHTIG: Diese werden NICHT im UI angezeigt, nur für Rotation-Berechnung verwendet
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      
+      let pastTrainingsForRotation = [];
+      if (playerTeamIds.length > 0) {
+        const { data: pastTeamTrainings } = await supabase
+          .from('training_sessions')
+          .select(`*, organizer:organizer_id (id, name, profile_image)`)
+          .in('team_id', playerTeamIds)
+          .gte('date', thirtyDaysAgo.toISOString())
+          .lt('date', new Date().toISOString()) // Nur vergangene Trainings
+          .order('date', { ascending: true });
+        
+        pastTrainingsForRotation = pastTeamTrainings || [];
+      }
+
+      const { data: pastPrivateTrainings } = await supabase
+        .from('training_sessions')
+        .select(`*, organizer:organizer_id (id, name, profile_image)`)
+        .is('team_id', null)
+        .eq('type', 'private')
+        .gte('date', thirtyDaysAgo.toISOString())
+        .lt('date', new Date().toISOString()) // Nur vergangene Trainings
+        .order('date', { ascending: true });
+
+      const filteredPastPrivate = (pastPrivateTrainings || []).filter(pt => {
+        const isOrganizer = pt.organizer_id === player?.id;
+        const isInvited = pt.invited_players?.includes(player?.id);
+        return isOrganizer || isInvited;
+      });
+
+      const allPastTrainingsForRotation = [...pastTrainingsForRotation, ...filteredPastPrivate];
+      const pastTrainingIds = allPastTrainingsForRotation.map(t => t.id);
+
+      // Lade Attendance für vergangene Trainings (für Rotation-Berechnung)
+      let pastAttendanceData = [];
+      if (pastTrainingIds.length > 0) {
+        const { data: pastAttendance } = await supabase
+          .from('training_attendance')
+          .select(`
+            *,
+            player:players_unified!training_attendance_player_id_fkey (
+              id,
+              name,
+              current_lk,
+              season_start_lk
+            )
+          `)
+          .in('session_id', pastTrainingIds);
+        
+        pastAttendanceData = pastAttendance || [];
+      }
+
+      // Kombiniere Attendance-Daten
+      const allAttendanceData = [...(attendanceData || []), ...pastAttendanceData];
+
+      // Zukünftige Trainings mit Attendance (für Anzeige)
       const trainingsWithAttendance = (sessionsData || []).map(session => {
         const attendance = (attendanceData || []).filter(a => a.session_id === session.id);
         const myAttendance = attendance.find(a => a.player_id === player?.id);
@@ -297,13 +396,46 @@ function Training() {
         };
       });
 
+      // Vergangene Trainings mit Attendance (nur für Rotation-Berechnung, nicht für Anzeige)
+      const pastTrainingsWithAttendance = (allPastTrainingsForRotation || []).map(session => {
+        const attendance = (pastAttendanceData || []).filter(a => a.session_id === session.id);
+        const myAttendance = attendance.find(a => a.player_id === player?.id);
+        
+        const confirmed = attendance.filter(a => a.status === 'confirmed').length;
+        const declined = attendance.filter(a => a.status === 'declined').length;
+
+        return {
+          ...session,
+          attendance,
+          myAttendance,
+          stats: { confirmed, declined, pending: 0 }
+        };
+      });
+
+      // Setze nur zukünftige Trainings für UI-Anzeige
       setTrainings(trainingsWithAttendance);
+      
+      // Speichere vergangene Trainings separat für Rotation-Berechnung
+      // Diese werden in calculateRotationIndexForTraining verwendet
+      window.__pastTrainingsForRotation = pastTrainingsWithAttendance;
     } catch (error) {
       console.error('Error loading trainings:', error);
     } finally {
       setLoading(false);
     }
   };
+
+  const resolvePlayerInfo = useCallback(
+    (attendanceEntry) => {
+      if (!attendanceEntry) return null;
+      return (
+        (players || []).find((pl) => pl.id === attendanceEntry.player_id) ||
+        attendanceEntry.player ||
+        null
+      );
+    },
+    [players]
+  );
 
   // Schließe Dropdown wenn außerhalb geklickt wird
   useEffect(() => {
@@ -407,7 +539,15 @@ function Training() {
       if (pastIds.length > 0) {
         const { data: attendanceData } = await supabase
           .from('training_attendance')
-          .select('*')
+          .select(`
+            *,
+            player:players_unified!training_attendance_player_id_fkey (
+              id,
+              name,
+              current_lk,
+              season_start_lk
+            )
+          `)
           .in('session_id', pastIds);
 
         const pastWithAttendance = allPastTrainings.map(training => {
@@ -1114,23 +1254,47 @@ Wir sehen uns auf dem Platz! 🎾`;
   };
 
   // Berechne Rotation-Index für ein Training basierend auf allen Trainings vor ihm
+  // WICHTIG: Rotation bei ≥5 Anmeldungen (wie in RoundRobinPlan.jsx)
+  // Dies ist die PLANUNGS-Logik, nicht die Realität (Warteliste)
   const calculateRotationIndexForTraining = (targetTraining, allTrainings) => {
+    // Kombiniere zukünftige Trainings (aus allTrainings) mit vergangenen Trainings (für Rotation-Berechnung)
+    // WICHTIG: Vergangene Trainings werden NICHT im UI angezeigt, nur für Rotation-Berechnung verwendet
+    const pastTrainingsForRotation = window.__pastTrainingsForRotation || [];
+    const allTrainingsIncludingPast = [...pastTrainingsForRotation, ...allTrainings];
+    
     // Nur Trainings vor dem Ziel-Training
-    const beforeTrainings = allTrainings.filter(t => new Date(t.date) < new Date(targetTraining.date));
+    const beforeTrainings = allTrainingsIncludingPast.filter(t => new Date(t.date) < new Date(targetTraining.date));
+    
+    // WICHTIG: Verwende nur Spieler mit ID für die Rotation
+    const playersWithId = rotationList.filter(p => p.id !== null && p.id !== undefined);
+    const rotationSize = playersWithId.length || 5; // Fallback auf 5 wenn keine IDs gefunden
     
     let currentIndex = 0;
     
+    console.log(`🔄 Berechne Rotation für Training am ${new Date(targetTraining.date).toLocaleDateString('de-DE')}:`);
+    console.log(`   Rotation-Größe: ${rotationSize} (${playersWithId.map(p => p.name).join(', ')})`);
+    console.log(`   Trainings vor diesem: ${beforeTrainings.length}`);
+    
     // Durchlaufe alle Trainings vor dem Ziel
-    beforeTrainings.forEach(prevTraining => {
+    beforeTrainings.forEach((prevTraining, idx) => {
       const prevAttendance = prevTraining.attendance || [];
       const prevConfirmed = prevAttendance.filter(a => a.status === 'confirmed').length;
       
-      // Bei ≥5 Anmeldungen: Rotation weiter
+      const oldIndex = currentIndex;
+      
+      // WICHTIG: Rotation bei ≥5 Anmeldungen (wie RoundRobinPlan.jsx)
+      // Dies ist die PLANUNGS-Logik: Wer SOLLTE aussetzen, nicht wer tatsächlich ausgesetzt hat
       if (prevConfirmed >= 5) {
-        currentIndex = (currentIndex + 1) % 5;
+        currentIndex = (currentIndex + 1) % rotationSize;
+        const setter = playersWithId[currentIndex] || rotationList[currentIndex];
+        console.log(`   Training ${idx + 1} (${new Date(prevTraining.date).toLocaleDateString('de-DE')}): ${prevConfirmed} confirmed → Rotation! Index: ${oldIndex} → ${currentIndex} (${setter?.name || 'N/A'})`);
+      } else {
+        console.log(`   Training ${idx + 1} (${new Date(prevTraining.date).toLocaleDateString('de-DE')}): ${prevConfirmed} confirmed → Keine Rotation. Index bleibt: ${currentIndex}`);
       }
-      // Bei <5: Index bleibt gleich
     });
+    
+    const finalSetter = playersWithId[currentIndex] || rotationList[currentIndex];
+    console.log(`   ✅ Finaler Index: ${currentIndex} → ${finalSetter?.name || 'N/A'} sollte aussetzen`);
     
     return currentIndex;
   };
@@ -1227,22 +1391,25 @@ Wir sehen uns auf dem Platz! 🎾`;
             {training.attendance && training.attendance.some(a => a.comment) && (
               <div style={{ marginTop: '0.75rem' }}>
                 {training.attendance
-                  .filter(a => a.comment)
-                  .map(a => {
-                    const player = players.find(p => p.id === a.player_id);
-                    if (!player) return null;
-                    
+                  .filter((a) => a.comment)
+                  .map((a) => {
+                    const playerInfo = resolvePlayerInfo(a);
+                    const displayName = playerInfo?.name || 'Unbekannter Spieler';
+
                     return (
-                      <div key={a.id} style={{
-                        padding: '0.5rem 0.75rem',
-                        background: '#f0f9ff',
-                        border: '1px solid #bae6fd',
-                        borderRadius: '8px',
-                        fontSize: '0.85rem',
-                        marginBottom: '0.5rem'
-                      }}>
+                      <div
+                        key={a.id}
+                        style={{
+                          padding: '0.5rem 0.75rem',
+                          background: '#f0f9ff',
+                          border: '1px solid #bae6fd',
+                          borderRadius: '8px',
+                          fontSize: '0.85rem',
+                          marginBottom: '0.5rem'
+                        }}
+                      >
                         <span style={{ fontWeight: '600', color: '#0369a1' }}>
-                          💬 {player.name}:
+                          💬 {displayName}:
                         </span>
                         <span style={{ color: '#0c4a6e', marginLeft: '0.5rem' }}>
                           &ldquo;{a.comment}&rdquo;
@@ -1557,12 +1724,13 @@ Wir sehen uns auf dem Platz! 🎾`;
                   ✅ Dabei ({canPlay.length}/{training.max_players})
                 </h4>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  {canPlay.map(a => {
-                    const p = players.find(pl => pl.id === a.player_id);
-                    if (!p) return null;
-                    
+                  {canPlay.map((a) => {
+                    const playerInfo = resolvePlayerInfo(a);
+                    const displayName = playerInfo?.name || 'Unbekannter Spieler';
+                    const lkValue = playerInfo?.current_lk ?? playerInfo?.season_start_lk;
+
                     return (
-                      <span 
+                      <span
                         key={a.id}
                         style={{
                           padding: '0.5rem 0.75rem',
@@ -1577,7 +1745,7 @@ Wir sehen uns auf dem Platz! 🎾`;
                           gap: '0.25rem'
                         }}
                       >
-                        {p.name} {p.current_lk && `(${p.current_lk})`}
+                        {displayName} {lkValue ? `(${lkValue})` : ''}
                       </span>
                     );
                   })}
@@ -1599,12 +1767,13 @@ Wir sehen uns auf dem Platz! 🎾`;
                   ⏳ Warteliste ({waitlist.length})
                 </h4>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  {waitlist.map(a => {
-                    const p = players.find(pl => pl.id === a.player_id);
-                    if (!p) return null;
-                    
+                  {waitlist.map((a) => {
+                    const playerInfo = resolvePlayerInfo(a);
+                    const displayName = playerInfo?.name || 'Unbekannter Spieler';
+                    const lkValue = playerInfo?.current_lk ?? playerInfo?.season_start_lk;
+
                     return (
-                      <span 
+                      <span
                         key={a.id}
                         style={{
                           padding: '0.5rem 0.75rem',
@@ -1619,7 +1788,7 @@ Wir sehen uns auf dem Platz! 🎾`;
                           gap: '0.25rem'
                         }}
                       >
-                        {p.name} {p.current_lk && `(${p.current_lk})`}
+                        {displayName} {lkValue ? `(${lkValue})` : ''}
                       </span>
                     );
                   })}
@@ -1642,13 +1811,14 @@ Wir sehen uns auf dem Platz! 🎾`;
                 </h4>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                   {training.attendance
-                    .filter(a => a.status === 'declined')
-                    .map(a => {
-                      const player = players.find(p => p.id === a.player_id);
-                      if (!player) return null;
-                      
+                    .filter((a) => a.status === 'declined')
+                    .map((a) => {
+                      const playerInfo = resolvePlayerInfo(a);
+                      const displayName = playerInfo?.name || 'Unbekannter Spieler';
+                      const lkValue = playerInfo?.current_lk ?? playerInfo?.season_start_lk;
+
                       return (
-                        <span 
+                        <span
                           key={a.id}
                           style={{
                             padding: '0.5rem 0.75rem',
@@ -1663,7 +1833,7 @@ Wir sehen uns auf dem Platz! 🎾`;
                             gap: '0.25rem'
                           }}
                         >
-                          {player.name} {player.current_lk && `(${player.current_lk})`}
+                          {displayName} {lkValue ? `(${lkValue})` : ''}
                         </span>
                       );
                     })}
@@ -1703,12 +1873,13 @@ Wir sehen uns auf dem Platz! 🎾`;
                       }
                       return !status || status === 'pending';
                     })
-                    .map(a => {
-                      const player = players.find(p => p.id === a.player_id);
-                      if (!player) return null;
-                      
+                    .map((a) => {
+                      const playerInfo = resolvePlayerInfo(a);
+                      const displayName = playerInfo?.name || 'Unbekannter Spieler';
+                      const lkValue = playerInfo?.current_lk ?? playerInfo?.season_start_lk;
+
                       return (
-                        <span 
+                        <span
                           key={a.id}
                           style={{
                             padding: '0.5rem 0.75rem',
@@ -1723,7 +1894,7 @@ Wir sehen uns auf dem Platz! 🎾`;
                             gap: '0.25rem'
                           }}
                         >
-                          {player.name} {player.current_lk && `(${player.current_lk})`}
+                          {displayName} {lkValue ? `(${lkValue})` : ''}
                         </span>
                       );
                     })}

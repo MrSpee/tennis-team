@@ -59,7 +59,14 @@ export default function Header() {
     <header className={`app-header${compact ? " is-compact" : ""}`} role="banner">
       <div className="bar">
         <div className="title-block">
-          <h1 className="app-title">Platzhirsch</h1>
+          <h1 
+            className="app-title" 
+            onClick={() => navigate('/')}
+            style={{ cursor: 'pointer' }}
+            title="Zur Startseite"
+          >
+            Platzhirsch
+          </h1>
           <p className="app-sub">Deine Matches, Dein Team, Dein Tennis.</p>
         </div>
         <div className="header-right">

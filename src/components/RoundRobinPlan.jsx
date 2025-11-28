@@ -37,11 +37,40 @@ function RoundRobinPlan() {
   // Lade Spieler-IDs für Rotation
   useEffect(() => {
     if (players && players.length > 0) {
-      const updated = rotationList.map(rotPlayer => {
-        const found = players.find(p => p.name === rotPlayer.name);
-        return found ? { ...rotPlayer, id: found.id } : rotPlayer;
+      setRotationList(prev => {
+        const updated = prev.map(rotPlayer => {
+          // Suche nach exaktem Namen (case-insensitive)
+          let found = players.find(p => p.name && p.name.toLowerCase().trim() === rotPlayer.name.toLowerCase().trim());
+          
+          // Falls nicht gefunden, versuche Fuzzy-Match (enthält den Namen)
+          if (!found) {
+            found = players.find(p => p.name && 
+              (p.name.toLowerCase().includes(rotPlayer.name.toLowerCase()) || 
+               rotPlayer.name.toLowerCase().includes(p.name.toLowerCase()))
+            );
+          }
+          
+          if (!found) {
+            console.warn(`⚠️ RoundRobinPlan: Spieler "${rotPlayer.name}" nicht in players-Liste gefunden!`);
+          } else {
+            console.log(`✅ RoundRobinPlan: "${rotPlayer.name}" → ID: ${found.id} (${found.name})`);
+          }
+          
+          return found ? { ...rotPlayer, id: found.id } : rotPlayer;
+        });
+        
+        // Filtere Spieler ohne ID aus und warne
+        const playersWithoutId = updated.filter(p => !p.id);
+        if (playersWithoutId.length > 0) {
+          console.warn(`⚠️ RoundRobinPlan: ${playersWithoutId.length} Spieler ohne ID gefunden:`, 
+            playersWithoutId.map(p => p.name).join(', '));
+          console.warn(`⚠️ Diese Spieler werden in der Rotation übersprungen!`);
+        }
+        
+        return updated;
       });
-      setRotationList(updated);
+    } else {
+      console.warn('⚠️ RoundRobinPlan: players-Liste ist leer oder nicht geladen!');
     }
   }, [players]); // eslint-disable-line react-hooks/exhaustive-deps
   
@@ -278,10 +307,25 @@ function RoundRobinPlan() {
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                         <span style={{ color: '#9ca3af', fontSize: '0.8rem', fontStyle: 'italic' }}>
-                          Aussetzer: {rotationList[plan.currentRotationIndex]?.name.split(' ')[0] || 'N/A'}
+                          Aussetzer: {(() => {
+                            const playersWithId = rotationList.filter(p => p.id !== null && p.id !== undefined);
+                            const rotationSize = playersWithId.length || 5;
+                            const currentPlayer = playersWithId.length > 0 
+                              ? playersWithId[plan.currentRotationIndex % playersWithId.length]
+                              : rotationList[plan.currentRotationIndex];
+                            return currentPlayer?.name.split(' ')[0] || 'N/A';
+                          })()}
                         </span>
                         <span style={{ color: '#9ca3af', fontSize: '0.8rem', fontStyle: 'italic' }}>
-                          Nächster: {rotationList[(plan.currentRotationIndex + 1) % 5]?.name.split(' ')[0] || 'N/A'}
+                          Nächster: {(() => {
+                            const playersWithId = rotationList.filter(p => p.id !== null && p.id !== undefined);
+                            const rotationSize = playersWithId.length || 5;
+                            const nextIndex = (plan.currentRotationIndex + 1) % rotationSize;
+                            const nextPlayer = playersWithId.length > 0 
+                              ? playersWithId[nextIndex % playersWithId.length]
+                              : rotationList[nextIndex];
+                            return nextPlayer?.name.split(' ')[0] || 'N/A';
+                          })()}
                         </span>
                       </div>
                     )}

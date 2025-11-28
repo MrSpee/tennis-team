@@ -24,12 +24,34 @@ export const calculateSimpleRotation = (training, attendance, currentRotationInd
   // Bei <5: Niemand muss aussetzen
   const shouldSitOut = confirmedCount >= 5;
   
-  const setter = shouldSitOut ? rotationList[currentRotationIndex] : null;
+  // WICHTIG: Nur Spieler mit ID können aussetzen
+  // Wenn der aktuelle Spieler keine ID hat, suche den nächsten Spieler mit ID
+  let setter = null;
+  if (shouldSitOut) {
+    // Filtere nur Spieler mit ID aus der Rotation-Liste
+    const playersWithId = rotationList.filter(p => p.id !== null && p.id !== undefined);
+    
+    if (playersWithId.length === 0) {
+      // Keine Spieler mit ID in der Rotation-Liste
+      setter = null;
+    } else {
+      // Finde den Index des aktuellen Spielers in der Liste der Spieler mit ID
+      const currentPlayer = rotationList[currentRotationIndex];
+      let effectiveIndex = playersWithId.findIndex(p => p.id === currentPlayer?.id);
+      
+      // Wenn der aktuelle Spieler keine ID hat, nimm den ersten Spieler mit ID
+      if (effectiveIndex === -1) {
+        effectiveIndex = 0;
+      }
+      
+      setter = playersWithId[effectiveIndex];
+    }
+  }
   
   return {
     setter,
     confirmedCount,
-    shouldRotate: shouldSitOut // Rotation nur bei ≥5
+    shouldRotate: shouldSitOut && setter !== null // Rotation nur bei ≥5 UND wenn ein Spieler mit ID gefunden wurde
   };
 };
 
@@ -50,8 +72,12 @@ export const calculateTrainingParticipants = (training, attendance, currentRotat
     rotationList
   );
   
-  // Nächster Rotation-Index
-  const nextIndex = shouldRotate ? ((currentRotationIndex + 1) % 5) : currentRotationIndex;
+  // WICHTIG: Verwende nur Spieler mit ID für die Rotation
+  const playersWithId = rotationList.filter(p => p.id !== null && p.id !== undefined);
+  const rotationSize = playersWithId.length || 5; // Fallback auf 5 wenn keine IDs gefunden
+  
+  // Nächster Rotation-Index (basierend auf tatsächlicher Anzahl Spieler mit ID)
+  const nextIndex = shouldRotate ? ((currentRotationIndex + 1) % rotationSize) : currentRotationIndex;
   
   const confirmed = attendance.filter(a => a.status === 'confirmed');
   
