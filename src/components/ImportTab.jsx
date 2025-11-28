@@ -1725,24 +1725,45 @@ const ImportTab = () => {
           
           // 2. season_start_lk: IMMER aus Meldeliste übernehmen (das ist die Saison-Start-LK!)
           if (normalizedLK) {
-            // Die LK aus der Meldeliste ist die season_start_lk
-            updateData.season_start_lk = normalizedLK;
+            // ✅ NEU: Prüfe zuerst, ob die neue season_start_lk höher ist als current_lk
+            // Wenn ja, korrigiere automatisch (die Meldeliste hat wahrscheinlich eine falsche LK)
+            const { checkSeasonStartLKInconsistency } = await import('../lib/lkUtils');
+            const inconsistencyCheck = checkSeasonStartLKInconsistency(
+              normalizedLK,
+              existingPlayer.current_lk,
+              1.0 // Threshold: 1.0 LK-Punkte
+            );
+
+            if (inconsistencyCheck.needsCorrection && existingPlayer.current_lk) {
+              // Die neue season_start_lk wäre höher als current_lk - das ist verdächtig
+              // Verwende stattdessen current_lk als season_start_lk (realistischer)
+              console.log(`  ⚠️ season_start_lk aus Meldeliste (${normalizedLK}) ist höher als current_lk (${existingPlayer.current_lk}). ` +
+                `Korrigiere automatisch auf ${inconsistencyCheck.correctedSeasonStartLK}`);
+              updateWarnings.push(
+                `⚠️ season_start_lk aus Meldeliste (${normalizedLK}) wurde automatisch korrigiert auf ${inconsistencyCheck.correctedSeasonStartLK}, ` +
+                `da current_lk (${existingPlayer.current_lk}) niedriger ist. Dies kann passieren, wenn die Meldeliste eine veraltete LK enthält.`
+              );
+              updateData.season_start_lk = inconsistencyCheck.correctedSeasonStartLK;
+            } else {
+              // Die LK aus der Meldeliste ist die season_start_lk
+              updateData.season_start_lk = normalizedLK;
+            }
             
-            // 3. Prüfe Abweichung zwischen current_lk und season_start_lk
+            // 3. Prüfe Abweichung zwischen current_lk und season_start_lk (für Warnung)
             let needsConfirmation = false;
             if (existingPlayer.current_lk) {
               const { calculateLKChange, parseLK } = await import('../lib/lkUtils');
               const currentLKValue = parseLK(existingPlayer.current_lk);
-              const seasonStartLKValue = parseLK(normalizedLK);
+              const seasonStartLKValue = parseLK(updateData.season_start_lk); // Verwende korrigierten Wert
               const difference = Math.abs(currentLKValue - seasonStartLKValue);
               
               // Warnung wenn Abweichung > 2.0
               if (difference > 2.0) {
-                const change = calculateLKChange(normalizedLK, existingPlayer.current_lk);
+                const change = calculateLKChange(updateData.season_start_lk, existingPlayer.current_lk);
                 const changeText = change > 0 ? `+${change.toFixed(1)}` : change.toFixed(1);
                 updateWarnings.push(
-                  `⚠️ Große LK-Abweichung: current_lk (${existingPlayer.current_lk}) weicht stark von season_start_lk (${normalizedLK}) ab (${changeText}). ` +
-                  `Die season_start_lk wird auf ${normalizedLK} aktualisiert.`
+                  `⚠️ Große LK-Abweichung: current_lk (${existingPlayer.current_lk}) weicht stark von season_start_lk (${updateData.season_start_lk}) ab (${changeText}). ` +
+                  `Die season_start_lk wird auf ${updateData.season_start_lk} aktualisiert.`
                 );
                 
                 // ✅ NEU: Bestätigungsdialog bei sehr großen Abweichungen (> 3.0)
@@ -1756,10 +1777,10 @@ const ImportTab = () => {
             // Standard: current_lk bleibt unverändert, nur season_start_lk wird aktualisiert
             // ABER: Wenn current_lk fehlt, setze es auf season_start_lk
             if (!existingPlayer.current_lk || existingPlayer.current_lk === 'LK 25.0' || existingPlayer.current_lk === null) {
-              updateData.current_lk = normalizedLK;
-              console.log(`  ✅ current_lk gesetzt (war leer/Default): ${normalizedLK}`);
+              updateData.current_lk = updateData.season_start_lk; // Verwende korrigierten Wert
+              console.log(`  ✅ current_lk gesetzt (war leer/Default): ${updateData.current_lk}`);
             } else {
-              console.log(`  ℹ️ current_lk bleibt unverändert: ${existingPlayer.current_lk} (season_start_lk wird auf ${normalizedLK} aktualisiert)`);
+              console.log(`  ℹ️ current_lk bleibt unverändert: ${existingPlayer.current_lk} (season_start_lk wird auf ${updateData.season_start_lk} aktualisiert)`);
             }
             
             // ✅ NEU: Wenn Bestätigung nötig, speichere für später
@@ -2015,11 +2036,59 @@ const ImportTab = () => {
         }
       }
 
+      // ✅ NEU: Globale Prüfung und Korrektur von season_start_lk Inkonsistenzen
+      let correctedCount = 0;
+      try {
+        const { correctSeasonStartLKForPlayers } = await import('../lib/lkUtils');
+        
+        // Lade alle Spieler, die gerade importiert/aktualisiert wurden
+        const importedPlayerIds = [
+          ...playersToImport.filter(p => p.matchResult?.playerId).map(p => p.matchResult.playerId),
+          ...(await Promise.all(
+            playersToImport
+              .filter(p => !p.matchResult?.playerId)
+              .map(async (p) => {
+                // Finde neu erstellte Spieler
+                const { data } = await supabase
+                  .from('players_unified')
+                  .select('id')
+                  .eq('name', p.name)
+                  .eq('tvm_id_number', p.id_number)
+                  .order('created_at', { ascending: false })
+                  .limit(1)
+                  .single();
+                return data?.id;
+              })
+          )).filter(Boolean)
+        ];
+
+        if (importedPlayerIds.length > 0) {
+          // Lade Spieler-Daten
+          const { data: importedPlayers, error: loadError } = await supabase
+            .from('players_unified')
+            .select('id, name, current_lk, season_start_lk')
+            .in('id', importedPlayerIds);
+
+          if (!loadError && importedPlayers && importedPlayers.length > 0) {
+            const corrections = await correctSeasonStartLKForPlayers(importedPlayers, supabase, 1.0);
+            correctedCount = corrections.length;
+            
+            if (correctedCount > 0) {
+              console.log(`✅ ${correctedCount} Spieler mit inkonsistenter season_start_lk automatisch korrigiert`);
+            }
+          }
+        }
+      } catch (correctionError) {
+        console.warn('⚠️ Fehler bei automatischer season_start_lk Korrektur:', correctionError);
+        // Nicht kritisch - nur warnen
+      }
+
       setImportStats({
         total: playersToImport.length,
         created,
         updated,
-        skipped
+        skipped,
+        corrected: correctedCount
       });
 
       // Erstelle Erfolgsmeldung mit Warnungen
@@ -2027,6 +2096,10 @@ const ImportTab = () => {
         `🆕 ${created} neue Spieler erstellt\n` +
         `🔄 ${updated} Spieler aktualisiert\n` +
         `⏭️ ${skipped} übersprungen`;
+      
+      if (correctedCount > 0) {
+        successMessage += `\n\n✅ ${correctedCount} Spieler mit inkonsistenter season_start_lk automatisch korrigiert`;
+      }
       
       if (lkWarnings.length > 0) {
         successMessage += `\n\n⚠️ ${lkWarnings.length} LK-Warnung(en):\n`;
@@ -4169,10 +4242,18 @@ Die KI erkennt automatisch:
                 <span className="stat-value">⏭️ {importStats.skipped}</span>
               </div>
             )}
-            <div className="stat-item info">
-              <span className="stat-label">Kosten:</span>
-              <span className="stat-value">💰 {importStats.cost}</span>
-            </div>
+            {importStats.corrected !== undefined && importStats.corrected > 0 && (
+              <div className="stat-item success">
+                <span className="stat-label">Korrigiert:</span>
+                <span className="stat-value">✅ {importStats.corrected}</span>
+              </div>
+            )}
+            {importStats.cost !== undefined && (
+              <div className="stat-item info">
+                <span className="stat-label">Kosten:</span>
+                <span className="stat-value">💰 {importStats.cost}</span>
+              </div>
+            )}
           </div>
         </div>
       )}

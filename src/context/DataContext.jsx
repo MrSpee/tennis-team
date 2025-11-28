@@ -545,6 +545,32 @@ export function DataProvider({ children }) {
     }
 
     console.log('✅ Players loaded:', data?.length || 0, 'players');
+    
+    // ✅ NEU: Prüfe und korrigiere season_start_lk Inkonsistenzen im Hintergrund
+    if (data && data.length > 0) {
+      try {
+        const { correctSeasonStartLKForPlayers } = await import('../lib/lkUtils');
+        // Prüfe nur Spieler mit beiden Werten gesetzt
+        const playersToCheck = data.filter(p => p.season_start_lk && p.current_lk);
+        if (playersToCheck.length > 0) {
+          // Führe Korrektur im Hintergrund aus (nicht blockierend)
+          correctSeasonStartLKForPlayers(playersToCheck, supabase, 1.0)
+            .then(corrections => {
+              if (corrections.length > 0) {
+                console.log(`✅ ${corrections.length} Spieler mit inkonsistenter season_start_lk automatisch korrigiert`);
+                // Lade Spieler neu, um aktualisierte Werte zu erhalten
+                loadPlayers();
+              }
+            })
+            .catch(err => {
+              console.warn('⚠️ Fehler bei automatischer season_start_lk Korrektur:', err);
+            });
+        }
+      } catch (err) {
+        console.warn('⚠️ Fehler beim Laden der Korrektur-Funktion:', err);
+      }
+    }
+    
     setPlayers(data);
   };
 

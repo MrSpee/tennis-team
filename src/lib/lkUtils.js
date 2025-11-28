@@ -215,5 +215,128 @@ export function formatLKChange(change) {
   };
 }
 
+/**
+ * Prüft, ob season_start_lk deutlich höher ist als current_lk
+ * Dies kann passieren, wenn die Meldeliste eine falsche LK enthält
+ * oder wenn ein Spieler Turniere gespielt hat, die nicht erfasst wurden
+ * 
+ * @param {string|null} seasonStartLK - season_start_lk Wert
+ * @param {string|null} currentLK - current_lk Wert
+ * @param {number} threshold - Mindest-Differenz für Warnung (Standard: 1.0)
+ * @returns {Object} { needsCorrection: boolean, difference: number, correctedSeasonStartLK: string|null }
+ */
+export function checkSeasonStartLKInconsistency(seasonStartLK, currentLK, threshold = 1.0) {
+  // Wenn keine Werte vorhanden, keine Korrektur nötig
+  if (!seasonStartLK || !currentLK) {
+    return {
+      needsCorrection: false,
+      difference: 0,
+      correctedSeasonStartLK: null
+    };
+  }
+
+  const seasonStart = parseLK(seasonStartLK);
+  const current = parseLK(currentLK);
+  const difference = seasonStart - current;
+
+  // Wenn season_start_lk deutlich höher ist als current_lk, ist das verdächtig
+  // (normalerweise sollte season_start_lk <= current_lk sein, da LK sich verbessern kann)
+  if (difference > threshold) {
+    // Korrigiere season_start_lk auf current_lk
+    return {
+      needsCorrection: true,
+      difference: difference,
+      correctedSeasonStartLK: formatLK(current)
+    };
+  }
+
+  return {
+    needsCorrection: false,
+    difference: difference,
+    correctedSeasonStartLK: null
+  };
+}
+
+/**
+ * Korrigiert season_start_lk für einen Spieler, wenn es deutlich höher ist als current_lk
+ * 
+ * @param {Object} player - Spieler-Objekt mit id, season_start_lk, current_lk
+ * @param {Object} supabase - Supabase Client
+ * @param {number} threshold - Mindest-Differenz für Korrektur (Standard: 1.0)
+ * @returns {Promise<Object>} { corrected: boolean, oldValue: string, newValue: string, playerName: string }
+ */
+export async function correctSeasonStartLKIfNeeded(player, supabase, threshold = 1.0) {
+  if (!player || !player.id) {
+    return { corrected: false, error: 'Spieler-Daten fehlen' };
+  }
+
+  const check = checkSeasonStartLKInconsistency(
+    player.season_start_lk,
+    player.current_lk,
+    threshold
+  );
+
+  if (!check.needsCorrection) {
+    return { corrected: false };
+  }
+
+  try {
+    const { error } = await supabase
+      .from('players_unified')
+      .update({
+        season_start_lk: check.correctedSeasonStartLK,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', player.id);
+
+    if (error) {
+      console.error('❌ Fehler beim Korrigieren von season_start_lk:', error);
+      return { corrected: false, error: error.message };
+    }
+
+    console.log(`✅ season_start_lk korrigiert für ${player.name}: ${player.season_start_lk} → ${check.correctedSeasonStartLK} (Differenz: ${check.difference.toFixed(1)})`);
+
+    return {
+      corrected: true,
+      oldValue: player.season_start_lk,
+      newValue: check.correctedSeasonStartLK,
+      playerName: player.name,
+      difference: check.difference
+    };
+  } catch (error) {
+    console.error('❌ Fehler beim Korrigieren von season_start_lk:', error);
+    return { corrected: false, error: error.message };
+  }
+}
+
+/**
+ * Prüft und korrigiert season_start_lk für mehrere Spieler
+ * 
+ * @param {Array} players - Array von Spieler-Objekten
+ * @param {Object} supabase - Supabase Client
+ * @param {number} threshold - Mindest-Differenz für Korrektur (Standard: 1.0)
+ * @returns {Promise<Array>} Array von Korrektur-Ergebnissen
+ */
+export async function correctSeasonStartLKForPlayers(players, supabase, threshold = 1.0) {
+  if (!players || players.length === 0) {
+    return [];
+  }
+
+  const results = [];
+
+  for (const player of players) {
+    const result = await correctSeasonStartLKIfNeeded(player, supabase, threshold);
+    if (result.corrected) {
+      results.push(result);
+    }
+  }
+
+  if (results.length > 0) {
+    console.log(`✅ ${results.length} Spieler mit inkonsistenter season_start_lk korrigiert`);
+  }
+
+  return results;
+}
+
 
 
