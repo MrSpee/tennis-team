@@ -103,19 +103,28 @@ const LiveResultsWithDB = () => {
       console.log('✅ Heim-Team:', matchData.home_team?.club_name, matchData.home_team?.team_name);
       console.log('✅ Auswärts-Team:', matchData.away_team?.club_name, matchData.away_team?.team_name);
 
-      // NEU: Lade ALLE Spieler des VEREINS (nicht nur des Teams)
+      // ✅ NEU: Lade nur Spieler aus Teams mit der GLEICHEN KATEGORIE (z.B. "Herren 30")
       const homeClubName = matchData.home_team?.club_name;
+      const homeTeamCategory = matchData.home_team?.category; // z.B. "Herren 30", "Damen", etc.
       
       if (!homeClubName) {
         setError('Club-Name konnte nicht ermittelt werden');
         return;
       }
       
-      // 1. Finde ALLE Teams des Vereins
-      const { data: clubTeams, error: clubTeamsError } = await supabase
+      // 1. Finde Teams des Vereins mit der GLEICHEN KATEGORIE
+      let clubTeamsQuery = supabase
         .from('team_info')
-        .select('id')
+        .select('id, category')
         .ilike('club_name', `%${homeClubName}%`);
+      
+      // ✅ WICHTIG: Filtere nach Kategorie, wenn vorhanden
+      if (homeTeamCategory) {
+        clubTeamsQuery = clubTeamsQuery.eq('category', homeTeamCategory);
+        console.log('🔍 Filtere Teams nach Kategorie:', homeTeamCategory);
+      }
+      
+      const { data: clubTeams, error: clubTeamsError } = await clubTeamsQuery;
       
       if (clubTeamsError) {
         console.error('Error loading club teams:', clubTeamsError);
@@ -126,10 +135,12 @@ const LiveResultsWithDB = () => {
       const clubTeamIds = (clubTeams || []).map(t => t.id);
       
       if (clubTeamIds.length === 0) {
-        console.warn('⚠️ Keine Teams für Verein gefunden:', homeClubName);
+        console.warn(`⚠️ Keine Teams für Verein "${homeClubName}" mit Kategorie "${homeTeamCategory || 'alle'}" gefunden`);
         setHomePlayers({ available: [], others: [] });
       } else {
-        // 2. Lade ALLE Spieler aus ALLEN Teams des Vereins (NUR aktive Memberships)
+        console.log(`✅ ${clubTeamIds.length} Team(s) mit Kategorie "${homeTeamCategory || 'alle'}" gefunden`);
+        
+        // 2. Lade Spieler aus Teams mit der gleichen Kategorie (NUR aktive Memberships)
         const { data: teamMembers, error: teamError } = await supabase
           .from('team_memberships')
           .select('player_id')

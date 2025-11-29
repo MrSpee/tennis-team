@@ -27,6 +27,7 @@ function PlayerProfileSimple() {
   const [allPlayerResults, setAllPlayerResults] = useState([]); // Alle Match-Ergebnisse für Modals
   const [allMatchdayResults, setAllMatchdayResults] = useState([]); // Alle Matchday-Ergebnisse für Team-Details
   const [playerDataMap, setPlayerDataMap] = useState({}); // Spieler-Daten für Gegner-Anzeige
+  const [firstLKDate, setFirstLKDate] = useState(null); // Datum der ersten LK-Erhebung
   
   // ✅ NEU: Accordion States (für Einzel/Doppel Details)
   const [expandedPersonalSection, setExpandedPersonalSection] = useState(null); // 'Einzel' oder 'Doppel' oder null
@@ -223,6 +224,44 @@ function PlayerProfileSimple() {
         );
         setPlayerDataMap(playerDataMapTemp);
       }
+      
+      // ✅ Ermittle Datum der ersten LK-Erhebung
+      // Das ist entweder das Datum des ersten Matches oder das created_at Datum (wenn Spieler mit LK erstellt wurde)
+      let firstDate = null;
+      
+      // 1. Prüfe das Datum des ersten Matches (sortiere nach match_date, nicht created_at)
+      if (results && results.length > 0) {
+        const matchDates = results
+          .map(r => r.matchday?.match_date)
+          .filter(Boolean)
+          .map(d => new Date(d))
+          .sort((a, b) => a.getTime() - b.getTime()); // Sortiere aufsteigend (ältestes zuerst)
+        
+        if (matchDates.length > 0) {
+          firstDate = matchDates[0];
+        }
+      }
+      
+      // 2. Prüfe created_at Datum des Spielers (wenn LK beim Erstellen gesetzt war)
+      // Hole Spieler-Daten, um created_at zu prüfen
+      const { data: playerData } = await supabase
+        .from('players_unified')
+        .select('created_at, season_start_lk, current_lk')
+        .eq('id', playerId)
+        .single();
+      
+      if (playerData && playerData.created_at) {
+        const createdDate = new Date(playerData.created_at);
+        // Wenn created_at früher ist als das erste Match, oder kein Match vorhanden ist
+        if (!firstDate || createdDate < firstDate) {
+          // Nur verwenden, wenn beim Erstellen bereits eine LK gesetzt war
+          if (playerData.season_start_lk || playerData.current_lk) {
+            firstDate = createdDate;
+          }
+        }
+      }
+      
+      setFirstLKDate(firstDate);
       
       // ✅ Hole ALLE Matchday-IDs wo Raoul gespielt hat
       const matchdayIds = [...new Set((results || []).map(r => r.matchday_id).filter(Boolean))];
@@ -879,6 +918,13 @@ function PlayerProfileSimple() {
                 {player.season_start_lk && (
                   <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.75rem' }}>
                     📅 Saison-Start: {player.season_start_lk}
+                  </div>
+                )}
+                
+                {/* Datum der ersten LK-Erhebung */}
+                {firstLKDate && (
+                  <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                    📊 Daten werden seit {new Date(firstLKDate).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })} erhoben
                   </div>
                 )}
               </div>
