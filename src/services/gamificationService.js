@@ -200,16 +200,16 @@ export async function saveAchievement({
     // Aktualisiere Gesamtpunkte des Spielers
     await updatePlayerPoints(playerId, points);
 
-    // 🔥 STREAK: Aktualisiere Streak nach Achievement
-    if (achievementType === 'speed_entry' && points > 0) {
-      const streakResult = await updateStreak(playerId, expectedEndTime || new Date());
+    // 🔥 MATCHDAY-STREAK: Aktualisiere Matchday-Streak nach Achievement
+    if (achievementType === 'speed_entry' && points > 0 && matchdayId) {
+      const streakResult = await updateMatchdayStreak(playerId, matchdayId, expectedEndTime || new Date());
       
-      // Berechne Wochen-Streak-Bonus
-      const weeklyBonus = await calculateWeeklyStreakBonus(playerId, expectedEndTime || new Date());
+      // Berechne Matchday-Streak-Bonus (basierend auf Prozentsatz der Matchdays mit schnellen Eingaben)
+      const matchdayStreakBonus = await calculateMatchdayStreakBonus(playerId, matchdayId);
       
-      // Füge Streak-Bonus zu den Punkten hinzu (wird bereits in updateStreak gespeichert)
-      if (streakResult.streakBonus > 0 || weeklyBonus > 0) {
-        console.log(`🔥 Streak-Bonus: ${streakResult.streakBonus} (Tages-Streak: ${streakResult.currentStreak}), Wochen-Bonus: ${weeklyBonus}`);
+      // Füge Streak-Bonus zu den Punkten hinzu (wird bereits in updateMatchdayStreak gespeichert)
+      if (streakResult.streakBonus > 0 || matchdayStreakBonus > 0) {
+        console.log(`🔥 Matchday-Streak-Bonus: ${streakResult.streakBonus} (Matchday-Streak: ${streakResult.currentStreak}), Saison-Bonus: ${matchdayStreakBonus}`);
       }
     }
 
