@@ -1,0 +1,191 @@
+.leaderboard {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.leaderboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+  gap: 1rem;
+}
+
+.leaderboard-header > div:first-child {
+  flex: 1;
+}
+
+.leaderboard-header h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1f2937;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.leaderboard-description {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+.leaderboard-info-button {
+  background: transparent;
+  border: 1px solid #e5e7eb;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #6b7280;
+  transition: all 0.2s;
+  padding: 0;
+}
+
+.leaderboard-info-button:hover {
+  background: #f3f4f6;
+  border-color: #667eea;
+  color: #667eea;
+}
+
+.leaderboard-info-box {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  border-left: 4px solid #667eea;
+}
+
+.leaderboard-info-box h4 {
+  margin: 0 0 0.75rem 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.leaderboard-info-box ul {
+  margin: 0 0 0.75rem 0;
+  padding-left: 1.5rem;
+  color: #374151;
+  font-size: 0.875rem;
+  line-height: 1.8;
+}
+
+.leaderboard-info-box p {
+  margin: 0.5rem 0;
+  font-size: 0.875rem;
+  color: #374151;
+  line-height: 1.6;
+}
+
+.leaderboard-info-box strong {
+  color: #1f2937;
+}
+
+.leaderboard-period {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.leaderboard-period button {
+  padding: 0.5rem 1rem;
+  border: 1px solid #e5e7eb;
+  background: white;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+}
+
+.leaderboard-period button:hover {
+  background: #f9fafb;
+}
+
+.leaderboard-period button.active {
+  background: #667eea;
+  color: white;
+  border-color: #667eea;
+}
+
+.leaderboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.leaderboard-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: #f9fafb;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.leaderboard-item:hover {
+  background: #f3f4f6;
+  transform: translateX(4px);
+}
+
+.leaderboard-rank {
+  font-size: 1.25rem;
+  font-weight: 700;
+  min-width: 3rem;
+  text-align: center;
+}
+
+.leaderboard-player {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.leaderboard-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.leaderboard-name {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.leaderboard-stats {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.leaderboard-streak {
+  font-size: 0.875rem;
+  color: #f59e0b;
+  font-weight: 600;
+}
+
+.leaderboard-points {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #667eea;
+}
+
+.leaderboard-loading,
+.leaderboard-error,
+.leaderboard-empty {
+  padding: 2rem;
+  text-align: center;
+  color: #6b7280;
+}
+

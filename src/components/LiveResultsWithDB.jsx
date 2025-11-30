@@ -3,6 +3,15 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, MessageCircle, Save } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 // import { getOpponentPlayers } from '../services/liveResultsService'; // Gegner werden jetzt als Freitext eingegeben
+import {
+  checkEntryAuthorization,
+  calculateGamificationPoints,
+  saveAchievement,
+  saveMatchResultHistory,
+  isMatchCompleted,
+  getBadgeForTime,
+  checkTeamBonus
+} from '../services/gamificationService';
 import './LiveResults.css';
 
 const LiveResultsWithDB = () => {
@@ -1057,35 +1066,160 @@ const LiveResultsWithDB = () => {
         }
       }
 
-      // Debug: Zeige was gesendet wird
-      console.log('🔍 Sending data to Supabase:', resultData);
+      // 🎮 GAMIFICATION: Prüfe Berechtigung
+      const homeTeamId = match?.home_team_id;
+      const awayTeamId = match?.away_team_id;
+      
+      if (!homeTeamId || !awayTeamId) {
+        throw new Error('Matchday hat keine Team-Zuordnung');
+      }
 
-      // Speichere in Supabase - erst versuche zu aktualisieren, sonst insert
-      // Prüfe ob Eintrag bereits existiert
+      const isAuthorized = await checkEntryAuthorization(user.id, matchId, homeTeamId, awayTeamId);
+      if (!isAuthorized) {
+        throw new Error('Du bist nicht berechtigt, Ergebnisse für diesen Matchday einzutragen.');
+      }
+
+      // Prüfe ob Super-Admin
+      const { data: playerData } = await supabase
+        .from('players_unified')
+        .select('id, is_super_admin')
+        .eq('user_id', user.id)
+        .single();
+      const isSuperAdmin = playerData?.is_super_admin === true;
+
+      // Prüfe ob bereits abgeschlossenes Spiel geändert wird
       const { data: existingResult, error: checkError } = await supabase
         .from('match_results')
-        .select('id')
+        .select('id, status, gamification_points, entered_by')
         .eq('matchday_id', resultData.matchday_id)
         .eq('match_number', resultData.match_number)
         .maybeSingle();
 
+      if (checkError) {
+        console.error('❌ Error checking existing result:', checkError);
+      }
+
+      const isUpdate = existingResult !== null;
+      const wasCompleted = existingResult && isMatchCompleted(existingResult.status);
+      const willBeCompleted = isMatchCompleted(resultData.status);
+
+      // Warnung bei Änderungen an abgeschlossenen Spielen
+      if (isUpdate && wasCompleted && !isSuperAdmin) {
+        const confirmed = window.confirm(
+          '⚠️ Dieses Spiel ist bereits abgeschlossen.\n\n' +
+          'Die vorhandenen Daten werden überschrieben. Bist du sicher?'
+        );
+        if (!confirmed) {
+          setSaving(false);
+          return;
+        }
+      }
+
+      // Debug: Zeige was gesendet wird
+      console.log('🔍 Sending data to Supabase:', resultData);
+
       let error;
       
+      // 🎮 GAMIFICATION: Berechne Punkte (vor dem Speichern)
+      let gamificationPoints = 0;
+      let achievementData = null;
+      let pointsCalculation = null;
+
+      if (!isSuperAdmin && (willBeCompleted || resultData.status === 'in_progress' || resultData.status === 'pending')) {
+        // Berechne Spielstart
+        const matchStart = new Date(match.match_date);
+        if (match.start_time) {
+          const [hours, minutes] = match.start_time.split(':').map(Number);
+          matchStart.setHours(hours, minutes, 0, 0);
+        }
+
+        const enteredAt = new Date();
+
+        // Berechne Punkte
+        pointsCalculation = calculateGamificationPoints({
+          matchStart,
+          matchType: resultData.match_type,
+          enteredAt,
+          status: resultData.status,
+          existingResult: existingResult || null,
+          isSuperAdmin
+        });
+
+        gamificationPoints = pointsCalculation.points;
+
+        // Speichere Punkte im resultData
+        if (isUpdate && wasCompleted && !willBeCompleted) {
+          // Änderung an abgeschlossenem Spiel: Keine Punkte
+          resultData.gamification_points = 0;
+        } else {
+          // Neue Eingabe oder Abschluss: Speichere Punkte
+          resultData.gamification_points = gamificationPoints;
+        }
+
+        // Speichere Achievement-Daten für später
+        if (gamificationPoints > 0) {
+          achievementData = {
+            playerId: playerData.id,
+            achievementType: pointsCalculation.isProgressEntry ? 'progress_entry' : 'speed_entry',
+            points: gamificationPoints,
+            badgeName: getBadgeForTime(pointsCalculation.timeDiffMinutes),
+            matchdayId: matchId,
+            matchResultId: null, // Wird nach dem Speichern gesetzt
+            matchType: resultData.match_type,
+            timeToEntryMinutes: pointsCalculation.timeDiffMinutes,
+            expectedEndTime: pointsCalculation.expectedEndTime,
+            isProgressEntry: pointsCalculation.isProgressEntry
+          };
+        }
+      } else {
+        // Super-Admin oder keine Punkte: Setze auf 0
+        resultData.gamification_points = 0;
+      }
+
+      // Speichere entered_by und entered_at
+      resultData.entered_by = user.id;
+      resultData.entered_at = new Date().toISOString();
+
+      // Audit-Trail: Speichere alte Werte wenn abgeschlossenes Spiel geändert wird
+      let previousValues = null;
+      if (isUpdate && wasCompleted && !isSuperAdmin) {
+        previousValues = {
+          status: existingResult.status,
+          winner: existingResult.winner,
+          home_score: existingResult.home_score,
+          away_score: existingResult.away_score,
+          set1_home: existingResult.set1_home,
+          set1_guest: existingResult.set1_guest,
+          set2_home: existingResult.set2_home,
+          set2_guest: existingResult.set2_guest,
+          set3_home: existingResult.set3_home,
+          set3_guest: existingResult.set3_guest
+        };
+      }
+
+      let savedResultId = null;
+
       if (existingResult) {
         // Aktualisiere existierenden Eintrag
         console.log('📝 Aktualisiere existierendes Ergebnis:', existingResult.id);
-        const { error: updateError } = await supabase
+        const { data: updatedData, error: updateError } = await supabase
           .from('match_results')
           .update(resultData)
-          .eq('id', existingResult.id);
+          .eq('id', existingResult.id)
+          .select()
+          .single();
         error = updateError;
+        savedResultId = updatedData?.id || existingResult.id;
       } else {
         // Erstelle neuen Eintrag
         console.log('➕ Erstelle neues Ergebnis...');
-        const { error: insertError } = await supabase
+        const { data: insertedData, error: insertError } = await supabase
           .from('match_results')
-          .insert(resultData);
+          .insert(resultData)
+          .select()
+          .single();
         error = insertError;
+        savedResultId = insertedData?.id;
       }
 
       if (error) {
@@ -1101,8 +1235,60 @@ const LiveResultsWithDB = () => {
         }
       }
 
+      // 🎮 GAMIFICATION: Speichere Audit-Trail für Änderungen
+      if (isUpdate && wasCompleted && previousValues && savedResultId) {
+        try {
+          await saveMatchResultHistory({
+            matchResultId: savedResultId,
+            changedBy: user.id,
+            previousValues,
+            newValues: {
+              status: resultData.status,
+              winner: resultData.winner,
+              home_score: resultData.home_score,
+              away_score: resultData.away_score,
+              set1_home: resultData.set1_home,
+              set1_guest: resultData.set1_guest,
+              set2_home: resultData.set2_home,
+              set2_guest: resultData.set2_guest,
+              set3_home: resultData.set3_home,
+              set3_guest: resultData.set3_guest
+            }
+          });
+        } catch (historyError) {
+          console.error('⚠️ Error saving match result history:', historyError);
+          // Nicht kritisch, weiter machen
+        }
+      }
+
+      // 🎮 GAMIFICATION: Speichere Achievement
+      if (achievementData && gamificationPoints > 0 && savedResultId) {
+        try {
+          achievementData.matchResultId = savedResultId;
+          await saveAchievement(achievementData);
+          console.log('✅ Achievement gespeichert:', achievementData);
+
+          // 🏆 TEAM-BONUS: Prüfe ob alle Ergebnisse schnell eingegeben wurden
+          if (willBeCompleted && !isSuperAdmin) {
+            try {
+              const teamBonus = await checkTeamBonus(matchId, new Date());
+              if (teamBonus > 0) {
+                console.log(`🏆 Team-Bonus vergeben: +${teamBonus} Punkte`);
+              }
+            } catch (teamBonusError) {
+              console.error('⚠️ Error checking team bonus:', teamBonusError);
+              // Nicht kritisch, weiter machen
+            }
+          }
+        } catch (achievementError) {
+          console.error('⚠️ Error saving achievement:', achievementError);
+          // Nicht kritisch, weiter machen
+        }
+      }
+
       // Erfolgsmeldung basierend auf Tennis-Logik oder Spielabbruch
       let statusMessage;
+      let pointsMessage = '';
       
       if (isAborted) {
         // Spielabbruch
@@ -1128,8 +1314,20 @@ const LiveResultsWithDB = () => {
         // Nur Spieler ausgewählt
         statusMessage = '📝 Spieler-Auswahl gespeichert!';
       }
+
+      // 🎮 GAMIFICATION: Füge Punkte-Meldung hinzu
+      if (gamificationPoints > 0 && !isSuperAdmin) {
+        const badgeName = achievementData?.badgeName || '';
+        if (pointsCalculation?.isProgressEntry) {
+          pointsMessage = `\n\n🎮 ${badgeName}\n+${gamificationPoints} Punkte (Zwischenstand)`;
+        } else {
+          pointsMessage = `\n\n🎮 ${badgeName}\n+${gamificationPoints} Punkte`;
+        }
+      } else if (isUpdate && wasCompleted && !isSuperAdmin) {
+        pointsMessage = '\n\n⚠️ Keine Punkte für Änderungen an abgeschlossenen Spielen';
+      }
         
-      alert(statusMessage);
+      alert(statusMessage + pointsMessage);
       
       // Zurück zur Übersicht nach dem Speichern
       setTimeout(() => {
@@ -1460,7 +1658,20 @@ const LiveResultsWithDB = () => {
               <ArrowLeft size={16} />
               Zurück zur Übersicht
             </button>
-            <h1>🎾 Live-Ergebnisse</h1>
+            <h1>🎾 Ergebnisse eintragen</h1>
+            <div style={{ 
+              marginTop: '0.5rem',
+              padding: '0.75rem', 
+              background: 'linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)',
+              border: '1px solid #3b82f6',
+              borderRadius: '8px',
+              fontSize: '0.875rem',
+              color: '#1e40af',
+              lineHeight: '1.5',
+              maxWidth: '600px'
+            }}>
+              <strong>⚡ Schnell-Eingabe lohnt sich!</strong> Sammle Punkte für zeitnahe Eingaben, baue Streaks auf und gewinne Preise! 🎁 Je schneller du einträgst, desto mehr Punkte bekommst du!
+            </div>
           </div>
           {match?.home_team && match?.away_team && (
             <div className="match-teams-info">

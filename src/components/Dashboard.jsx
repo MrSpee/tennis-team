@@ -10,6 +10,7 @@ import { supabase } from '../lib/supabaseClient';
 import { recalculateLKForMatchResult, recalculateLKForAllActivePlayers } from '../services/lkCalculationService';
 import { runAutoImport } from '../services/autoMatchResultImportService';
 import SurfaceInfo from './SurfaceInfo';
+import { PointsDisplay } from './gamification/PointsDisplay';
 import './Dashboard.css';
 
 function Dashboard() {
@@ -1724,16 +1725,188 @@ function Dashboard() {
 
   return (
     <div className="dashboard container">
-      {/* 1. Persönliche Begrüßung - ganz oben */}
-      <div className="fade-in" style={{ marginBottom: '1rem', paddingTop: '0.5rem' }}>
+      {/* 🎮 GAMIFICATION BANNER - Teaser Card (ganz oben) */}
+      <div 
+        className="fade-in" 
+        style={{ 
+          marginBottom: '1.5rem',
+          marginTop: '0.5rem',
+          cursor: 'pointer'
+        }}
+        onClick={() => navigate('/leaderboard')}
+      >
+        <div style={{
+          background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 30%, #fcd34d 60%, #fbbf24 100%)',
+          border: '3px solid #f59e0b',
+          borderRadius: '20px',
+          padding: '2rem',
+          boxShadow: '0 8px 24px rgba(245, 158, 11, 0.3), 0 4px 8px rgba(0, 0, 0, 0.1)',
+          transition: 'all 0.3s ease',
+          position: 'relative',
+          overflow: 'hidden'
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'translateY(-4px) scale(1.01)';
+          e.currentTarget.style.boxShadow = '0 12px 32px rgba(245, 158, 11, 0.4), 0 6px 12px rgba(0, 0, 0, 0.15)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'translateY(0) scale(1)';
+          e.currentTarget.style.boxShadow = '0 8px 24px rgba(245, 158, 11, 0.3), 0 4px 8px rgba(0, 0, 0, 0.1)';
+        }}
+        >
+          {/* Dekorative Elemente */}
+          <div style={{
+            position: 'absolute',
+            top: '-40px',
+            right: '-40px',
+            width: '200px',
+            height: '200px',
+            background: 'radial-gradient(circle, rgba(245, 158, 11, 0.25) 0%, transparent 70%)',
+            borderRadius: '50%'
+          }} />
+          <div style={{
+            position: 'absolute',
+            bottom: '-30px',
+            left: '-30px',
+            width: '150px',
+            height: '150px',
+            background: 'radial-gradient(circle, rgba(251, 191, 36, 0.2) 0%, transparent 70%)',
+            borderRadius: '50%'
+          }} />
+          
+          {/* Tennisball-Icon SVG */}
+          <div style={{
+            position: 'absolute',
+            top: '1rem',
+            right: '1rem',
+            width: '80px',
+            height: '80px',
+            opacity: 0.15,
+            zIndex: 0
+          }}>
+            <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+              <ellipse cx="50" cy="50" rx="45" ry="45" fill="#92400e" />
+              <path d="M 20 50 Q 30 30, 50 30 Q 70 30, 80 50 Q 70 70, 50 70 Q 30 70, 20 50" fill="none" stroke="#fef3c7" strokeWidth="2" />
+              <path d="M 50 20 Q 30 30, 30 50 Q 30 70, 50 80 Q 70 70, 70 50 Q 70 30, 50 20" fill="none" stroke="#fef3c7" strokeWidth="2" />
+            </svg>
+          </div>
+          
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '1rem',
+              marginBottom: '1rem',
+              flexWrap: 'wrap'
+            }}>
+              <div style={{
+                fontSize: '3rem',
+                lineHeight: 1,
+                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))'
+              }}>
+                🎾
+              </div>
+              <div style={{ flex: 1, minWidth: '200px' }}>
+                <h2 style={{
+                  margin: '0 0 0.5rem 0',
+                  fontSize: '1.75rem',
+                  fontWeight: '800',
+                  color: '#78350f',
+                  textShadow: '0 2px 4px rgba(255,255,255,0.5)',
+                  lineHeight: 1.2
+                }}>
+                  Spielergebnisse - eintragen lohnt sich!
+                </h2>
+                <p style={{
+                  margin: 0,
+                  fontSize: '1.1rem',
+                  color: '#92400e',
+                  lineHeight: 1.5,
+                  fontWeight: '500'
+                }}>
+                  Sammle Punkte für zeitnahe Eingaben, baue Streaks auf und gewinne Preise! 🎁
+                </p>
+              </div>
+            </div>
+            
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '1rem',
+              paddingTop: '1rem',
+              borderTop: '2px solid rgba(146, 64, 14, 0.2)'
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.75rem',
+                fontSize: '1rem',
+                fontWeight: '700',
+                color: '#78350f',
+                background: 'rgba(255, 255, 255, 0.6)',
+                padding: '0.75rem 1.25rem',
+                borderRadius: '12px',
+                border: '2px solid rgba(146, 64, 14, 0.3)',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.9)';
+                e.currentTarget.style.transform = 'scale(1.05)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.6)';
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+              >
+                <span style={{ fontSize: '1.25rem' }}>⚡</span>
+                <span>Details & Leaderboard ansehen</span>
+                <span style={{ fontSize: '1.25rem' }}>→</span>
+              </div>
+              
+              {pastMatchesWithoutResult.length > 0 && (
+                <div style={{
+                  background: 'linear-gradient(135deg, rgba(220, 38, 38, 0.15) 0%, rgba(239, 68, 68, 0.15) 100%)',
+                  border: '2px solid rgba(220, 38, 38, 0.4)',
+                  padding: '0.75rem 1.25rem',
+                  borderRadius: '12px',
+                  fontSize: '0.95rem',
+                  fontWeight: '700',
+                  color: '#991b1b',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}>
+                  <span>⚠️</span>
+                  <span>{pastMatchesWithoutResult.length} offene {pastMatchesWithoutResult.length === 1 ? 'Eingabe' : 'Eingaben'}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 1. Persönliche Begrüßung */}
+      <div className="fade-in" style={{ marginBottom: '1rem' }}>
         <h1 className="hi">
           {getGreeting()}
         </h1>
       </div>
-      
+
       {/* 2. LK-Card mit Formkurve - IMMER ANZEIGEN */}
       {player && (
         <div className="fade-in" style={{ marginBottom: '1.5rem' }}>
+          {/* 🎮 GAMIFICATION: Eigene Punkte-Anzeige */}
+          {player.gamification_points !== undefined && (
+            <div style={{ marginBottom: '1rem' }}>
+              <PointsDisplay 
+                points={player.gamification_points || 0}
+                streak={player.current_streak ? { currentStreak: player.current_streak } : null}
+                showDetails={false}
+              />
+            </div>
+          )}
           <div className="lk-card-full">
             <div className="formkurve-header">
               <div className="formkurve-title">Deine Formkurve</div>
@@ -2790,7 +2963,7 @@ function Dashboard() {
               <div className="next-match-countdown">📅 Der Spielplan ist noch leer</div>
             </div>
           )}
-          
+
           {/* ⚠️ NEU: Vergangene Spiele OHNE Ergebnis - OFFEN */}
           {pastMatchesWithoutResult.length > 0 && (
             <div className="season-matches" style={{ 
@@ -2808,7 +2981,7 @@ function Dashboard() {
                 border: '2px solid #f59e0b',
                 boxShadow: '0 2px 8px rgba(245, 158, 11, 0.2)'
               }}>
-                ⚠️ OFFEN - Bitte Ergebnisse eintragen ({pastMatchesWithoutResult.length})
+                ⚠️ OFFEN - Ergebnisse eintragen ({pastMatchesWithoutResult.length})
               </div>
               {pastMatchesWithoutResult.map((match) => (
                 <div 

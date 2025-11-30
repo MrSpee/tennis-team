@@ -784,8 +784,20 @@ const MatchdayResults = () => {
             onClick={() => navigate(`/live-results/${matchId}/edit`)}
             >
             <Edit size={16} style={{ marginRight: '6px' }} />
-            Ergebnisse bearbeiten
+            Ergebnisse eintragen
             </button>
+            <div style={{ 
+              marginTop: '0.75rem', 
+              padding: '0.75rem', 
+              background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+              border: '1px solid #f59e0b',
+              borderRadius: '8px',
+              fontSize: '0.875rem',
+              color: '#92400e',
+              lineHeight: '1.5'
+            }}>
+              <strong>⚡ Schnell-Eingabe lohnt sich!</strong> Sammle Punkte für zeitnahe Eingaben und gewinne Preise! 🎁
+            </div>
           </div>
       </div>
 
@@ -827,7 +839,19 @@ const MatchdayResults = () => {
             <div className="no-results">
             <div style={{ fontSize: '3rem' }}>🎾</div>
               <h3>Noch keine Ergebnisse</h3>
-            <p>Klicke auf &ldquo;Ergebnisse bearbeiten&rdquo; um zu beginnen!</p>
+            <p>Klicke auf &ldquo;Ergebnisse eintragen&rdquo; um zu beginnen!</p>
+            <div style={{ 
+              marginTop: '1rem', 
+              padding: '0.75rem', 
+              background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+              border: '1px solid #f59e0b',
+              borderRadius: '8px',
+              fontSize: '0.875rem',
+              color: '#92400e',
+              lineHeight: '1.5'
+            }}>
+              <strong>⚡ Schnell-Eingabe lohnt sich!</strong> Sammle Punkte für zeitnahe Eingaben und gewinne Preise! 🎁
+            </div>
             </div>
         </div>
       )}

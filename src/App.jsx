@@ -24,6 +24,7 @@ import OnboardingFlow from './components/OnboardingFlow';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
 import EmailVerificationError from './components/EmailVerificationError';
 import NotFound from './components/NotFound';
+import LeaderboardPage from './components/LeaderboardPage';
 import Navigation from './components/Navigation';
 import Header from './components/Header';
 import ScrollToTop from './components/ScrollToTop';
@@ -196,6 +197,12 @@ function AppContent() {
           <Route path="/rankings" element={
             <ProtectedRoute>
               <Rankings />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/leaderboard" element={
+            <ProtectedRoute>
+              <LeaderboardPage />
             </ProtectedRoute>
           } />
           
