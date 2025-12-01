@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Info } from 'lucide-react';
+import { Info, Trophy, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 import './Leaderboard.css';
 
 /**
- * Leaderboard-Komponente für Gamification-Punkte
+ * Tennis-Weltranglisten-Style Leaderboard
  */
-export const Leaderboard = ({ period: initialPeriod = 'week', limit = 10 }) => {
+export const Leaderboard = ({ period: initialPeriod = 'week', limit = 20 }) => {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [period, setPeriod] = useState(initialPeriod);
   const [showInfo, setShowInfo] = useState(false);
+  const [previousRankings, setPreviousRankings] = useState({});
 
   useEffect(() => {
     loadLeaderboard();
@@ -60,11 +61,11 @@ export const Leaderboard = ({ period: initialPeriod = 'week', limit = 10 }) => {
       // 🎮 DEMO: Wenn keine Daten vorhanden, zeige Beispieldaten
       if (playerIds.length === 0) {
         const demoPlayers = [
-          { id: 'demo-1', name: 'Max Mustermann', profile_image: null, gamification_points: 450, current_streak: 7, periodPoints: 320 },
-          { id: 'demo-2', name: 'Anna Schmidt', profile_image: null, gamification_points: 380, current_streak: 5, periodPoints: 280 },
-          { id: 'demo-3', name: 'Tom Weber', profile_image: null, gamification_points: 320, current_streak: 3, periodPoints: 240 },
-          { id: 'demo-4', name: 'Lisa Müller', profile_image: null, gamification_points: 290, current_streak: 2, periodPoints: 190 },
-          { id: 'demo-5', name: 'Jan Becker', profile_image: null, gamification_points: 250, current_streak: 1, periodPoints: 150 }
+          { id: 'demo-1', name: 'Max Mustermann', profile_image: null, gamification_points: 450, current_streak: 5, periodPoints: 320, rankChange: 0 },
+          { id: 'demo-2', name: 'Anna Schmidt', profile_image: null, gamification_points: 380, current_streak: 3, periodPoints: 280, rankChange: 1 },
+          { id: 'demo-3', name: 'Tom Weber', profile_image: null, gamification_points: 320, current_streak: 2, periodPoints: 240, rankChange: -1 },
+          { id: 'demo-4', name: 'Lisa Müller', profile_image: null, gamification_points: 290, current_streak: 2, periodPoints: 190, rankChange: 0 },
+          { id: 'demo-5', name: 'Jan Becker', profile_image: null, gamification_points: 250, current_streak: 1, periodPoints: 150, rankChange: 2 }
         ];
         setPlayers(demoPlayers);
         setLoading(false);
@@ -80,20 +81,34 @@ export const Leaderboard = ({ period: initialPeriod = 'week', limit = 10 }) => {
 
       if (playersError) throw playersError;
 
-      // Kombiniere Daten
-      const leaderboard = (playersData || []).map(player => ({
-        ...player,
-        periodPoints: playerPoints[player.id] || 0
-      })).sort((a, b) => b.periodPoints - a.periodPoints);
+      // Kombiniere Daten und berechne Rangänderungen
+      const leaderboard = (playersData || []).map((player, index) => {
+        const previousRank = previousRankings[player.id] || index + 1;
+        const currentRank = index + 1;
+        const rankChange = previousRank - currentRank; // Positiv = aufgestiegen, Negativ = abgestiegen
+
+        return {
+          ...player,
+          periodPoints: playerPoints[player.id] || 0,
+          rankChange
+        };
+      }).sort((a, b) => b.periodPoints - a.periodPoints);
+
+      // Speichere aktuelle Rankings für nächsten Vergleich
+      const newRankings = {};
+      leaderboard.forEach((player, index) => {
+        newRankings[player.id] = index + 1;
+      });
+      setPreviousRankings(newRankings);
 
       // 🎮 DEMO: Falls weniger als 5 Spieler, fülle mit Beispieldaten auf
       if (leaderboard.length < 5) {
         const demoPlayers = [
-          { id: 'demo-1', name: 'Max Mustermann', profile_image: null, gamification_points: 450, current_streak: 7, periodPoints: 320 },
-          { id: 'demo-2', name: 'Anna Schmidt', profile_image: null, gamification_points: 380, current_streak: 5, periodPoints: 280 },
-          { id: 'demo-3', name: 'Tom Weber', profile_image: null, gamification_points: 320, current_streak: 3, periodPoints: 240 },
-          { id: 'demo-4', name: 'Lisa Müller', profile_image: null, gamification_points: 290, current_streak: 2, periodPoints: 190 },
-          { id: 'demo-5', name: 'Jan Becker', profile_image: null, gamification_points: 250, current_streak: 1, periodPoints: 150 }
+          { id: 'demo-1', name: 'Max Mustermann', profile_image: null, gamification_points: 450, current_streak: 5, periodPoints: 320, rankChange: 0 },
+          { id: 'demo-2', name: 'Anna Schmidt', profile_image: null, gamification_points: 380, current_streak: 3, periodPoints: 280, rankChange: 1 },
+          { id: 'demo-3', name: 'Tom Weber', profile_image: null, gamification_points: 320, current_streak: 2, periodPoints: 240, rankChange: -1 },
+          { id: 'demo-4', name: 'Lisa Müller', profile_image: null, gamification_points: 290, current_streak: 2, periodPoints: 190, rankChange: 0 },
+          { id: 'demo-5', name: 'Jan Becker', profile_image: null, gamification_points: 250, current_streak: 1, periodPoints: 150, rankChange: 2 }
         ];
         // Kombiniere echte Daten mit Demo-Daten
         const combined = [...leaderboard, ...demoPlayers.slice(leaderboard.length)];
@@ -110,7 +125,12 @@ export const Leaderboard = ({ period: initialPeriod = 'week', limit = 10 }) => {
   };
 
   if (loading) {
-    return <div className="leaderboard-loading">Lade Leaderboard...</div>;
+    return (
+      <div className="leaderboard-loading">
+        <div className="tennis-ball-loader">🎾</div>
+        <p>Lade Weltrangliste...</p>
+      </div>
+    );
   }
 
   if (error) {
@@ -118,93 +138,185 @@ export const Leaderboard = ({ period: initialPeriod = 'week', limit = 10 }) => {
   }
 
   if (players.length === 0) {
-    return <div className="leaderboard-empty">Noch keine Einträge im Leaderboard</div>;
+    return (
+      <div className="leaderboard-empty">
+        <div className="empty-court">🎾</div>
+        <p>Noch keine Einträge in der Weltrangliste</p>
+        <p className="empty-hint">Trage Ergebnisse ein, um aufzusteigen!</p>
+      </div>
+    );
   }
 
-  const getRankIcon = (rank) => {
-    if (rank === 1) return '🥇';
-    if (rank === 2) return '🥈';
-    if (rank === 3) return '🥉';
-    return `#${rank}`;
+  const getRankDisplay = (rank) => {
+    if (rank === 1) return { icon: '🥇', label: 'Weltmeister', color: '#FFD700' };
+    if (rank === 2) return { icon: '🥈', label: 'Vize', color: '#C0C0C0' };
+    if (rank === 3) return { icon: '🥉', label: 'Bronze', color: '#CD7F32' };
+    return { icon: `#${rank}`, label: `Rang ${rank}`, color: '#6b7280' };
+  };
+
+  const getRankChangeIcon = (change) => {
+    if (change > 0) return <TrendingUp size={16} className="rank-up" />;
+    if (change < 0) return <TrendingDown size={16} className="rank-down" />;
+    return <Minus size={16} className="rank-same" />;
+  };
+
+  const getTennisTitle = (period) => {
+    if (period === 'week') return 'ATP/WTA Woche';
+    if (period === 'month') return 'ATP/WTA Monat';
+    return 'ATP/WTA Gesamt';
   };
 
   return (
-    <div className="leaderboard">
-      <div className="leaderboard-header">
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-            <h3>⚡ Schnell-Eingabe-Ranking</h3>
-            <button
-              onClick={() => setShowInfo(!showInfo)}
-              className="leaderboard-info-button"
-              title="Wie funktioniert das System?"
+    <div className="tennis-leaderboard">
+      {/* Tennis Court Header */}
+      <div className="tennis-court-header">
+        <div className="court-line"></div>
+        <div className="court-title">
+          <span className="tennis-icon">🎾</span>
+          <h2>Platzhirsch Weltrangliste</h2>
+          <span className="tennis-icon">🎾</span>
+        </div>
+        <div className="court-line"></div>
+      </div>
+
+      <div className="leaderboard-container">
+        <div className="leaderboard-header">
+          <div className="header-left">
+            <div className="title-section">
+              <h3>{getTennisTitle(period)}</h3>
+              <button
+                onClick={() => setShowInfo(!showInfo)}
+                className="info-button"
+                title="Wie funktioniert das System?"
+              >
+                <Info size={18} />
+              </button>
+            </div>
+            <p className="leaderboard-description">
+              Wer ist der schnellste Ergebnis-Einträger? Steige in der Weltrangliste auf! 🏆
+            </p>
+            {showInfo && (
+              <div className="leaderboard-info-box">
+                <h4>🎮 Wie funktioniert das System?</h4>
+                <ul>
+                  <li><strong>⚡ Blitz (0-30 Min):</strong> 50 Punkte</li>
+                  <li><strong>🚀 Schnell (30-60 Min):</strong> 30 Punkte</li>
+                  <li><strong>✅ Pünktlich (60-120 Min):</strong> 15 Punkte</li>
+                  <li><strong>📝 Spät (120+ Min):</strong> 5 Punkte</li>
+                </ul>
+                <p><strong>🔥 Matchday-Streaks:</strong> Aufeinanderfolgende Matchdays mit schnellen Eingaben bringen Bonus-Punkte!</p>
+                <p><strong>🏆 Team-Bonus:</strong> Wenn alle 6 Ergebnisse schnell eingegeben werden, bekommt jeder +25 Punkte!</p>
+                <p><strong>💾 Zwischenstände:</strong> 50% der Punkte, Rest beim Abschluss!</p>
+              </div>
+            )}
+          </div>
+          <div className="period-selector">
+            <button 
+              className={`period-btn ${period === 'week' ? 'active' : ''}`}
+              onClick={() => setPeriod('week')}
             >
-              <Info size={18} />
+              Woche
+            </button>
+            <button 
+              className={`period-btn ${period === 'month' ? 'active' : ''}`}
+              onClick={() => setPeriod('month')}
+            >
+              Monat
+            </button>
+            <button 
+              className={`period-btn ${period === 'all' ? 'active' : ''}`}
+              onClick={() => setPeriod('all')}
+            >
+              Gesamt
             </button>
           </div>
-          <p className="leaderboard-description">
-            Wer trägt Ergebnisse am schnellsten ein? Sammle Punkte für zeitnahe Eingaben und gewinne Preise! 🎁
-          </p>
-          {showInfo && (
-            <div className="leaderboard-info-box">
-              <h4>🎮 Wie funktioniert das System?</h4>
-              <ul>
-                <li><strong>⚡ Blitz (0-30 Min):</strong> 50 Punkte</li>
-                <li><strong>🚀 Schnell (30-60 Min):</strong> 30 Punkte</li>
-                <li><strong>✅ Pünktlich (60-120 Min):</strong> 15 Punkte</li>
-                <li><strong>📝 Spät (120+ Min):</strong> 5 Punkte</li>
-              </ul>
-              <p><strong>🔥 Streaks:</strong> Tägliche Eingaben bringen Bonus-Punkte!</p>
-              <p><strong>🏆 Team-Bonus:</strong> Wenn alle 6 Ergebnisse schnell eingegeben werden, bekommt jeder +25 Punkte!</p>
-              <p><strong>💾 Zwischenstände:</strong> 50% der Punkte, Rest beim Abschluss!</p>
-            </div>
-          )}
         </div>
-        <div className="leaderboard-period">
-          <button 
-            className={period === 'week' ? 'active' : ''}
-            onClick={() => setPeriod('week')}
-          >
-            Woche
-          </button>
-          <button 
-            className={period === 'month' ? 'active' : ''}
-            onClick={() => setPeriod('month')}
-          >
-            Monat
-          </button>
-          <button 
-            className={period === 'all' ? 'active' : ''}
-            onClick={() => setPeriod('all')}
-          >
-            Gesamt
-          </button>
+
+        {/* Tennis Table */}
+        <div className="tennis-table-wrapper">
+          <table className="tennis-ranking-table">
+            <thead>
+              <tr>
+                <th className="col-rank">Rang</th>
+                <th className="col-change">+/-</th>
+                <th className="col-player">Spieler</th>
+                <th className="col-streak">Streak</th>
+                <th className="col-points">Punkte</th>
+                <th className="col-trophy">🏆</th>
+              </tr>
+            </thead>
+            <tbody>
+              {players.map((player, index) => {
+                const rank = index + 1;
+                const rankInfo = getRankDisplay(rank);
+                const isTopThree = rank <= 3;
+                
+                return (
+                  <tr 
+                    key={player.id} 
+                    className={`ranking-row ${isTopThree ? 'top-three' : ''} ${rank % 2 === 0 ? 'even' : 'odd'}`}
+                  >
+                    <td className="col-rank">
+                      <div className="rank-badge" style={{ backgroundColor: rankInfo.color }}>
+                        <span className="rank-icon">{rankInfo.icon}</span>
+                        <span className="rank-number">{rank}</span>
+                      </div>
+                    </td>
+                    <td className="col-change">
+                      {player.rankChange !== 0 && (
+                        <div className={`rank-change ${player.rankChange > 0 ? 'up' : 'down'}`}>
+                          {getRankChangeIcon(player.rankChange)}
+                          <span>{Math.abs(player.rankChange)}</span>
+                        </div>
+                      )}
+                    </td>
+                    <td className="col-player">
+                      <div className="player-info">
+                        {player.profile_image ? (
+                          <img 
+                            src={player.profile_image} 
+                            alt={player.name}
+                            className="player-avatar"
+                          />
+                        ) : (
+                          <div className="player-avatar-placeholder">
+                            {player.name.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div className="player-details">
+                          <span className="player-name">{player.name}</span>
+                          {isTopThree && (
+                            <span className="player-title">{rankInfo.label}</span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="col-streak">
+                      {player.current_streak > 0 ? (
+                        <div className="streak-badge">
+                          <span className="streak-icon">🔥</span>
+                          <span className="streak-text">{player.current_streak} Matchdays</span>
+                        </div>
+                      ) : (
+                        <span className="no-streak">-</span>
+                      )}
+                    </td>
+                    <td className="col-points">
+                      <div className="points-display">
+                        <span className="points-value">{player.periodPoints.toLocaleString('de-DE')}</span>
+                        <span className="points-label">Pkt.</span>
+                      </div>
+                    </td>
+                    <td className="col-trophy">
+                      {isTopThree && <Trophy size={20} className="trophy-icon" />}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-      </div>
-      <div className="leaderboard-list">
-        {players.map((player, index) => (
-          <div key={player.id} className="leaderboard-item">
-            <div className="leaderboard-rank">{getRankIcon(index + 1)}</div>
-            <div className="leaderboard-player">
-              {player.profile_image && (
-                <img 
-                  src={player.profile_image} 
-                  alt={player.name}
-                  className="leaderboard-avatar"
-                />
-              )}
-              <span className="leaderboard-name">{player.name}</span>
-            </div>
-            <div className="leaderboard-stats">
-              {player.current_streak > 0 && (
-                <span className="leaderboard-streak">🔥 {player.current_streak}</span>
-              )}
-              <span className="leaderboard-points">{player.periodPoints} Punkte</span>
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );
 };
-

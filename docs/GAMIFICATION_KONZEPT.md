@@ -148,16 +148,22 @@ Spieler motivieren, Match-Ergebnisse **zeitnah** einzutragen, um:
 - ❌ **Änderungen** an bereits abgeschlossenen Spielen geben KEINE Punkte
 - ❌ **Super-Admin** sammelt KEINE Punkte (auch nicht bei neuen Eingaben)
 
-### **2. Streak-System (Serien-Belohnung)**
+### **2. Matchday-Streak-System (Serien-Belohnung) - NEU!**
 
-**Wochen-Streak:**
-- 3+ schnelle Eingaben in einer Woche → +20 Bonus-Punkte
-- 5+ schnelle Eingaben in einer Woche → +50 Bonus-Punkte
-- 7+ schnelle Eingaben in einer Woche → +100 Bonus-Punkte + 🏅 "Wochen-Champion" Badge
+**Wichtig:** Das Streak-System basiert auf **Matchdays**, nicht auf Tagen, da Medenspiele nur alle paar Wochen stattfinden.
 
-**Monats-Streak:**
-- 10+ schnelle Eingaben im Monat → +200 Bonus-Punkte
-- 20+ schnelle Eingaben im Monat → +500 Bonus-Punkte + 🥇 "Monats-Champion" Badge
+**Matchday-Streak (aufeinanderfolgende Matchdays mit schnellen Eingaben):**
+- 2+ aufeinanderfolgende Matchdays → +20 Bonus-Punkte + ⭐ "Matchday-King" Badge
+- 3+ aufeinanderfolgende Matchdays → +50 Bonus-Punkte + 🔥 "Matchday-Streak" Badge
+- 5+ aufeinanderfolgende Matchdays → +100 Bonus-Punkte + 💪 "Matchday-Meister" Badge
+
+**Saison-Streak-Bonus (fair für alle Teams, unabhängig von Matchday-Anzahl):**
+- 50%+ der Matchdays mit schnellen Eingaben → +25 Bonus-Punkte + 🔥 "Saison-Engagement" Badge
+- 60%+ der Matchdays mit schnellen Eingaben → +50 Bonus-Punkte + ⭐ "Saison-Champion" Badge
+- 75%+ der Matchdays mit schnellen Eingaben → +100 Bonus-Punkte + 🥇 "Saison-Star" Badge
+- 90%+ der Matchdays mit schnellen Eingaben → +200 Bonus-Punkte + 🏆 "Saison-Meister" Badge
+
+**Fairness:** Das System berücksichtigt, dass verschiedene Teams unterschiedlich viele Matchdays haben. Spieler mit weniger Matchdays werden nicht benachteiligt, da die Boni auf **Prozentsätzen** basieren, nicht auf absoluten Zahlen.
 
 ### **3. Team-Belohnungen**
 
@@ -184,11 +190,14 @@ Spieler motivieren, Match-Ergebnisse **zeitnah** einzutragen, um:
 - 🚀 **Schnell-Eingabe** - 25x innerhalb von 60 Minuten nach erwartetem Ende
 - ✅ **Pünktlich** - 50x innerhalb von 120 Minuten nach erwartetem Ende
 
-### **Streak Badges:**
-- 🔥 **Hot Streak** - 5 Tage in Folge schnelle Eingaben
-- 💪 **Eisen-Wille** - 10 Tage in Folge
-- 🏅 **Wochen-Champion** - 7+ Eingaben in einer Woche
-- 🥇 **Monats-Champion** - 20+ Eingaben in einem Monat
+### **Matchday-Streak Badges:**
+- ⭐ **Matchday-King** - 2+ aufeinanderfolgende Matchdays mit schnellen Eingaben
+- 🔥 **Matchday-Streak** - 3+ aufeinanderfolgende Matchdays mit schnellen Eingaben
+- 💪 **Matchday-Meister** - 5+ aufeinanderfolgende Matchdays mit schnellen Eingaben
+- 🔥 **Saison-Engagement** - 50%+ der Matchdays mit schnellen Eingaben
+- ⭐ **Saison-Champion** - 60%+ der Matchdays mit schnellen Eingaben
+- 🥇 **Saison-Star** - 75%+ der Matchdays mit schnellen Eingaben
+- 🏆 **Saison-Meister** - 90%+ der Matchdays mit schnellen Eingaben
 
 ### **Team Badges:**
 - 🏆 **Team-Spirit** - 3x alle Ergebnisse innerhalb 1 Stunde
@@ -206,7 +215,7 @@ Spieler motivieren, Match-Ergebnisse **zeitnah** einzutragen, um:
 
 ### **Wöchentliches Ranking:**
 1. **Speed-Punkte** (Gesamtpunkte der Woche)
-2. **Streak-Länge** (Tage in Folge)
+2. **Matchday-Streak-Länge** (aufeinanderfolgende Matchdays)
 3. **Team-Boni** (Team-Punkte)
 
 ### **Monatliches Ranking:**

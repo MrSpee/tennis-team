@@ -1,191 +1,596 @@
-.leaderboard {
+/* Tennis Weltranglisten-Style Leaderboard */
+
+.tennis-leaderboard {
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border-radius: 20px;
+  padding: 0;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  border: 3px solid #0ea5e9;
+}
+
+/* Tennis Court Header */
+.tennis-court-header {
+  background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+  padding: 1.5rem 2rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.tennis-court-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent,
+    transparent 20px,
+    rgba(255, 255, 255, 0.1) 20px,
+    rgba(255, 255, 255, 0.1) 22px
+  );
+  opacity: 0.3;
+}
+
+.court-line {
+  height: 2px;
+  background: rgba(255, 255, 255, 0.3);
+  margin: 0.5rem 0;
+}
+
+.court-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  position: relative;
+  z-index: 1;
+}
+
+.court-title h2 {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: white;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+  letter-spacing: 1px;
+}
+
+.tennis-icon {
+  font-size: 2rem;
+  animation: bounce 2s infinite;
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-10px) rotate(180deg); }
+}
+
+.leaderboard-container {
+  padding: 2rem;
   background: white;
-  border-radius: 12px;
-  padding: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .leaderboard-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 1.5rem;
-  gap: 1rem;
+  margin-bottom: 2rem;
+  gap: 2rem;
+  flex-wrap: wrap;
 }
 
-.leaderboard-header > div:first-child {
+.header-left {
   flex: 1;
+  min-width: 300px;
 }
 
-.leaderboard-header h3 {
-  margin: 0 0 0.5rem 0;
+.title-section {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.title-section h3 {
+  margin: 0;
   font-size: 1.5rem;
   font-weight: 700;
-  color: #1f2937;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #1e40af;
+  background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-.leaderboard-description {
-  margin: 0;
-  font-size: 0.875rem;
-  color: #6b7280;
-  line-height: 1.5;
-}
-
-.leaderboard-info-button {
+.info-button {
   background: transparent;
-  border: 1px solid #e5e7eb;
+  border: 2px solid #3b82f6;
   border-radius: 50%;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: #6b7280;
+  color: #3b82f6;
   transition: all 0.2s;
   padding: 0;
 }
 
-.leaderboard-info-button:hover {
-  background: #f3f4f6;
-  border-color: #667eea;
-  color: #667eea;
+.info-button:hover {
+  background: #3b82f6;
+  color: white;
+  transform: scale(1.1);
+}
+
+.leaderboard-description {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.95rem;
+  color: #64748b;
+  line-height: 1.6;
 }
 
 .leaderboard-info-box {
   margin-top: 1rem;
-  padding: 1rem;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  border-left: 4px solid #667eea;
+  padding: 1.25rem;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border: 2px solid #f59e0b;
+  border-radius: 12px;
+  border-left: 5px solid #f59e0b;
 }
 
 .leaderboard-info-box h4 {
-  margin: 0 0 0.75rem 0;
-  font-size: 1rem;
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
   font-weight: 700;
-  color: #1f2937;
+  color: #92400e;
 }
 
 .leaderboard-info-box ul {
-  margin: 0 0 0.75rem 0;
+  margin: 0 0 1rem 0;
   padding-left: 1.5rem;
-  color: #374151;
-  font-size: 0.875rem;
-  line-height: 1.8;
+  color: #78350f;
+  font-size: 0.9rem;
+  line-height: 2;
 }
 
 .leaderboard-info-box p {
-  margin: 0.5rem 0;
-  font-size: 0.875rem;
-  color: #374151;
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+  color: #78350f;
   line-height: 1.6;
 }
 
 .leaderboard-info-box strong {
-  color: #1f2937;
+  color: #92400e;
 }
 
-.leaderboard-period {
+.period-selector {
   display: flex;
   gap: 0.5rem;
+  background: #f1f5f9;
+  padding: 0.5rem;
+  border-radius: 12px;
+  border: 2px solid #e2e8f0;
 }
 
-.leaderboard-period button {
-  padding: 0.5rem 1rem;
-  border: 1px solid #e5e7eb;
-  background: white;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.875rem;
-  transition: all 0.2s;
-}
-
-.leaderboard-period button:hover {
-  background: #f9fafb;
-}
-
-.leaderboard-period button.active {
-  background: #667eea;
-  color: white;
-  border-color: #667eea;
-}
-
-.leaderboard-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.leaderboard-item {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 1rem;
-  background: #f9fafb;
+.period-btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  background: transparent;
   border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #64748b;
   transition: all 0.2s;
+  white-space: nowrap;
 }
 
-.leaderboard-item:hover {
-  background: #f3f4f6;
-  transform: translateX(4px);
+.period-btn:hover {
+  background: #e2e8f0;
+  color: #1e40af;
 }
 
-.leaderboard-rank {
-  font-size: 1.25rem;
+.period-btn.active {
+  background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+  color: white;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+/* Tennis Ranking Table */
+.tennis-table-wrapper {
+  overflow-x: auto;
+  border-radius: 12px;
+  border: 2px solid #e2e8f0;
+  background: white;
+}
+
+.tennis-ranking-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.tennis-ranking-table thead {
+  background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+  color: white;
+}
+
+.tennis-ranking-table th {
+  padding: 1rem;
+  text-align: left;
   font-weight: 700;
-  min-width: 3rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.tennis-ranking-table th.col-rank {
+  width: 80px;
   text-align: center;
 }
 
-.leaderboard-player {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex: 1;
+.tennis-ranking-table th.col-change {
+  width: 60px;
+  text-align: center;
 }
 
-.leaderboard-avatar {
-  width: 40px;
-  height: 40px;
+.tennis-ranking-table th.col-player {
+  min-width: 200px;
+}
+
+.tennis-ranking-table th.col-streak {
+  width: 140px;
+  text-align: center;
+}
+
+.tennis-ranking-table th.col-points {
+  width: 120px;
+  text-align: right;
+}
+
+.tennis-ranking-table th.col-trophy {
+  width: 60px;
+  text-align: center;
+}
+
+.ranking-row {
+  transition: all 0.2s;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.ranking-row:hover {
+  background: #f8fafc;
+  transform: scale(1.01);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.ranking-row.top-three {
+  background: linear-gradient(90deg, rgba(255, 215, 0, 0.1) 0%, rgba(255, 255, 255, 0.1) 100%);
+  border-left: 4px solid #FFD700;
+}
+
+.ranking-row.top-three:hover {
+  background: linear-gradient(90deg, rgba(255, 215, 0, 0.15) 0%, rgba(255, 255, 255, 0.15) 100%);
+}
+
+.ranking-row.even {
+  background: #f8fafc;
+}
+
+.ranking-row.odd {
+  background: white;
+}
+
+.tennis-ranking-table td {
+  padding: 1rem;
+  vertical-align: middle;
+}
+
+.col-rank {
+  text-align: center;
+}
+
+.rank-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 10px;
+  font-weight: 700;
+  color: white;
+  min-width: 60px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.rank-icon {
+  font-size: 1.25rem;
+}
+
+.rank-number {
+  font-size: 1rem;
+}
+
+.col-change {
+  text-align: center;
+}
+
+.rank-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.rank-change.up {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.rank-change.down {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.rank-change .rank-up {
+  color: #16a34a;
+}
+
+.rank-change .rank-down {
+  color: #dc2626;
+}
+
+.rank-change .rank-same {
+  color: #94a3b8;
+}
+
+.col-player {
+  min-width: 200px;
+}
+
+.player-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.player-avatar,
+.player-avatar-placeholder {
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   object-fit: cover;
+  border: 3px solid #3b82f6;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+  flex-shrink: 0;
 }
 
-.leaderboard-name {
-  font-weight: 600;
-  color: #1f2937;
-}
-
-.leaderboard-stats {
+.player-avatar-placeholder {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  justify-content: center;
+  background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
+  color: white;
+  font-weight: 700;
+  font-size: 1.25rem;
 }
 
-.leaderboard-streak {
-  font-size: 0.875rem;
+.player-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.player-name {
+  font-weight: 700;
+  color: #1e293b;
+  font-size: 1rem;
+}
+
+.player-title {
+  font-size: 0.75rem;
   color: #f59e0b;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.col-streak {
+  text-align: center;
+}
+
+.streak-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border: 2px solid #f59e0b;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #92400e;
+}
+
+.streak-icon {
+  font-size: 1rem;
+}
+
+.streak-text {
+  white-space: nowrap;
+}
+
+.no-streak {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.col-points {
+  text-align: right;
+}
+
+.points-display {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+.points-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1e40af;
+}
+
+.points-label {
+  font-size: 0.75rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.col-trophy {
+  text-align: center;
+}
+
+.trophy-icon {
+  color: #f59e0b;
+  filter: drop-shadow(0 2px 4px rgba(245, 158, 11, 0.3));
+}
+
+/* Loading & Error States */
+.leaderboard-loading {
+  padding: 4rem 2rem;
+  text-align: center;
+  color: #64748b;
+}
+
+.tennis-ball-loader {
+  font-size: 3rem;
+  animation: spin 1s linear infinite;
+  margin-bottom: 1rem;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.leaderboard-loading p {
+  margin: 0;
+  font-size: 1.1rem;
   font-weight: 600;
 }
 
-.leaderboard-points {
-  font-size: 1rem;
-  font-weight: 700;
-  color: #667eea;
-}
-
-.leaderboard-loading,
-.leaderboard-error,
-.leaderboard-empty {
+.leaderboard-error {
   padding: 2rem;
   text-align: center;
-  color: #6b7280;
+  color: #dc2626;
+  background: #fee2e2;
+  border-radius: 12px;
+  border: 2px solid #dc2626;
 }
 
+.leaderboard-empty {
+  padding: 4rem 2rem;
+  text-align: center;
+  color: #64748b;
+}
+
+.empty-court {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+  opacity: 0.5;
+}
+
+.leaderboard-empty p {
+  margin: 0.5rem 0;
+  font-size: 1.1rem;
+}
+
+.empty-hint {
+  font-size: 0.9rem;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .tennis-leaderboard {
+    border-radius: 12px;
+  }
+
+  .tennis-court-header {
+    padding: 1rem 1.5rem;
+  }
+
+  .court-title h2 {
+    font-size: 1.25rem;
+  }
+
+  .tennis-icon {
+    font-size: 1.5rem;
+  }
+
+  .leaderboard-container {
+    padding: 1.5rem;
+  }
+
+  .leaderboard-header {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .period-selector {
+    width: 100%;
+    justify-content: space-around;
+  }
+
+  .period-btn {
+    flex: 1;
+    padding: 0.625rem 1rem;
+    font-size: 0.85rem;
+  }
+
+  .tennis-table-wrapper {
+    overflow-x: scroll;
+  }
+
+  .tennis-ranking-table {
+    font-size: 0.85rem;
+    min-width: 600px;
+  }
+
+  .tennis-ranking-table th,
+  .tennis-ranking-table td {
+    padding: 0.75rem 0.5rem;
+  }
+
+  .player-info {
+    gap: 0.75rem;
+  }
+
+  .player-avatar,
+  .player-avatar-placeholder {
+    width: 40px;
+    height: 40px;
+    font-size: 1rem;
+  }
+
+  .player-name {
+    font-size: 0.9rem;
+  }
+
+  .points-value {
+    font-size: 1.1rem;
+  }
+}

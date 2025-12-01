@@ -25,7 +25,7 @@ export const PointsDisplay = ({ points, badge, streak, showDetails = false }) =>
       {streak && streak.currentStreak > 0 && (
         <div className="streak-display">
           <span className="streak-icon">🔥</span>
-          <span className="streak-value">{streak.currentStreak} Tage</span>
+          <span className="streak-value">{streak.currentStreak} Matchdays</span>
         </div>
       )}
       {showDetails && streak && streak.streakBonus > 0 && (

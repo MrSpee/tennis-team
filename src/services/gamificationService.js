@@ -314,12 +314,13 @@ export function getBadgeForTime(timeDiffMinutes) {
 }
 
 /**
- * Aktualisiert den Streak eines Spielers
+ * Aktualisiert den Matchday-Streak eines Spielers (NEU: basierend auf Matchdays, nicht Tagen)
  * @param {string} playerId - Player-ID
+ * @param {string} matchdayId - Matchday-ID der aktuellen Eingabe
  * @param {Date} entryDate - Datum der Eingabe
  * @returns {Promise<Object>} { currentStreak, longestStreak, streakBonus }
  */
-export async function updateStreak(playerId, entryDate) {
+export async function updateMatchdayStreak(playerId, matchdayId, entryDate) {
   try {
     // Hole aktuelle Spieler-Daten
     const { data: player, error: playerError } = await supabase
@@ -333,45 +334,82 @@ export async function updateStreak(playerId, entryDate) {
       return { currentStreak: 0, longestStreak: 0, streakBonus: 0 };
     }
 
-    const entryDateObj = new Date(entryDate);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const entryDateOnly = new Date(entryDateObj);
-    entryDateOnly.setHours(0, 0, 0, 0);
+    // Lade alle Matchdays des Spielers (basierend auf seinen Teams)
+    const playerTeams = await getPlayerTeams(playerId);
+    if (!playerTeams || playerTeams.length === 0) {
+      console.warn('⚠️ No teams found for player, cannot calculate matchday streak');
+      return { currentStreak: 0, longestStreak: 0, streakBonus: 0 };
+    }
 
-    let currentStreak = player.current_streak || 0;
-    let longestStreak = player.longest_streak || 0;
-    let streakBonus = 0;
+    const teamIds = playerTeams.map(t => t.id);
+    
+    // Lade alle Matchdays für die Teams des Spielers, sortiert nach Datum
+    const { data: allMatchdays, error: matchdaysError } = await supabase
+      .from('matchdays')
+      .select('id, match_date')
+      .or(`home_team_id.in.(${teamIds.join(',')}),away_team_id.in.(${teamIds.join(',')})`)
+      .order('match_date', { ascending: true });
 
-    // Prüfe ob letzter Eintrag vorhanden
-    if (player.last_entry_date) {
-      const lastEntryDate = new Date(player.last_entry_date);
-      lastEntryDate.setHours(0, 0, 0, 0);
+    if (matchdaysError || !allMatchdays) {
+      console.error('❌ Error loading matchdays for streak:', matchdaysError);
+      return { currentStreak: 0, longestStreak: 0, streakBonus: 0 };
+    }
 
-      const daysDiff = Math.floor((entryDateOnly - lastEntryDate) / (1000 * 60 * 60 * 24));
+    // Lade alle schnellen Eingaben des Spielers (nur speed_entry, keine progress_entry)
+    const { data: achievements, error: achievementsError } = await supabase
+      .from('player_achievements')
+      .select('matchday_id, created_at, points')
+      .eq('player_id', playerId)
+      .eq('achievement_type', 'speed_entry')
+      .gte('points', 15) // Mindestens "Pünktlich" (15 Punkte)
+      .not('matchday_id', 'is', null)
+      .order('created_at', { ascending: true });
 
-      if (daysDiff === 0) {
-        // Gleicher Tag: Streak bleibt gleich (keine Änderung)
-        return { currentStreak, longestStreak, streakBonus: 0 };
-      } else if (daysDiff === 1) {
-        // Gestern: Streak wird fortgesetzt
-        currentStreak = (currentStreak || 0) + 1;
+    if (achievementsError) {
+      console.error('❌ Error loading achievements for streak:', achievementsError);
+      return { currentStreak: 0, longestStreak: 0, streakBonus: 0 };
+    }
+
+    // Erstelle Map: matchdayId -> hat schnelle Eingabe
+    const matchdaysWithFastEntry = new Set((achievements || []).map(a => a.matchday_id));
+
+    // Finde den aktuellen Matchday in der Liste
+    const currentMatchdayIndex = allMatchdays.findIndex(m => m.id === matchdayId);
+    if (currentMatchdayIndex === -1) {
+      console.warn('⚠️ Current matchday not found in player teams matchdays');
+      return { currentStreak: 0, longestStreak: 0, streakBonus: 0 };
+    }
+
+    // Markiere aktuellen Matchday als "hat schnelle Eingabe"
+    matchdaysWithFastEntry.add(matchdayId);
+
+    // Berechne aktuellen Streak: Zähle aufeinanderfolgende Matchdays mit schnellen Eingaben
+    // Starte beim aktuellen Matchday und gehe rückwärts
+    let currentStreak = 0;
+    for (let i = currentMatchdayIndex; i >= 0; i--) {
+      if (matchdaysWithFastEntry.has(allMatchdays[i].id)) {
+        currentStreak++;
       } else {
-        // Mehr als 1 Tag Unterschied: Streak wird zurückgesetzt
-        currentStreak = 1;
+        break; // Streak unterbrochen
       }
-    } else {
-      // Erster Eintrag: Streak startet bei 1
-      currentStreak = 1;
     }
 
-    // Aktualisiere längsten Streak
-    if (currentStreak > longestStreak) {
-      longestStreak = currentStreak;
+    // Berechne längsten Streak: Durchlaufe alle Matchdays
+    let longestStreak = player.longest_streak || 0;
+    let tempStreak = 0;
+    for (const matchday of allMatchdays) {
+      if (matchdaysWithFastEntry.has(matchday.id)) {
+        tempStreak++;
+        if (tempStreak > longestStreak) {
+          longestStreak = tempStreak;
+        }
+      } else {
+        tempStreak = 0; // Streak unterbrochen
+      }
     }
 
-    // Berechne Streak-Bonus
-    streakBonus = calculateStreakBonus(currentStreak);
+    // Berechne Streak-Bonus (basierend auf Matchday-Streak, nicht Tages-Streak)
+    streakBonus = calculateMatchdayStreakBonusPoints(currentStreak);
 
     // Aktualisiere Spieler-Daten
     await supabase
@@ -379,7 +417,7 @@ export async function updateStreak(playerId, entryDate) {
       .update({
         current_streak: currentStreak,
         longest_streak: longestStreak,
-        last_entry_date: entryDateOnly.toISOString().split('T')[0] // Nur Datum, keine Zeit
+        last_entry_date: new Date(entryDate).toISOString().split('T')[0] // Nur Datum, keine Zeit
       })
       .eq('id', playerId);
 
@@ -390,10 +428,11 @@ export async function updateStreak(playerId, entryDate) {
           .from('player_achievements')
           .insert({
             player_id: playerId,
-            achievement_type: 'streak',
+            achievement_type: 'matchday_streak',
             points: streakBonus,
-            badge_name: getStreakBadge(currentStreak),
-            created_at: entryDateObj.toISOString()
+            badge_name: getMatchdayStreakBadge(currentStreak),
+            matchday_id: matchdayId,
+            created_at: new Date(entryDate).toISOString()
           });
 
         // Aktualisiere Gesamtpunkte
@@ -406,81 +445,130 @@ export async function updateStreak(playerId, entryDate) {
 
     return { currentStreak, longestStreak, streakBonus };
   } catch (error) {
-    console.error('❌ Error in updateStreak:', error);
+    console.error('❌ Error in updateMatchdayStreak:', error);
     return { currentStreak: 0, longestStreak: 0, streakBonus: 0 };
   }
 }
 
 /**
- * Berechnet Streak-Bonus-Punkte
- * @param {number} currentStreak - Aktueller Streak
+ * Hilfsfunktion: Lade alle Teams eines Spielers
+ * @param {string} playerId - Player-ID
+ * @returns {Promise<Array>} Array von Team-Objekten
+ */
+async function getPlayerTeams(playerId) {
+  try {
+    const { data: memberships, error } = await supabase
+      .from('team_memberships')
+      .select('team_id, team:team_info(id, club_name, team_name, category)')
+      .eq('player_id', playerId)
+      .eq('is_active', true);
+
+    if (error) {
+      console.error('❌ Error loading player teams:', error);
+      return [];
+    }
+
+    return (memberships || []).map(m => m.team).filter(Boolean);
+  } catch (error) {
+    console.error('❌ Error in getPlayerTeams:', error);
+    return [];
+  }
+}
+
+/**
+ * Berechnet Matchday-Streak-Bonus-Punkte (NEU: basierend auf Matchdays, nicht Tagen)
+ * @param {number} currentStreak - Aktueller Matchday-Streak
  * @returns {number} Bonus-Punkte
  */
-function calculateStreakBonus(currentStreak) {
-  // Wochen-Streak (7 Tage)
-  if (currentStreak === 7) return 100;
-  // Monats-Streak (30 Tage)
-  if (currentStreak === 30) return 500;
-  // Tägliche Streak-Boni (jeden 5. Tag)
-  if (currentStreak > 0 && currentStreak % 5 === 0) {
-    return 20; // +20 Punkte alle 5 Tage
-  }
+function calculateMatchdayStreakBonusPoints(currentStreak) {
+  // Matchday-Streak-Boni (angepasst für Medenspiele, die alle paar Wochen stattfinden)
+  if (currentStreak >= 5) return 100; // 5+ aufeinanderfolgende Matchdays
+  if (currentStreak >= 3) return 50;  // 3+ aufeinanderfolgende Matchdays
+  if (currentStreak >= 2) return 20;  // 2+ aufeinanderfolgende Matchdays
   return 0;
 }
 
 /**
- * Gibt den Badge-Namen für einen Streak zurück
- * @param {number} streak - Streak-Länge
+ * Gibt den Badge-Namen für einen Matchday-Streak zurück
+ * @param {number} streak - Matchday-Streak-Länge
  * @returns {string}
  */
-function getStreakBadge(streak) {
-  if (streak >= 30) return '💪 Eisen-Wille';
-  if (streak >= 7) return '🔥 Hot Streak';
-  if (streak >= 5) return '⭐ Streak-King';
-  return '🔥 Streak';
+function getMatchdayStreakBadge(streak) {
+  if (streak >= 5) return '💪 Matchday-Meister';
+  if (streak >= 3) return '🔥 Matchday-Streak';
+  if (streak >= 2) return '⭐ Matchday-King';
+  return '🔥 Matchday-Streak';
 }
 
 /**
- * Berechnet Wochen-Streak-Bonus (3+, 5+, 7+ schnelle Eingaben in einer Woche)
+ * Berechnet Saison-Streak-Bonus basierend auf Prozentsatz der Matchdays mit schnellen Eingaben
+ * Berücksichtigt unterschiedliche Matchday-Anzahlen pro Team (FAIRNESS)
  * @param {string} playerId - Player-ID
- * @param {Date} entryDate - Datum der Eingabe
+ * @param {string} matchdayId - Matchday-ID der aktuellen Eingabe
  * @returns {Promise<number>} Bonus-Punkte
  */
-export async function calculateWeeklyStreakBonus(playerId, entryDate) {
+export async function calculateMatchdayStreakBonus(playerId, matchdayId) {
   try {
-    const entryDateObj = new Date(entryDate);
-    const weekStart = new Date(entryDateObj);
-    weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // Sonntag
-    weekStart.setHours(0, 0, 0, 0);
-    
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekEnd.getDate() + 7);
-
-    // Zähle schnelle Eingaben diese Woche (nur speed_entry, keine progress_entry)
-    const { data: achievements, error } = await supabase
-      .from('player_achievements')
-      .select('id, points, created_at')
-      .eq('player_id', playerId)
-      .eq('achievement_type', 'speed_entry')
-      .gte('created_at', weekStart.toISOString())
-      .lt('created_at', weekEnd.toISOString());
-
-    if (error) {
-      console.error('❌ Error loading weekly achievements:', error);
+    // Lade alle Teams des Spielers
+    const playerTeams = await getPlayerTeams(playerId);
+    if (!playerTeams || playerTeams.length === 0) {
       return 0;
     }
 
-    const fastEntries = (achievements || []).filter(a => a.points >= 15); // Mindestens "Pünktlich"
-    const count = fastEntries.length;
+    const teamIds = playerTeams.map(t => t.id);
+    
+    // Lade alle Matchdays für die Teams des Spielers in der aktuellen Saison
+    const { data: currentMatchday } = await supabase
+      .from('matchdays')
+      .select('season')
+      .eq('id', matchdayId)
+      .single();
 
-    // Prüfe ob Bonus bereits vergeben wurde
+    if (!currentMatchday) {
+      return 0;
+    }
+
+    const { data: allMatchdays, error: matchdaysError } = await supabase
+      .from('matchdays')
+      .select('id, match_date')
+      .or(`home_team_id.in.(${teamIds.join(',')}),away_team_id.in.(${teamIds.join(',')})`)
+      .eq('season', currentMatchday.season)
+      .order('match_date', { ascending: true });
+
+    if (matchdaysError || !allMatchdays || allMatchdays.length === 0) {
+      return 0;
+    }
+
+    // Lade alle schnellen Eingaben des Spielers in dieser Saison
+    const { data: achievements, error: achievementsError } = await supabase
+      .from('player_achievements')
+      .select('matchday_id, points')
+      .eq('player_id', playerId)
+      .eq('achievement_type', 'speed_entry')
+      .gte('points', 15) // Mindestens "Pünktlich"
+      .not('matchday_id', 'is', null)
+      .in('matchday_id', allMatchdays.map(m => m.id));
+
+    if (achievementsError) {
+      console.error('❌ Error loading achievements for season bonus:', achievementsError);
+      return 0;
+    }
+
+    // Zähle Matchdays mit schnellen Eingaben
+    const matchdaysWithFastEntry = new Set((achievements || []).map(a => a.matchday_id));
+    matchdaysWithFastEntry.add(matchdayId); // Aktueller Matchday
+
+    const totalMatchdays = allMatchdays.length;
+    const fastEntryMatchdays = matchdaysWithFastEntry.size;
+    const percentage = (fastEntryMatchdays / totalMatchdays) * 100;
+
+    // Prüfe ob Bonus bereits vergeben wurde (nur einmal pro Saison)
     const { data: existingBonus } = await supabase
       .from('player_achievements')
       .select('id')
       .eq('player_id', playerId)
-      .eq('achievement_type', 'weekly_streak')
-      .gte('created_at', weekStart.toISOString())
-      .lt('created_at', weekEnd.toISOString())
+      .eq('achievement_type', 'season_matchday_bonus')
+      .eq('matchday_id', matchdayId) // Verwende aktuellen Matchday als Marker
       .maybeSingle();
 
     if (existingBonus) {
@@ -490,36 +578,43 @@ export async function calculateWeeklyStreakBonus(playerId, entryDate) {
     let bonus = 0;
     let badgeName = null;
 
-    if (count >= 7) {
+    // Saison-Boni basierend auf Prozentsatz (fair für alle Teams, unabhängig von Matchday-Anzahl)
+    if (percentage >= 90) {
+      bonus = 200;
+      badgeName = '🏆 Saison-Meister';
+    } else if (percentage >= 75) {
       bonus = 100;
-      badgeName = '🏅 Wochen-Champion';
-    } else if (count >= 5) {
+      badgeName = '🥇 Saison-Star';
+    } else if (percentage >= 60) {
       bonus = 50;
-      badgeName = '⭐ Wochen-Star';
-    } else if (count >= 3) {
-      bonus = 20;
-      badgeName = '🔥 Wochen-Streak';
+      badgeName = '⭐ Saison-Champion';
+    } else if (percentage >= 50) {
+      bonus = 25;
+      badgeName = '🔥 Saison-Engagement';
     }
 
     if (bonus > 0) {
-      // Speichere Wochen-Streak-Achievement
+      // Speichere Saison-Bonus-Achievement
       await supabase
         .from('player_achievements')
         .insert({
           player_id: playerId,
-          achievement_type: 'weekly_streak',
+          achievement_type: 'season_matchday_bonus',
           points: bonus,
           badge_name: badgeName,
-          created_at: entryDateObj.toISOString()
+          matchday_id: matchdayId,
+          created_at: new Date().toISOString()
         });
 
       // Aktualisiere Gesamtpunkte
       await updatePlayerPoints(playerId, bonus);
+      
+      console.log(`✅ Saison-Bonus vergeben: ${percentage.toFixed(1)}% (${fastEntryMatchdays}/${totalMatchdays} Matchdays) = ${bonus} Punkte`);
     }
 
     return bonus;
   } catch (error) {
-    console.error('❌ Error in calculateWeeklyStreakBonus:', error);
+    console.error('❌ Error in calculateMatchdayStreakBonus:', error);
     return 0;
   }
 }

@@ -113,8 +113,8 @@ export const LeaderboardPage = () => {
             </div>
 
             <div className="info-highlight">
-              <h4>🔥 Streaks</h4>
-              <p>Tägliche Eingaben bringen Bonus-Punkte! Halte deinen Streak am Laufen!</p>
+              <h4>🔥 Matchday-Streaks</h4>
+              <p>Aufeinanderfolgende Matchdays mit schnellen Eingaben bringen Bonus-Punkte! 2+ Matchdays = +20 Punkte, 3+ = +50 Punkte, 5+ = +100 Punkte!</p>
             </div>
 
             <div className="info-highlight">
