@@ -60,16 +60,53 @@ export function AuthProvider({ children }) {
 
     // Hole aktuelle Session beim App-Start (z.B. nach Refresh)
     const checkSession = async () => {
+      let timeoutId;
+      
       try {
         console.log('🔵 Checking for existing session...');
         
-        // Timeout für Session-Check um Hängen zu vermeiden
-        const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Session check timeout')), 5000)
-        );
+        // Versuche zuerst, Session aus localStorage zu lesen (schneller)
+        // Supabase speichert die Session in localStorage unter 'supabase.auth.token'
+        try {
+          const storedSession = localStorage.getItem('supabase.auth.token');
+          if (storedSession) {
+            console.log('🔵 Found stored session in localStorage');
+            // Session existiert lokal, aber prüfe trotzdem mit Supabase (async im Hintergrund)
+          }
+        } catch (e) {
+          // localStorage nicht verfügbar, kein Problem
+        }
         
-        const { data: { session }, error } = await Promise.race([sessionPromise, timeoutPromise]);
+        // Timeout nach 3 Sekunden - wenn Supabase nicht antwortet, fahre ohne Session fort
+        const timeoutPromise = new Promise((resolve) => {
+          timeoutId = setTimeout(() => {
+            console.warn('⚠️ Session check timeout after 3s - continuing without session');
+            resolve({ timeout: true });
+          }, 3000);
+        });
+        
+        // Session-Check mit Timeout
+        const sessionPromise = supabase.auth.getSession().then(result => {
+          if (timeoutId) clearTimeout(timeoutId);
+          return result;
+        }).catch(err => {
+          if (timeoutId) clearTimeout(timeoutId);
+          console.error('❌ Session check error:', err);
+          return { data: { session: null }, error: err };
+        });
+        
+        // Race: Entweder Session-Ergebnis oder Timeout
+        const result = await Promise.race([sessionPromise, timeoutPromise]);
+        
+        // Wenn Timeout gewonnen hat, fahre ohne Session fort
+        if (result && result.timeout) {
+          console.warn('⚠️ Session check timed out - continuing without session');
+          setLoading(false);
+          setInitialCheckDone(true);
+          return;
+        }
+        
+        const { data: { session }, error } = result || { data: { session: null }, error: null };
         
         if (error) {
           console.error('❌ Error getting session:', error);
@@ -91,11 +128,15 @@ export function AuthProvider({ children }) {
         setInitialCheckDone(true);
       } catch (error) {
         console.error('❌ Error checking session:', error);
-        if (error.message === 'Session check timeout') {
-          console.warn('⚠️ Session check timed out - continuing without session');
-        }
+        // Bei jedem Fehler einfach ohne Session fortfahren
+        console.warn('⚠️ Continuing without session due to error');
         setLoading(false);
         setInitialCheckDone(true);
+      } finally {
+        // Cleanup: Stelle sicher, dass Timeout gelöscht wird
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
       }
     };
 

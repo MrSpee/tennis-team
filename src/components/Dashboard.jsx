@@ -581,6 +581,9 @@ function Dashboard() {
       }
 
       // Filtere Match-Results basierend auf Spieltag-Datum (nicht created_at!)
+      // ✅ WICHTIG: Zeige nur Matches mit Ergebnis (winner gesetzt) ODER status='completed'
+      // Dies stellt sicher, dass auch Matches angezeigt werden, die bereits ein Ergebnis haben,
+      // auch wenn der Spieltag noch nicht auf "completed" gesetzt wurde
       const matchResults = allMatchResults
         .filter(result => {
           const matchday = matchdaysMap[result.matchday_id];
@@ -588,7 +591,17 @@ function Dashboard() {
             return false; // Skip if matchday not found or no date
           }
           const matchDate = new Date(matchday.match_date);
-          return matchDate >= twoMonthsAgo;
+          if (matchDate < twoMonthsAgo) {
+            return false; // Skip if too old
+          }
+          
+          // ✅ Zeige Match nur wenn:
+          // 1. Status ist 'completed' ODER
+          // 2. Winner ist gesetzt (Match hat ein Ergebnis, auch wenn Status noch nicht 'completed')
+          const hasResult = result.winner && (result.winner === 'home' || result.winner === 'guest' || result.winner === 'away');
+          const isCompleted = result.status === 'completed';
+          
+          return isCompleted || hasResult;
         })
         .sort((a, b) => {
           const dateA = matchdaysMap[a.matchday_id]?.match_date ? new Date(matchdaysMap[a.matchday_id].match_date) : new Date(0);
@@ -613,6 +626,10 @@ function Dashboard() {
       });
 
       if (matchResults && matchResults.length > 0) {
+        // ✅ NEU: Gruppiere Match-Ergebnisse pro Spieler und Match-Typ
+        // Ziel: Pro Spieler das neueste Einzel UND das neueste Doppel behalten
+        const playerMatchResults = new Map(); // playerId -> { 'Einzel': [...], 'Doppel': [...] }
+        
         // Verwende for...of statt forEach für async/await
         for (const result of matchResults) {
           // Finde beteiligte Spieler
@@ -637,275 +654,315 @@ function Dashboard() {
           }
 
           for (const playerId of involvedPlayers) {
-            const playerInfo = players.find(p => p.id === playerId);
-            if (!playerInfo) {
-              console.warn('⚠️ Player not found for feed:', playerId);
-              return;
+            // ✅ Gruppiere nach Match-Typ
+            if (!playerMatchResults.has(playerId)) {
+              playerMatchResults.set(playerId, { 'Einzel': [], 'Doppel': [] });
             }
-
-            const matchday = matchdaysMap[result.matchday_id];
-            if (!matchday) {
-              console.warn('⚠️ Matchday not found for result:', result.id, 'matchday_id:', result.matchday_id);
-              return; // Skip if matchday not found
+            const playerResults = playerMatchResults.get(playerId);
+            const matchType = result.match_type || 'Unknown';
+            if (playerResults[matchType]) {
+              playerResults[matchType].push({ result, playerId });
             }
-
-            const isHome = result.home_player_id === playerId || 
-                          result.home_player1_id === playerId || 
-                          result.home_player2_id === playerId;
-            const won = (isHome && result.winner === 'home') || 
-                       (!isHome && (result.winner === 'guest' || result.winner === 'away'));
-
-            // LK-Berechnungsformel (aus Rankings.jsx)
-            const pointsP = (diff) => {
-              if (diff <= -4) return 10;
-              if (diff >= 4) return 110;
-              if (diff < 0) {
-                const t = (diff + 4) / 4;
-                return 10 + 40 * (t * t);
-              }
-              const t = diff / 4;
-              return 50 + 60 * (t * t);
-            };
-            
-            const hurdleH = (ownLK) => 50 + 12.5 * (25 - ownLK);
-            
-            const calcMatchImprovement = (ownLK, oppLK, isTeamMatch = true) => {
-              const AGE_CLASS_FACTOR = 0.8; // M40/H40
-              const diff = ownLK - oppLK;
-              const P = pointsP(diff);
-              const A = AGE_CLASS_FACTOR;
-              const H = hurdleH(ownLK);
-              let improvement = (P * A) / H;
-              if (isTeamMatch) improvement *= 1.1;
-              return Math.max(0, Number(improvement.toFixed(3)));
-            };
-            
-            // Lade Gegner-Informationen
-            let opponentName = '';
-            let opponentLK = 25;
-            let lkImprovement = 0;
-            let playerLKBefore = 25;
-            let playerLKAfter = 25;
-            
-            const playerLKStr = playerInfo.current_lk || playerInfo.season_start_lk || playerInfo.ranking || '25';
-            const playerLK = parseFloat(playerLKStr.replace('LK ', '').replace(',', '.').replace('LK', '').trim()) || 25;
-            playerLKBefore = playerLK;
-            
-            if (result.match_type === 'Einzel') {
-              // Einzel: Lade direkten Gegner
-              const opponentId = isHome ? result.guest_player_id : result.home_player_id;
-              
-              if (opponentId) {
-                const { data: oppData } = await supabase
-                  .from('players_unified')
-                  .select('name, current_lk, season_start_lk, ranking')
-                  .eq('id', opponentId)
-                  .single();
-                
-                if (oppData) {
-                  opponentName = oppData.name || 'Unbekannt';
-                  const oppLKStr = oppData.current_lk || oppData.season_start_lk || oppData.ranking || '25';
-                  opponentLK = parseFloat(oppLKStr.replace('LK ', '').replace(',', '.').replace('LK', '').trim()) || 25;
-                  
-                  // Berechne LK-Verbesserung (nur bei Sieg)
-                  if (won) {
-                    lkImprovement = calcMatchImprovement(playerLK, opponentLK, true);
-                    playerLKAfter = Math.max(0, playerLK - lkImprovement);
-                  } else {
-                    playerLKAfter = playerLK;
-                  }
-                }
-              }
-            } else {
-              // Doppel: Lade Partner und Gegner
-              const partnerId = isHome ?
-                (result.home_player1_id === playerId ? result.home_player2_id : result.home_player1_id) :
-                (result.guest_player1_id === playerId ? result.guest_player2_id : result.guest_player1_id);
-              
-              const opp1Id = isHome ? result.guest_player1_id : result.home_player1_id;
-              const opp2Id = isHome ? result.guest_player2_id : result.home_player2_id;
-              
-              // Lade Partner-LK für Durchschnitt
-              let partnerLK = 25;
-              if (partnerId) {
-                const { data: partnerData } = await supabase
-                  .from('players_unified')
-                  .select('current_lk, season_start_lk, ranking')
-                  .eq('id', partnerId)
-                  .single();
-                
-                if (partnerData) {
-                  const partnerLKStr = partnerData.current_lk || partnerData.season_start_lk || partnerData.ranking || '25';
-                  partnerLK = parseFloat(partnerLKStr.replace('LK ', '').replace(',', '.').replace('LK', '').trim()) || 25;
-                }
-              }
-              
-              const ownLK = (playerLK + partnerLK) / 2;
-              
-              // Lade Gegner
-              const oppIds = [opp1Id, opp2Id].filter(Boolean);
-              if (oppIds.length > 0) {
-                const { data: oppData } = await supabase
-                  .from('players_unified')
-                  .select('name, current_lk, season_start_lk, ranking')
-                  .in('id', oppIds);
-                
-                if (oppData && oppData.length > 0) {
-                  const oppNames = oppData.map(o => o.name || '?');
-                  opponentName = oppNames.join(' & ');
-                  
-                  const oppLKs = oppData.map(o => {
-                    const oppLKStr = o.current_lk || o.season_start_lk || o.ranking || '25';
-                    return parseFloat(oppLKStr.replace('LK ', '').replace(',', '.').replace('LK', '').trim()) || 25;
-                  });
-                  opponentLK = oppLKs.reduce((a, b) => a + b, 0) / oppLKs.length;
-                  
-                  // Berechne LK-Verbesserung (nur bei Sieg)
-                  if (won) {
-                    lkImprovement = calcMatchImprovement(ownLK, opponentLK, true);
-                    // Bei Doppel: Verbesserung auf Durchschnitts-LK anwenden, dann zurück auf Einzel-LK umrechnen
-                    const ownLKAfter = Math.max(0, ownLK - lkImprovement);
-                    // Vereinfachte Umrechnung: Anteilige Verbesserung
-                    const improvementRatio = ownLKAfter / ownLK;
-                    playerLKAfter = Math.max(0, playerLK * improvementRatio);
-                  } else {
-                    playerLKAfter = playerLK;
-                  }
-                }
-              }
-            }
-            
-            // Fallback: Team-Name wenn kein Spieler gefunden
-            if (!opponentName || opponentName === 'Unbekannt') {
-              opponentName = isHome 
-                ? (matchday.away_team?.club_name || '') + ' ' + (matchday.away_team?.team_name || '')
-                : (matchday.home_team?.club_name || '') + ' ' + (matchday.home_team?.team_name || '');
-            }
-            
-            const opponent = opponentName.trim();
-
-            // Extrahiere Satzergebnisse
-            const isHomePlayer = result.home_player_id === playerId || 
-                          result.home_player1_id === playerId || 
-                          result.home_player2_id === playerId;
-            
-            // Satzergebnisse extrahieren
-            const set1Home = parseInt(result.set1_home) || 0;
-            const set1Guest = parseInt(result.set1_guest) || 0;
-            const set2Home = parseInt(result.set2_home) || 0;
-            const set2Guest = parseInt(result.set2_guest) || 0;
-            const set3Home = parseInt(result.set3_home) || 0;
-            const set3Guest = parseInt(result.set3_guest) || 0;
-            
-            // Baue Satzergebnis-String (z.B. "6:4, 6:2" oder "6:4, 4:6, 7:5")
-            const sets = [];
-            if (set1Home > 0 || set1Guest > 0) {
-              sets.push(isHomePlayer ? `${set1Home}:${set1Guest}` : `${set1Guest}:${set1Home}`);
-            }
-            if (set2Home > 0 || set2Guest > 0) {
-              sets.push(isHomePlayer ? `${set2Home}:${set2Guest}` : `${set2Guest}:${set2Home}`);
-            }
-            if (set3Home > 0 || set3Guest > 0) {
-              sets.push(isHomePlayer ? `${set3Home}:${set3Guest}` : `${set3Guest}:${set3Home}`);
-            }
-            const setScore = sets.join(', ');
-            
-            // Berechne Gesamtspiele für Dominanz-Bewertung
-            const playerGames = isHomePlayer ? (set1Home + set2Home + set3Home) : (set1Guest + set2Guest + set3Guest);
-            const opponentGames = isHomePlayer ? (set1Guest + set2Guest + set3Guest) : (set1Home + set2Home + set3Home);
-            const gameDiff = playerGames - opponentGames;
-            
-            // Zähle gewonnene Sätze (aus Spieler-Perspektive)
-            let playerSetsWon = 0;
-            let opponentSetsWon = 0;
-            
-            if (isHomePlayer) {
-              // Spieler ist auf Home-Seite
-              if (set1Home > set1Guest) playerSetsWon++;
-              else if (set1Guest > set1Home) opponentSetsWon++;
-              if (set2Home > set2Guest) playerSetsWon++;
-              else if (set2Guest > set2Home) opponentSetsWon++;
-              if (set3Home > set3Guest) playerSetsWon++;
-              else if (set3Guest > set3Home) opponentSetsWon++;
-            } else {
-              // Spieler ist auf Guest-Seite
-              if (set1Guest > set1Home) playerSetsWon++;
-              else if (set1Home > set1Guest) opponentSetsWon++;
-              if (set2Guest > set2Home) playerSetsWon++;
-              else if (set2Home > set2Guest) opponentSetsWon++;
-              if (set3Guest > set3Home) playerSetsWon++;
-              else if (set3Home > set3Guest) opponentSetsWon++;
-            }
-            
-            const setDiff = Math.abs(playerSetsWon - opponentSetsWon);
-            
-            let message = '';
-            let icon = '';
-            
-            // Erstelle Message mit Gegner-Name und LK
-            const opponentLKText = opponentLK !== 25 ? ` (LK ${opponentLK.toFixed(1)})` : '';
-            
-            if (won) {
-              // Gewonnen
-              if (setDiff === 2 && gameDiff > 10) {
-                // Klarer Sieg
-                message = `hat ${opponent}${opponentLKText} im ${result.match_type} klar geschlagen! ${setScore} 🏆`;
-                icon = '🏆';
-              } else if (setDiff === 2) {
-                // Normaler Sieg
-                message = `hat ${opponent}${opponentLKText} im ${result.match_type} besiegt! ${setScore} 🎾`;
-                icon = '🎾';
-              } else {
-                // Knapper Sieg
-                message = `hat ${opponent}${opponentLKText} im ${result.match_type} knapp geschlagen! ${setScore} 🎊`;
-                icon = '🎊';
-              }
-            } else {
-              // Verloren
-              if (setDiff === 2 && gameDiff < -10) {
-                // Klare Niederlage
-                message = `hat gegen ${opponent}${opponentLKText} im ${result.match_type} verloren. ${setScore} 😔`;
-                icon = '💔';
-              } else if (setDiff === 2) {
-                // Normale Niederlage
-                message = `hat gegen ${opponent}${opponentLKText} im ${result.match_type} verloren. ${setScore} 😤`;
-                icon = '😓';
-              } else {
-                // Knappe Niederlage
-                message = `hat gegen ${opponent}${opponentLKText} im ${result.match_type} knapp verloren. ${setScore} 😢`;
-                icon = '😞';
-              }
-            }
-            
-            const feedItem = {
-              type: 'match_result',
-              playerId: playerId,
-              playerName: playerInfo.name,
-              playerImage: playerInfo.profile_image,
-              playerLK: playerInfo.current_lk,
-              timestamp: new Date(matchday.match_date),
-              icon,
-              message,
-              data: {
-                matchType: result.match_type,
-                won,
-                setScore,
-                playerSetsWon,
-                opponentSetsWon,
-                playerGames,
-                opponentGames,
-                opponent: opponent.trim(),
-                opponentLK: opponentLK,
-                lkImprovement: lkImprovement,
-                playerLK: playerLK,
-                playerLKBefore: playerLKBefore,
-                playerLKAfter: playerLKAfter,
-                matchDate: matchday.match_date
-              }
-            };
-            
-            feedItems.push(feedItem);
           }
+        }
+        
+        // ✅ Pro Spieler: Behalte nur das neueste Einzel UND das neueste Doppel
+        const processedResults = [];
+        for (const [playerId, resultsByType] of playerMatchResults.entries()) {
+          // Sortiere Einzel-Ergebnisse nach Datum (neueste zuerst)
+          if (resultsByType['Einzel'] && resultsByType['Einzel'].length > 0) {
+            resultsByType['Einzel'].sort((a, b) => {
+              const dateA = matchdaysMap[a.result.matchday_id]?.match_date ? new Date(matchdaysMap[a.result.matchday_id].match_date) : new Date(0);
+              const dateB = matchdaysMap[b.result.matchday_id]?.match_date ? new Date(matchdaysMap[b.result.matchday_id].match_date) : new Date(0);
+              return dateB - dateA; // Neueste zuerst
+            });
+            // Behalte nur das neueste Einzel
+            processedResults.push(resultsByType['Einzel'][0]);
+          }
+          
+          // Sortiere Doppel-Ergebnisse nach Datum (neueste zuerst)
+          if (resultsByType['Doppel'] && resultsByType['Doppel'].length > 0) {
+            resultsByType['Doppel'].sort((a, b) => {
+              const dateA = matchdaysMap[a.result.matchday_id]?.match_date ? new Date(matchdaysMap[a.result.matchday_id].match_date) : new Date(0);
+              const dateB = matchdaysMap[b.result.matchday_id]?.match_date ? new Date(matchdaysMap[b.result.matchday_id].match_date) : new Date(0);
+              return dateB - dateA; // Neueste zuerst
+            });
+            // Behalte nur das neueste Doppel
+            processedResults.push(resultsByType['Doppel'][0]);
+          }
+        }
+        
+        // ✅ Verarbeite nur die neuesten Ergebnisse pro Spieler und Match-Typ
+        // Verwende for...of mit await für async/await
+        for (const { result, playerId } of processedResults) {
+          const playerInfo = players.find(p => p.id === playerId);
+          if (!playerInfo) {
+            console.warn('⚠️ Player not found for feed:', playerId);
+            continue; // Skip this result
+          }
+
+          const matchday = matchdaysMap[result.matchday_id];
+          if (!matchday) {
+            console.warn('⚠️ Matchday not found for result:', result.id, 'matchday_id:', result.matchday_id);
+            continue; // Skip if matchday not found
+          }
+
+          const isHome = result.home_player_id === playerId || 
+                        result.home_player1_id === playerId || 
+                        result.home_player2_id === playerId;
+          const won = (isHome && result.winner === 'home') || 
+                     (!isHome && (result.winner === 'guest' || result.winner === 'away'));
+
+          // LK-Berechnungsformel (aus Rankings.jsx)
+          const pointsP = (diff) => {
+            if (diff <= -4) return 10;
+            if (diff >= 4) return 110;
+            if (diff < 0) {
+              const t = (diff + 4) / 4;
+              return 10 + 40 * (t * t);
+            }
+            const t = diff / 4;
+            return 50 + 60 * (t * t);
+          };
+          
+          const hurdleH = (ownLK) => 50 + 12.5 * (25 - ownLK);
+          
+          const calcMatchImprovement = (ownLK, oppLK, isTeamMatch = true) => {
+            const AGE_CLASS_FACTOR = 0.8; // M40/H40
+            const diff = ownLK - oppLK;
+            const P = pointsP(diff);
+            const A = AGE_CLASS_FACTOR;
+            const H = hurdleH(ownLK);
+            let improvement = (P * A) / H;
+            if (isTeamMatch) improvement *= 1.1;
+            return Math.max(0, Number(improvement.toFixed(3)));
+          };
+          
+          // Lade Gegner-Informationen
+          let opponentName = '';
+          let opponentLK = 25;
+          let lkImprovement = 0;
+          let playerLKBefore = 25;
+          let playerLKAfter = 25;
+          
+          const playerLKStr = playerInfo.current_lk || playerInfo.season_start_lk || playerInfo.ranking || '25';
+          const playerLK = parseFloat(playerLKStr.replace('LK ', '').replace(',', '.').replace('LK', '').trim()) || 25;
+          playerLKBefore = playerLK;
+          
+          if (result.match_type === 'Einzel') {
+            // Einzel: Lade direkten Gegner
+            const opponentId = isHome ? result.guest_player_id : result.home_player_id;
+            
+            if (opponentId) {
+              const { data: oppData } = await supabase
+                .from('players_unified')
+                .select('name, current_lk, season_start_lk, ranking')
+                .eq('id', opponentId)
+                .single();
+              
+              if (oppData) {
+                opponentName = oppData.name || 'Unbekannt';
+                const oppLKStr = oppData.current_lk || oppData.season_start_lk || oppData.ranking || '25';
+                opponentLK = parseFloat(oppLKStr.replace('LK ', '').replace(',', '.').replace('LK', '').trim()) || 25;
+                
+                // Berechne LK-Verbesserung (nur bei Sieg)
+                if (won) {
+                  lkImprovement = calcMatchImprovement(playerLK, opponentLK, true);
+                  playerLKAfter = Math.max(0, playerLK - lkImprovement);
+                } else {
+                  playerLKAfter = playerLK;
+                }
+              }
+            }
+          } else {
+            // Doppel: Lade Partner und Gegner
+            const partnerId = isHome ?
+              (result.home_player1_id === playerId ? result.home_player2_id : result.home_player1_id) :
+              (result.guest_player1_id === playerId ? result.guest_player2_id : result.guest_player1_id);
+            
+            const opp1Id = isHome ? result.guest_player1_id : result.home_player1_id;
+            const opp2Id = isHome ? result.guest_player2_id : result.home_player2_id;
+            
+            // Lade Partner-LK für Durchschnitt
+            let partnerLK = 25;
+            if (partnerId) {
+              const { data: partnerData } = await supabase
+                .from('players_unified')
+                .select('current_lk, season_start_lk, ranking')
+                .eq('id', partnerId)
+                .single();
+              
+              if (partnerData) {
+                const partnerLKStr = partnerData.current_lk || partnerData.season_start_lk || partnerData.ranking || '25';
+                partnerLK = parseFloat(partnerLKStr.replace('LK ', '').replace(',', '.').replace('LK', '').trim()) || 25;
+              }
+            }
+            
+            const ownLK = (playerLK + partnerLK) / 2;
+            
+            // Lade Gegner
+            const oppIds = [opp1Id, opp2Id].filter(Boolean);
+            if (oppIds.length > 0) {
+              const { data: oppData } = await supabase
+                .from('players_unified')
+                .select('name, current_lk, season_start_lk, ranking')
+                .in('id', oppIds);
+              
+              if (oppData && oppData.length > 0) {
+                const oppNames = oppData.map(o => o.name || '?');
+                opponentName = oppNames.join(' & ');
+                
+                const oppLKs = oppData.map(o => {
+                  const oppLKStr = o.current_lk || o.season_start_lk || o.ranking || '25';
+                  return parseFloat(oppLKStr.replace('LK ', '').replace(',', '.').replace('LK', '').trim()) || 25;
+                });
+                opponentLK = oppLKs.reduce((a, b) => a + b, 0) / oppLKs.length;
+                
+                // Berechne LK-Verbesserung (nur bei Sieg)
+                if (won) {
+                  lkImprovement = calcMatchImprovement(ownLK, opponentLK, true);
+                  // Bei Doppel: Verbesserung auf Durchschnitts-LK anwenden, dann zurück auf Einzel-LK umrechnen
+                  const ownLKAfter = Math.max(0, ownLK - lkImprovement);
+                  // Vereinfachte Umrechnung: Anteilige Verbesserung
+                  const improvementRatio = ownLKAfter / ownLK;
+                  playerLKAfter = Math.max(0, playerLK * improvementRatio);
+                } else {
+                  playerLKAfter = playerLK;
+                }
+              }
+            }
+          }
+          
+          // Fallback: Team-Name wenn kein Spieler gefunden
+          if (!opponentName || opponentName === 'Unbekannt') {
+            opponentName = isHome 
+              ? (matchday.away_team?.club_name || '') + ' ' + (matchday.away_team?.team_name || '')
+              : (matchday.home_team?.club_name || '') + ' ' + (matchday.home_team?.team_name || '');
+          }
+          
+          const opponent = opponentName.trim();
+
+          // Extrahiere Satzergebnisse
+          const isHomePlayer = result.home_player_id === playerId || 
+                        result.home_player1_id === playerId || 
+                        result.home_player2_id === playerId;
+          
+          // Satzergebnisse extrahieren
+          const set1Home = parseInt(result.set1_home) || 0;
+          const set1Guest = parseInt(result.set1_guest) || 0;
+          const set2Home = parseInt(result.set2_home) || 0;
+          const set2Guest = parseInt(result.set2_guest) || 0;
+          const set3Home = parseInt(result.set3_home) || 0;
+          const set3Guest = parseInt(result.set3_guest) || 0;
+          
+          // Baue Satzergebnis-String (z.B. "6:4, 6:2" oder "6:4, 4:6, 7:5")
+          const sets = [];
+          if (set1Home > 0 || set1Guest > 0) {
+            sets.push(isHomePlayer ? `${set1Home}:${set1Guest}` : `${set1Guest}:${set1Home}`);
+          }
+          if (set2Home > 0 || set2Guest > 0) {
+            sets.push(isHomePlayer ? `${set2Home}:${set2Guest}` : `${set2Guest}:${set2Home}`);
+          }
+          if (set3Home > 0 || set3Guest > 0) {
+            sets.push(isHomePlayer ? `${set3Home}:${set3Guest}` : `${set3Guest}:${set3Home}`);
+          }
+          const setScore = sets.join(', ');
+          
+          // Berechne Gesamtspiele für Dominanz-Bewertung
+          const playerGames = isHomePlayer ? (set1Home + set2Home + set3Home) : (set1Guest + set2Guest + set3Guest);
+          const opponentGames = isHomePlayer ? (set1Guest + set2Guest + set3Guest) : (set1Home + set2Home + set3Home);
+          const gameDiff = playerGames - opponentGames;
+          
+          // Zähle gewonnene Sätze (aus Spieler-Perspektive)
+          let playerSetsWon = 0;
+          let opponentSetsWon = 0;
+          
+          if (isHomePlayer) {
+            // Spieler ist auf Home-Seite
+            if (set1Home > set1Guest) playerSetsWon++;
+            else if (set1Guest > set1Home) opponentSetsWon++;
+            if (set2Home > set2Guest) playerSetsWon++;
+            else if (set2Guest > set2Home) opponentSetsWon++;
+            if (set3Home > set3Guest) playerSetsWon++;
+            else if (set3Guest > set3Home) opponentSetsWon++;
+          } else {
+            // Spieler ist auf Guest-Seite
+            if (set1Guest > set1Home) playerSetsWon++;
+            else if (set1Home > set1Guest) opponentSetsWon++;
+            if (set2Guest > set2Home) playerSetsWon++;
+            else if (set2Home > set2Guest) opponentSetsWon++;
+            if (set3Guest > set3Home) playerSetsWon++;
+            else if (set3Home > set3Guest) opponentSetsWon++;
+          }
+          
+          const setDiff = Math.abs(playerSetsWon - opponentSetsWon);
+          
+          let message = '';
+          let icon = '';
+          
+          // Erstelle Message mit Gegner-Name und LK
+          const opponentLKText = opponentLK !== 25 ? ` (LK ${opponentLK.toFixed(1)})` : '';
+          
+          if (won) {
+            // Gewonnen
+            if (setDiff === 2 && gameDiff > 10) {
+              // Klarer Sieg
+              message = `hat ${opponent}${opponentLKText} im ${result.match_type} klar geschlagen! ${setScore} 🏆`;
+              icon = '🏆';
+            } else if (setDiff === 2) {
+              // Normaler Sieg
+              message = `hat ${opponent}${opponentLKText} im ${result.match_type} besiegt! ${setScore} 🎾`;
+              icon = '🎾';
+            } else {
+              // Knapper Sieg
+              message = `hat ${opponent}${opponentLKText} im ${result.match_type} knapp geschlagen! ${setScore} 🎊`;
+              icon = '🎊';
+            }
+          } else {
+            // Verloren
+            if (setDiff === 2 && gameDiff < -10) {
+              // Klare Niederlage
+              message = `hat gegen ${opponent}${opponentLKText} im ${result.match_type} verloren. ${setScore} 😔`;
+              icon = '💔';
+            } else if (setDiff === 2) {
+              // Normale Niederlage
+              message = `hat gegen ${opponent}${opponentLKText} im ${result.match_type} verloren. ${setScore} 😤`;
+              icon = '😓';
+            } else {
+              // Knappe Niederlage
+              message = `hat gegen ${opponent}${opponentLKText} im ${result.match_type} knapp verloren. ${setScore} 😢`;
+              icon = '😞';
+            }
+          }
+          
+          const feedItem = {
+            type: 'match_result',
+            playerId: playerId,
+            playerName: playerInfo.name,
+            playerImage: playerInfo.profile_image,
+            playerLK: playerInfo.current_lk,
+            timestamp: new Date(matchday.match_date),
+            icon,
+            message,
+            data: {
+              matchType: result.match_type,
+              won,
+              setScore,
+              playerSetsWon,
+              opponentSetsWon,
+              playerGames,
+              opponentGames,
+              opponent: opponent.trim(),
+              opponentLK: opponentLK,
+              lkImprovement: lkImprovement,
+              playerLK: playerLK,
+              playerLKBefore: playerLKBefore,
+              playerLKAfter: playerLKAfter,
+              matchDate: matchday.match_date
+            }
+          };
+          
+          feedItems.push(feedItem);
         }
       }
 
@@ -1138,53 +1195,87 @@ function Dashboard() {
         }
       });
 
-      // Sortiere: Spielergebnisse (match_result) immer vor neuen Matches (new_match)
-      // Innerhalb jeder Kategorie unterschiedlich sortieren
+      // Sortiere: Einzel > Doppel > Zukünftige Matches, dann nach Zeit (neueste zuerst)
       uniqueFeedItems.sort((a, b) => {
-        // Priorität: match_result > new_match
-        const typePriority = {
-          'match_result': 1,
-          'new_match': 2
+        // Priorität: Einzel (1) > Doppel (2) > Zukünftige Matches (3)
+        const getPriority = (item) => {
+          if (item.type === 'match_result') {
+            const matchType = item.data?.matchType || 'Unknown';
+            if (matchType === 'Einzel') return 1; // Höchste Priorität
+            if (matchType === 'Doppel') return 2; // Zweithöchste Priorität
+            return 3; // Unbekannter Match-Typ
+          }
+          if (item.type === 'new_match') {
+            return 3; // Niedrigste Priorität
+          }
+          return 999; // Unbekannter Typ
         };
         
-        const priorityA = typePriority[a.type] || 999;
-        const priorityB = typePriority[b.type] || 999;
+        const priorityA = getPriority(a);
+        const priorityB = getPriority(b);
         
-        // Zuerst nach Typ-Priorität sortieren
+        // Wenn unterschiedliche Prioritäten: Sortiere nach Priorität
         if (priorityA !== priorityB) {
           return priorityA - priorityB;
         }
         
-        // Bei match_result: Neueste zuerst (absteigend)
+        // Wenn gleiche Priorität: Sortiere nach Zeit (neueste zuerst)
         if (a.type === 'match_result' && b.type === 'match_result') {
-          return b.timestamp - a.timestamp;
+          return b.timestamp - a.timestamp; // Neueste zuerst
         }
-        
-        // Bei new_match: Nächste zuerst (aufsteigend - frühere Matches zuerst)
         if (a.type === 'new_match' && b.type === 'new_match') {
-          return a.timestamp - b.timestamp;
+          return a.timestamp - b.timestamp; // Nächste Matches zuerst (aufsteigend)
         }
         
         // Fallback
         return b.timestamp - a.timestamp;
       });
 
-      // Limitiere: Max. 2 Ergebnisse pro Freund, insgesamt max. 10 Items auf der Startseite
+      // ✅ NEU: Limitiere pro Spieler: Max. 1 Einzel + 1 Doppel (Match-Ergebnisse)
+      // + max. 1 zukünftiges Match
+      // WICHTIG: Einzel hat Priorität vor Doppel
       const playerItemCounts = new Map(); // Zähle Items pro Spieler
+      const playerMatchTypes = new Map(); // Tracke Match-Typen pro Spieler (Einzel/Doppel)
       const limitedFeedItems = [];
       
       for (const item of uniqueFeedItems) {
         const playerId = item.playerId;
         const currentCount = playerItemCounts.get(playerId) || 0;
         
-        // Max. 2 Items pro Spieler
-        if (currentCount < 2) {
-          limitedFeedItems.push(item);
-          playerItemCounts.set(playerId, currentCount + 1);
+        // Für Match-Ergebnisse: Prüfe ob bereits Einzel oder Doppel vorhanden
+        if (item.type === 'match_result') {
+          const matchType = item.data?.matchType || 'Unknown';
+          const playerTypes = playerMatchTypes.get(playerId) || new Set();
           
-          // Max. 10 Items insgesamt auf der Startseite (erhöht von 5)
-          if (limitedFeedItems.length >= 10) {
-            break;
+          // Wenn bereits Einzel UND Doppel vorhanden, überspringe weitere Match-Ergebnisse
+          if (playerTypes.has('Einzel') && playerTypes.has('Doppel')) {
+            continue;
+          }
+          
+          // Wenn dieser Match-Typ noch nicht vorhanden, füge hinzu
+          // WICHTIG: Einzel wird zuerst hinzugefügt (wegen Sortierung), dann Doppel
+          if (!playerTypes.has(matchType)) {
+            limitedFeedItems.push(item);
+            playerTypes.add(matchType);
+            playerMatchTypes.set(playerId, playerTypes);
+            playerItemCounts.set(playerId, currentCount + 1);
+            
+            // Max. 10 Items insgesamt auf der Startseite
+            if (limitedFeedItems.length >= 10) {
+              break;
+            }
+          }
+        } else {
+          // Für zukünftige Matches: Max. 1 pro Spieler
+          // Nur hinzufügen, wenn bereits Match-Ergebnisse vorhanden sind ODER wenn noch Platz ist
+          if (currentCount < 3) { // 2 Match-Ergebnisse + 1 zukünftiges Match = 3
+            limitedFeedItems.push(item);
+            playerItemCounts.set(playerId, currentCount + 1);
+            
+            // Max. 10 Items insgesamt auf der Startseite
+            if (limitedFeedItems.length >= 10) {
+              break;
+            }
           }
         }
       }
@@ -1725,161 +1816,27 @@ function Dashboard() {
 
   return (
     <div className="dashboard container">
-      {/* 🎮 GAMIFICATION BANNER - Teaser Card (ganz oben) */}
-      <div 
-        className="fade-in" 
-        style={{ 
-          marginBottom: '1.5rem',
-          marginTop: '0.5rem',
-          cursor: 'pointer'
-        }}
-        onClick={() => navigate('/leaderboard')}
-      >
-        <div style={{
-          background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 30%, #fcd34d 60%, #fbbf24 100%)',
-          border: '3px solid #f59e0b',
-          borderRadius: '20px',
-          padding: '2rem',
-          boxShadow: '0 8px 24px rgba(245, 158, 11, 0.3), 0 4px 8px rgba(0, 0, 0, 0.1)',
-          transition: 'all 0.3s ease',
-          position: 'relative',
-          overflow: 'hidden'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.transform = 'translateY(-4px) scale(1.01)';
-          e.currentTarget.style.boxShadow = '0 12px 32px rgba(245, 158, 11, 0.4), 0 6px 12px rgba(0, 0, 0, 0.15)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.transform = 'translateY(0) scale(1)';
-          e.currentTarget.style.boxShadow = '0 8px 24px rgba(245, 158, 11, 0.3), 0 4px 8px rgba(0, 0, 0, 0.1)';
-        }}
-        >
-          {/* Dekorative Elemente */}
-          <div style={{
-            position: 'absolute',
-            top: '-40px',
-            right: '-40px',
-            width: '200px',
-            height: '200px',
-            background: 'radial-gradient(circle, rgba(245, 158, 11, 0.25) 0%, transparent 70%)',
-            borderRadius: '50%'
-          }} />
-          <div style={{
-            position: 'absolute',
-            bottom: '-30px',
-            left: '-30px',
-            width: '150px',
-            height: '150px',
-            background: 'radial-gradient(circle, rgba(251, 191, 36, 0.2) 0%, transparent 70%)',
-            borderRadius: '50%'
-          }} />
-          
-          {/* Tennisball-Icon SVG */}
-          <div style={{
-            position: 'absolute',
-            top: '1rem',
-            right: '1rem',
-            width: '80px',
-            height: '80px',
-            opacity: 0.15,
-            zIndex: 0
-          }}>
-            <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-              <ellipse cx="50" cy="50" rx="45" ry="45" fill="#92400e" />
-              <path d="M 20 50 Q 30 30, 50 30 Q 70 30, 80 50 Q 70 70, 50 70 Q 30 70, 20 50" fill="none" stroke="#fef3c7" strokeWidth="2" />
-              <path d="M 50 20 Q 30 30, 30 50 Q 30 70, 50 80 Q 70 70, 70 50 Q 70 30, 50 20" fill="none" stroke="#fef3c7" strokeWidth="2" />
-            </svg>
+      {/* 🎮 GAMIFICATION BANNER - Comic Style mit Originalbild (ganz oben) */}
+      <div className="fade-in" style={{ marginBottom: '1.5rem', marginTop: '0.5rem' }}>
+        <div className="comic-banner" onClick={() => navigate('/leaderboard')}>
+          {/* Hintergrundbild */}
+          <div className="banner-background">
+            <img 
+              src="/Banner_App.jpg" 
+              alt="Tennis Comic Duel" 
+              className="banner-bg-image"
+            />
+            <div className="banner-overlay"></div>
           </div>
           
-          <div style={{ position: 'relative', zIndex: 1 }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '1rem',
-              marginBottom: '1rem',
-              flexWrap: 'wrap'
-            }}>
-              <div style={{
-                fontSize: '3rem',
-                lineHeight: 1,
-                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))'
-              }}>
-                🎾
-              </div>
-              <div style={{ flex: 1, minWidth: '200px' }}>
-                <h2 style={{
-                  margin: '0 0 0.5rem 0',
-                  fontSize: '1.75rem',
-                  fontWeight: '800',
-                  color: '#78350f',
-                  textShadow: '0 2px 4px rgba(255,255,255,0.5)',
-                  lineHeight: 1.2
-                }}>
-                  Spielergebnisse - eintragen lohnt sich!
-                </h2>
-                <p style={{
-                  margin: 0,
-                  fontSize: '1.1rem',
-                  color: '#92400e',
-                  lineHeight: 1.5,
-                  fontWeight: '500'
-                }}>
-                  Sammle Punkte für zeitnahe Eingaben, baue Streaks auf und gewinne Preise! 🎁
-                </p>
-              </div>
-            </div>
-            
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: '1rem',
-              paddingTop: '1rem',
-              borderTop: '2px solid rgba(146, 64, 14, 0.2)'
-            }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.75rem',
-                fontSize: '1rem',
-                fontWeight: '700',
-                color: '#78350f',
-                background: 'rgba(255, 255, 255, 0.6)',
-                padding: '0.75rem 1.25rem',
-                borderRadius: '12px',
-                border: '2px solid rgba(146, 64, 14, 0.3)',
-                transition: 'all 0.2s ease'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.9)';
-                e.currentTarget.style.transform = 'scale(1.05)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.6)';
-                e.currentTarget.style.transform = 'scale(1)';
-              }}
-              >
-                <span style={{ fontSize: '1.25rem' }}>⚡</span>
-                <span>Details & Leaderboard ansehen</span>
-                <span style={{ fontSize: '1.25rem' }}>→</span>
-              </div>
+          {/* Content */}
+          <div className="banner-content-wrapper">
+            <div className="banner-content">
+              <h2 className="banner-headline">Spielergebnisse eintragen lohnt sich!</h2>
               
               {pastMatchesWithoutResult.length > 0 && (
-                <div style={{
-                  background: 'linear-gradient(135deg, rgba(220, 38, 38, 0.15) 0%, rgba(239, 68, 68, 0.15) 100%)',
-                  border: '2px solid rgba(220, 38, 38, 0.4)',
-                  padding: '0.75rem 1.25rem',
-                  borderRadius: '12px',
-                  fontSize: '0.95rem',
-                  fontWeight: '700',
-                  color: '#991b1b',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem'
-                }}>
-                  <span>⚠️</span>
-                  <span>{pastMatchesWithoutResult.length} offene {pastMatchesWithoutResult.length === 1 ? 'Eingabe' : 'Eingaben'}</span>
+                <div className="banner-warning">
+                  ⚠️ {pastMatchesWithoutResult.length} offene {pastMatchesWithoutResult.length === 1 ? 'Eingabe' : 'Eingaben'}
                 </div>
               )}
             </div>
@@ -2359,16 +2316,76 @@ function Dashboard() {
                   return acc;
                 }, {});
 
-                // Sortiere Aktivitäten pro Spieler nach Timestamp (neueste zuerst)
+                // Sortiere Aktivitäten pro Spieler: Einzel > Doppel > Zukünftige Matches, dann nach Zeit (neueste zuerst)
                 Object.values(groupedByPlayer).forEach(player => {
-                  player.activities.sort((a, b) => b.timestamp - a.timestamp);
+                  player.activities.sort((a, b) => {
+                    // Priorität: Einzel (1) > Doppel (2) > Zukünftige Matches (3)
+                    const getPriority = (item) => {
+                      if (item.type === 'match_result') {
+                        const matchType = item.data?.matchType || 'Unknown';
+                        if (matchType === 'Einzel') return 1; // Höchste Priorität
+                        if (matchType === 'Doppel') return 2; // Zweithöchste Priorität
+                        return 3; // Unbekannter Match-Typ
+                      }
+                      if (item.type === 'new_match') {
+                        return 3; // Niedrigste Priorität
+                      }
+                      return 999; // Unbekannter Typ
+                    };
+                    
+                    const priorityA = getPriority(a);
+                    const priorityB = getPriority(b);
+                    
+                    // Wenn unterschiedliche Prioritäten: Sortiere nach Priorität
+                    if (priorityA !== priorityB) {
+                      return priorityA - priorityB;
+                    }
+                    
+                    // Wenn gleiche Priorität: Sortiere nach Zeit (neueste zuerst)
+                    if (a.type === 'match_result') {
+                      return b.timestamp - a.timestamp; // Neueste zuerst
+                    } else {
+                      return a.timestamp - b.timestamp; // Nächste Matches zuerst (aufsteigend)
+                    }
+                  });
                 });
 
-                // Konvertiere zu Array und sortiere nach neuester Aktivität
+                // Konvertiere zu Array und sortiere Spieler nach neuester Aktivität
+                // Berücksichtige dabei die Typ-Priorität: Einzel > Doppel > Zukünftige Matches
                 const playersWithActivities = Object.values(groupedByPlayer).sort((a, b) => {
-                  const latestA = a.activities[0]?.timestamp || 0;
-                  const latestB = b.activities[0]?.timestamp || 0;
-                  return latestB - latestA;
+                  const latestA = a.activities[0];
+                  const latestB = b.activities[0];
+                  
+                  if (!latestA || !latestB) return 0;
+                  
+                  // Priorität: Einzel (1) > Doppel (2) > Zukünftige Matches (3)
+                  const getPriority = (item) => {
+                    if (item.type === 'match_result') {
+                      const matchType = item.data?.matchType || 'Unknown';
+                      if (matchType === 'Einzel') return 1; // Höchste Priorität
+                      if (matchType === 'Doppel') return 2; // Zweithöchste Priorität
+                      return 3; // Unbekannter Match-Typ
+                    }
+                    if (item.type === 'new_match') {
+                      return 3; // Niedrigste Priorität
+                    }
+                    return 999; // Unbekannter Typ
+                  };
+                  
+                  const priorityA = getPriority(latestA);
+                  const priorityB = getPriority(latestB);
+                  
+                  // Wenn unterschiedliche Prioritäten: Sortiere nach Priorität
+                  if (priorityA !== priorityB) {
+                    return priorityA - priorityB;
+                  }
+                  
+                  // Gleiche Priorität: Neueste zuerst
+                  if (latestA.type === 'match_result') {
+                    return latestB.timestamp - latestA.timestamp;
+                  } else {
+                    return latestA.timestamp - latestB.timestamp; // Nächste Matches zuerst
+                  }
                 });
 
                 return (

@@ -205,11 +205,38 @@ function Matches() {
                   key={match.id} 
                   id={`match-${match.id}`}
                   className="match-result-card"
+                  style={{
+                    borderLeft: myStatus?.status === 'unavailable' ? '4px solid #ef4444' : 
+                                myStatus?.status === 'available' ? '4px solid #10b981' : 
+                                '4px solid transparent'
+                  }}
                 >
                   {/* Match Header mit Gegner */}
                   <div className="match-header">
                     <div className="match-info">
-                      <span className="match-opponent-name">{match.opponent}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                        <span className="match-opponent-name">{match.opponent}</span>
+                        {/* ✅ NEU: Dein Status Badge direkt im Header */}
+                        {myStatus && (
+                          <div style={{
+                            padding: '0.25rem 0.75rem',
+                            borderRadius: '9999px',
+                            fontSize: '0.75rem',
+                            fontWeight: '700',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.05em',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.375rem',
+                            backgroundColor: myStatus.status === 'available' ? '#d1fae5' : '#fee2e2',
+                            color: myStatus.status === 'available' ? '#065f46' : '#991b1b',
+                            border: `2px solid ${myStatus.status === 'available' ? '#10b981' : '#ef4444'}`
+                          }}>
+                            <span>{myStatus.status === 'available' ? '✅' : '❌'}</span>
+                            <span>{myStatus.status === 'available' ? 'Dabei' : 'Abgesagt'}</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                     <div className="match-status">
                       {/* Status Badge */}
@@ -424,15 +451,51 @@ function Matches() {
                   <div className="availability-hero">
                     {myStatus ? (
                       // Bereits geantwortet
-                      <div className={`availability-status-card ${myStatus.status}`}>
-                        <div className="status-card-header">
-                          <div>
-                            <div className="status-card-label">Deine Antwort:</div>
-                            <div className="status-card-value">
-                              {myStatus.status === 'available' ? '✅ Bin dabei!' : '❌ Kann nicht'}
+                      <div className={`availability-status-card ${myStatus.status}`} style={{
+                        backgroundColor: myStatus.status === 'available' ? '#d1fae5' : '#fee2e2',
+                        border: `3px solid ${myStatus.status === 'available' ? '#10b981' : '#ef4444'}`,
+                        borderRadius: '12px',
+                        padding: '1rem',
+                        marginTop: '1rem'
+                      }}>
+                        <div className="status-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                          <div style={{ flex: 1 }}>
+                            <div className="status-card-label" style={{ 
+                              fontSize: '0.75rem', 
+                              fontWeight: '700', 
+                              textTransform: 'uppercase', 
+                              letterSpacing: '0.05em',
+                              color: myStatus.status === 'available' ? '#065f46' : '#991b1b',
+                              marginBottom: '0.5rem'
+                            }}>
+                              Deine Antwort:
+                            </div>
+                            <div className="status-card-value" style={{
+                              fontSize: '1.25rem',
+                              fontWeight: '700',
+                              color: myStatus.status === 'available' ? '#065f46' : '#991b1b',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.5rem',
+                              marginBottom: myStatus.comment ? '0.5rem' : '0'
+                            }}>
+                              <span style={{ fontSize: '1.5rem' }}>
+                                {myStatus.status === 'available' ? '✅' : '❌'}
+                              </span>
+                              <span>
+                                {myStatus.status === 'available' ? 'Bin dabei!' : 'Kann nicht'}
+                              </span>
                             </div>
                             {myStatus.comment && (
-                              <div className="status-card-comment">
+                              <div className="status-card-comment" style={{
+                                fontSize: '0.875rem',
+                                color: myStatus.status === 'available' ? '#047857' : '#dc2626',
+                                fontStyle: 'italic',
+                                marginTop: '0.5rem',
+                                padding: '0.5rem',
+                                backgroundColor: myStatus.status === 'available' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                                borderRadius: '6px'
+                              }}>
                                 💬 {myStatus.comment}
                               </div>
                             )}
@@ -461,6 +524,23 @@ function Matches() {
                           <button
                             onClick={() => setSelectedMatch(match.id)}
                             className="btn-change-availability"
+                            style={{
+                              width: '100%',
+                              padding: '0.75rem',
+                              borderRadius: '8px',
+                              border: `2px solid ${myStatus.status === 'available' ? '#10b981' : '#ef4444'}`,
+                              backgroundColor: 'white',
+                              color: myStatus.status === 'available' ? '#065f46' : '#991b1b',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s ease'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.target.style.backgroundColor = myStatus.status === 'available' ? '#d1fae5' : '#fee2e2';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.backgroundColor = 'white';
+                            }}
                           >
                             Antwort ändern
                           </button>

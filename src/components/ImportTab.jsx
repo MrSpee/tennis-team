@@ -2394,10 +2394,17 @@ const ImportTab = () => {
 
       // Für jeden importierten Spieler: Fuzzy-Match
       const matchResults = players.map(importPlayer => {
+        // ✅ Helper: Entferne Länder-Flags für Namensvergleich
+        const normalizeNameForMatch = (name) => {
+          if (!name) return '';
+          return removeCountryFlag(name).toLowerCase().trim();
+        };
+        
         // PRIORITÄT 1: Exakte Übereinstimmung Name + LK + TVM ID (100% Match)
+        // ✅ NEU: Ignoriert Länder-Flags im Namen
         if (importPlayer.lk && importPlayer.id_number) {
           const tripleMatch = existingPlayers.find(p => {
-            const nameMatch = p.name.toLowerCase() === importPlayer.name.toLowerCase();
+            const nameMatch = normalizeNameForMatch(p.name) === normalizeNameForMatch(importPlayer.name);
             const lkMatch = p.current_lk === importPlayer.lk;
             const tvmMatch = p.tvm_id_number === importPlayer.id_number;
             return nameMatch && lkMatch && tvmMatch;
@@ -2416,9 +2423,10 @@ const ImportTab = () => {
         }
 
         // PRIORITÄT 2: Name + TVM ID (ohne LK)
+        // ✅ NEU: Ignoriert Länder-Flags im Namen
         if (importPlayer.id_number) {
           const nameTvmMatch = existingPlayers.find(p => {
-            const nameMatch = p.name.toLowerCase() === importPlayer.name.toLowerCase();
+            const nameMatch = normalizeNameForMatch(p.name) === normalizeNameForMatch(importPlayer.name);
             const tvmMatch = p.tvm_id_number === importPlayer.id_number;
             return nameMatch && tvmMatch;
           });
@@ -2436,9 +2444,10 @@ const ImportTab = () => {
         }
 
         // PRIORITÄT 3: Name + LK (ohne TVM ID)
+        // ✅ NEU: Ignoriert Länder-Flags im Namen
         if (importPlayer.lk) {
           const nameLkMatch = existingPlayers.find(p => {
-            const nameMatch = p.name.toLowerCase() === importPlayer.name.toLowerCase();
+            const nameMatch = normalizeNameForMatch(p.name) === normalizeNameForMatch(importPlayer.name);
             const lkMatch = p.current_lk === importPlayer.lk;
             return nameMatch && lkMatch;
           });
@@ -2505,8 +2514,9 @@ const ImportTab = () => {
         }
 
         // PRIORITÄT 5: Exakte Übereinstimmung (nur Name)
+        // ✅ NEU: Ignoriert Länder-Flags im Namen
         const exactNameMatch = existingPlayers.find(
-          p => p.name.toLowerCase() === importPlayer.name.toLowerCase()
+          p => normalizeNameForMatch(p.name) === normalizeNameForMatch(importPlayer.name)
         );
 
         if (exactNameMatch) {
@@ -2557,11 +2567,25 @@ const ImportTab = () => {
   };
 
   /**
+   * Entfernt Länder-Flags aus Spielernamen (Format: "XXX Y Name" oder "Name XXX Y")
+   * z.B. "Raoul NED N van Herwijnen" → "Raoul van Herwijnen"
+   * z.B. "NED N van Herwijnen" → "van Herwijnen"
+   */
+  const removeCountryFlag = (name) => {
+    if (!name) return name;
+    // Entferne Länder-Flag-Muster: 3 Großbuchstaben + Leerzeichen + 1 Großbuchstaben + Leerzeichen
+    // z.B. "NED N " oder " ITA N "
+    return name.replace(/\b[A-Z]{3}\s+[A-Z]\s+/g, '').trim();
+  };
+
+  /**
    * Einfache String-Similarity (Levenshtein Distance)
+   * ✅ NEU: Ignoriert Länder-Flags im Namen
    */
   const calculateSimilarity = (str1, str2) => {
-    const s1 = str1.toLowerCase();
-    const s2 = str2.toLowerCase();
+    // ✅ NEU: Entferne Länder-Flags vor dem Vergleich
+    const s1 = removeCountryFlag(str1).toLowerCase();
+    const s2 = removeCountryFlag(str2).toLowerCase();
     
     if (s1 === s2) return 1;
     

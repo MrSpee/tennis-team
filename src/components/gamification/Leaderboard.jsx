@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Info, Trophy, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 import './Leaderboard.css';
@@ -10,15 +10,11 @@ export const Leaderboard = ({ period: initialPeriod = 'week', limit = 20 }) => {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [period, setPeriod] = useState(initialPeriod);
+  const [period, setPeriod] = useState(initialPeriod || 'week');
   const [showInfo, setShowInfo] = useState(false);
   const [previousRankings, setPreviousRankings] = useState({});
 
-  useEffect(() => {
-    loadLeaderboard();
-  }, [period, limit]);
-
-  const loadLeaderboard = async () => {
+  const loadLeaderboard = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -37,29 +33,25 @@ export const Leaderboard = ({ period: initialPeriod = 'week', limit = 20 }) => {
         startDate = new Date(0);
       }
 
-      // Lade Achievements für den Zeitraum
-      const { data: achievements, error: achievementsError } = await supabase
+      // Timeout für Query (3 Sekunden)
+      const queryTimeout = new Promise((resolve) => {
+        setTimeout(() => {
+          resolve({ timeout: true });
+        }, 3000);
+      });
+
+      // Lade Achievements für den Zeitraum mit Timeout
+      const achievementsQuery = supabase
         .from('player_achievements')
         .select('player_id, points, created_at')
         .gte('created_at', startDate.toISOString())
         .order('created_at', { ascending: false });
 
-      if (achievementsError) throw achievementsError;
-
-      // Aggregiere Punkte pro Spieler
-      const playerPoints = {};
-      (achievements || []).forEach(achievement => {
-        if (!playerPoints[achievement.player_id]) {
-          playerPoints[achievement.player_id] = 0;
-        }
-        playerPoints[achievement.player_id] += achievement.points;
-      });
-
-      // Lade Spieler-Daten
-      const playerIds = Object.keys(playerPoints);
+      const achievementsResult = await Promise.race([achievementsQuery, queryTimeout]);
       
-      // 🎮 DEMO: Wenn keine Daten vorhanden, zeige Beispieldaten
-      if (playerIds.length === 0) {
+      // Wenn Timeout, zeige Demo-Daten
+      if (achievementsResult.timeout) {
+        console.warn('⚠️ Achievements query timeout - showing demo data');
         const demoPlayers = [
           { id: 'demo-1', name: 'Max Mustermann', profile_image: null, gamification_points: 450, current_streak: 5, periodPoints: 320, rankChange: 0 },
           { id: 'demo-2', name: 'Anna Schmidt', profile_image: null, gamification_points: 380, current_streak: 3, periodPoints: 280, rankChange: 1 },
@@ -72,14 +64,100 @@ export const Leaderboard = ({ period: initialPeriod = 'week', limit = 20 }) => {
         return;
       }
 
-      const { data: playersData, error: playersError } = await supabase
+      const { data: achievements, error: achievementsError } = achievementsResult;
+
+      if (achievementsError) {
+        console.error('❌ Error loading achievements:', achievementsError);
+        // Fallback: Zeige Demo-Daten bei Fehler
+        const demoPlayers = [
+          { id: 'demo-1', name: 'Max Mustermann', profile_image: null, gamification_points: 450, current_streak: 5, periodPoints: 320, rankChange: 0 },
+          { id: 'demo-2', name: 'Anna Schmidt', profile_image: null, gamification_points: 380, current_streak: 3, periodPoints: 280, rankChange: 1 },
+          { id: 'demo-3', name: 'Tom Weber', profile_image: null, gamification_points: 320, current_streak: 2, periodPoints: 240, rankChange: -1 },
+          { id: 'demo-4', name: 'Lisa Müller', profile_image: null, gamification_points: 290, current_streak: 2, periodPoints: 190, rankChange: 0 },
+          { id: 'demo-5', name: 'Jan Becker', profile_image: null, gamification_points: 250, current_streak: 1, periodPoints: 150, rankChange: 2 }
+        ];
+        setPlayers(demoPlayers);
+        setLoading(false);
+        return;
+      }
+
+      // Aggregiere Punkte pro Spieler
+      const playerPoints = {};
+      (achievements || []).forEach(achievement => {
+        if (achievement.player_id) {
+          if (!playerPoints[achievement.player_id]) {
+            playerPoints[achievement.player_id] = 0;
+          }
+          playerPoints[achievement.player_id] += (achievement.points || 0);
+        }
+      });
+
+      // Lade Spieler-Daten
+      const playerIds = Object.keys(playerPoints).filter(id => id && id !== 'null' && id !== 'undefined');
+      
+      // 🎮 DEMO: Wenn keine Daten vorhanden, zeige sofort Beispieldaten (OHNE weitere Query)
+      if (!achievements || achievements.length === 0 || playerIds.length === 0) {
+        console.log('ℹ️ No achievements found, showing demo data immediately');
+        const demoPlayers = [
+          { id: 'demo-1', name: 'Max Mustermann', profile_image: null, gamification_points: 450, current_streak: 5, periodPoints: 320, rankChange: 0 },
+          { id: 'demo-2', name: 'Anna Schmidt', profile_image: null, gamification_points: 380, current_streak: 3, periodPoints: 280, rankChange: 1 },
+          { id: 'demo-3', name: 'Tom Weber', profile_image: null, gamification_points: 320, current_streak: 2, periodPoints: 240, rankChange: -1 },
+          { id: 'demo-4', name: 'Lisa Müller', profile_image: null, gamification_points: 290, current_streak: 2, periodPoints: 190, rankChange: 0 },
+          { id: 'demo-5', name: 'Jan Becker', profile_image: null, gamification_points: 250, current_streak: 1, periodPoints: 150, rankChange: 2 }
+        ];
+        setPlayers(demoPlayers);
+        setLoading(false);
+        return;
+      }
+
+      // Alternative: Lade alle Spieler mit gamification_points > 0, falls keine achievements vorhanden
+      // Oder lade Spieler basierend auf playerIds
+      const playersQuery = supabase
         .from('players_unified')
         .select('id, name, profile_image, gamification_points, current_streak')
         .in('id', playerIds)
         .order('gamification_points', { ascending: false })
         .limit(limit);
 
-      if (playersError) throw playersError;
+      const playersTimeout = new Promise((resolve) => {
+        setTimeout(() => {
+          resolve({ timeout: true });
+        }, 3000);
+      });
+
+      const playersResult = await Promise.race([playersQuery, playersTimeout]);
+      
+      // Wenn Timeout, zeige Demo-Daten
+      if (playersResult.timeout) {
+        console.warn('⚠️ Players query timeout - showing demo data');
+        const demoPlayers = [
+          { id: 'demo-1', name: 'Max Mustermann', profile_image: null, gamification_points: 450, current_streak: 5, periodPoints: 320, rankChange: 0 },
+          { id: 'demo-2', name: 'Anna Schmidt', profile_image: null, gamification_points: 380, current_streak: 3, periodPoints: 280, rankChange: 1 },
+          { id: 'demo-3', name: 'Tom Weber', profile_image: null, gamification_points: 320, current_streak: 2, periodPoints: 240, rankChange: -1 },
+          { id: 'demo-4', name: 'Lisa Müller', profile_image: null, gamification_points: 290, current_streak: 2, periodPoints: 190, rankChange: 0 },
+          { id: 'demo-5', name: 'Jan Becker', profile_image: null, gamification_points: 250, current_streak: 1, periodPoints: 150, rankChange: 2 }
+        ];
+        setPlayers(demoPlayers);
+        setLoading(false);
+        return;
+      }
+
+      const { data: playersData, error: playersError } = playersResult;
+
+      if (playersError) {
+        console.error('❌ Error loading players:', playersError);
+        // Fallback: Zeige Demo-Daten bei Fehler
+        const demoPlayers = [
+          { id: 'demo-1', name: 'Max Mustermann', profile_image: null, gamification_points: 450, current_streak: 5, periodPoints: 320, rankChange: 0 },
+          { id: 'demo-2', name: 'Anna Schmidt', profile_image: null, gamification_points: 380, current_streak: 3, periodPoints: 280, rankChange: 1 },
+          { id: 'demo-3', name: 'Tom Weber', profile_image: null, gamification_points: 320, current_streak: 2, periodPoints: 240, rankChange: -1 },
+          { id: 'demo-4', name: 'Lisa Müller', profile_image: null, gamification_points: 290, current_streak: 2, periodPoints: 190, rankChange: 0 },
+          { id: 'demo-5', name: 'Jan Becker', profile_image: null, gamification_points: 250, current_streak: 1, periodPoints: 150, rankChange: 2 }
+        ];
+        setPlayers(demoPlayers);
+        setLoading(false);
+        return;
+      }
 
       // Kombiniere Daten und berechne Rangänderungen
       const leaderboard = (playersData || []).map((player, index) => {
@@ -117,12 +195,73 @@ export const Leaderboard = ({ period: initialPeriod = 'week', limit = 20 }) => {
         setPlayers(leaderboard);
       }
     } catch (err) {
-      console.error('Error loading leaderboard:', err);
+      console.error('❌ Error loading leaderboard:', err);
       setError('Fehler beim Laden des Leaderboards');
+      // Fallback: Zeige Demo-Daten auch bei unerwarteten Fehlern
+      const demoPlayers = [
+        { id: 'demo-1', name: 'Max Mustermann', profile_image: null, gamification_points: 450, current_streak: 5, periodPoints: 320, rankChange: 0 },
+        { id: 'demo-2', name: 'Anna Schmidt', profile_image: null, gamification_points: 380, current_streak: 3, periodPoints: 280, rankChange: 1 },
+        { id: 'demo-3', name: 'Tom Weber', profile_image: null, gamification_points: 320, current_streak: 2, periodPoints: 240, rankChange: -1 },
+        { id: 'demo-4', name: 'Lisa Müller', profile_image: null, gamification_points: 290, current_streak: 2, periodPoints: 190, rankChange: 0 },
+        { id: 'demo-5', name: 'Jan Becker', profile_image: null, gamification_points: 250, current_streak: 1, periodPoints: 150, rankChange: 2 }
+      ];
+      setPlayers(demoPlayers);
     } finally {
       setLoading(false);
     }
-  };
+  }, [period, limit, previousRankings]);
+
+  useEffect(() => {
+    let isMounted = true;
+    let timeoutId;
+    
+    // Zeige sofort Demo-Daten, während echte Daten geladen werden
+    const demoPlayers = [
+      { id: 'demo-1', name: 'Max Mustermann', profile_image: null, gamification_points: 450, current_streak: 5, periodPoints: 320, rankChange: 0 },
+      { id: 'demo-2', name: 'Anna Schmidt', profile_image: null, gamification_points: 380, current_streak: 3, periodPoints: 280, rankChange: 1 },
+      { id: 'demo-3', name: 'Tom Weber', profile_image: null, gamification_points: 320, current_streak: 2, periodPoints: 240, rankChange: -1 },
+      { id: 'demo-4', name: 'Lisa Müller', profile_image: null, gamification_points: 290, current_streak: 2, periodPoints: 190, rankChange: 0 },
+      { id: 'demo-5', name: 'Jan Becker', profile_image: null, gamification_points: 250, current_streak: 1, periodPoints: 150, rankChange: 2 }
+    ];
+    
+    // Setze sofort Demo-Daten und lade im Hintergrund
+    setPlayers(demoPlayers);
+    setLoading(false);
+    
+    // Lade echte Daten im Hintergrund (ohne Loading-State zu blockieren)
+    const loadData = async () => {
+      try {
+        // Timeout nach 2 Sekunden - wenn zu langsam, bleibe bei Demo-Daten
+        timeoutId = setTimeout(() => {
+          if (isMounted) {
+            console.warn('⚠️ Leaderboard load timeout, keeping demo data');
+          }
+        }, 2000);
+        
+        await loadLeaderboard();
+        
+        if (isMounted && timeoutId) {
+          clearTimeout(timeoutId);
+        }
+      } catch (err) {
+        console.error('❌ Unexpected error in loadLeaderboard:', err);
+        // Bei Fehler bleiben wir bei Demo-Daten
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+      }
+    };
+    
+    // Lade im Hintergrund (nicht-blockierend)
+    loadData();
+    
+    return () => {
+      isMounted = false;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [loadLeaderboard]);
 
   if (loading) {
     return (

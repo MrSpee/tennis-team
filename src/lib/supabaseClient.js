@@ -13,17 +13,27 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error('Siehe SUPABASE_SETUP.md für Details');
 }
 
-// Erstelle Supabase Client
+// Erstelle Supabase Client mit expliziten Timeouts
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: true
+    detectSessionInUrl: true,
+    storage: window.localStorage,
+    storageKey: 'supabase.auth.token'
   },
   realtime: {
     params: {
       eventsPerSecond: 10
     }
+  },
+  global: {
+    headers: {
+      'x-client-info': 'tennis-team-app'
+    }
+  },
+  db: {
+    schema: 'public'
   }
 });
 

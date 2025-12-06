@@ -4224,3 +4224,271 @@
     color: #dbeafe;
   }
 }
+
+/* ====== COMIC BANNER ====== */
+.comic-banner {
+  position: relative;
+  border-radius: 16px;
+  padding: 0;
+  margin-bottom: 20px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), 0 4px 8px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+}
+
+/* Mobile: Deutlich kleineres Banner */
+@media (max-width: 480px) {
+  .comic-banner {
+    min-height: 80px;
+    margin-bottom: 12px;
+    border-radius: 10px;
+  }
+}
+
+.comic-banner:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3), 0 6px 12px rgba(0, 0, 0, 0.2);
+}
+
+.banner-background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+
+.banner-bg-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  transition: transform 0.5s ease;
+}
+
+.comic-banner:hover .banner-bg-image {
+  transform: scale(1.05);
+}
+
+.banner-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 107, 107, 0.85) 0%,
+    rgba(255, 217, 61, 0.75) 50%,
+    rgba(255, 107, 107, 0.85) 100%
+  );
+  z-index: 1;
+}
+
+.banner-content-wrapper {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* Mobile: Reduziertes Padding */
+@media (max-width: 480px) {
+  .banner-content-wrapper {
+    padding: 8px 12px;
+  }
+}
+
+.banner-content {
+  text-align: right;
+  max-width: 500px;
+  margin-left: auto;
+}
+
+.banner-headline {
+  font-size: 1.4em;
+  font-weight: 900;
+  margin: 0;
+  text-transform: uppercase;
+  color: white;
+  text-shadow: 
+    2px 2px 0 #192A56,
+    3px 3px 0 rgba(0, 0, 0, 0.3),
+    0 0 15px rgba(255, 255, 255, 0.5);
+  letter-spacing: 1px;
+  line-height: 1.2;
+}
+
+/* Mobile: Kleinere Headline */
+@media (max-width: 480px) {
+  .banner-headline {
+    font-size: 0.9em;
+    margin: 0;
+    letter-spacing: 0.3px;
+    text-shadow: 
+      1px 1px 0 #192A56,
+      0 0 6px rgba(255, 255, 255, 0.5);
+    line-height: 1.2;
+  }
+}
+
+.banner-subtext {
+  font-size: 1.15em;
+  font-weight: 700;
+  margin: 0 0 24px 0;
+  line-height: 1.5;
+  color: white;
+  text-shadow: 
+    2px 2px 0 #192A56,
+    0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+/* Mobile: Kleinere Subtext */
+@media (max-width: 480px) {
+  .banner-subtext {
+    font-size: 0.75em;
+    margin: 0 0 10px 0;
+    line-height: 1.3;
+    text-shadow: 
+      1px 1px 0 #192A56,
+      0 0 6px rgba(0, 0, 0, 0.5);
+  }
+}
+
+.prize-text {
+  color: #FFD700;
+  font-weight: 900;
+  white-space: nowrap;
+  text-shadow: 
+    2px 2px 0 #C0392B,
+    0 0 15px rgba(255, 215, 0, 0.8);
+}
+
+.trophy-icon {
+  width: 20px;
+  height: 20px;
+  vertical-align: middle;
+  margin-left: 5px;
+  color: #F1C40F;
+  animation: glow 1.5s infinite alternate;
+}
+
+@keyframes glow {
+  from {
+    filter: drop-shadow(0 0 1px #F1C40F);
+  }
+  to {
+    filter: drop-shadow(0 0 8px #F1C40F);
+  }
+}
+
+.cta-button {
+  background-color: #2ECC71;
+  color: white;
+  font-weight: 800;
+  font-size: 1.15em;
+  padding: 14px 28px;
+  border: 3px solid white;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 
+    0 6px 0 #27AE60,
+    0 0 20px rgba(46, 204, 113, 0.5);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Mobile: Kompakterer Button */
+@media (max-width: 480px) {
+  .cta-button {
+    font-size: 0.75em;
+    padding: 8px 16px;
+    border: 2px solid white;
+    border-radius: 8px;
+    box-shadow: 
+      0 3px 0 #27AE60,
+      0 0 12px rgba(46, 204, 113, 0.5);
+    gap: 4px;
+    letter-spacing: 0.3px;
+  }
+}
+
+.cta-button:hover {
+  background-color: #27AE60;
+  transform: translateY(3px);
+  box-shadow: 
+    0 3px 0 #27AE60,
+    0 0 25px rgba(46, 204, 113, 0.7);
+}
+
+.cta-button:active {
+  transform: translateY(6px);
+  box-shadow: 0 0 0 #27AE60;
+}
+
+.banner-warning {
+  margin-top: 1rem;
+  background: rgba(192, 57, 43, 0.9);
+  padding: 0.75rem 1.5rem;
+  border-radius: 10px;
+  fontSize: 0.95rem;
+  font-weight: 700;
+  color: white;
+  box-shadow: 
+    0 4px 0 #A93226,
+    0 0 15px rgba(192, 57, 43, 0.5);
+  display: inline-block;
+  border: 2px solid white;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.arrow-icon {
+  font-size: 1.2em;
+  transition: transform 0.2s;
+}
+
+.cta-button:hover .arrow-icon {
+  transform: translateX(4px);
+}
+
+/* Responsive Anpassung für kleinere Bildschirme */
+@media (max-width: 768px) {
+  .comic-banner {
+    min-height: 90px;
+  }
+
+  .banner-content-wrapper {
+    padding: 12px 20px;
+    justify-content: center;
+  }
+
+  .banner-content {
+    text-align: center;
+    max-width: 100%;
+    margin-left: 0;
+  }
+
+  .banner-headline {
+    font-size: 1.1em;
+    text-shadow: 
+      2px 2px 0 #192A56,
+      0 0 12px rgba(255, 255, 255, 0.5);
+    letter-spacing: 0.5px;
+  }
+}
+
+/* Mobile Styles für Banner (max-width: 480px) sind bereits oben in den einzelnen Selektoren definiert */

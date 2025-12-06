@@ -146,14 +146,31 @@ export const isPrefixMatch = (shortStr, longStr) => {
 /**
  * Kombinierter Similarity Score mit Präfix-Matching
  */
+/**
+ * Entfernt Länder-Flags aus Spielernamen (Format: "XXX Y Name" oder "Name XXX Y")
+ * z.B. "Raoul NED N van Herwijnen" → "Raoul van Herwijnen"
+ * z.B. "NED N van Herwijnen" → "van Herwijnen"
+ */
+export const removeCountryFlag = (name) => {
+  if (!name) return name;
+  // Entferne Länder-Flag-Muster: 3 Großbuchstaben + Leerzeichen + 1 Großbuchstaben + Leerzeichen
+  // z.B. "NED N " oder " ITA N "
+  return name.replace(/\b[A-Z]{3}\s+[A-Z]\s+/g, '').trim();
+};
+
 export const calculateSimilarity = (str1, str2) => {
   if (!str1 || !str2) return 0;
-  if (normalizeString(str1) === normalizeString(str2)) return 1.0;
+  
+  // ✅ NEU: Entferne Länder-Flags vor dem Vergleich
+  const str1Clean = removeCountryFlag(str1);
+  const str2Clean = removeCountryFlag(str2);
+  
+  if (normalizeString(str1Clean) === normalizeString(str2Clean)) return 1.0;
   
   // Prüfe Präfix-Matching (für abgekürzte Namen)
   // "SV Blau" sollte gut zu "SV Blau-Weiß-Rot" matchen
-  const str1Norm = normalizeString(str1);
-  const str2Norm = normalizeString(str2);
+  const str1Norm = normalizeString(str1Clean);
+  const str2Norm = normalizeString(str2Clean);
   
   // Wenn einer der Strings deutlich kürzer ist, prüfe Präfix-Match
   if (Math.abs(str1Norm.length - str2Norm.length) > 3) {
@@ -168,8 +185,8 @@ export const calculateSimilarity = (str1, str2) => {
     }
   }
   
-  const jw = jaroWinkler(str1, str2);
-  const tsr = tokenSetRatio(str1, str2);
+  const jw = jaroWinkler(str1Clean, str2Clean);
+  const tsr = tokenSetRatio(str1Clean, str2Clean);
   
   // Gewichtete Kombination
   return (jw * 0.6 + tsr * 0.4);
