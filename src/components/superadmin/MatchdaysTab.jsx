@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, useState, useMemo } from 'react';
 import MatchdayDetailCard from './MatchdayDetailCard';
 
 const MATCHDAY_STATUS_STYLES = {
@@ -56,6 +56,37 @@ const needsResultParser = (match) => {
   return match.status === 'scheduled' && isMatchInPast(match);
 };
 
+// Prüft ob ein Matchday vollständige Ergebnisse hat
+const hasCompleteResults = (match) => {
+  if (!match) return false;
+  
+  // Wenn Match abgesagt oder verschoben, gilt es als "vollständig" (nichts zu tun)
+  if (['cancelled', 'postponed'].includes(match.status)) return true;
+  
+  // Wenn Match nicht completed ist, ist es nicht vollständig
+  if (match.status !== 'completed') return false;
+  
+  // Prüfe ob Ergebnisse vorhanden sind
+  const matchResultsCount = match.match_results_count || 0;
+  if (matchResultsCount === 0) return false;
+  
+  // Prüfe ob final_score oder home_score/away_score vorhanden sind
+  const hasNumericScore = match.home_score != null && match.away_score != null;
+  const finalScore = typeof match.final_score === 'string' 
+    ? match.final_score.trim() 
+    : match.final_score;
+  const hasFinalScore = Boolean(finalScore);
+  
+  // Wenn Score vorhanden UND Ergebnisse in DB, gilt als vollständig
+  if ((hasNumericScore || hasFinalScore) && matchResultsCount > 0) {
+    return true;
+  }
+  
+  // Wenn keine Scores, aber Ergebnisse vorhanden, prüfe ob diese vollständig sind
+  // (Das wird später durch matchResultsData geprüft, hier erstmal konservativ)
+  return matchResultsCount >= 6; // Erwartete Anzahl für ein vollständiges Match
+};
+
 function MatchdaysTab({
   seasonMatchdays,
   matchesNeedingParser,
@@ -80,6 +111,27 @@ function MatchdaysTab({
   creatingPlayerKey,
   matchdayDuplicates = []
 }) {
+  // State für Archiv-Filter
+  const [showArchived, setShowArchived] = useState(false);
+  
+  // Filtere Matchdays basierend auf Vollständigkeit
+  const filteredMatchdays = useMemo(() => {
+    if (showArchived) {
+      // Zeige nur vollständige (archivierte) Matchdays
+      return seasonMatchdays.filter(match => hasCompleteResults(match));
+    } else {
+      // Zeige nur unvollständige Matchdays (Standard)
+      return seasonMatchdays.filter(match => !hasCompleteResults(match));
+    }
+  }, [seasonMatchdays, showArchived]);
+  
+  // Zähle vollständige und unvollständige Matchdays
+  const stats = useMemo(() => {
+    const complete = seasonMatchdays.filter(m => hasCompleteResults(m)).length;
+    const incomplete = seasonMatchdays.filter(m => !hasCompleteResults(m)).length;
+    return { complete, incomplete, total: seasonMatchdays.length };
+  }, [seasonMatchdays]);
+  
   const renderParserIndicator = ({ parserStatus, parserState, isParserRunning, shouldTriggerParser, matchStatus }) => {
     if (isParserRunning) {
       return (
@@ -122,10 +174,63 @@ function MatchdaysTab({
         <div>
           <div className="formkurve-title">Spieltage</div>
           <div className="formkurve-subtitle">
-            {seasonMatchdays.length > 0
-              ? `${seasonMatchdays.length} Spiel${seasonMatchdays.length === 1 ? '' : 'e'}`
-              : 'Keine Spieltage gefunden'}
+            {showArchived ? (
+              <>
+                {stats.complete > 0
+                  ? `${stats.complete} archivierte Spiel${stats.complete === 1 ? '' : 'e'} (vollständig)`
+                  : 'Keine archivierten Spieltage'}
+              </>
+            ) : (
+              <>
+                {stats.incomplete > 0
+                  ? `${stats.incomplete} Spiel${stats.incomplete === 1 ? '' : 'e'} benötigen Aufmerksamkeit`
+                  : 'Alle Spieltage sind vollständig! 🎉'}
+              </>
+            )}
+            {stats.total > 0 && (
+              <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: '#6b7280' }}>
+                ({stats.total} gesamt)
+              </span>
+            )}
           </div>
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={() => setShowArchived(false)}
+            style={{
+              padding: '0.5rem 1rem',
+              background: !showArchived ? 'linear-gradient(135deg, rgb(59, 130, 246) 0%, rgb(37, 99, 235) 100%)' : 'white',
+              color: !showArchived ? 'white' : '#374151',
+              border: '2px solid',
+              borderColor: !showArchived ? 'rgb(30, 64, 175)' : '#e5e7eb',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '0.875rem',
+              fontWeight: '600',
+              transition: 'all 0.2s'
+            }}
+          >
+            Aktuell {stats.incomplete > 0 && `(${stats.incomplete})`}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowArchived(true)}
+            style={{
+              padding: '0.5rem 1rem',
+              background: showArchived ? 'linear-gradient(135deg, rgb(59, 130, 246) 0%, rgb(37, 99, 235) 100%)' : 'white',
+              color: showArchived ? 'white' : '#374151',
+              border: '2px solid',
+              borderColor: showArchived ? 'rgb(30, 64, 175)' : '#e5e7eb',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '0.875rem',
+              fontWeight: '600',
+              transition: 'all 0.2s'
+            }}
+          >
+            📦 Archiv {stats.complete > 0 && `(${stats.complete})`}
+          </button>
         </div>
       </div>
       <div className="season-content">
@@ -181,8 +286,12 @@ function MatchdaysTab({
             </button>
           </div>
         )}
-        {seasonMatchdays.length === 0 ? (
-          <div className="placeholder">Für diese Saison wurden keine Matchdays gefunden.</div>
+        {filteredMatchdays.length === 0 ? (
+          <div className="placeholder">
+            {showArchived 
+              ? 'Keine archivierten Spieltage gefunden.' 
+              : 'Alle Spieltage sind vollständig! 🎉'}
+          </div>
         ) : (
           <div className="table-responsive">
             <table className="lk-table matchday-table matchday-table-compact">
@@ -202,7 +311,7 @@ function MatchdaysTab({
                 </tr>
               </thead>
               <tbody>
-                {seasonMatchdays.map((match, index) => {
+                {filteredMatchdays.map((match, index) => {
                   const homeTeam = teamById.get(match.home_team_id);
                   const awayTeam = teamById.get(match.away_team_id);
                   const matchResultsCount = match.match_results_count || 0;
