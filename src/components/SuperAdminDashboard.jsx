@@ -21,7 +21,7 @@ import ScraperTab from './superadmin/ScraperTab';
 import TeamPortraitImportTab from './superadmin/TeamPortraitImportTab';
 import GroupsTab from './superadmin/GroupsTab';
 import ActivityLogTab from './superadmin/ActivityLogTab';
-import { findMatchdaysWithoutResultsAfter4Days } from '../services/autoMatchResultImportService';
+import { findMatchdaysWithoutResultsAfter4Days, runAutoImport } from '../services/autoMatchResultImportService';
 import './Dashboard.css';
 import './SuperAdminDashboard.css';
 
@@ -1058,6 +1058,69 @@ function SuperAdminDashboard() {
   useEffect(() => {
     loadDashboardData();
   }, [loadDashboardData]);
+
+  // ✅ NEU: Automatischer Import-Prozess - prüft regelmäßig auf fehlende Ergebnisse
+  useEffect(() => {
+    if (!supabase) return;
+    
+    // Funktion zum Ausführen des automatischen Imports
+    const runAutoImportCheck = async () => {
+      if (autoImportStatus.isRunning) {
+        console.log('[SuperAdminDashboard] Auto-Import läuft bereits, überspringe...');
+        return;
+      }
+      
+      setAutoImportStatus(prev => ({ ...prev, isRunning: true }));
+      
+      try {
+        console.log('[SuperAdminDashboard] 🔄 Starte automatischen Import-Check...');
+        const result = await runAutoImport(supabase, { 
+          delayBetweenImports: 2000 // 2 Sekunden Pause zwischen Imports
+        });
+        
+        setAutoImportStatus({
+          lastRun: new Date(),
+          isRunning: false,
+          lastResult: result
+        });
+        
+        if (result.success > 0) {
+          console.log(`[SuperAdminDashboard] ✅ ${result.success} Spieltage automatisch importiert`);
+          // Dashboard-Daten werden automatisch neu geladen, da matchdaysWithoutResults aktualisiert wird
+        } else if (result.total > 0) {
+          console.log(`[SuperAdminDashboard] ⏭️ ${result.skipped} übersprungen, ${result.failed} fehlgeschlagen`);
+        } else {
+          console.log('[SuperAdminDashboard] ℹ️ Keine Spieltage zum Importieren gefunden');
+        }
+        
+        // Lade auch die Liste der fehlenden Ergebnisse neu
+        const missingResults = await findMatchdaysWithoutResultsAfter4Days(supabase);
+        setMatchdaysWithoutResults(missingResults || []);
+      } catch (error) {
+        console.error('[SuperAdminDashboard] ❌ Fehler beim automatischen Import:', error);
+        setAutoImportStatus(prev => ({
+          ...prev,
+          isRunning: false,
+          lastResult: { error: error.message }
+        }));
+      }
+    };
+    
+    // Führe sofort einen Check durch (nach kurzer Verzögerung)
+    const initialTimeout = setTimeout(() => {
+      runAutoImportCheck();
+    }, 3000); // 3 Sekunden nach Mount
+    
+    // Dann regelmäßig alle 10 Minuten prüfen
+    const interval = setInterval(() => {
+      runAutoImportCheck();
+    }, 10 * 60 * 1000); // 10 Minuten
+    
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
+  }, [supabase]);
 
   // ---------------------------------------------------------------------------
   // Scraper-Utilities
@@ -3524,6 +3587,38 @@ function SuperAdminDashboard() {
       for (let i = 0; i < matchdaysWithoutResults.length; i++) {
         const match = matchdaysWithoutResults[i];
         
+        // ✅ Prüfe ob group_name vorhanden ist, sonst lade es aus der DB
+        let matchWithGroupName = match;
+        if (!match.group_name) {
+          try {
+            const { data: matchdayData } = await supabase
+              .from('matchdays')
+              .select('group_name, season, league')
+              .eq('id', match.id)
+              .maybeSingle();
+            
+            if (matchdayData && matchdayData.group_name) {
+              matchWithGroupName = { ...match, ...matchdayData };
+            } else {
+              console.warn(`⚠️ Match ${match.id} hat keine group_name, überspringe...`);
+              errorCount++;
+              continue;
+            }
+          } catch (dbError) {
+            console.warn(`⚠️ Fehler beim Laden der group_name für Match ${match.id}:`, dbError);
+            errorCount++;
+            continue;
+          }
+        }
+        
+        // Prüfe ob groupId ermittelt werden kann
+        const groupId = resolveGroupId(matchWithGroupName.group_name);
+        if (!groupId && !matchWithGroupName.meeting_id) {
+          console.warn(`⚠️ Match ${match.id} hat keine gültige group_name (${matchWithGroupName.group_name}) und keine meeting_id, überspringe...`);
+          errorCount++;
+          continue;
+        }
+        
         // Baue Team-Labels
         const homeTeam = match.home_team 
           ? `${match.home_team.club_name}${match.home_team.team_name ? ` ${match.home_team.team_name}` : ''}`
@@ -3534,7 +3629,7 @@ function SuperAdminDashboard() {
         
         try {
           // Lade Details OHNE automatischen Import (applyImport = false)
-          await handleLoadMeetingDetails(match, { 
+          await handleLoadMeetingDetails(matchWithGroupName, { 
             homeLabel: homeTeam, 
             awayLabel: awayTeam, 
             applyImport: false 
@@ -4671,6 +4766,7 @@ function SuperAdminDashboard() {
       onNavigateToTab={setSelectedTab}
       onLoadDetailsForAllMatches={handleLoadDetailsForAllMatches}
       loadingDetailsForAll={loadingDetailsForAll}
+      autoImportStatus={autoImportStatus}
     />
   );
 

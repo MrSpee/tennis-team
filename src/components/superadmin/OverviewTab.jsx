@@ -8,7 +8,8 @@ function OverviewTab({
   onUpdateMeetingIds,
   onNavigateToTab,
   onLoadDetailsForAllMatches,
-  loadingDetailsForAll = false
+  loadingDetailsForAll = false,
+  autoImportStatus = null
 }) {
   return (
     <div className="lk-card-full">
@@ -17,6 +18,22 @@ function OverviewTab({
           <div className="formkurve-title">System-Übersicht</div>
           <div className="formkurve-subtitle">
             Build {buildInfo.shortCommit} · {buildInfo.buildTimeFormatted}
+            {autoImportStatus && (
+              <span style={{ marginLeft: '1rem', fontSize: '0.75rem', color: '#6b7280' }}>
+                {autoImportStatus.isRunning ? (
+                  <span style={{ color: '#3b82f6' }}>🔄 Prüfe auf fehlende Ergebnisse...</span>
+                ) : autoImportStatus.lastRun ? (
+                  <span>
+                    ✅ Letzte Prüfung: {new Date(autoImportStatus.lastRun).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                    {autoImportStatus.lastResult && autoImportStatus.lastResult.success > 0 && (
+                      <span style={{ color: '#10b981', marginLeft: '0.5rem' }}>
+                        ({autoImportStatus.lastResult.success} importiert)
+                      </span>
+                    )}
+                  </span>
+                ) : null}
+              </span>
+            )}
           </div>
         </div>
       </div>
