@@ -524,6 +524,26 @@ export function DataProvider({ children }) {
       // TEST-DATEN deaktiviert für sauberes Development
 
       setMatches(transformedMatches);
+      
+      // ✅ NEU: Automatisches Laden von Meldelisten im Hintergrund
+      if (data && data.length > 0) {
+        // Importiere dynamisch, um Circular Dependencies zu vermeiden
+        import('../services/autoTeamRosterImportService').then(({ autoImportTeamRostersForMatchdays }) => {
+          // Führe im Hintergrund aus (nicht blockierend)
+          const runImport = () => {
+            autoImportTeamRostersForMatchdays(data);
+          };
+          
+          if ('requestIdleCallback' in window) {
+            requestIdleCallback(runImport, { timeout: 5000 });
+          } else {
+            // Fallback: Führe nach kurzer Verzögerung aus
+            setTimeout(runImport, 2000);
+          }
+        }).catch(err => {
+          console.warn('⚠️ Fehler beim Laden von autoTeamRosterImportService:', err);
+        });
+      }
     } catch (error) {
       console.error('Error in loadMatches:', error);
     }

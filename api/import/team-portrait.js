@@ -77,10 +77,20 @@ module.exports = async function handler(req, res) {
     try {
       cheerio = require('cheerio');
     } catch (e) {
-      // Fallback für ES Modules
-      const cheerioModule = await import('cheerio');
-      cheerio = cheerioModule.default || cheerioModule;
+      try {
+        // Fallback für ES Modules
+        const cheerioModule = await import('cheerio');
+        cheerio = cheerioModule.default || cheerioModule;
+      } catch (importError) {
+        console.error('❌ Cheerio konnte nicht geladen werden:', importError);
+        throw new Error('Cheerio-Bibliothek nicht verfügbar. Bitte installiere: npm install cheerio');
+      }
     }
+    
+    if (!cheerio) {
+      throw new Error('Cheerio konnte nicht initialisiert werden');
+    }
+    
     const $ = cheerio.load(html);
 
     // 1. VEREIN-INFORMATIONEN extrahieren
@@ -102,7 +112,11 @@ module.exports = async function handler(req, res) {
       matches: matches.length
     });
 
-    // Erfolgreiche Response
+    // Erfolgreiche Response - setze CORS-Header
+    Object.entries(corsHeaders).forEach(([key, value]) => {
+      res.setHeader(key, value);
+    });
+    
     return res.status(200).json({
       success: true,
       data: {
@@ -114,16 +128,23 @@ module.exports = async function handler(req, res) {
           scraped_at: new Date().toISOString(),
           source_url: teamPortraitUrl
         }
-      },
-      ...corsHeaders
+      }
     });
 
   } catch (error) {
     console.error('❌ Error scraping team portrait:', error);
+    console.error('❌ Error stack:', error.stack);
+    
+    // Stelle sicher, dass CORS-Header gesetzt sind
+    Object.entries(corsHeaders).forEach(([key, value]) => {
+      res.setHeader(key, value);
+    });
+    
     return res.status(500).json({
+      success: false,
       error: 'Fehler beim Scrapen der Team-Portrait-Seite',
       details: error.message,
-      ...corsHeaders
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };

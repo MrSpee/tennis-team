@@ -429,14 +429,29 @@ const TeamPortraitImportTab = () => {
         body: JSON.stringify({ teamPortraitUrl })
       });
       
-      const result = await response.json();
-      
+      // Prüfe ob Response gültig ist
       if (!response.ok) {
-        throw new Error(result.error || 'Fehler beim Scrapen');
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorData.details || errorMessage;
+          if (errorData.details) {
+            errorMessage += ` - ${errorData.details}`;
+          }
+        } catch (e) {
+          // Response ist kein JSON, nutze Text
+          const text = await response.text();
+          if (text) {
+            errorMessage = text.substring(0, 200);
+          }
+        }
+        throw new Error(errorMessage);
       }
       
+      const result = await response.json();
+      
       if (!result.success || !result.data) {
-        throw new Error('Ungültige Antwort vom Server');
+        throw new Error(result.error || 'Ungültige Antwort vom Server');
       }
       
       setScrapedData(result.data);
@@ -537,6 +552,8 @@ const TeamPortraitImportTab = () => {
             league: scrapedData.team_info.league || null,
             group_name: scrapedData.team_info.group_name || null,
             team_size: 6, // Standard Team-Größe für Tennis
+            source_url: teamPortraitUrl || null, // ✅ NEU: Speichere Team-Portrait-URL
+            source_type: 'nuliga',
             is_active: true
           });
         
@@ -778,6 +795,43 @@ const TeamPortraitImportTab = () => {
         }
       }
       
+      // ✅ NEU: Speichere Meldelisten-Spieler in team_roster
+      if (importedPlayers > 0 && selectedTeamId && scrapedData.players && scrapedData.players.length > 0) {
+        try {
+          setImportProgress({ 
+            current: importedPlayers, 
+            total: totalSteps, 
+            message: 'Speichere Meldelisten-Spieler in team_roster...' 
+          });
+          
+          const season = scrapedData.team_info.season || 'Winter 2025/26';
+          
+          // Rufe die parse-team-roster API auf, um die Meldelisten-Spieler zu speichern
+          const rosterResponse = await fetch('/api/import/parse-team-roster', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              teamPortraitUrl: teamPortraitUrl,
+              teamId: selectedTeamId,
+              season: season,
+              apply: true // Speichere in DB
+            })
+          });
+          
+          const rosterResult = await rosterResponse.json();
+          
+          if (rosterResponse.ok && rosterResult.success) {
+            console.log(`✅ Meldelisten-Spieler in team_roster gespeichert:`, rosterResult.saved?.stats);
+          } else {
+            console.warn('⚠️ Fehler beim Speichern der Meldelisten-Spieler in team_roster:', rosterResult.error);
+            // Nicht kritisch - fahre fort
+          }
+        } catch (rosterError) {
+          console.warn('⚠️ Fehler beim Speichern der Meldelisten-Spieler in team_roster:', rosterError);
+          // Nicht kritisch - fahre fort
+        }
+      }
+      
       // 2. Importiere Matches
       setImportProgress({ current: importedPlayers, total: totalSteps, message: 'Importiere Spieltermine...' });
       
@@ -933,10 +987,14 @@ const TeamPortraitImportTab = () => {
           .maybeSingle();
         
         if (existingSeason) {
-          // Update existing
+          // Update existing - aktualisiere auch source_url falls vorhanden
           const { error: updateError } = await supabase
             .from('team_seasons')
-            .update({ is_active: true })
+            .update({ 
+              is_active: true,
+              source_url: teamPortraitUrl || null, // ✅ NEU: Aktualisiere Team-Portrait-URL
+              source_type: 'nuliga'
+            })
             .eq('id', existingSeason.id);
           
           if (updateError) {
@@ -953,6 +1011,8 @@ const TeamPortraitImportTab = () => {
               league: scrapedData.team_info.league || null,
               group_name: scrapedData.team_info.group_name || null,
               team_size: 6, // Standard Team-Größe für Tennis
+              source_url: teamPortraitUrl || null, // ✅ NEU: Speichere Team-Portrait-URL
+              source_type: 'nuliga',
               is_active: true
             });
           
