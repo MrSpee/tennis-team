@@ -170,6 +170,12 @@ function OverviewTab({
                 const homeTeam = match.home_team ? `${match.home_team.club_name}${match.home_team.team_name ? ` ${match.home_team.team_name}` : ''}` : 'Unbekannt';
                 const awayTeam = match.away_team ? `${match.away_team.club_name}${match.away_team.team_name ? ` ${match.away_team.team_name}` : ''}` : 'Unbekannt';
                 const matchDate = match.match_date ? new Date(match.match_date).toLocaleDateString('de-DE') : 'Unbekannt';
+                
+                // Extrahiere Altersklasse (kann bei home_team oder away_team sein)
+                const category = match.home_team?.category || match.away_team?.category || null;
+                const groupName = match.group_name || null;
+                const league = match.league || null;
+                
                 return (
                   <div key={match.id} style={{
                     fontSize: '0.875rem',
@@ -181,8 +187,20 @@ function OverviewTab({
                     <div style={{ fontWeight: 600, color: 'rgb(55, 65, 81)', marginBottom: '0.25rem' }}>
                       {homeTeam} vs. {awayTeam}
                     </div>
-                    <div style={{ fontSize: '0.75rem', color: 'rgb(107, 114, 128)' }}>
-                      {matchDate} · {match.daysSinceMatch} Tage · {match.attemptCount} Versuche · Meeting ID: {match.meeting_id}
+                    <div style={{ fontSize: '0.75rem', color: 'rgb(107, 114, 128)', lineHeight: 1.4 }}>
+                      <div>{matchDate} · {match.daysSinceMatch} Tage · {match.attemptCount} Versuche</div>
+                      <div style={{ marginTop: '0.25rem', fontWeight: 500 }}>
+                        {category && <span style={{ color: 'rgb(37, 99, 235)' }}>{category}</span>}
+                        {category && (groupName || league) && <span style={{ margin: '0 0.25rem', color: 'rgb(107, 114, 128)' }}>·</span>}
+                        {groupName && <span style={{ color: 'rgb(16, 185, 129)' }}>{groupName}</span>}
+                        {groupName && league && <span style={{ margin: '0 0.25rem', color: 'rgb(107, 114, 128)' }}>·</span>}
+                        {league && <span style={{ color: 'rgb(107, 114, 128)' }}>{league}</span>}
+                      </div>
+                      {match.meeting_id && (
+                        <div style={{ marginTop: '0.25rem', fontSize: '0.7rem', color: 'rgb(156, 163, 175)' }}>
+                          Meeting ID: {match.meeting_id}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );

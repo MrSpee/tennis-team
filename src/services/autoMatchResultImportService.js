@@ -335,8 +335,8 @@ export async function findMatchdaysWithoutResultsAfter4Days(supabase) {
       notes,
       home_team_id,
       away_team_id,
-      home_team:home_team_id(id, club_name, team_name),
-      away_team:away_team_id(id, club_name, team_name)
+      home_team:home_team_id(id, club_name, team_name, category),
+      away_team:away_team_id(id, club_name, team_name, category)
     `)
     // ✅ ENTFERNT: .not('meeting_id', 'is', null) - prüfe auch Matchdays ohne meeting_id
     .lt('match_date', fourDaysAgo.toISOString())
