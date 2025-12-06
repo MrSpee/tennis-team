@@ -933,13 +933,21 @@ function SuperAdminDashboard() {
         duplicateCheck.get(key).push(match);
       });
       
+      // Erstelle temporäres teamById Map für Duplikat-Erkennung
+      const tempTeamById = new Map();
+      (teamsRes.data || []).forEach((team) => {
+        if (team?.id) {
+          tempTeamById.set(team.id, team);
+        }
+      });
+      
       // Warnung bei Duplikaten
       const duplicates = Array.from(duplicateCheck.values()).filter(matches => matches.length > 1);
       const duplicateInfo = duplicates.length > 0 ? duplicates.map(dup => {
         const first = dup[0];
         const dateStr = first.match_date ? new Date(first.match_date).toLocaleDateString('de-DE') : 'unbekannt';
-        const homeTeam = teamById.get(first.home_team_id);
-        const awayTeam = teamById.get(first.away_team_id);
+        const homeTeam = tempTeamById.get(first.home_team_id);
+        const awayTeam = tempTeamById.get(first.away_team_id);
         const homeLabel = homeTeam ? `${homeTeam.club_name}${homeTeam.team_name ? ` ${homeTeam.team_name}` : ''}` : 'Unbekannt';
         const awayLabel = awayTeam ? `${awayTeam.club_name}${awayTeam.team_name ? ` ${awayTeam.team_name}` : ''}` : 'Unbekannt';
         return {
@@ -3658,11 +3666,11 @@ function SuperAdminDashboard() {
           : 'Unbekannt';
         
         try {
-          // Lade Details OHNE automatischen Import (applyImport = false)
+          // Lade Details MIT automatischem Import (applyImport = true)
           await handleLoadMeetingDetails(matchWithGroupName, { 
             homeLabel: homeTeam, 
             awayLabel: awayTeam, 
-            applyImport: false 
+            applyImport: true 
           });
           successCount++;
           
