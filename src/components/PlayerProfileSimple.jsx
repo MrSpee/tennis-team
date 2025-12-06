@@ -29,6 +29,10 @@ function PlayerProfileSimple() {
   const [playerDataMap, setPlayerDataMap] = useState({}); // Spieler-Daten für Gegner-Anzeige
   const [firstLKDate, setFirstLKDate] = useState(null); // Datum der ersten LK-Erhebung
   
+  // ✅ NEU: Anstehende Spiele
+  const [upcomingMatches, setUpcomingMatches] = useState([]);
+  const [loadingUpcomingMatches, setLoadingUpcomingMatches] = useState(false);
+  
   // ✅ NEU: Accordion States (für Einzel/Doppel Details)
   const [expandedPersonalSection, setExpandedPersonalSection] = useState(null); // 'Einzel' oder 'Doppel' oder null
   
@@ -713,9 +717,76 @@ function PlayerProfileSimple() {
 
       setClubs(uniqueClubs);
       console.log('✅ Clubs extracted:', uniqueClubs);
-
+      
+      // ✅ Lade anstehende Spiele für die Teams des Spielers
+      if (teams.length > 0) {
+        loadUpcomingMatches(teams.map(t => t.id));
+      }
     } catch (error) {
       console.error('❌ Error loading teams and clubs:', error);
+    }
+  };
+  
+  // ✅ NEU: Lade anstehende Spiele für die Teams des Spielers
+  const loadUpcomingMatches = async (teamIds) => {
+    if (!teamIds || teamIds.length === 0) {
+      setUpcomingMatches([]);
+      return;
+    }
+    
+    setLoadingUpcomingMatches(true);
+    
+    try {
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      
+      // Lade alle anstehenden Spieltage für die Teams des Spielers
+      const { data: matchdays, error } = await supabase
+        .from('matchdays')
+        .select(`
+          id,
+          match_date,
+          start_time,
+          status,
+          group_name,
+          season,
+          league,
+          match_number,
+          home_team_id,
+          away_team_id,
+          home_team:home_team_id(id, club_name, team_name, category),
+          away_team:away_team_id(id, club_name, team_name, category),
+          match_availability(
+            id,
+            player_id,
+            status,
+            comment
+          )
+        `)
+        .or(`home_team_id.in.(${teamIds.join(',')}),away_team_id.in.(${teamIds.join(',')})`)
+        .gte('match_date', today.toISOString().split('T')[0])
+        .order('match_date', { ascending: true })
+        .order('start_time', { ascending: true });
+      
+      if (error) {
+        console.error('❌ Fehler beim Laden der anstehenden Spiele:', error);
+        setUpcomingMatches([]);
+        return;
+      }
+      
+      // Filtere abgesagte/verschobene Spiele aus
+      const upcoming = (matchdays || []).filter(m => 
+        m.status !== 'cancelled' && m.status !== 'postponed'
+      );
+      
+      console.log('✅ Anstehende Spiele geladen:', upcoming.length);
+      setUpcomingMatches(upcoming);
+      
+    } catch (error) {
+      console.error('❌ Fehler beim Laden der anstehenden Spiele:', error);
+      setUpcomingMatches([]);
+    } finally {
+      setLoadingUpcomingMatches(false);
     }
   };
 
@@ -1396,6 +1467,199 @@ function PlayerProfileSimple() {
                   Noch keine persönlichen Spiele in dieser Saison
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* ✅ NEU: Anstehende Spiele */}
+      {!loadingUpcomingMatches && upcomingMatches.length > 0 && (
+        <div className="fade-in" style={{ marginBottom: '1.5rem' }}>
+          <div className="lk-card-full">
+            <div style={{
+              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+              padding: '1.5rem',
+              borderRadius: '12px 12px 0 0',
+              color: 'white'
+            }}>
+              <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: '700', color: 'white' }}>
+                📅 Anstehende Spiele
+              </h2>
+              <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.875rem', opacity: 0.9 }}>
+                {upcomingMatches.length} {upcomingMatches.length === 1 ? 'Spiel' : 'Spiele'} in den kommenden Wochen
+              </p>
+            </div>
+            
+            <div style={{ padding: '1.5rem', background: 'white', borderRadius: '0 0 12px 12px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {upcomingMatches.map((match) => {
+                  const isHomeTeam = playerTeams.some(t => t.id === match.home_team_id);
+                  const playerTeam = isHomeTeam ? match.home_team : match.away_team;
+                  const opponentTeam = isHomeTeam ? match.away_team : match.home_team;
+                  
+                  const matchDate = new Date(match.match_date);
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  const matchDateOnly = new Date(matchDate);
+                  matchDateOnly.setHours(0, 0, 0, 0);
+                  const daysUntilMatch = Math.ceil((matchDateOnly - today) / (1000 * 60 * 60 * 24));
+                  
+                  // Prüfe Zu-/Absage des Spielers
+                  const playerAvailability = match.match_availability?.find(
+                    a => a.player_id === player?.id
+                  );
+                  
+                  const opponentLabel = opponentTeam 
+                    ? `${opponentTeam.club_name}${opponentTeam.team_name ? ` ${opponentTeam.team_name}` : ''}`.trim()
+                    : 'Unbekannt';
+                  
+                  const teamLabel = playerTeam
+                    ? `${playerTeam.club_name}${playerTeam.team_name ? ` ${playerTeam.team_name}` : ''}`.trim()
+                    : 'Unbekannt';
+                  
+                  return (
+                    <div
+                      key={match.id}
+                      style={{
+                        padding: '1rem',
+                        background: daysUntilMatch <= 7 ? '#fef3c7' : '#f0fdf4',
+                        border: `2px solid ${daysUntilMatch <= 7 ? '#f59e0b' : '#10b981'}`,
+                        borderRadius: '8px',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        <div style={{ flex: 1, minWidth: '200px' }}>
+                          <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#1f2937', marginBottom: '0.25rem' }}>
+                            {teamLabel} vs. {opponentLabel}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>
+                            📅 {matchDate.toLocaleDateString('de-DE', { 
+                              weekday: 'long', 
+                              day: '2-digit', 
+                              month: '2-digit', 
+                              year: 'numeric' 
+                            })}
+                            {match.start_time && ` · ${match.start_time} Uhr`}
+                          </div>
+                          {(match.group_name || match.league || playerTeam?.category) && (
+                            <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.25rem' }}>
+                              {playerTeam?.category && <span style={{ color: '#3b82f6', fontWeight: '600' }}>{playerTeam.category}</span>}
+                              {playerTeam?.category && (match.group_name || match.league) && <span style={{ margin: '0 0.25rem' }}>·</span>}
+                              {match.group_name && <span style={{ color: '#10b981', fontWeight: '600' }}>{match.group_name}</span>}
+                              {match.group_name && match.league && <span style={{ margin: '0 0.25rem' }}>·</span>}
+                              {match.league && <span>{match.league}</span>}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
+                          {daysUntilMatch === 0 && (
+                            <>
+                              <span style={{
+                                padding: '0.25rem 0.5rem',
+                                background: '#fef3c7',
+                                border: '1px solid #f59e0b',
+                                borderRadius: '4px',
+                                fontSize: '0.7rem',
+                                fontWeight: '700',
+                                color: '#92400e'
+                              }}>
+                                HEUTE
+                              </span>
+                              <button
+                                onClick={() => navigate(`/live-results/${match.id}`)}
+                                style={{
+                                  padding: '0.5rem 0.75rem',
+                                  background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '600',
+                                  color: 'white',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s',
+                                  whiteSpace: 'nowrap',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.25rem'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background = 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)';
+                                  e.currentTarget.style.transform = 'translateY(-1px)';
+                                  e.currentTarget.style.boxShadow = '0 4px 8px rgba(59, 130, 246, 0.3)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)';
+                                  e.currentTarget.style.transform = 'translateY(0)';
+                                  e.currentTarget.style.boxShadow = 'none';
+                                }}
+                              >
+                                📊 Live-Ergebnisse
+                              </button>
+                            </>
+                          )}
+                          {daysUntilMatch === 1 && (
+                            <span style={{
+                              padding: '0.25rem 0.5rem',
+                              background: '#fef3c7',
+                              border: '1px solid #f59e0b',
+                              borderRadius: '4px',
+                              fontSize: '0.7rem',
+                              fontWeight: '700',
+                              color: '#92400e'
+                            }}>
+                              MORGEN
+                            </span>
+                          )}
+                          {daysUntilMatch > 1 && daysUntilMatch <= 7 && (
+                            <span style={{
+                              padding: '0.25rem 0.5rem',
+                              background: '#fef3c7',
+                              border: '1px solid #f59e0b',
+                              borderRadius: '4px',
+                              fontSize: '0.7rem',
+                              fontWeight: '700',
+                              color: '#92400e'
+                            }}>
+                              in {daysUntilMatch} Tagen
+                            </span>
+                          )}
+                          {daysUntilMatch > 7 && (
+                            <span style={{
+                              padding: '0.25rem 0.5rem',
+                              background: '#d1fae5',
+                              border: '1px solid #10b981',
+                              borderRadius: '4px',
+                              fontSize: '0.7rem',
+                              fontWeight: '600',
+                              color: '#065f46'
+                            }}>
+                              in {daysUntilMatch} Tagen
+                            </span>
+                          )}
+                          {playerAvailability && (
+                            <span style={{
+                              padding: '0.25rem 0.5rem',
+                              background: playerAvailability.status === 'available' ? '#d1fae5' : 
+                                         playerAvailability.status === 'unavailable' ? '#fee2e2' : '#fef3c7',
+                              border: `1px solid ${playerAvailability.status === 'available' ? '#10b981' : 
+                                       playerAvailability.status === 'unavailable' ? '#ef4444' : '#f59e0b'}`,
+                              borderRadius: '4px',
+                              fontSize: '0.7rem',
+                              fontWeight: '600',
+                              color: playerAvailability.status === 'available' ? '#065f46' : 
+                                     playerAvailability.status === 'unavailable' ? '#991b1b' : '#92400e'
+                            }}>
+                              {playerAvailability.status === 'available' ? '✅ Zusage' : 
+                               playerAvailability.status === 'unavailable' ? '❌ Absage' : '❓ Unklar'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>

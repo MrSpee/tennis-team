@@ -1193,21 +1193,21 @@ function SuperAdminDashboard() {
         
         // Lade auch die Liste der fehlenden Ergebnisse neu
         const missingResults = await findMatchdaysWithoutResultsAfter4Days(supabase);
-        const result = missingResults || [];
+        const missingResultsData = missingResults || [];
         
         // Speichere im localStorage mit Timestamp
         try {
           localStorage.setItem('superAdminMatchdaysWithoutResults', JSON.stringify({
-            data: result,
+            data: missingResultsData,
             timestamp: Date.now(),
-            count: result.length
+            count: missingResultsData.length
           }));
-          console.log(`[SuperAdminDashboard] 💾 ${result.length} fehlende Ergebnisse im localStorage gespeichert (nach Auto-Import)`);
+          console.log(`[SuperAdminDashboard] 💾 ${missingResultsData.length} fehlende Ergebnisse im localStorage gespeichert (nach Auto-Import)`);
         } catch (e) {
           console.warn('⚠️ Fehler beim Speichern in localStorage:', e);
         }
         
-        setMatchdaysWithoutResults(result);
+        setMatchdaysWithoutResults(missingResultsData);
       } catch (error) {
         console.error('[SuperAdminDashboard] ❌ Fehler beim automatischen Import:', error);
         setAutoImportStatus(prev => ({
