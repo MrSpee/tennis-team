@@ -33,7 +33,7 @@ const Results = () => {
   const [clubOverview, setClubOverview] = useState(null);
   const [allClubTeams, setAllClubTeams] = useState([]);
   const [selectedClubTeamId, setSelectedClubTeamId] = useState(null);
-  const [showClubOverview, setShowClubOverview] = useState(true);
+  const [teamViewTab, setTeamViewTab] = useState('spiele'); // Tab für Liga-Spielplan
   
   // ✅ NEU: Globale Suche (Phase 2)
   const [searchTerm, setSearchTerm] = useState('');
@@ -295,7 +295,6 @@ const Results = () => {
         if (teamsError) throw teamsError;
         
         setAllClubTeams(clubTeams || []);
-        setShowClubOverview(true);
         
         // Wähle das erste Team aus
         if (clubTeams && clubTeams.length > 0) {
@@ -1485,206 +1484,228 @@ const Results = () => {
         )}
       </div>
 
-      {/* ✅ NEU: Vereins-Performance-Übersicht */}
-      {clubOverview && showClubOverview && (
-        <div className="fade-in" style={{ marginBottom: '1.5rem' }}>
-          <div className="lk-card-full">
-            <div style={{
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              padding: '1.5rem',
-              borderRadius: '12px 12px 0 0',
-              color: 'white'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-                <div>
-                  <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: '700', color: 'white' }}>
-                    🏢 {clubOverview.clubName}
-                  </h2>
-                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.875rem', opacity: 0.9 }}>
-                    {clubOverview.totalTeams} Mannschaften • {clubOverview.totalMatches} Spiele
-                  </p>
-                </div>
-                <button
-                  onClick={() => setShowClubOverview(false)}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    background: 'rgba(255, 255, 255, 0.2)',
-                    border: '1px solid rgba(255, 255, 255, 0.3)',
-                    borderRadius: '6px',
-                    color: 'white',
-                    cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    fontWeight: '600'
-                  }}
-                >
-                  Ausblenden
-                </button>
+      {/* ✅ NEU: Mein(e) Verein(e) - mit eingeklappter Bilanz */}
+      {clubOverview && (
+        <div className="fade-in lk-card-full" style={{ marginBottom: '1rem' }}>
+          <div className="formkurve-header">
+            <div className="formkurve-title">Mein(e) Verein(e)</div>
+            <div style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: '600' }}>
+              {clubOverview.totalTeams} {clubOverview.totalTeams === 1 ? 'Mannschaft' : 'Mannschaften'}
+            </div>
+          </div>
+          
+          <div className="season-content">
+            <div style={{ marginBottom: '0.75rem' }}>
+              <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#1f2937', marginBottom: '0.5rem' }}>
+                {clubOverview.clubName}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                {clubOverview.totalMatches} {clubOverview.totalMatches === 1 ? 'Spiel' : 'Spiele'} in dieser Saison
               </div>
             </div>
             
-            <div style={{ padding: '1.5rem', background: 'white', borderRadius: '0 0 12px 12px' }}>
-              {/* Gesamt-Bilanz */}
-              <div style={{ marginBottom: '1.5rem' }}>
-                <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: '700', color: '#1f2937' }}>
-                  📊 Gesamt-Bilanz Saison {display}
-                </h3>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '1rem' }}>
+            {/* Bilanz eingeklappt */}
+            <details style={{ marginTop: '0.75rem' }}>
+              <summary style={{ 
+                cursor: 'pointer', 
+                fontSize: '0.75rem', 
+                fontWeight: '600', 
+                color: '#6b7280',
+                padding: '0.5rem',
+                borderRadius: '6px',
+                transition: 'background-color 0.2s',
+                listStyle: 'none'
+              }}
+              onMouseEnter={(e) => e.target.style.backgroundColor = '#f3f4f6'}
+              onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+              >
+                📊 Bilanz anzeigen
+              </summary>
+              <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid #e5e7eb' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '0.75rem' }}>
                   <div style={{
-                    padding: '1rem',
+                    padding: '0.75rem',
                     background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
                     border: '2px solid #10b981',
-                    borderRadius: '12px',
+                    borderRadius: '8px',
                     textAlign: 'center'
                   }}>
-                    <div style={{ fontSize: '2rem', fontWeight: '700', color: '#059669' }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#059669' }}>
                       {clubOverview.totalWins}
                     </div>
-                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#047857', marginTop: '0.25rem' }}>
+                    <div style={{ fontSize: '0.7rem', fontWeight: '600', color: '#047857', marginTop: '0.25rem' }}>
                       SIEGE
                     </div>
                   </div>
                   
                   <div style={{
-                    padding: '1rem',
+                    padding: '0.75rem',
                     background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
                     border: '2px solid #f59e0b',
-                    borderRadius: '12px',
+                    borderRadius: '8px',
                     textAlign: 'center'
                   }}>
-                    <div style={{ fontSize: '2rem', fontWeight: '700', color: '#d97706' }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#d97706' }}>
                       {clubOverview.totalDraws}
                     </div>
-                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#92400e', marginTop: '0.25rem' }}>
+                    <div style={{ fontSize: '0.7rem', fontWeight: '600', color: '#92400e', marginTop: '0.25rem' }}>
                       REMIS
                     </div>
                   </div>
                   
                   <div style={{
-                    padding: '1rem',
+                    padding: '0.75rem',
                     background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
                     border: '2px solid #ef4444',
-                    borderRadius: '12px',
+                    borderRadius: '8px',
                     textAlign: 'center'
                   }}>
-                    <div style={{ fontSize: '2rem', fontWeight: '700', color: '#dc2626' }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#dc2626' }}>
                       {clubOverview.totalLosses}
                     </div>
-                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#991b1b', marginTop: '0.25rem' }}>
+                    <div style={{ fontSize: '0.7rem', fontWeight: '600', color: '#991b1b', marginTop: '0.25rem' }}>
                       NIEDERLAGEN
                     </div>
                   </div>
                   
                   <div style={{
-                    padding: '1rem',
+                    padding: '0.75rem',
                     background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
                     border: '2px solid #3b82f6',
-                    borderRadius: '12px',
+                    borderRadius: '8px',
                     textAlign: 'center'
                   }}>
-                    <div style={{ fontSize: '2rem', fontWeight: '700', color: '#2563eb' }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#2563eb' }}>
                       {clubOverview.totalPlayed > 0 ? Math.round((clubOverview.totalWins / clubOverview.totalPlayed) * 100) : 0}%
                     </div>
-                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#1e40af', marginTop: '0.25rem' }}>
+                    <div style={{ fontSize: '0.7rem', fontWeight: '600', color: '#1e40af', marginTop: '0.25rem' }}>
                       SIEGQUOTE
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
+            </details>
           </div>
         </div>
       )}
       
-      {/* ✅ NEU: Separate Mannschaften-Auswahl Card */}
-      {allClubTeams.length > 0 && (
-        <div className="fade-in" style={{ marginBottom: '1.5rem' }}>
-          <div className="lk-card-full">
-            <div style={{ padding: '1.5rem', background: 'white', borderRadius: '12px' }}>
-              <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: '700', color: '#1f2937' }}>
-                🏆 Mannschaften wählen
-              </h3>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                {allClubTeams.map(team => {
-                  const isPrimary = playerTeams.find(pt => pt.id === team.id && pt.is_primary);
-                  const isMember = playerTeams.some(pt => pt.id === team.id);
-                  const isSelected = selectedClubTeamId === team.id || (!selectedClubTeamId && isPrimary);
-                  
-                  return (
-                    <button
-                      key={team.id}
-                      onClick={() => {
-                        // WICHTIG: Setze immer die Team-ID, nicht die Kategorie
-                        const newTeamId = team.id === selectedClubTeamId ? null : team.id;
-                        console.log('🔵 Button clicked:', { 
-                          clickedCategory: team.category, 
-                          clickedTeamId: team.id, 
-                          clickedTeamName: team.team_name,
-                          currentSelectedId: selectedClubTeamId,
-                          newTeamId: newTeamId
-                        });
-                        setSelectedClubTeamId(newTeamId);
-                        // WICHTIG: Aktualisiere auch selectedTeamId in DataContext, damit leagueMeta neu geladen wird
-                        setSelectedTeamId(newTeamId || '');
-                      }}
-                      style={{
-                        padding: '0.5rem 1rem',
-                        background: isSelected 
-                          ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' 
-                          : 'white',
-                        color: isSelected ? 'white' : '#1f2937',
-                        border: isSelected ? '2px solid #1e40af' : '2px solid #e5e7eb',
-                        borderRadius: '8px',
-                        cursor: 'pointer',
-                        fontSize: '0.875rem',
-                        fontWeight: '600',
-                        transition: 'all 0.2s'
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!isSelected) {
-                          e.currentTarget.style.background = '#f3f4f6';
-                          e.currentTarget.style.borderColor = '#9ca3af';
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!isSelected) {
-                          e.currentTarget.style.background = 'white';
-                          e.currentTarget.style.borderColor = '#e5e7eb';
-                        }
-                      }}
-                    >
-                      {team.category}
-                      {isMember && ' ⭐'}
-                    </button>
-                  );
-                })}
+      {/* ✅ NEU: Mein(e) Mannschaft(en) mit integriertem Liga-Spielplan */}
+      {allClubTeams.length > 0 && viewMode === 'mannschaft' && (
+        <>
+          <div className="fade-in lk-card-full" style={{ marginBottom: '1rem' }}>
+            <div className="formkurve-header">
+              <div className="formkurve-title">Mein(e) Mannschaft(en)</div>
+              <div style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: '600' }}>
+                {allClubTeams.length} {allClubTeams.length === 1 ? 'Mannschaft' : 'Mannschaften'}
+              </div>
+            </div>
+            
+            <div className="season-content">
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
+                  {allClubTeams.map(team => {
+                    const isPrimary = playerTeams.find(pt => pt.id === team.id && pt.is_primary);
+                    const isMember = playerTeams.some(pt => pt.id === team.id);
+                    const isSelected = selectedClubTeamId === team.id || (!selectedClubTeamId && isPrimary);
+                    
+                    return (
+                      <button
+                        key={team.id}
+                        onClick={() => {
+                          // WICHTIG: Setze immer die Team-ID, nicht die Kategorie
+                          const newTeamId = team.id === selectedClubTeamId ? null : team.id;
+                          console.log('🔵 Button clicked:', { 
+                            clickedCategory: team.category, 
+                            clickedTeamId: team.id, 
+                            clickedTeamName: team.team_name,
+                            currentSelectedId: selectedClubTeamId,
+                            newTeamId: newTeamId
+                          });
+                          setSelectedClubTeamId(newTeamId);
+                          // WICHTIG: Aktualisiere auch selectedTeamId in DataContext, damit leagueMeta neu geladen wird
+                          setSelectedTeamId(newTeamId || '');
+                        }}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          background: isSelected 
+                            ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' 
+                            : 'white',
+                          color: isSelected ? 'white' : '#1f2937',
+                          border: isSelected ? '2px solid #1e40af' : '2px solid #e5e7eb',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          fontSize: '0.875rem',
+                          fontWeight: '600',
+                          transition: 'all 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isSelected) {
+                            e.currentTarget.style.background = '#f3f4f6';
+                            e.currentTarget.style.borderColor = '#9ca3af';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isSelected) {
+                            e.currentTarget.style.background = 'white';
+                            e.currentTarget.style.borderColor = '#e5e7eb';
+                          }
+                        }}
+                      >
+                        {team.category}
+                        {isMember && ' ⭐'}
+                      </button>
+                    );
+                  })}
               </div>
             </div>
           </div>
-        </div>
-      )}
-      
-      {!showClubOverview && clubOverview && (
-        <button
-          onClick={() => setShowClubOverview(true)}
-          style={{
-            marginBottom: '1rem',
-            padding: '0.75rem 1.5rem',
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            color: 'white',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer',
-            fontSize: '0.875rem',
-            fontWeight: '600',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem'
-          }}
-        >
-          🏢 Vereins-Übersicht anzeigen
-        </button>
-      )}
 
+          {/* Tab-Navigation für Liga-Spielplan */}
+          {allClubTeams.length > 0 && (
+            <div className="fade-in" style={{ marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', background: 'white', padding: '0.5rem', borderRadius: '12px', border: '2px solid #e5e7eb' }}>
+                <button
+                  onClick={() => setTeamViewTab('spiele')}
+                  style={{
+                    flex: 1,
+                    padding: '0.75rem',
+                    background: teamViewTab === 'spiele' 
+                      ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' 
+                      : 'white',
+                    color: teamViewTab === 'spiele' ? 'white' : '#1f2937',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '600',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  📊 Spiele
+                </button>
+                <button
+                  onClick={() => setTeamViewTab('tabelle')}
+                  style={{
+                    flex: 1,
+                    padding: '0.75rem',
+                    background: teamViewTab === 'tabelle' 
+                      ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' 
+                      : 'white',
+                    color: teamViewTab === 'tabelle' ? 'white' : '#1f2937',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '600',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  📈 Tabelle
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Results Container */}
       {viewMode === 'mannschaft' ? (
@@ -1736,6 +1757,8 @@ const Results = () => {
               leagueMeta={leagueMeta}
               playerTeamIds={playerTeams.map(team => team.id)}
               display={display}
+              activeTab={teamViewTab}
+              onTabChange={setTeamViewTab}
             />
           );
         })()

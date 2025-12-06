@@ -30,7 +30,7 @@ function Navigation() {
       
       <NavLink to="/rankings" className="nav-item">
         <Award size={24} />
-        <span>Rangliste</span>
+        <span>Kader</span>
       </NavLink>
       
       <NavLink to="/profile" className="nav-item">

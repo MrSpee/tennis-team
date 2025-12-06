@@ -15,6 +15,29 @@
   --blue-600: #2563eb;
 }
 
+/* Details/Summary Styling für eingeklappte Bilanz */
+details summary {
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+}
+
+details summary::-webkit-details-marker {
+  display: none;
+}
+
+details summary::before {
+  content: '▶';
+  display: inline-block;
+  margin-right: 0.5rem;
+  transition: transform 0.2s;
+  font-size: 0.7rem;
+}
+
+details[open] summary::before {
+  transform: rotate(90deg);
+}
+
 /* Page Layout */
 .results-page {
   padding: 0;

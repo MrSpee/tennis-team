@@ -4,24 +4,42 @@
  */
 
 /**
+ * Entfernt Länderkürzel aus LK-String (z.B. "IRL 6" → "6")
+ * Länderkürzel sind 3 Großbuchstaben gefolgt von Leerzeichen
+ */
+function removeCountryCodeFromLK(lkString) {
+  if (!lkString) return lkString;
+  // Entferne Länderkürzel-Muster: 3 Großbuchstaben + Leerzeichen am Anfang
+  // z.B. "IRL 6" → "6", "NED 12.5" → "12.5"
+  return String(lkString).replace(/^[A-Z]{3}\s+/i, '').trim();
+}
+
+/**
  * Normalisiert LK-Eingabe für Speicherung
- * Eingabe: "13,6", "13.6", "LK 13,6", "LK 13.6", "13.6"
+ * Eingabe: "13,6", "13.6", "LK 13,6", "LK 13.6", "13.6", "IRL 6", "NED 12.5"
  * Ausgabe: "LK 13.6" (immer mit Punkt, mit "LK " Prefix)
  */
 export function normalizeLK(input) {
   if (!input || input.trim() === '') return null;
   
+  // ✅ NEU: Entferne Länderkürzel zuerst (z.B. "IRL 6" → "6")
+  let cleaned = removeCountryCodeFromLK(input);
+  
   // Entferne "LK " falls vorhanden
-  let cleaned = String(input).replace(/LK\s*/i, '').trim();
+  cleaned = cleaned.replace(/LK\s*/i, '').trim();
   
   // Ersetze Komma durch Punkt
   cleaned = cleaned.replace(',', '.');
+  
+  // Entferne alle nicht-numerischen Zeichen außer Punkt und Minus
+  // (für Fälle wie "IRL 6.5" oder "6.5 (alt)")
+  cleaned = cleaned.replace(/[^\d.-]/g, '').trim();
   
   // Parse zu Number und validiere
   const number = parseFloat(cleaned);
   
   if (isNaN(number) || number < 1 || number > 25) {
-    console.warn('⚠️ Ungültige LK:', input);
+    console.warn('⚠️ Ungültige LK:', input, '(bereinigt:', cleaned, ')');
     return null;
   }
   
@@ -31,24 +49,31 @@ export function normalizeLK(input) {
 
 /**
  * Parsed LK-String zu Nummer für Berechnungen
- * Eingabe: "LK 13.6", "13,6", "13.6"
+ * Eingabe: "LK 13.6", "13,6", "13.6", "IRL 6", "NED 12.5"
  * Ausgabe: 13.6 (Number)
  */
 export function parseLK(lk) {
   if (!lk) return 25; // Default LK für Anfänger
   if (typeof lk === 'number') return lk;
   
+  // ✅ NEU: Entferne Länderkürzel zuerst (z.B. "IRL 6" → "6")
+  let cleaned = removeCountryCodeFromLK(lk);
+  
   // Entferne "LK " und ersetze Komma durch Punkt
-  const normalized = String(lk)
+  cleaned = cleaned
     .replace(/LK\s*/i, '')
     .replace(',', '.')
     .trim();
   
-  const parsed = parseFloat(normalized);
+  // Entferne alle nicht-numerischen Zeichen außer Punkt und Minus
+  // (für Fälle wie "IRL 6.5" oder "6.5 (alt)")
+  cleaned = cleaned.replace(/[^\d.-]/g, '').trim();
+  
+  const parsed = parseFloat(cleaned);
   
   // Validierung: LK muss zwischen 1 und 25 sein
   if (isNaN(parsed) || parsed < 1 || parsed > 25) {
-    console.warn('⚠️ Ungültige LK beim Parsen:', lk, '→ Default 25');
+    console.warn('⚠️ Ungültige LK beim Parsen:', lk, '(bereinigt:', cleaned, ') → Default 25');
     return 25;
   }
   

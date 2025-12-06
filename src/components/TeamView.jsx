@@ -13,14 +13,18 @@ const TeamView = ({
   leagueMatches = [],
   leagueMeta,
   playerTeamIds = [],
-  display = ''
+  display = '',
+  activeTab = 'spiele', // ✅ NEU: Tab von außen steuerbar
+  onTabChange = null // ✅ NEU: Callback für Tab-Änderungen
 }) => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('spiele');
+  const [internalActiveTab, setInternalActiveTab] = useState(activeTab || 'spiele');
+  
+  // Verwende externen Tab wenn vorhanden, sonst internen
+  const currentTab = activeTab !== undefined ? activeTab : internalActiveTab;
+  const setCurrentTab = onTabChange || setInternalActiveTab;
   const [standings, setStandings] = useState([]);
-  const [teamPlayers, setTeamPlayers] = useState([]);
   const [loadingStandings, setLoadingStandings] = useState(false);
-  const [loadingPlayers, setLoadingPlayers] = useState(false);
 
   const playerTeamIdSet = useMemo(() => new Set(playerTeamIds), [playerTeamIds]);
 
@@ -507,197 +511,19 @@ const TeamView = ({
     }
   };
 
-  // Lade Kader
-  const loadTeamPlayers = async (tid) => {
-    if (!tid) return;
-    
-    setLoadingPlayers(true);
-    try {
-      const { data, error } = await supabase
-        .from('team_memberships')
-        .select(`
-          player_id,
-          role,
-          is_primary,
-          players_unified:players_unified!team_memberships_player_id_fkey(
-            id,
-            name,
-            current_lk,
-            season_start_lk,
-            profile_image,
-            player_type
-          )
-        `)
-        .eq('team_id', tid)
-        .eq('is_active', true);
-      
-      if (error) throw error;
-      
-      const playerIds = data?.map(d => d.players_unified?.id).filter(Boolean) || [];
-      
-      const { data: teamCounts } = playerIds.length > 0
-        ? await supabase
-            .from('team_memberships')
-            .select('player_id')
-            .in('player_id', playerIds)
-            .eq('is_active', true)
-        : { data: [] };
-
-      const teamCountMap = {};
-      (teamCounts || []).forEach((tc) => {
-        if (!tc || !tc.player_id) return;
-        teamCountMap[tc.player_id] = (teamCountMap[tc.player_id] || 0) + 1;
-      });
-      
-      // Map zu Spielerobjekten und entferne Duplikate
-      const playersMap = new Map();
-      
-      (data || []).forEach((d) => {
-        const profile = d.players_unified || {};
-        const playerId = profile.id || d.player_id;
-        
-        if (!playerId) return;
-        
-        // Nur behalten, wenn noch nicht vorhanden ODER wenn dieser Eintrag ein App-User ist
-        if (!playersMap.has(playerId) || profile.player_type === 'app_user') {
-          playersMap.set(playerId, {
-            ...profile,
-            id: playerId,
-            is_captain: d.role === 'captain',
-            role: d.role || 'player',
-            team_count: playerId ? (teamCountMap[playerId] || 1) : 1
-          });
-        }
-      });
-      
-      // Konvertiere Map zu Array
-      let players = Array.from(playersMap.values());
-      
-      // Helper-Funktion: Extrahiere numerische LK
-      const extractLK = (player) => {
-        const lkString = player.current_lk || player.season_start_lk || '';
-        // Entferne "LK " Präfix falls vorhanden
-        const cleanedLK = lkString.toString().replace(/^LK\s*/i, '').trim();
-        const parsed = parseFloat(cleanedLK);
-        return isNaN(parsed) ? 999 : parsed; // Spieler ohne LK ans Ende
-      };
-      
-      // Sortiere nach LK (niedrigere LK = besser = Position 1)
-      players.sort((a, b) => {
-        const lkA = extractLK(a);
-        const lkB = extractLK(b);
-        
-        // Primär: nach LK aufsteigend
-        if (lkA !== lkB) {
-          return lkA - lkB;
-        }
-        
-        // Sekundär: nach Name alphabetisch
-        const nameA = (a.name || '').toLowerCase();
-        const nameB = (b.name || '').toLowerCase();
-        return nameA.localeCompare(nameB);
-      });
-      
-      // Weise Position basierend auf LK-Sortierung zu
-      players = players.map((p, index) => ({
-        ...p,
-        position: index + 1
-      }));
-      
-      console.log(`✅ Kader geladen: ${players.length} Spieler (${playersMap.size} unique nach Deduplizierung)`);
-      
-      setTeamPlayers(players);
-    } catch (error) {
-      console.error('Error loading team players:', error);
-    } finally {
-      setLoadingPlayers(false);
-    }
-  };
-
   useEffect(() => {
     if (!teamId) return;
     
-    if (activeTab === 'tabelle') {
+    if (currentTab === 'tabelle') {
       loadStandings(teamId);
-    } else if (activeTab === 'kader') {
-      loadTeamPlayers(teamId);
     }
-  }, [activeTab, teamId]);
+  }, [currentTab, teamId]);
 
   return (
     <>
-      {/* Tab-Navigation */}
-      <div className="fade-in" style={{ marginBottom: '1rem' }}>
-        <div style={{
-          display: 'flex',
-          gap: '0.5rem',
-          background: 'white',
-          padding: '0.5rem',
-          borderRadius: '12px',
-          border: '2px solid #e5e7eb'
-        }}>
-          <button
-            onClick={() => setActiveTab('spiele')}
-            style={{
-              flex: 1,
-              padding: '0.75rem',
-              background: activeTab === 'spiele' 
-                ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' 
-                : 'white',
-              color: activeTab === 'spiele' ? 'white' : '#1f2937',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '0.875rem',
-              fontWeight: '600',
-              transition: 'all 0.2s'
-            }}
-          >
-            📊 Spiele
-          </button>
-          <button
-            onClick={() => setActiveTab('tabelle')}
-            style={{
-              flex: 1,
-              padding: '0.75rem',
-              background: activeTab === 'tabelle' 
-                ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' 
-                : 'white',
-              color: activeTab === 'tabelle' ? 'white' : '#1f2937',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '0.875rem',
-              fontWeight: '600',
-              transition: 'all 0.2s'
-            }}
-          >
-            📈 Tabelle
-          </button>
-          <button
-            onClick={() => setActiveTab('kader')}
-            style={{
-              flex: 1,
-              padding: '0.75rem',
-              background: activeTab === 'kader' 
-                ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' 
-                : 'white',
-              color: activeTab === 'kader' ? 'white' : '#1f2937',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '0.875rem',
-              fontWeight: '600',
-              transition: 'all 0.2s'
-            }}
-          >
-            👥 Kader
-          </button>
-        </div>
-      </div>
-
+      {/* Tab-Navigation wird jetzt von Results.jsx gerendert */}
       {/* Tab: Spiele */}
-      {activeTab === 'spiele' && (
+      {currentTab === 'spiele' && (
         <div className="fade-in lk-card-full">
           <div className="formkurve-header">
             <div className="formkurve-title">Liga-Spielplan</div>
@@ -745,7 +571,7 @@ const TeamView = ({
       )}
 
       {/* Tab: Tabelle */}
-      {activeTab === 'tabelle' && (
+      {currentTab === 'tabelle' && (
         <div className="fade-in lk-card-full">
           <div className="formkurve-header">
             <div className="formkurve-title">Tabelle - Saison {leagueMeta?.season}</div>
@@ -834,110 +660,6 @@ const TeamView = ({
         </div>
       )}
 
-      {/* Tab: Kader */}
-      {activeTab === 'kader' && (
-        <div className="fade-in lk-card-full">
-          <div className="formkurve-header">
-            <div className="formkurve-title">Mannschaftskader</div>
-            <div className="match-count-badge">{teamPlayers.length} Spieler</div>
-          </div>
-          
-          <div className="season-content">
-            {loadingPlayers ? (
-              <div style={{ padding: '2rem', textAlign: 'center' }}>
-                <div style={{ fontSize: '2rem' }}>⏳</div>
-                <div>Lade Spieler...</div>
-              </div>
-            ) : teamPlayers.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center' }}>
-                <div style={{ fontSize: '3rem' }}>👥</div>
-                <h3>Keine Spieler gefunden</h3>
-                <p>Für diese Mannschaft sind noch keine Spieler registriert.</p>
-              </div>
-            ) : (
-              <div style={{ display: 'grid', gap: '0.75rem' }}>
-                {teamPlayers.map((p) => (
-                  <div
-                    key={p.id}
-                    onClick={() => navigate(`/player/${encodeURIComponent(p.name)}`)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '1rem',
-                      padding: '1rem',
-                      background: p.is_captain 
-                        ? 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)'
-                        : 'white',
-                      border: p.is_captain ? '2px solid #f59e0b' : '2px solid #e5e7eb',
-                      borderRadius: '12px',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.transform = 'translateY(-2px)';
-                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.transform = 'translateY(0)';
-                      e.currentTarget.style.boxShadow = 'none';
-                    }}
-                  >
-                    {p.profile_image ? (
-                      <img 
-                        src={p.profile_image} 
-                        alt={p.name}
-                        style={{
-                          width: '50px',
-                          height: '50px',
-                          borderRadius: '50%',
-                          objectFit: 'cover',
-                          border: '2px solid #e5e7eb'
-                        }}
-                      />
-                    ) : (
-                      <div style={{
-                        width: '50px',
-                        height: '50px',
-                        borderRadius: '50%',
-                        background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '1.5rem'
-                      }}>
-                        🎾
-                      </div>
-                    )}
-                    
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: '700', fontSize: '1rem' }}>
-                        {p.name}
-                        {p.is_captain && ' 👑'}
-                      </div>
-                      <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-                        {p.current_lk ? `LK ${p.current_lk}` : p.season_start_lk ? `LK ${p.season_start_lk}` : 'LK ?'}
-                        {p.team_count > 1 && ` • ${p.team_count} Teams`}
-                      </div>
-                    </div>
-                    
-                    {p.position && (
-                      <div style={{
-                        padding: '0.25rem 0.75rem',
-                        background: '#f3f4f6',
-                        borderRadius: '6px',
-                        fontSize: '0.75rem',
-                        fontWeight: '600'
-                      }}>
-                        Pos. {p.position}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </>
   );
 };

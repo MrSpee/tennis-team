@@ -1668,11 +1668,17 @@ const ImportTab = () => {
         }
 
         // 🎾 LK-VALIDIERUNG: Prüfe LK gegen Team
-        const { validateLKAgainstTeam, validateLK } = await import('../lib/lkUtils');
+        // ✅ WICHTIG: Bereinige LK vor Validierung (entfernt Länderkürzel wie "IRL 6" → "6")
+        const { validateLKAgainstTeam, validateLK, normalizeLK } = await import('../lib/lkUtils');
+        
+        // Bereinige LK zuerst (entfernt Länderkürzel und normalisiert)
+        const cleanedLK = normalizeLK(playerData.lk) || playerData.lk;
+        const lkForValidation = cleanedLK ? cleanedLK.replace(/^LK\s*/i, '') : playerData.lk;
+        
         const teamPlayers = teamPlayersMap[playerData.team_id] || [];
         const lkValidation = teamPlayers.length > 0 
-          ? validateLKAgainstTeam(playerData.lk, teamPlayers)
-          : validateLK(playerData.lk);
+          ? validateLKAgainstTeam(lkForValidation, teamPlayers)
+          : validateLK(lkForValidation);
         
         if (lkValidation.warning) {
           console.warn(`⚠️ LK-Warnung für ${playerData.name}:`, lkValidation.warning);
@@ -1684,13 +1690,13 @@ const ImportTab = () => {
         }
         
         if (!lkValidation.valid) {
-          console.error(`❌ Ungültige LK für ${playerData.name}:`, lkValidation.error);
+          console.error(`❌ Ungültige LK für ${playerData.name}:`, lkValidation.error, '(Original:', playerData.lk, ')');
           skipped++;
           continue;
         }
         
-        // Verwende normalisierte LK
-        const normalizedLK = lkValidation.normalized || playerData.lk;
+        // Verwende normalisierte LK (bereits bereinigt von Länderkürzeln)
+        const normalizedLK = lkValidation.normalized || cleanedLK || playerData.lk;
 
         // ✅ FALL 1: Existierender Spieler (ALLE Match-Typen: exact, fuzzy, name_lk, etc.)
         if (matchResult?.playerId && matchResult.status !== 'new') {
