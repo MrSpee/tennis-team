@@ -3505,6 +3505,70 @@ function SuperAdminDashboard() {
     [meetingDetails, resolveGroupId, setParserMessage, supabase, loadDashboardData, loadMatchResults]
   );
 
+  // ✅ NEU: Lade Details für alle Matches ohne Ergebnisse
+  const [loadingDetailsForAll, setLoadingDetailsForAll] = useState(false);
+  
+  const handleLoadDetailsForAllMatches = useCallback(async () => {
+    if (loadingDetailsForAll || matchdaysWithoutResults.length === 0) return;
+    
+    setLoadingDetailsForAll(true);
+    setParserMessage({
+      type: 'info',
+      text: `Lade Details für ${matchdaysWithoutResults.length} Matches...`
+    });
+    
+    let successCount = 0;
+    let errorCount = 0;
+    
+    try {
+      for (let i = 0; i < matchdaysWithoutResults.length; i++) {
+        const match = matchdaysWithoutResults[i];
+        
+        // Baue Team-Labels
+        const homeTeam = match.home_team 
+          ? `${match.home_team.club_name}${match.home_team.team_name ? ` ${match.home_team.team_name}` : ''}`
+          : 'Unbekannt';
+        const awayTeam = match.away_team 
+          ? `${match.away_team.club_name}${match.away_team.team_name ? ` ${match.away_team.team_name}` : ''}`
+          : 'Unbekannt';
+        
+        try {
+          // Lade Details OHNE automatischen Import (applyImport = false)
+          await handleLoadMeetingDetails(match, { 
+            homeLabel: homeTeam, 
+            awayLabel: awayTeam, 
+            applyImport: false 
+          });
+          successCount++;
+          
+          // Kurze Pause zwischen den Requests, um Server nicht zu überlasten
+          if (i < matchdaysWithoutResults.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        } catch (error) {
+          console.error(`❌ Fehler beim Laden der Details für Match ${match.id}:`, error);
+          errorCount++;
+        }
+      }
+      
+      setParserMessage({
+        type: successCount > 0 ? 'success' : 'error',
+        text: `Details geladen: ${successCount} erfolgreich, ${errorCount} Fehler`
+      });
+      
+      // Lade Dashboard-Daten neu, um aktualisierte Status anzuzeigen
+      await loadDashboardData();
+    } catch (error) {
+      console.error('❌ Fehler beim Laden der Details für alle Matches:', error);
+      setParserMessage({
+        type: 'error',
+        text: `Fehler beim Laden der Details: ${error.message}`
+      });
+    } finally {
+      setLoadingDetailsForAll(false);
+    }
+  }, [matchdaysWithoutResults, handleLoadMeetingDetails, loadDashboardData, loadingDetailsForAll]);
+  
   const handleCreateMissingPlayer = useCallback(
     async (match, playerEntry) => {
       if (!match?.id || !playerEntry?.name || !playerEntry?.key) return;
@@ -4604,7 +4668,9 @@ function SuperAdminDashboard() {
       updatingMeetingIds={updatingMeetingIds}
       meetingIdUpdateResult={meetingIdUpdateResult}
       onUpdateMeetingIds={handleUpdateMeetingIdsForPastMatches}
-      onNavigateToTab={setSelectedTab} 
+      onNavigateToTab={setSelectedTab}
+      onLoadDetailsForAllMatches={handleLoadDetailsForAllMatches}
+      loadingDetailsForAll={loadingDetailsForAll}
     />
   );
 

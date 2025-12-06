@@ -6,7 +6,9 @@ function OverviewTab({
   updatingMeetingIds = false,
   meetingIdUpdateResult = null,
   onUpdateMeetingIds,
-  onNavigateToTab 
+  onNavigateToTab,
+  onLoadDetailsForAllMatches,
+  loadingDetailsForAll = false
 }) {
   return (
     <div className="lk-card-full">
@@ -73,33 +75,67 @@ function OverviewTab({
                       Diese Matches wurden bereits 4+ Tage lang täglich geprüft, aber noch keine Ergebnisse gefunden. Bitte manuell überprüfen.
                     </div>
                   </div>
-                  {onNavigateToTab && (
-                    <button
-                      onClick={() => onNavigateToTab('matchdays')}
-                      style={{
-                        padding: '0.5rem 1rem',
-                        background: 'rgb(239, 68, 68)',
-                        border: 'none',
-                        borderRadius: '8px',
-                        color: 'white',
-                        fontSize: '0.875rem',
-                        fontWeight: '600',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s',
-                        whiteSpace: 'nowrap'
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.background = 'rgb(220, 38, 38)';
-                        e.currentTarget.style.transform = 'translateY(-1px)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = 'rgb(239, 68, 68)';
-                        e.currentTarget.style.transform = 'translateY(0)';
-                      }}
-                    >
-                      → Zu Spieltage
-                    </button>
-                  )}
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    {onLoadDetailsForAllMatches && (
+                      <button
+                        onClick={onLoadDetailsForAllMatches}
+                        disabled={loadingDetailsForAll}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          background: loadingDetailsForAll ? 'rgb(156, 163, 175)' : 'rgb(16, 185, 129)',
+                          border: 'none',
+                          borderRadius: '8px',
+                          color: 'white',
+                          fontSize: '0.875rem',
+                          fontWeight: '600',
+                          cursor: loadingDetailsForAll ? 'not-allowed' : 'pointer',
+                          transition: 'all 0.2s',
+                          whiteSpace: 'nowrap'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!loadingDetailsForAll) {
+                            e.currentTarget.style.background = 'rgb(5, 150, 105)';
+                            e.currentTarget.style.transform = 'translateY(-1px)';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!loadingDetailsForAll) {
+                            e.currentTarget.style.background = 'rgb(16, 185, 129)';
+                            e.currentTarget.style.transform = 'translateY(0)';
+                          }
+                        }}
+                      >
+                        {loadingDetailsForAll ? '⏳ Lade Details...' : '📥 Details laden'}
+                      </button>
+                    )}
+                    {onNavigateToTab && (
+                      <button
+                        onClick={() => onNavigateToTab('matchdays')}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          background: 'rgb(239, 68, 68)',
+                          border: 'none',
+                          borderRadius: '8px',
+                          color: 'white',
+                          fontSize: '0.875rem',
+                          fontWeight: '600',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          whiteSpace: 'nowrap'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = 'rgb(220, 38, 38)';
+                          e.currentTarget.style.transform = 'translateY(-1px)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'rgb(239, 68, 68)';
+                          e.currentTarget.style.transform = 'translateY(0)';
+                        }}
+                      >
+                        → Zu Spieltage
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
