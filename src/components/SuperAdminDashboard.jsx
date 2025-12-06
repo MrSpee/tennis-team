@@ -401,6 +401,11 @@ function SuperAdminDashboard() {
   const [matchdaysNeedingMeetingIdUpdate, setMatchdaysNeedingMeetingIdUpdate] = useState([]);
   const [updatingMeetingIds, setUpdatingMeetingIds] = useState(false);
   const [meetingIdUpdateResult, setMeetingIdUpdateResult] = useState(null);
+  const [autoImportStatus, setAutoImportStatus] = useState({
+    lastRun: null,
+    isRunning: false,
+    lastResult: null
+  });
 
   const buildInfo = useMemo(getDefaultBuildInfo, []);
 
@@ -1059,9 +1064,32 @@ function SuperAdminDashboard() {
     loadDashboardData();
   }, [loadDashboardData]);
 
-  // ✅ NEU: Automatischer Import-Prozess - prüft regelmäßig auf fehlende Ergebnisse
+  // ✅ NEU: Automatischer Import-Prozess - prüft max. 1x täglich auf fehlende Ergebnisse
   useEffect(() => {
     if (!supabase) return;
+    
+    // Prüfe ob heute bereits ein Import durchgeführt wurde (localStorage)
+    const today = new Date().toISOString().split('T')[0];
+    const lastImportDate = localStorage.getItem('superAdminAutoImportLastRun');
+    
+    if (lastImportDate === today) {
+      console.log('[SuperAdminDashboard] Auto-Import wurde heute bereits durchgeführt');
+      // Lade trotzdem den letzten Status, falls vorhanden
+      const lastStatus = localStorage.getItem('superAdminAutoImportStatus');
+      if (lastStatus) {
+        try {
+          const status = JSON.parse(lastStatus);
+          setAutoImportStatus({
+            lastRun: status.lastRun ? new Date(status.lastRun) : null,
+            isRunning: false,
+            lastResult: status.lastResult || null
+          });
+        } catch (e) {
+          console.warn('[SuperAdminDashboard] Fehler beim Laden des letzten Status:', e);
+        }
+      }
+      return;
+    }
     
     // Funktion zum Ausführen des automatischen Imports
     const runAutoImportCheck = async () => {
@@ -1073,20 +1101,28 @@ function SuperAdminDashboard() {
       setAutoImportStatus(prev => ({ ...prev, isRunning: true }));
       
       try {
-        console.log('[SuperAdminDashboard] 🔄 Starte automatischen Import-Check...');
+        console.log('[SuperAdminDashboard] 🔄 Starte automatischen Import-Check (max. 1x täglich)...');
         const result = await runAutoImport(supabase, { 
-          delayBetweenImports: 2000 // 2 Sekunden Pause zwischen Imports
+          delayBetweenImports: 12000 // 12 Sekunden Pause zwischen Imports (10-15 Sekunden)
         });
         
-        setAutoImportStatus({
+        const statusUpdate = {
           lastRun: new Date(),
           isRunning: false,
           lastResult: result
-        });
+        };
+        
+        setAutoImportStatus(statusUpdate);
+        
+        // Speichere Status in localStorage
+        localStorage.setItem('superAdminAutoImportLastRun', today);
+        localStorage.setItem('superAdminAutoImportStatus', JSON.stringify({
+          lastRun: statusUpdate.lastRun.toISOString(),
+          lastResult: result
+        }));
         
         if (result.success > 0) {
           console.log(`[SuperAdminDashboard] ✅ ${result.success} Spieltage automatisch importiert`);
-          // Dashboard-Daten werden automatisch neu geladen, da matchdaysWithoutResults aktualisiert wird
         } else if (result.total > 0) {
           console.log(`[SuperAdminDashboard] ⏭️ ${result.skipped} übersprungen, ${result.failed} fehlgeschlagen`);
         } else {
@@ -1106,19 +1142,13 @@ function SuperAdminDashboard() {
       }
     };
     
-    // Führe sofort einen Check durch (nach kurzer Verzögerung)
+    // Führe Check nach kurzer Verzögerung durch (nur wenn heute noch nicht durchgeführt)
     const initialTimeout = setTimeout(() => {
       runAutoImportCheck();
     }, 3000); // 3 Sekunden nach Mount
     
-    // Dann regelmäßig alle 10 Minuten prüfen
-    const interval = setInterval(() => {
-      runAutoImportCheck();
-    }, 10 * 60 * 1000); // 10 Minuten
-    
     return () => {
       clearTimeout(initialTimeout);
-      clearInterval(interval);
     };
   }, [supabase]);
 
