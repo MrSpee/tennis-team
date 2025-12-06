@@ -368,19 +368,41 @@ export async function findMatchdaysWithoutResultsAfter4Days(supabase) {
     // ✅ VERBESSERT: Prüfe ob Ergebnisse vollständig sind
     if (results && results.length > 0) {
       // Prüfe ob mindestens ein Ergebnis vollständig ist (hat Spieler UND Set-Ergebnisse)
-      const hasCompleteResults = results.some(r => {
+      const completeResults = results.filter(r => {
         const hasPlayers = r.home_player_id || r.home_player1_id;
         const hasSets = r.set1_home !== null && r.set1_guest !== null;
         return hasPlayers && hasSets;
       });
       
       // Wenn vollständige Ergebnisse vorhanden sind, überspringe
-      if (hasCompleteResults) {
+      if (completeResults.length > 0) {
+        console.log(`[autoMatchResultImport] ✅ Matchday ${matchday.id} hat ${completeResults.length}/${results.length} vollständige Ergebnisse - überspringe`);
         continue;
       }
       
       // Wenn nur unvollständige Ergebnisse vorhanden sind, zähle als "ohne Ergebnisse"
-      console.log(`[autoMatchResultImport] ⚠️ Matchday ${matchday.id} hat ${results.length} unvollständige Ergebnisse`);
+      const incompleteDetails = results.map(r => {
+        const hasPlayers = r.home_player_id || r.home_player1_id;
+        const hasSets = r.set1_home !== null && r.set1_guest !== null;
+        return {
+          id: r.id,
+          hasPlayers,
+          hasSets,
+          status: r.status,
+          home_player_id: r.home_player_id,
+          home_player1_id: r.home_player1_id,
+          set1_home: r.set1_home,
+          set1_guest: r.set1_guest
+        };
+      });
+      
+      console.log(`[autoMatchResultImport] ⚠️ Matchday ${matchday.id} hat ${results.length} unvollständige Ergebnisse:`, {
+        matchdayId: matchday.id,
+        meetingId: matchday.meeting_id,
+        homeTeam: matchday.home_team?.club_name || 'Unbekannt',
+        awayTeam: matchday.away_team?.club_name || 'Unbekannt',
+        incompleteDetails
+      });
     }
     
     // Prüfe Anzahl der Versuche

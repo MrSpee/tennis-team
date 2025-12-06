@@ -3460,9 +3460,19 @@ function SuperAdminDashboard() {
             (raw && raw.trim().length ? raw : `Serverfehler (${response.status}) beim Laden des Spielberichts.`);
           const errorCode = result?.errorCode || null;
 
+          console.log(`[handleLoadMeetingDetails] ⚠️ API-Fehler für Matchday ${recordId}:`, {
+            matchdayId: recordId,
+            meetingId: payload.meetingId,
+            errorCode,
+            message,
+            responseStatus: response.status,
+            applyImport
+          });
+
           // WICHTIG: MEETING_ID_NOT_AVAILABLE ist kein kritischer Fehler
           // Das Spiel wurde möglicherweise noch nicht gespielt
           if (errorCode === 'MEETING_ID_NOT_AVAILABLE') {
+            console.log(`[handleLoadMeetingDetails] ℹ️ Meeting-ID nicht verfügbar für Matchday ${recordId} - Spiel möglicherweise noch nicht gespielt`);
             setMeetingDetails((prev) => ({
               ...prev,
               [recordId]: {
@@ -3519,6 +3529,15 @@ function SuperAdminDashboard() {
             existing.data?.applyResult?.missingPlayers ||
             [];
 
+        console.log(`[handleLoadMeetingDetails] ✅ Meeting-Details erfolgreich geladen für Matchday ${recordId}:`, {
+          matchdayId: recordId,
+          meetingId: result.meetingId,
+          applyImport,
+          insertedCount: result.applyResult?.inserted?.length || 0,
+          missingPlayersCount: missingPlayers.length,
+          hasResults: !!result.applyResult
+        });
+
         setMeetingDetails((prev) => ({
           ...prev,
           [recordId]: {
@@ -3541,6 +3560,15 @@ function SuperAdminDashboard() {
 
         if (applyImport) {
           const missingCount = result.applyResult?.missingPlayers?.length || 0;
+          const insertedCount = result.applyResult?.inserted?.length ?? 0;
+          
+          console.log(`[handleLoadMeetingDetails] 📥 Import abgeschlossen für Matchday ${recordId}:`, {
+            matchdayId: recordId,
+            insertedCount,
+            missingPlayersCount: missingCount,
+            insertedResults: result.applyResult?.inserted || []
+          });
+          
           const nextMatchNumber =
             result.matchMeta?.matchNumber ||
             existing.matchMeta?.matchNumber ||
@@ -3550,7 +3578,6 @@ function SuperAdminDashboard() {
           if (nextMatchNumber) {
             await supabase.from('matchdays').update({ match_number: nextMatchNumber }).eq('id', match.id);
           }
-          const insertedCount = result.applyResult?.inserted?.length ?? existing.matchResultsCount ?? 0;
           setSeasonMatchdays((prev) =>
             prev.map((entry) =>
               entry.id === match.id
@@ -3666,12 +3693,22 @@ function SuperAdminDashboard() {
           : 'Unbekannt';
         
         try {
+          console.log(`[handleLoadDetailsForAllMatches] 🔄 Lade Details für Match ${match.id} (${i + 1}/${matchdaysWithoutResults.length}): ${homeTeam} vs. ${awayTeam}`, {
+            matchdayId: match.id,
+            meetingId: matchWithGroupName.meeting_id,
+            groupName: matchWithGroupName.group_name,
+            daysSinceMatch: match.daysSinceMatch,
+            attemptCount: match.attemptCount
+          });
+          
           // Lade Details MIT automatischem Import (applyImport = true)
           await handleLoadMeetingDetails(matchWithGroupName, { 
             homeLabel: homeTeam, 
             awayLabel: awayTeam, 
             applyImport: true 
           });
+          
+          console.log(`[handleLoadDetailsForAllMatches] ✅ Details erfolgreich geladen für Match ${match.id}`);
           successCount++;
           
           // Kurze Pause zwischen den Requests, um Server nicht zu überlasten
@@ -3679,7 +3716,12 @@ function SuperAdminDashboard() {
             await new Promise(resolve => setTimeout(resolve, 500));
           }
         } catch (error) {
-          console.error(`❌ Fehler beim Laden der Details für Match ${match.id}:`, error);
+          console.error(`[handleLoadDetailsForAllMatches] ❌ Fehler beim Laden der Details für Match ${match.id}:`, {
+            matchdayId: match.id,
+            meetingId: matchWithGroupName.meeting_id,
+            error: error.message,
+            stack: error.stack
+          });
           errorCount++;
         }
       }
