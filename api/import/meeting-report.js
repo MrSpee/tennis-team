@@ -1255,24 +1255,27 @@ module.exports = async function handler(req, res) {
     let effectiveLeagueUrl = null;
 
     // ✅ NEU: Lade leagueUrl aus team_seasons, wenn matchdayId vorhanden ist
+    let matchdayData = null; // Deklariere außerhalb des try-Blocks
     if (matchdayId && groupId) {
       try {
         const supabase = createSupabaseClient(true);
         // Lade matchday, um group_name, season, league zu bekommen
-        const { data: matchdayData } = await supabase
+        const { data: loadedMatchdayData } = await supabase
           .from('matchdays')
           .select('group_name, season, league')
           .eq('id', matchdayId)
           .maybeSingle();
         
-        if (matchdayData) {
+        matchdayData = loadedMatchdayData; // Setze die Variable
+        
+        if (loadedMatchdayData) {
           // Versuche, source_url aus team_seasons zu laden
           const { data: teamSeason } = await supabase
             .from('team_seasons')
             .select('source_url')
-            .eq('group_name', matchdayData.group_name)
-            .eq('season', matchdayData.season)
-            .eq('league', matchdayData.league)
+            .eq('group_name', loadedMatchdayData.group_name)
+            .eq('season', loadedMatchdayData.season)
+            .eq('league', loadedMatchdayData.league)
             .not('source_url', 'is', null)
             .limit(1)
             .maybeSingle();
@@ -1283,7 +1286,7 @@ module.exports = async function handler(req, res) {
           } else {
             // ✅ FALLBACK: Basierend auf Liga-Name die richtige URL bestimmen
             // WICHTIG: "Köln-Leverkusen" Ligen brauchen einen anderen championship-Parameter!
-            const league = matchdayData.league || '';
+            const league = loadedMatchdayData.league || '';
             let baseUrl;
             let tab = 2; // Default: Damen/Herren
             
@@ -1327,9 +1330,9 @@ module.exports = async function handler(req, res) {
                 const { data: teamSeason } = await supabase
                   .from('team_seasons')
                   .select('team_id')
-                  .eq('group_name', matchdayData.group_name)
-                  .eq('season', matchdayData.season)
-                  .eq('league', matchdayData.league)
+                  .eq('group_name', loadedMatchdayData.group_name)
+                  .eq('season', loadedMatchdayData.season)
+                  .eq('league', loadedMatchdayData.league)
                   .limit(1)
                   .maybeSingle();
                 
