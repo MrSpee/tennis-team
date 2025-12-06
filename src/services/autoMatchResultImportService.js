@@ -374,9 +374,10 @@ export async function findMatchdaysWithoutResultsAfter4Days(supabase) {
         return hasPlayers && hasSets;
       });
       
-      // Wenn vollständige Ergebnisse vorhanden sind, überspringe
+      // Wenn vollständige Ergebnisse vorhanden sind, überspringe (OHNE Log, um Console-Spam zu vermeiden)
       if (completeResults.length > 0) {
-        console.log(`[autoMatchResultImport] ✅ Matchday ${matchday.id} hat ${completeResults.length}/${results.length} vollständige Ergebnisse - überspringe`);
+        // Nur loggen wenn nicht alle Ergebnisse vollständig sind (für Debugging)
+        // console.log(`[autoMatchResultImport] ✅ Matchday ${matchday.id} hat ${completeResults.length}/${results.length} vollständige Ergebnisse - überspringe`);
         continue;
       }
       
@@ -396,12 +397,26 @@ export async function findMatchdaysWithoutResultsAfter4Days(supabase) {
         };
       });
       
+      // ✅ ANALYSE: Warum sind die Ergebnisse unvollständig?
+      const missingPlayersCount = results.filter(r => !r.home_player_id && !r.home_player1_id).length;
+      const missingSetsCount = results.filter(r => r.set1_home === null || r.set1_guest === null).length;
+      const hasBothIssues = results.filter(r => (!r.home_player_id && !r.home_player1_id) && (r.set1_home === null || r.set1_guest === null)).length;
+      
       console.log(`[autoMatchResultImport] ⚠️ Matchday ${matchday.id} hat ${results.length} unvollständige Ergebnisse:`, {
         matchdayId: matchday.id,
         meetingId: matchday.meeting_id,
         homeTeam: matchday.home_team?.club_name || 'Unbekannt',
         awayTeam: matchday.away_team?.club_name || 'Unbekannt',
-        incompleteDetails
+        totalResults: results.length,
+        missingPlayersCount,
+        missingSetsCount,
+        hasBothIssues,
+        incompleteDetails,
+        diagnosis: missingPlayersCount > 0 
+          ? `❌ ${missingPlayersCount} Ergebnisse haben keine Spieler-IDs - Spieler müssen zugeordnet werden`
+          : missingSetsCount > 0
+          ? `❌ ${missingSetsCount} Ergebnisse haben keine Set-Ergebnisse - Meeting-Report muss neu geladen werden`
+          : '❌ Unbekannter Grund für Unvollständigkeit'
       });
     }
     

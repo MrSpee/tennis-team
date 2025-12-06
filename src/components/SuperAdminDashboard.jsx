@@ -397,7 +397,25 @@ function SuperAdminDashboard() {
   const [deletingMatchdayId, setDeletingMatchdayId] = useState(null);
   const [matchResultsData, setMatchResultsData] = useState({});
   const [matchdayDuplicates, setMatchdayDuplicates] = useState([]);
-  const [matchdaysWithoutResults, setMatchdaysWithoutResults] = useState([]);
+  // ✅ Lade initial aus localStorage, um unnötige DB-Abfragen zu vermeiden
+  const [matchdaysWithoutResults, setMatchdaysWithoutResults] = useState(() => {
+    try {
+      const saved = localStorage.getItem('superAdminMatchdaysWithoutResults');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Prüfe ob Daten nicht älter als 5 Minuten sind
+        const now = Date.now();
+        const savedTime = parsed.timestamp || 0;
+        const fiveMinutes = 5 * 60 * 1000;
+        if (now - savedTime < fiveMinutes) {
+          return parsed.data || [];
+        }
+      }
+    } catch (e) {
+      console.warn('⚠️ Fehler beim Laden der gespeicherten fehlenden Ergebnisse:', e);
+    }
+    return [];
+  });
   const [matchdaysNeedingMeetingIdUpdate, setMatchdaysNeedingMeetingIdUpdate] = useState([]);
   const [updatingMeetingIds, setUpdatingMeetingIds] = useState(false);
   const [meetingIdUpdateResult, setMeetingIdUpdateResult] = useState(null);
@@ -1003,8 +1021,44 @@ function SuperAdminDashboard() {
       // ✅ LAZY LOADING: Lade Matches ohne Ergebnisse im Hintergrund, blockiert nicht das UI
       const loadMissingResults = async () => {
         try {
+          // Prüfe ob wir kürzlich geladen haben (innerhalb der letzten 5 Minuten)
+          const saved = localStorage.getItem('superAdminMatchdaysWithoutResults');
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved);
+              const now = Date.now();
+              const savedTime = parsed.timestamp || 0;
+              const fiveMinutes = 5 * 60 * 1000;
+              
+              // Wenn Daten weniger als 5 Minuten alt sind, verwende sie
+              if (now - savedTime < fiveMinutes && parsed.data) {
+                console.log(`[SuperAdminDashboard] 📦 Verwende gespeicherte fehlende Ergebnisse aus localStorage (${parsed.data.length} Matchdays, ${Math.round((now - savedTime) / 1000)}s alt)`);
+                setMatchdaysWithoutResults(parsed.data);
+                return; // Überspringe DB-Abfrage
+              }
+            } catch (e) {
+              console.warn('⚠️ Fehler beim Parsen der gespeicherten Daten:', e);
+            }
+          }
+          
+          // Lade neue Daten aus der DB
+          console.log('[SuperAdminDashboard] 🔄 Lade fehlende Ergebnisse aus der Datenbank...');
           const missingResults = await findMatchdaysWithoutResultsAfter4Days(supabase);
-          setMatchdaysWithoutResults(missingResults || []);
+          const result = missingResults || [];
+          
+          // Speichere im localStorage mit Timestamp
+          try {
+            localStorage.setItem('superAdminMatchdaysWithoutResults', JSON.stringify({
+              data: result,
+              timestamp: Date.now(),
+              count: result.length
+            }));
+            console.log(`[SuperAdminDashboard] 💾 ${result.length} fehlende Ergebnisse im localStorage gespeichert`);
+          } catch (e) {
+            console.warn('⚠️ Fehler beim Speichern in localStorage:', e);
+          }
+          
+          setMatchdaysWithoutResults(result);
         } catch (error) {
           console.warn('⚠️ Fehler beim Laden der Matches ohne Ergebnisse:', error);
           setMatchdaysWithoutResults([]);
@@ -1139,7 +1193,21 @@ function SuperAdminDashboard() {
         
         // Lade auch die Liste der fehlenden Ergebnisse neu
         const missingResults = await findMatchdaysWithoutResultsAfter4Days(supabase);
-        setMatchdaysWithoutResults(missingResults || []);
+        const result = missingResults || [];
+        
+        // Speichere im localStorage mit Timestamp
+        try {
+          localStorage.setItem('superAdminMatchdaysWithoutResults', JSON.stringify({
+            data: result,
+            timestamp: Date.now(),
+            count: result.length
+          }));
+          console.log(`[SuperAdminDashboard] 💾 ${result.length} fehlende Ergebnisse im localStorage gespeichert (nach Auto-Import)`);
+        } catch (e) {
+          console.warn('⚠️ Fehler beim Speichern in localStorage:', e);
+        }
+        
+        setMatchdaysWithoutResults(result);
       } catch (error) {
         console.error('[SuperAdminDashboard] ❌ Fehler beim automatischen Import:', error);
         setAutoImportStatus(prev => ({
@@ -3590,6 +3658,24 @@ function SuperAdminDashboard() {
             )
           );
           await loadDashboardData();
+          
+          // ✅ Aktualisiere fehlende Ergebnisse im localStorage nach Import
+          if (applyImport) {
+            try {
+              const updatedMissingResults = await findMatchdaysWithoutResultsAfter4Days(supabase);
+              const result = updatedMissingResults || [];
+              localStorage.setItem('superAdminMatchdaysWithoutResults', JSON.stringify({
+                data: result,
+                timestamp: Date.now(),
+                count: result.length
+              }));
+              setMatchdaysWithoutResults(result);
+              console.log(`[SuperAdminDashboard] 💾 ${result.length} fehlende Ergebnisse im localStorage aktualisiert (nach Import)`);
+            } catch (e) {
+              console.warn('⚠️ Fehler beim Aktualisieren der fehlenden Ergebnisse nach Import:', e);
+            }
+          }
+          
           // Lade Match-Results neu, wenn importiert wurde
           if (applyImport && match.id) {
             setMatchResultsData((prev) => {
@@ -3701,6 +3787,34 @@ function SuperAdminDashboard() {
             attemptCount: match.attemptCount
           });
           
+          // ✅ FIX: Prüfe ob unvollständige Ergebnisse vorhanden sind und lösche sie vor dem Import
+          // Unvollständige Ergebnisse haben keine Spieler-IDs oder keine Set-Ergebnisse
+          try {
+            const { data: existingResults } = await supabase
+              .from('match_results')
+              .select('id, home_player_id, home_player1_id, set1_home, set1_guest')
+              .eq('matchday_id', match.id);
+            
+            if (existingResults && existingResults.length > 0) {
+              const incompleteResults = existingResults.filter(r => {
+                const hasPlayers = r.home_player_id || r.home_player1_id;
+                const hasSets = r.set1_home !== null && r.set1_guest !== null;
+                return !hasPlayers || !hasSets;
+              });
+              
+              if (incompleteResults.length > 0) {
+                console.log(`[handleLoadDetailsForAllMatches] 🧹 Lösche ${incompleteResults.length} unvollständige Ergebnisse für Match ${match.id} vor dem Re-Import`);
+                await supabase
+                  .from('match_results')
+                  .delete()
+                  .in('id', incompleteResults.map(r => r.id));
+              }
+            }
+          } catch (cleanupError) {
+            console.warn(`[handleLoadDetailsForAllMatches] ⚠️ Fehler beim Löschen unvollständiger Ergebnisse:`, cleanupError);
+            // Weiter mit Import, auch wenn Cleanup fehlgeschlagen ist
+          }
+          
           // Lade Details MIT automatischem Import (applyImport = true)
           await handleLoadMeetingDetails(matchWithGroupName, { 
             homeLabel: homeTeam, 
@@ -3733,6 +3847,23 @@ function SuperAdminDashboard() {
       
       // Lade Dashboard-Daten neu, um aktualisierte Status anzuzeigen
       await loadDashboardData();
+      
+      // ✅ Aktualisiere auch die fehlenden Ergebnisse im localStorage (nur wenn erfolgreich importiert wurde)
+      if (successCount > 0) {
+        try {
+          const updatedMissingResults = await findMatchdaysWithoutResultsAfter4Days(supabase);
+          const result = updatedMissingResults || [];
+          localStorage.setItem('superAdminMatchdaysWithoutResults', JSON.stringify({
+            data: result,
+            timestamp: Date.now(),
+            count: result.length
+          }));
+          setMatchdaysWithoutResults(result);
+          console.log(`[SuperAdminDashboard] 💾 ${result.length} fehlende Ergebnisse im localStorage aktualisiert (nach Details-Laden)`);
+        } catch (e) {
+          console.warn('⚠️ Fehler beim Aktualisieren der fehlenden Ergebnisse:', e);
+        }
+      }
     } catch (error) {
       console.error('❌ Fehler beim Laden der Details für alle Matches:', error);
       setParserMessage({
