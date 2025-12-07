@@ -118,95 +118,96 @@ async function searchClubOnNuLiga(clubName) {
       
       // Wenn keine Club-Nummer in URL, suche in HTML nach Club-Nummern
       if (!clubNumber) {
-      console.log(`[find-club-numbers] ⚠️ Keine Club-Nummer in URL, suche in HTML...`);
-      
-      // Prüfe ob wir auf einer Suchergebnis-Seite sind
-      const isSearchResultsPage = finalUrl.includes('clubSearch') && !finalUrl.includes('club=');
-      
-      if (isSearchResultsPage) {
-        console.log(`[find-club-numbers] 📋 Auf Suchergebnis-Seite gelandet, parse Ergebnisse...`);
+        console.log(`[find-club-numbers] ⚠️ Keine Club-Nummer in URL, suche in HTML...`);
         
-        // Suche nach Club-Links in Suchergebnissen
-        // Pattern: Links die zu clubInfoDisplay, clubPools, etc. führen
-        const clubLinkPatterns = [
-          /href=["']([^"']*club(?:InfoDisplay|Pools|Portrait|Meetings|Teams)\?club=(\d+)[^"']*)["']/gi,
-          /href=["']([^"']*[?&]club=(\d+)[^"']*)["']/gi
-        ];
+        // Prüfe ob wir auf einer Suchergebnis-Seite sind
+        const isSearchResultsPage = finalUrl.includes('clubSearch') && !finalUrl.includes('club=');
         
-        const foundClubs = new Map(); // Map<clubNumber, {url, context}>
-        
-        clubLinkPatterns.forEach(pattern => {
-          const matches = [...html.matchAll(pattern)];
-          matches.forEach(match => {
-            const foundClubNumber = match[2] || match[1]?.match(/[?&]club=(\d+)/)?.[1];
-            if (foundClubNumber) {
-              // Extrahiere Kontext um den Link (Vereinsname)
-              const linkStart = match.index;
-              const contextStart = Math.max(0, linkStart - 200);
-              const contextEnd = Math.min(html.length, linkStart + match[0].length + 200);
-              const context = html.substring(contextStart, contextEnd);
-              
-              // Versuche Vereinsnamen aus dem Kontext zu extrahieren
-              const nameMatch = context.match(/>([^<]{5,50}?)</);
-              const clubNameFromContext = nameMatch ? nameMatch[1].trim() : null;
-              
-              if (!foundClubs.has(foundClubNumber)) {
-                foundClubs.set(foundClubNumber, {
-                  url: match[1] || match[0],
-                  context: clubNameFromContext,
-                  fullContext: context.substring(0, 300)
-                });
+        if (isSearchResultsPage) {
+          console.log(`[find-club-numbers] 📋 Auf Suchergebnis-Seite gelandet, parse Ergebnisse...`);
+          
+          // Suche nach Club-Links in Suchergebnissen
+          // Pattern: Links die zu clubInfoDisplay, clubPools, etc. führen
+          const clubLinkPatterns = [
+            /href=["']([^"']*club(?:InfoDisplay|Pools|Portrait|Meetings|Teams)\?club=(\d+)[^"']*)["']/gi,
+            /href=["']([^"']*[?&]club=(\d+)[^"']*)["']/gi
+          ];
+          
+          const foundClubs = new Map(); // Map<clubNumber, {url, context}>
+          
+          clubLinkPatterns.forEach(pattern => {
+            const matches = [...html.matchAll(pattern)];
+            matches.forEach(match => {
+              const foundClubNumber = match[2] || match[1]?.match(/[?&]club=(\d+)/)?.[1];
+              if (foundClubNumber) {
+                // Extrahiere Kontext um den Link (Vereinsname)
+                const linkStart = match.index;
+                const contextStart = Math.max(0, linkStart - 200);
+                const contextEnd = Math.min(html.length, linkStart + match[0].length + 200);
+                const context = html.substring(contextStart, contextEnd);
+                
+                // Versuche Vereinsnamen aus dem Kontext zu extrahieren
+                const nameMatch = context.match(/>([^<]{5,50}?)</);
+                const clubNameFromContext = nameMatch ? nameMatch[1].trim() : null;
+                
+                if (!foundClubs.has(foundClubNumber)) {
+                  foundClubs.set(foundClubNumber, {
+                    url: match[1] || match[0],
+                    context: clubNameFromContext,
+                    fullContext: context.substring(0, 300)
+                  });
+                }
               }
-            }
+            });
           });
-        });
-        
-        console.log(`[find-club-numbers] 🔍 ${foundClubs.size} verschiedene Club-Nummern in Suchergebnissen gefunden`);
-        
-        if (foundClubs.size > 0) {
-          // Versuche das beste Match zu finden basierend auf Vereinsnamen
-          let bestMatch = null;
-          let bestScore = 0;
           
-          foundClubs.forEach((data, foundClubNumber) => {
-            const contextName = data.context || '';
-            const score = calculateSimilarity(clubName, contextName);
-            console.log(`[find-club-numbers]   - Club ${foundClubNumber}: "${contextName}" (Score: ${score.toFixed(2)})`);
+          console.log(`[find-club-numbers] 🔍 ${foundClubs.size} verschiedene Club-Nummern in Suchergebnissen gefunden`);
+          
+          if (foundClubs.size > 0) {
+            // Versuche das beste Match zu finden basierend auf Vereinsnamen
+            let bestMatch = null;
+            let bestScore = 0;
             
-            if (score > bestScore) {
-              bestScore = score;
-              bestMatch = {
-                clubNumber: foundClubNumber,
-                clubName: contextName,
-                score: score
-              };
+            foundClubs.forEach((data, foundClubNumber) => {
+              const contextName = data.context || '';
+              const score = calculateSimilarity(clubName, contextName);
+              console.log(`[find-club-numbers]   - Club ${foundClubNumber}: "${contextName}" (Score: ${score.toFixed(2)})`);
+              
+              if (score > bestScore) {
+                bestScore = score;
+                bestMatch = {
+                  clubNumber: foundClubNumber,
+                  clubName: contextName,
+                  score: score
+                };
+              }
+            });
+            
+            if (bestMatch && bestMatch.score >= 0.5) {
+              clubNumber = bestMatch.clubNumber;
+              console.log(`[find-club-numbers] ✅ Bestes Match gefunden: Club ${clubNumber} (Score: ${bestMatch.score.toFixed(2)})`);
+            } else if (foundClubs.size === 1) {
+              // Wenn nur ein Ergebnis, nimm es
+              const onlyClub = Array.from(foundClubs.entries())[0];
+              clubNumber = onlyClub[0];
+              console.log(`[find-club-numbers] ✅ Einziges Ergebnis gefunden: Club ${clubNumber}`);
             }
-          });
-          
-          if (bestMatch && bestMatch.score >= 0.5) {
-            clubNumber = bestMatch.clubNumber;
-            console.log(`[find-club-numbers] ✅ Bestes Match gefunden: Club ${clubNumber} (Score: ${bestMatch.score.toFixed(2)})`);
-          } else if (foundClubs.size === 1) {
-            // Wenn nur ein Ergebnis, nimm es
-            const onlyClub = Array.from(foundClubs.entries())[0];
-            clubNumber = onlyClub[0];
-            console.log(`[find-club-numbers] ✅ Einziges Ergebnis gefunden: Club ${clubNumber}`);
           }
-        }
-      } else {
-        // Normale Suche in HTML (falls wir auf einer Detail-Seite sind)
-        const clubLinkPattern = /club(?:Pools|Portrait|InfoDisplay|Meetings|Teams)\?club=(\d+)/gi;
-        const clubLinks = [...html.matchAll(clubLinkPattern)];
-        const directClubPattern = /[?&]club=(\d+)/gi;
-        const directClubs = [...html.matchAll(directClubPattern)];
-        
-        const allClubNumbers = new Set();
-        clubLinks.forEach(match => allClubNumbers.add(match[1]));
-        directClubs.forEach(match => allClubNumbers.add(match[1]));
-        
-        if (allClubNumbers.size > 0) {
-          clubNumber = Array.from(allClubNumbers)[0];
-          console.log(`[find-club-numbers] ✅ Club-Nummer in HTML gefunden: ${clubNumber}`);
+        } else {
+          // Normale Suche in HTML (falls wir auf einer Detail-Seite sind)
+          const clubLinkPattern = /club(?:Pools|Portrait|InfoDisplay|Meetings|Teams)\?club=(\d+)/gi;
+          const clubLinks = [...html.matchAll(clubLinkPattern)];
+          const directClubPattern = /[?&]club=(\d+)/gi;
+          const directClubs = [...html.matchAll(directClubPattern)];
+          
+          const allClubNumbers = new Set();
+          clubLinks.forEach(match => allClubNumbers.add(match[1]));
+          directClubs.forEach(match => allClubNumbers.add(match[1]));
+          
+          if (allClubNumbers.size > 0) {
+            clubNumber = Array.from(allClubNumbers)[0];
+            console.log(`[find-club-numbers] ✅ Club-Nummer in HTML gefunden: ${clubNumber}`);
+          }
         }
       }
       
@@ -214,8 +215,7 @@ async function searchClubOnNuLiga(clubName) {
       if (clubNumber) {
         // Extrahiere Vereinsnamen aus HTML für das beste Match
         let foundClubName = null;
-    let foundClubName = null;
-    
+        
         // Pattern 1: <h1>Vereinsname<br />Vereinsinfo</h1> oder <h1>Vereinsname</h1>
         const h1Match = html.match(/<h1[^>]*>([^<]+)(?:<br[^>]*>)?/i);
         if (h1Match) {
