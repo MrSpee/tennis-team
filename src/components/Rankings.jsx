@@ -256,11 +256,39 @@ function Rankings() {
     
     // ✅ NEU: Wenn spezifisches Team ausgewählt, verwende Meldeliste als primäre Quelle
     try {
+      // Lade Team-Informationen (team_name, category, club_id) für intelligente Roster-Anzeige
+      const { data: selectedTeamInfo, error: teamInfoError } = await supabase
+        .from('team_info')
+        .select('id, team_name, category, club_id')
+        .eq('id', selectedTeamId)
+        .single();
+      
+      if (teamInfoError || !selectedTeamInfo) {
+        console.warn('⚠️ Team-Info nicht gefunden:', teamInfoError);
+        setFilteredPlayers([]);
+        setRosterRanks({});
+        return;
+      }
+      
+      const selectedTeamNumber = selectedTeamInfo.team_name ? parseInt(selectedTeamInfo.team_name, 10) : 1;
+      const selectedCategory = selectedTeamInfo.category;
+      const selectedClubIdForRoster = selectedTeamInfo.club_id;
+      
+      console.log(`[Rankings] 🔍 Lade Kader für Team: ${selectedCategory} ${selectedTeamInfo.team_name} (Mannschaftsnummer: ${selectedTeamNumber})`);
+      
       // ✅ NEU: Prüfe zuerst, ob Meldeliste existiert und vollständig gematched ist
+      // Suche in ALLEN Teams derselben Kategorie und desselben Vereins
       const { data: rosterCheck, error: rosterCheckError } = await supabase
         .from('team_roster')
-        .select('id, player_id')
-        .eq('team_id', selectedTeamId)
+        .select(`
+          id, 
+          player_id,
+          team_number,
+          team_id,
+          team_info!inner(category, club_id)
+        `)
+        .eq('team_info.category', selectedCategory)
+        .eq('team_info.club_id', selectedClubIdForRoster)
         .eq('season', currentSeason);
       
       const rosterExists = !rosterCheckError && (rosterCheck?.length || 0) > 0;
@@ -269,12 +297,17 @@ function Rankings() {
       const fullyMatched = rosterExists && totalEntries > 0 && matchedEntries === totalEntries;
       
       // ✅ WICHTIG: Nur importieren, wenn Meldeliste nicht existiert ODER nicht vollständig gematched ist
-      if (!fullyMatched) {
-        if (!rosterExists) {
-          console.log(`[Rankings] 🔍 Meldeliste für Team ${selectedTeamId}, Saison ${currentSeason} nicht gefunden. Versuche automatischen Import...`);
-        } else {
-          console.log(`[Rankings] ⚠️ Meldeliste existiert, aber nicht vollständig gematched (${matchedEntries}/${totalEntries}). Versuche fehlende Matches...`);
-        }
+      // Prüfe nur für das ausgewählte Team (nicht für alle Teams der Kategorie)
+      const { data: selectedTeamRosterCheck, error: selectedTeamRosterCheckError } = await supabase
+        .from('team_roster')
+        .select('id, player_id')
+        .eq('team_id', selectedTeamId)
+        .eq('season', currentSeason);
+      
+      const selectedTeamRosterExists = !selectedTeamRosterCheckError && (selectedTeamRosterCheck?.length || 0) > 0;
+      
+      if (!fullyMatched && !selectedTeamRosterExists) {
+        console.log(`[Rankings] 🔍 Meldeliste für Team ${selectedTeamId}, Saison ${currentSeason} nicht gefunden. Versuche automatischen Import...`);
         
         try {
           // Importiere dynamisch, um Circular Dependencies zu vermeiden
@@ -290,10 +323,8 @@ function Rankings() {
         }
         
         // Warte kurz, falls gerade importiert wird
-        if (!rosterExists) {
-          await new Promise(resolve => setTimeout(resolve, 2000)); // 2 Sekunden warten
-        }
-      } else {
+        await new Promise(resolve => setTimeout(resolve, 2000)); // 2 Sekunden warten
+      } else if (fullyMatched) {
         console.log(`[Rankings] ✅ Meldeliste vollständig gematched (${matchedEntries}/${totalEntries}) - keine weitere Aktion nötig`);
       }
       
@@ -301,6 +332,10 @@ function Rankings() {
       let roster = null;
       let rosterError = null;
       
+      // ✅ WICHTIG: Lade Roster für ALLE Teams derselben Kategorie und desselben Vereins
+      // Filtere dann basierend auf team_number:
+      // - Mannschaft 1: Zeige team_number >= 1 (also 1, 2, 3, etc.)
+      // - Mannschaft 2: Zeige team_number >= 2 (also 2, 3, etc.), aber NICHT 1
       // Versuche 1: Exakte Saison
       let { data, error } = await supabase
         .from('team_roster')
@@ -313,15 +348,17 @@ function Rankings() {
           tvm_id,
           birth_year,
           team_id,
+          team_number,
           season,
-          team_info!inner(club_id)
+          team_info!inner(category, club_id, team_name)
         `)
-        .eq('team_id', selectedTeamId)
+        .eq('team_info.category', selectedCategory)
+        .eq('team_info.club_id', selectedClubIdForRoster)
         .eq('season', currentSeason)
         .order('rank', { ascending: true });
       
       if (error || !data || data.length === 0) {
-        // Versuche 2: Alle Saisons für dieses Team (nehme die neueste)
+        // Versuche 2: Alle Saisons für Teams derselben Kategorie (nehme die neueste)
         const { data: allRosters, error: allError } = await supabase
           .from('team_roster')
           .select(`
@@ -333,10 +370,12 @@ function Rankings() {
             tvm_id,
             birth_year,
             team_id,
+            team_number,
             season,
-            team_info!inner(club_id)
+            team_info!inner(category, club_id, team_name)
           `)
-          .eq('team_id', selectedTeamId)
+          .eq('team_info.category', selectedCategory)
+          .eq('team_info.club_id', selectedClubIdForRoster)
           .order('created_at', { ascending: false });
         
         if (!allError && allRosters && allRosters.length > 0) {
@@ -407,8 +446,36 @@ function Rankings() {
         return;
       }
       
-      // Filtere nach Club
-      const clubRoster = roster.filter(r => r.team_info?.club_id === selectedClubId);
+      // ✅ WICHTIG: Filtere basierend auf team_number gemäß Wettspielordnung
+      // - Mannschaft 1 (team_number = 1): Zeige alle Spieler mit team_number >= 1
+      // - Mannschaft 2 (team_number = 2): Zeige nur Spieler mit team_number >= 2 (NICHT 1)
+      // - Mannschaft 3 (team_number = 3): Zeige nur Spieler mit team_number >= 3 (NICHT 1, 2)
+      // etc.
+      // FALLBACK: Wenn team_number null ist, verwende team_name aus team_info
+      const filteredRoster = roster.filter(r => {
+        // Versuche team_number zu verwenden, sonst team_name
+        let playerTeamNumber = r.team_number;
+        if (playerTeamNumber === null || playerTeamNumber === undefined) {
+          // Fallback: Verwende team_name aus team_info
+          const teamName = r.team_info?.team_name;
+          if (teamName) {
+            playerTeamNumber = parseInt(teamName, 10);
+            if (isNaN(playerTeamNumber)) {
+              playerTeamNumber = 1; // Fallback: 1 wenn team_name nicht parsebar
+            }
+          } else {
+            playerTeamNumber = 1; // Fallback: 1 wenn team_name nicht vorhanden
+          }
+        }
+        
+        // Zeige nur Spieler mit team_number >= selectedTeamNumber
+        return playerTeamNumber >= selectedTeamNumber;
+      });
+      
+      console.log(`[Rankings] 📊 Roster gefiltert: ${roster.length} → ${filteredRoster.length} Spieler (team_number >= ${selectedTeamNumber})`);
+      
+      // Filtere nach Club (zusätzliche Sicherheit)
+      const clubRoster = filteredRoster.filter(r => r.team_info?.club_id === selectedClubId);
       
       // ✅ WICHTIG: Auch wenn keine Meldeliste vorhanden ist, zeige leere Liste (nicht return!)
       // Das Team sollte trotzdem im Dropdown erscheinen

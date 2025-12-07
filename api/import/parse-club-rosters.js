@@ -277,6 +277,7 @@ async function parseRosterFromClubPoolsPage(teamUrl) {
     let match;
     while ((match = fullRowPattern.exec(htmlToParse)) !== null) {
       const rank = parseInt(match[1], 10);
+      const teamNumber = parseInt(match[2], 10); // Mannschaftsnummer (1, 2, 3, etc.)
       const lk = match[3].trim();
       const tvmId = match[4].trim();
       const name = match[5].trim();
@@ -293,6 +294,7 @@ async function parseRosterFromClubPoolsPage(teamUrl) {
       if (name && name.length > 2 && tvmId && tvmId.match(/^\d+$/)) {
         roster.push({
           rank,
+          teamNumber, // Mannschaftsnummer (1, 2, 3, etc.)
           name,
           lk: lk.startsWith('LK') ? lk : `LK ${lk}`,
           tvmId,
@@ -302,7 +304,7 @@ async function parseRosterFromClubPoolsPage(teamUrl) {
           total: null
         });
       } else {
-        console.warn(`[parse-club-rosters] ⚠️ Ungültige Zeile übersprungen: rank=${rank}, name="${name}", tvmId="${tvmId}"`);
+        console.warn(`[parse-club-rosters] ⚠️ Ungültige Zeile übersprungen: rank=${rank}, teamNumber=${teamNumber}, name="${name}", tvmId="${tvmId}"`);
       }
     }
     
@@ -314,6 +316,7 @@ async function parseRosterFromClubPoolsPage(teamUrl) {
       
       while ((simpleMatch = simpleRowPattern.exec(htmlToParse)) !== null) {
         const rank = parseInt(simpleMatch[1], 10);
+        const teamNumber = parseInt(simpleMatch[2], 10); // Mannschaftsnummer (1, 2, 3, etc.)
         const lk = simpleMatch[3].trim();
         const tvmId = simpleMatch[4].trim();
         const name = simpleMatch[5].trim();
@@ -329,6 +332,7 @@ async function parseRosterFromClubPoolsPage(teamUrl) {
         if (name && name.length > 2 && tvmId && tvmId.match(/^\d+$/)) {
           roster.push({
             rank,
+            teamNumber, // Mannschaftsnummer (1, 2, 3, etc.)
             name,
             lk: lk.startsWith('LK') ? lk : `LK ${lk}`,
             tvmId,
@@ -513,14 +517,33 @@ async function matchPlayerToUnified(supabase, rosterPlayer) {
 
 /**
  * Erstellt oder aktualisiert team_membership für einen Spieler
+ * Berücksichtigt die DTB-Wettspielordnung:
+ * - Ein Spieler darf nicht in derselben Altersklasse für zwei verschiedene Mannschaften im selben Wettbewerb spielen
+ * - Die Meldeliste ist die Quelle der Wahrheit - wenn ein Spieler auf einer Meldeliste steht, ist er für dieses Team spielberechtigt
+ * 
  * @param {Function} callback - Callback mit (created, updated) Parametern
  */
-async function ensureTeamMembership(supabase, playerId, teamId, normalizedSeason, callback = null) {
+async function ensureTeamMembership(supabase, playerId, teamId, normalizedSeason, teamCategory, callback = null) {
   try {
+    // Lade Team-Informationen für Kategorie-Prüfung
+    const { data: teamInfo } = await supabase
+      .from('team_info')
+      .select('id, category, club_id')
+      .eq('id', teamId)
+      .single();
+    
+    if (!teamInfo) {
+      console.warn(`[parse-club-rosters] ⚠️ Team ${teamId} nicht gefunden`);
+      return false;
+    }
+    
+    const teamCategoryToUse = teamCategory || teamInfo.category;
+    const teamClubId = teamInfo.club_id;
+    
     // Prüfe ob team_membership bereits existiert
     const { data: existing, error: checkError } = await supabase
       .from('team_memberships')
-      .select('id, is_active')
+      .select('id, is_active, team_id')
       .eq('player_id', playerId)
       .eq('team_id', teamId)
       .eq('season', normalizedSeason)
@@ -553,7 +576,53 @@ async function ensureTeamMembership(supabase, playerId, teamId, normalizedSeason
       }
     }
     
+    // WICHTIG: Prüfe auf Konflikte gemäß DTB-Wettspielordnung
+    // Ein Spieler darf nicht in derselben Altersklasse für zwei verschiedene Mannschaften im selben Wettbewerb spielen
+    // Lade alle aktiven Memberships des Spielers in dieser Saison
+    const { data: allActiveMemberships } = await supabase
+      .from('team_memberships')
+      .select(`
+        id,
+        team_id,
+        is_active,
+        team_info:team_id (
+          id,
+          category,
+          club_id
+        )
+      `)
+      .eq('player_id', playerId)
+      .eq('season', normalizedSeason)
+      .eq('is_active', true);
+    
+    // Prüfe auf Konflikte: Gleiche Kategorie + gleicher Verein = Konflikt!
+    if (allActiveMemberships && allActiveMemberships.length > 0) {
+      for (const membership of allActiveMemberships) {
+        const otherTeam = membership.team_info;
+        if (otherTeam && 
+            otherTeam.category === teamCategoryToUse && 
+            otherTeam.club_id === teamClubId &&
+            otherTeam.id !== teamId) {
+          // KONFLIKT: Spieler ist bereits für ein anderes Team derselben Kategorie im selben Verein gemeldet
+          console.warn(`[parse-club-rosters] ⚠️ WETTSPIELORDNUNG: Spieler ${playerId} ist bereits für Team ${otherTeam.id} (${teamCategoryToUse}) gemeldet. Deaktiviere alte Zuordnung, da Meldeliste die Quelle der Wahrheit ist.`);
+          
+          // Deaktiviere alte Zuordnung (Meldeliste hat Priorität!)
+          const { error: deactivateError } = await supabase
+            .from('team_memberships')
+            .update({ is_active: false })
+            .eq('id', membership.id);
+          
+          if (deactivateError) {
+            console.warn(`[parse-club-rosters] ⚠️ Fehler beim Deaktivieren der alten team_membership:`, deactivateError);
+          } else {
+            console.log(`[parse-club-rosters] ✅ Alte team_membership deaktiviert (Team ${otherTeam.id})`);
+          }
+        }
+      }
+    }
+    
     // Prüfe ob Spieler bereits andere Teams in dieser Saison hat (für is_primary)
+    // Jetzt nur noch aktive Memberships (nach Konfliktbereinigung)
     const { data: otherMemberships } = await supabase
       .from('team_memberships')
       .select('id, is_primary')
@@ -649,16 +718,33 @@ async function saveTeamRoster(supabase, teamId, season, roster) {
       
       // Wenn Spieler gematcht wurde: Erstelle/aktualisiere team_membership
       if (matchResult.playerId) {
-        const membershipResult = await ensureTeamMembership(supabase, matchResult.playerId, teamId, normalizedSeason, (created, updated) => {
-          if (created) membershipCreatedCount++;
-          if (updated) membershipUpdatedCount++;
-        });
+        // Lade Team-Kategorie für Wettspielordnung-Prüfung
+        const { data: teamInfo } = await supabase
+          .from('team_info')
+          .select('category')
+          .eq('id', teamId)
+          .single();
+        
+        const teamCategory = teamInfo?.category || null;
+        
+        const membershipResult = await ensureTeamMembership(
+          supabase, 
+          matchResult.playerId, 
+          teamId, 
+          normalizedSeason, 
+          teamCategory,
+          (created, updated) => {
+            if (created) membershipCreatedCount++;
+            if (updated) membershipUpdatedCount++;
+          }
+        );
       }
       
       rosterEntries.push({
         team_id: teamId,
         season: normalizedSeason, // Verwende normalisierte Saison
         rank: player.rank,
+        team_number: player.teamNumber || null, // Mannschaftsnummer (1, 2, 3, etc.)
         player_name: player.name.trim(),
         lk: player.lk || null,
         tvm_id: player.tvmId || null,
@@ -778,10 +864,13 @@ async function handler(req, res) {
       savedRosters: []
     };
     
+    // clubId wird für Team-Matching benötigt
+    const effectiveClubId = clubId;
+    
     // Speichere Club-Nummer wenn apply=true und clubId vorhanden
-    if (apply && clubId && clubNumber) {
+    if (apply && effectiveClubId && clubNumber) {
       const supabase = createSupabaseClient(true); // Service Role für RLS-Umgehung
-      await saveClubNumber(supabase, clubId, clubNumber);
+      await saveClubNumber(supabase, effectiveClubId, clubNumber);
     }
     
     // Speichere Meldelisten wenn apply=true und teamMapping vorhanden
@@ -790,42 +879,97 @@ async function handler(req, res) {
       const failedRosters = [];
       
       for (const team of teams) {
-        const teamId = teamMapping[team.contestType] || teamMapping[team.teamName];
-        
-        if (!teamId) {
-          failedRosters.push({
-            teamName: team.teamName,
-            contestType: team.contestType,
-            reason: 'Kein Team-Mapping gefunden'
-          });
-          continue;
+        // Gruppiere Roster nach Mannschaftsnummer (team_number)
+        const rosterByTeamNumber = {};
+        if (team.roster && team.roster.length > 0) {
+          for (const player of team.roster) {
+            const teamNum = player.teamNumber || 1; // Fallback: 1 wenn nicht vorhanden
+            if (!rosterByTeamNumber[teamNum]) {
+              rosterByTeamNumber[teamNum] = [];
+            }
+            rosterByTeamNumber[teamNum].push(player);
+          }
         }
         
-        if (!team.roster || team.roster.length === 0) {
-          failedRosters.push({
-            teamName: team.teamName,
-            contestType: team.contestType,
-            teamUrl: team.teamUrl,
-            reason: `Keine Spieler in Meldeliste gefunden (${team.roster?.length || 0} Spieler) - Parsing fehlgeschlagen oder Meldeliste leer`
-          });
-          console.warn(`[parse-club-rosters] ⚠️ Team "${team.contestType}" hat leere Meldeliste - wird nicht gespeichert`);
-          continue;
-        }
-        
-        try {
-          const savedRoster = await saveTeamRoster(supabase, teamId, targetSeason, team.roster);
-          results.savedRosters.push({
-            teamName: team.teamName,
-            contestType: team.contestType,
-            ...savedRoster.stats
-          });
-        } catch (error) {
-          console.error(`[parse-club-rosters] ❌ Fehler beim Speichern der Meldeliste für ${team.teamName}:`, error);
-          failedRosters.push({
-            teamName: team.teamName,
-            contestType: team.contestType,
-            reason: `Fehler beim Speichern: ${error.message}`
-          });
+        // Für jede Mannschaftsnummer: Finde das richtige Team und speichere
+        for (const [teamNumber, rosterForTeam] of Object.entries(rosterByTeamNumber)) {
+          // Versuche Team-Mapping basierend auf contestType + teamNumber
+          // z.B. "Herren 50" + "1" → Suche nach Team mit category="Herren 50" und team_name="1"
+          let teamId = null;
+          
+          // Strategie 1: Direktes Mapping über contestType (für einfache Fälle)
+          teamId = teamMapping[team.contestType] || teamMapping[team.teamName];
+          
+          // Strategie 2: Wenn mehrere Teams in derselben Kategorie, suche nach team_name
+          if (!teamId || Object.keys(rosterByTeamNumber).length > 1) {
+            // Lade alle Teams dieser Kategorie für diesen Club
+            let categoryTeamsQuery = supabase
+              .from('team_info')
+              .select('id, team_name, category')
+              .eq('category', team.contestType);
+            
+            if (effectiveClubId) {
+              categoryTeamsQuery = categoryTeamsQuery.eq('club_id', effectiveClubId);
+            }
+            
+            const { data: categoryTeams } = await categoryTeamsQuery;
+            
+            if (categoryTeams && categoryTeams.length > 0) {
+              // Suche nach Team mit passender team_name
+              const matchingTeam = categoryTeams.find(t => 
+                t.team_name === teamNumber.toString() || 
+                t.team_name === teamNumber
+              );
+              
+              if (matchingTeam) {
+                teamId = matchingTeam.id;
+                console.log(`[parse-club-rosters] ✅ Team gefunden für "${team.contestType}" Mannschaft ${teamNumber}: ${matchingTeam.id}`);
+              } else if (categoryTeams.length === 1) {
+                // Nur ein Team in dieser Kategorie → verwende es
+                teamId = categoryTeams[0].id;
+                console.log(`[parse-club-rosters] ℹ️ Nur ein Team in "${team.contestType}" gefunden, verwende es für alle Mannschaften`);
+              }
+            }
+          }
+          
+          if (!teamId) {
+            failedRosters.push({
+              teamName: `${team.teamName} (Mannschaft ${teamNumber})`,
+              contestType: team.contestType,
+              teamNumber: parseInt(teamNumber),
+              reason: `Kein Team-Mapping gefunden für "${team.contestType}" Mannschaft ${teamNumber}`
+            });
+            console.warn(`[parse-club-rosters] ⚠️ Kein Team gefunden für "${team.contestType}" Mannschaft ${teamNumber}`);
+            continue;
+          }
+          
+          if (!rosterForTeam || rosterForTeam.length === 0) {
+            failedRosters.push({
+              teamName: `${team.teamName} (Mannschaft ${teamNumber})`,
+              contestType: team.contestType,
+              teamNumber: parseInt(teamNumber),
+              reason: `Keine Spieler in Meldeliste gefunden (${rosterForTeam?.length || 0} Spieler)`
+            });
+            continue;
+          }
+          
+          try {
+            const savedRoster = await saveTeamRoster(supabase, teamId, targetSeason, rosterForTeam);
+            results.savedRosters.push({
+              teamName: `${team.teamName} (Mannschaft ${teamNumber})`,
+              contestType: team.contestType,
+              teamNumber: parseInt(teamNumber),
+              ...savedRoster.stats
+            });
+          } catch (error) {
+            console.error(`[parse-club-rosters] ❌ Fehler beim Speichern der Meldeliste für ${team.teamName} Mannschaft ${teamNumber}:`, error);
+            failedRosters.push({
+              teamName: `${team.teamName} (Mannschaft ${teamNumber})`,
+              contestType: team.contestType,
+              teamNumber: parseInt(teamNumber),
+              reason: `Fehler beim Speichern: ${error.message}`
+            });
+          }
         }
       }
       
