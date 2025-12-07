@@ -14,9 +14,11 @@ export const Leaderboard = ({ period: initialPeriod = 'week', limit = 20 }) => {
   const [showInfo, setShowInfo] = useState(false);
   const [previousRankings, setPreviousRankings] = useState({});
 
-  const loadLeaderboard = useCallback(async () => {
+  const loadLeaderboard = useCallback(async (skipLoadingState = false) => {
     try {
-      setLoading(true);
+      if (!skipLoadingState) {
+        setLoading(true);
+      }
       setError(null);
 
       const now = new Date();
@@ -168,9 +170,17 @@ export const Leaderboard = ({ period: initialPeriod = 'week', limit = 20 }) => {
         return {
           ...player,
           periodPoints: playerPoints[player.id] || 0,
-          rankChange
+          rankChange,
+          current_streak: player.current_streak || 0
         };
-      }).sort((a, b) => b.periodPoints - a.periodPoints);
+      })
+      .filter(player => player.periodPoints > 0 || player.gamification_points > 0) // Nur Spieler mit Punkten anzeigen
+      .sort((a, b) => {
+        // Sortiere nach periodPoints (falls vorhanden), sonst nach gamification_points
+        const aPoints = a.periodPoints || a.gamification_points || 0;
+        const bPoints = b.periodPoints || b.gamification_points || 0;
+        return bPoints - aPoints;
+      });
 
       // Speichere aktuelle Rankings für nächsten Vergleich
       const newRankings = {};
@@ -207,7 +217,9 @@ export const Leaderboard = ({ period: initialPeriod = 'week', limit = 20 }) => {
       ];
       setPlayers(demoPlayers);
     } finally {
-      setLoading(false);
+      if (!skipLoadingState) {
+        setLoading(false);
+      }
     }
   }, [period, limit, previousRankings]);
 
@@ -238,7 +250,7 @@ export const Leaderboard = ({ period: initialPeriod = 'week', limit = 20 }) => {
           }
         }, 2000);
         
-        await loadLeaderboard();
+        await loadLeaderboard(true); // skipLoadingState = true, da Demo-Daten bereits angezeigt werden
         
         if (isMounted && timeoutId) {
           clearTimeout(timeoutId);
@@ -263,28 +275,8 @@ export const Leaderboard = ({ period: initialPeriod = 'week', limit = 20 }) => {
     };
   }, [loadLeaderboard]);
 
-  if (loading) {
-    return (
-      <div className="leaderboard-loading">
-        <div className="tennis-ball-loader">🎾</div>
-        <p>Lade Weltrangliste...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return <div className="leaderboard-error">{error}</div>;
-  }
-
-  if (players.length === 0) {
-    return (
-      <div className="leaderboard-empty">
-        <div className="empty-court">🎾</div>
-        <p>Noch keine Einträge in der Weltrangliste</p>
-        <p className="empty-hint">Trage Ergebnisse ein, um aufzusteigen!</p>
-      </div>
-    );
-  }
+  // Zeige immer die Tabelle, auch wenn loading oder error
+  // Die Demo-Daten werden sofort angezeigt, während echte Daten geladen werden
 
   const getRankDisplay = (rank) => {
     if (rank === 1) return { icon: '🥇', label: 'Weltmeister', color: '#FFD700' };
@@ -373,87 +365,107 @@ export const Leaderboard = ({ period: initialPeriod = 'week', limit = 20 }) => {
 
         {/* Tennis Table */}
         <div className="tennis-table-wrapper">
-          <table className="tennis-ranking-table">
-            <thead>
-              <tr>
-                <th className="col-rank">Rang</th>
-                <th className="col-change">+/-</th>
-                <th className="col-player">Spieler</th>
-                <th className="col-streak">Streak</th>
-                <th className="col-points">Punkte</th>
-                <th className="col-trophy">🏆</th>
-              </tr>
-            </thead>
-            <tbody>
-              {players.map((player, index) => {
-                const rank = index + 1;
-                const rankInfo = getRankDisplay(rank);
-                const isTopThree = rank <= 3;
-                
-                return (
-                  <tr 
-                    key={player.id} 
-                    className={`ranking-row ${isTopThree ? 'top-three' : ''} ${rank % 2 === 0 ? 'even' : 'odd'}`}
-                  >
-                    <td className="col-rank">
-                      <div className="rank-badge" style={{ backgroundColor: rankInfo.color }}>
-                        <span className="rank-icon">{rankInfo.icon}</span>
-                        <span className="rank-number">{rank}</span>
-                      </div>
-                    </td>
-                    <td className="col-change">
-                      {player.rankChange !== 0 && (
-                        <div className={`rank-change ${player.rankChange > 0 ? 'up' : 'down'}`}>
-                          {getRankChangeIcon(player.rankChange)}
-                          <span>{Math.abs(player.rankChange)}</span>
+          {loading && players.length === 0 && (
+            <div className="leaderboard-loading" style={{ padding: '2rem', textAlign: 'center' }}>
+              <div className="tennis-ball-loader">🎾</div>
+              <p>Lade Weltrangliste...</p>
+            </div>
+          )}
+          {error && players.length === 0 && (
+            <div className="leaderboard-error" style={{ margin: '1rem', padding: '1rem', textAlign: 'center' }}>
+              {error}
+            </div>
+          )}
+          {players.length === 0 && !loading && !error && (
+            <div className="leaderboard-empty" style={{ padding: '2rem', textAlign: 'center' }}>
+              <div className="empty-court">🎾</div>
+              <p>Noch keine Einträge in der Weltrangliste</p>
+              <p className="empty-hint">Trage Ergebnisse ein, um aufzusteigen!</p>
+            </div>
+          )}
+          {players.length > 0 && (
+            <table className="tennis-ranking-table">
+              <thead>
+                <tr>
+                  <th className="col-rank">Rang</th>
+                  <th className="col-change">+/-</th>
+                  <th className="col-player">Spieler</th>
+                  <th className="col-streak">Streak</th>
+                  <th className="col-points">Punkte</th>
+                  <th className="col-trophy">🏆</th>
+                </tr>
+              </thead>
+              <tbody>
+                {players.map((player, index) => {
+                  const rank = index + 1;
+                  const rankInfo = getRankDisplay(rank);
+                  const isTopThree = rank <= 3;
+                  
+                  return (
+                    <tr 
+                      key={player.id} 
+                      className={`ranking-row ${isTopThree ? 'top-three' : ''} ${rank % 2 === 0 ? 'even' : 'odd'}`}
+                    >
+                      <td className="col-rank">
+                        <div className="rank-badge" style={{ backgroundColor: rankInfo.color }}>
+                          <span className="rank-icon">{rankInfo.icon}</span>
+                          <span className="rank-number">{rank}</span>
                         </div>
-                      )}
-                    </td>
-                    <td className="col-player">
-                      <div className="player-info">
-                        {player.profile_image ? (
-                          <img 
-                            src={player.profile_image} 
-                            alt={player.name}
-                            className="player-avatar"
-                          />
-                        ) : (
-                          <div className="player-avatar-placeholder">
-                            {player.name.charAt(0).toUpperCase()}
+                      </td>
+                      <td className="col-change">
+                        {player.rankChange !== 0 && (
+                          <div className={`rank-change ${player.rankChange > 0 ? 'up' : 'down'}`}>
+                            {getRankChangeIcon(player.rankChange)}
+                            <span>{Math.abs(player.rankChange)}</span>
                           </div>
                         )}
-                        <div className="player-details">
-                          <span className="player-name">{player.name}</span>
-                          {isTopThree && (
-                            <span className="player-title">{rankInfo.label}</span>
+                      </td>
+                      <td className="col-player">
+                        <div className="player-info">
+                          {player.profile_image ? (
+                            <img 
+                              src={player.profile_image} 
+                              alt={player.name}
+                              className="player-avatar"
+                            />
+                          ) : (
+                            <div className="player-avatar-placeholder">
+                              {player.name ? player.name.charAt(0).toUpperCase() : '?'}
+                            </div>
                           )}
+                          <div className="player-details">
+                            <span className="player-name">{player.name || 'Unbekannt'}</span>
+                            {isTopThree && (
+                              <span className="player-title">{rankInfo.label}</span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="col-streak">
-                      {player.current_streak > 0 ? (
-                        <div className="streak-badge">
-                          <span className="streak-icon">🔥</span>
-                          <span className="streak-text">{player.current_streak} Matchdays</span>
+                      </td>
+                      <td className="col-streak">
+                        {(player.current_streak || 0) > 0 ? (
+                          <div className="streak-badge">
+                            <span className="streak-icon">🔥</span>
+                            <span className="streak-text">{player.current_streak || 0} Matchdays</span>
+                          </div>
+                        ) : (
+                          <span className="no-streak">-</span>
+                        )}
+                      </td>
+                      <td className="col-points">
+                        <div className="points-display">
+                          <span className="points-value">{((player.periodPoints || player.gamification_points || 0)).toLocaleString('de-DE')}</span>
+                          <span className="points-label">Pkt.</span>
                         </div>
-                      ) : (
-                        <span className="no-streak">-</span>
-                      )}
-                    </td>
-                    <td className="col-points">
-                      <div className="points-display">
-                        <span className="points-value">{player.periodPoints.toLocaleString('de-DE')}</span>
-                        <span className="points-label">Pkt.</span>
-                      </div>
-                    </td>
-                    <td className="col-trophy">
-                      {isTopThree && <Trophy size={20} className="trophy-icon" />}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </td>
+                      <td className="col-trophy">
+                        {isTopThree && <Trophy size={20} className="trophy-icon" />}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>

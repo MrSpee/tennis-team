@@ -29,6 +29,8 @@ function Rankings() {
   const [expandedPlayers, setExpandedPlayers] = useState(new Set());
   const [lkCalculations, setLkCalculations] = useState({});
   const [allMatches, setAllMatches] = useState([]);
+  const [rosterRanks, setRosterRanks] = useState({}); // {playerId: rank} für Sortierung nach Meldelisten-Rang
+  const [currentSeason, setCurrentSeason] = useState('Winter 2025/26'); // Aktuelle Saison (für Meldelisten)
   
   // LK-Berechnung Konstanten
   const SEASON_START = new Date('2025-09-29');
@@ -205,50 +207,242 @@ function Rankings() {
   }, []);
   
   const loadFilteredPlayers = useCallback(async () => {
-    if (!selectedClubId || !players || players.length === 0) {
+    if (!selectedClubId) {
       setFilteredPlayers([]);
+      setRosterRanks({});
       return;
     }
     
-    try {
-      const { data: memberships, error } = await supabase
-        .from('team_memberships')
-        .select('player_id, team_id, team_info!inner(club_id)')
-        .eq('is_active', true);
-      
-      if (error) {
-        console.error('Error loading memberships:', error);
+    // ✅ WICHTIG: Wenn kein spezifisches Team ausgewählt, verwende team_memberships (alte Logik)
+    if (selectedTeamId === 'all') {
+      if (!players || players.length === 0) {
+        setFilteredPlayers([]);
+        setRosterRanks({});
         return;
       }
       
-      const clubPlayerIds = memberships
-        .filter(m => m.team_info?.club_id === selectedClubId)
-        .map(m => m.player_id);
-      
-      let finalPlayerIds = clubPlayerIds;
-      if (selectedTeamId !== 'all') {
-        const teamPlayerIds = memberships
-          .filter(m => m.team_id === selectedTeamId)
+      try {
+        const { data: memberships, error } = await supabase
+          .from('team_memberships')
+          .select('player_id, team_id, team_info!inner(club_id)')
+          .eq('is_active', true);
+        
+        if (error) {
+          console.error('Error loading memberships:', error);
+          return;
+        }
+        
+        const clubPlayerIds = memberships
+          .filter(m => m.team_info?.club_id === selectedClubId)
           .map(m => m.player_id);
-        finalPlayerIds = clubPlayerIds.filter(id => teamPlayerIds.includes(id));
+        
+        let filtered = players.filter(p => clubPlayerIds.includes(p.id));
+        filtered = filtered.filter(p => p.name !== 'Theo Tester');
+        
+        const sorted = filtered.sort((a, b) => {
+          const lkA = parseFloat((a.current_lk || a.season_start_lk || a.ranking || '25').replace('LK ', '').replace(',', '.'));
+          const lkB = parseFloat((b.current_lk || b.season_start_lk || b.ranking || '25').replace('LK ', '').replace(',', '.'));
+          return lkA - lkB;
+        });
+        
+        setFilteredPlayers(sorted);
+        loadPlayerStats(sorted);
+        setRosterRanks({});
+      } catch (error) {
+        console.error('Error loading filtered players:', error);
+      }
+      return;
+    }
+    
+    // ✅ NEU: Wenn spezifisches Team ausgewählt, verwende Meldeliste als primäre Quelle
+    try {
+      // ✅ NEU: Prüfe zuerst, ob Meldeliste existiert und vollständig gematched ist
+      const { data: rosterCheck, error: rosterCheckError } = await supabase
+        .from('team_roster')
+        .select('id, player_id')
+        .eq('team_id', selectedTeamId)
+        .eq('season', currentSeason);
+      
+      const rosterExists = !rosterCheckError && (rosterCheck?.length || 0) > 0;
+      const totalEntries = rosterCheck?.length || 0;
+      const matchedEntries = rosterCheck?.filter(r => r.player_id).length || 0;
+      const fullyMatched = rosterExists && totalEntries > 0 && matchedEntries === totalEntries;
+      
+      // ✅ WICHTIG: Nur importieren, wenn Meldeliste nicht existiert ODER nicht vollständig gematched ist
+      if (!fullyMatched) {
+        if (!rosterExists) {
+          console.log(`[Rankings] 🔍 Meldeliste für Team ${selectedTeamId}, Saison ${currentSeason} nicht gefunden. Versuche automatischen Import...`);
+        } else {
+          console.log(`[Rankings] ⚠️ Meldeliste existiert, aber nicht vollständig gematched (${matchedEntries}/${totalEntries}). Versuche fehlende Matches...`);
+        }
+        
+        try {
+          // Importiere dynamisch, um Circular Dependencies zu vermeiden
+          const { autoImportTeamRoster } = await import('../services/autoTeamRosterImportService');
+          
+          // Führe Import aus (blockierend, da wir die Daten sofort brauchen)
+          await autoImportTeamRoster(selectedTeamId, currentSeason);
+          
+          console.log(`[Rankings] ✅ Automatischer Import der Meldeliste gestartet`);
+        } catch (importError) {
+          console.warn(`[Rankings] ⚠️ Fehler beim automatischen Import der Meldeliste:`, importError);
+          // Weiter machen, auch wenn Import fehlschlägt
+        }
+        
+        // Warte kurz, falls gerade importiert wird
+        if (!rosterExists) {
+          await new Promise(resolve => setTimeout(resolve, 2000)); // 2 Sekunden warten
+        }
+      } else {
+        console.log(`[Rankings] ✅ Meldeliste vollständig gematched (${matchedEntries}/${totalEntries}) - keine weitere Aktion nötig`);
       }
       
-      // ⚠️ WICHTIG: Zeige ALLE Spieler (auch inaktive für Vereinsspieler)
-      let filtered = players.filter(p => finalPlayerIds.includes(p.id));
-      filtered = filtered.filter(p => p.name !== 'Theo Tester');
+      const { data: roster, error: rosterError } = await supabase
+        .from('team_roster')
+        .select(`
+          id,
+          player_id,
+          rank,
+          player_name,
+          lk,
+          tvm_id,
+          birth_year,
+          team_id,
+          team_info!inner(club_id)
+        `)
+        .eq('team_id', selectedTeamId)
+        .eq('season', currentSeason)
+        .order('rank', { ascending: true }); // Sortiere nach Rang
       
-      const sorted = filtered.sort((a, b) => {
-        const lkA = parseFloat((a.current_lk || a.season_start_lk || a.ranking || '25').replace('LK ', '').replace(',', '.'));
-        const lkB = parseFloat((b.current_lk || b.season_start_lk || b.ranking || '25').replace('LK ', '').replace(',', '.'));
-        return lkA - lkB;
+      if (rosterError) {
+        console.warn('⚠️ Error loading roster (Tabelle existiert möglicherweise noch nicht):', rosterError);
+        setFilteredPlayers([]);
+        setRosterRanks({});
+        return;
+      }
+      
+      if (!roster || roster.length === 0) {
+        console.log('ℹ️ Keine Meldeliste gefunden für dieses Team. Möglicherweise wird sie gerade importiert...');
+        // Zeige leere Liste mit Hinweis
+        setFilteredPlayers([]);
+        setRosterRanks({});
+        
+        // ✅ VERBESSERT: Verhindere Endlosschleife - nur einmal retry, und nur wenn Import gestartet wurde
+        // Prüfe ob source_url vorhanden ist (dann könnte Import möglich sein)
+        if (!rosterExists) {
+          // Prüfe ob Team-Portrait-URL vorhanden ist
+          const { data: teamSeason } = await supabase
+            .from('team_seasons')
+            .select('source_url')
+            .eq('team_id', selectedTeamId)
+            .eq('season', currentSeason)
+            .maybeSingle();
+          
+          const hasTeamPortraitUrl = teamSeason?.source_url && teamSeason.source_url.includes('teamPortrait');
+          
+          if (hasTeamPortraitUrl) {
+            // Nur retry wenn Team-Portrait-URL vorhanden ist (Import könnte laufen)
+            const retryKey = `roster_retry_${selectedTeamId}_${currentSeason}`;
+            const hasRetried = sessionStorage.getItem(retryKey);
+            
+            if (!hasRetried) {
+              sessionStorage.setItem(retryKey, 'true');
+              setTimeout(() => {
+                loadFilteredPlayers();
+              }, 3000);
+            } else {
+              console.log('ℹ️ Retry bereits durchgeführt, keine weiteren Versuche');
+            }
+          } else {
+            console.log('ℹ️ Keine Team-Portrait-URL vorhanden, Import nicht möglich');
+          }
+        }
+        return;
+      }
+      
+      // Filtere nach Club
+      const clubRoster = roster.filter(r => r.team_info?.club_id === selectedClubId);
+      
+      if (clubRoster.length === 0) {
+        setFilteredPlayers([]);
+        setRosterRanks({});
+        return;
+      }
+      
+      // 2. Sammle alle player_ids (die vorhanden sind)
+      const playerIds = clubRoster
+        .filter(r => r.player_id)
+        .map(r => r.player_id);
+      
+      // 3. Lade vollständige Spieler-Daten aus players_unified (nur für Einträge mit player_id)
+      let playersMap = new Map();
+      if (playerIds.length > 0) {
+        const { data: playersData, error: playersError } = await supabase
+          .from('players_unified')
+          .select('*')
+          .in('id', playerIds);
+        
+        if (playersError) {
+          console.warn('⚠️ Error loading players_unified:', playersError);
+        } else if (playersData) {
+          playersData.forEach(p => {
+            playersMap.set(p.id, p);
+          });
+        }
+      }
+      
+      // 4. Erstelle kombinierte Spieler-Liste aus Meldeliste
+      const rosterRankMap = {}; // {playerId: rank} für Anzeige
+      const combinedPlayers = clubRoster.map(rosterEntry => {
+        const playerId = rosterEntry.player_id;
+        const playerData = playerId ? playersMap.get(playerId) : null;
+        
+        // Speichere Rang für Anzeige
+        if (playerId) {
+          rosterRankMap[playerId] = rosterEntry.rank;
+        }
+        
+        // Kombiniere Daten: Meldeliste als Basis, players_unified als Ergänzung
+        return {
+          id: playerId || `roster-${rosterEntry.id}`, // Fallback-ID wenn kein player_id
+          roster_id: rosterEntry.id,
+          rank: rosterEntry.rank,
+          name: playerData?.name || rosterEntry.player_name, // Priorisiere players_unified
+          current_lk: playerData?.current_lk || rosterEntry.lk,
+          season_start_lk: playerData?.season_start_lk || rosterEntry.lk,
+          ranking: playerData?.ranking || null,
+          tvm_id: playerData?.tvm_id || rosterEntry.tvm_id,
+          birth_date: playerData?.birth_date || (rosterEntry.birth_year ? `${rosterEntry.birth_year}-01-01` : null),
+          is_active: playerData?.is_active ?? false, // Wenn kein player_id, dann nicht aktiv
+          has_player_id: !!playerId, // Flag: Hat dieser Eintrag einen player_id?
+          player_type: playerData?.player_type || 'opponent',
+          email: playerData?.email || null,
+          phone: playerData?.phone || null,
+          profile_image: playerData?.profile_image || null,
+          // Zusätzliche Roster-Daten
+          roster_player_name: rosterEntry.player_name,
+          roster_lk: rosterEntry.lk
+        };
       });
       
+      // 5. Filtere "Theo Tester" heraus
+      const filtered = combinedPlayers.filter(p => p.name !== 'Theo Tester');
+      
+      // 6. Sortiere nach Rang (bereits von DB sortiert, aber sicherstellen)
+      const sorted = filtered.sort((a, b) => a.rank - b.rank);
+      
+      // 7. Speichere Roster-Ränge für Anzeige
+      setRosterRanks(rosterRankMap);
+      
+      console.log(`✅ Kader geladen: ${sorted.length} Spieler aus Meldeliste (${playerIds.length} mit player_id, ${sorted.length - playerIds.length} ohne player_id)`);
       setFilteredPlayers(sorted);
-      loadPlayerStats(sorted);
+      loadPlayerStats(sorted.filter(p => p.has_player_id).map(p => ({ id: p.id }))); // Nur für Spieler mit player_id
     } catch (error) {
       console.error('Error loading filtered players:', error);
+      setFilteredPlayers([]);
+      setRosterRanks({});
     }
-  }, [selectedClubId, selectedTeamId, players, loadPlayerStats]);
+  }, [selectedClubId, selectedTeamId, players, loadPlayerStats, currentSeason]);
   
   useEffect(() => {
     if (!playerTeams || playerTeams.length === 0) {
@@ -280,6 +474,36 @@ function Rankings() {
       loadClubTeams(selectedClubId);
     }
   }, [selectedClubId, loadClubTeams]);
+  
+  // ✅ NEU: Lade aktuelle Saison aus team_seasons (für Meldelisten)
+  useEffect(() => {
+    const loadCurrentSeason = async () => {
+      if (!selectedTeamId || selectedTeamId === 'all') {
+        // Wenn kein spezifisches Team ausgewählt, verwende Standard-Saison
+        return;
+      }
+      
+      try {
+        const { data: teamSeason } = await supabase
+          .from('team_seasons')
+          .select('season')
+          .eq('team_id', selectedTeamId)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        if (teamSeason?.season) {
+          setCurrentSeason(teamSeason.season);
+          console.log('✅ Aktuelle Saison für Meldelisten geladen:', teamSeason.season);
+        }
+      } catch (error) {
+        console.warn('⚠️ Fehler beim Laden der Saison:', error);
+      }
+    };
+    
+    loadCurrentSeason();
+  }, [selectedTeamId]);
   
   useEffect(() => {
     if (selectedClubId && players) {
@@ -760,7 +984,8 @@ function Rankings() {
           </div>
         ) : (
           filteredPlayers.map((player, index) => {
-            const stats = getPlayerStats(player.id);
+            // ✅ Nur Stats für Spieler mit player_id laden (nicht für roster-only Einträge)
+            const stats = player.has_player_id ? getPlayerStats(player.id) : { wins: 0, losses: 0, total: 0 };
             const form = getFormTrend(stats.wins, stats.losses);
             
             return (
@@ -769,11 +994,41 @@ function Rankings() {
                   <div>
                     <h3 className="player-name-large">
                       <span className="position-number">{index + 1}</span> - {player.name}
-                    {!player.is_active && (
-                      <span className="inactive-badge" title="Spieler hat sich noch nicht in der App registriert">
-                        🚫 Nicht in der App angemeldet
-                      </span>
-                    )}
+                      {/* ✅ NEU: Zeige Meldelisten-Rang (immer vorhanden, da aus Meldeliste) */}
+                      {player.rank && (
+                        <span style={{
+                          marginLeft: '0.5rem',
+                          fontSize: '0.75rem',
+                          fontWeight: '600',
+                          color: '#3b82f6',
+                          background: 'rgba(59, 130, 246, 0.1)',
+                          padding: '0.125rem 0.5rem',
+                          borderRadius: '12px',
+                          border: '1px solid rgba(59, 130, 246, 0.3)'
+                        }}>
+                          📋 Rang {player.rank}
+                        </span>
+                      )}
+                      {/* ✅ NEU: Status-Anzeige basierend auf player_id und is_active */}
+                      {(!player.has_player_id || !player.is_active) && (
+                        <span className="inactive-badge" title={!player.has_player_id ? "Spieler ist noch nicht in players_unified gematcht" : "Spieler hat sich noch nicht in der App registriert"}>
+                          {!player.has_player_id ? '🔗 Nicht gematcht' : '🚫 Nicht in der App angemeldet'}
+                        </span>
+                      )}
+                      {player.has_player_id && player.is_active && (
+                        <span style={{
+                          marginLeft: '0.5rem',
+                          fontSize: '0.7rem',
+                          fontWeight: '600',
+                          color: '#10b981',
+                          background: 'rgba(16, 185, 129, 0.1)',
+                          padding: '0.125rem 0.5rem',
+                          borderRadius: '12px',
+                          border: '1px solid rgba(16, 185, 129, 0.3)'
+                        }}>
+                          ✅ In der App angemeldet
+                        </span>
+                      )}
                     </h3>
                     {/* Start-LK unter dem Namen (immer anzeigen wenn vorhanden) */}
                     {player.season_start_lk && (

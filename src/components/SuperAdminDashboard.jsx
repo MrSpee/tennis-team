@@ -19,6 +19,7 @@ import PlayersTab from './superadmin/PlayersTab';
 import MatchdaysTab from './superadmin/MatchdaysTab';
 import ScraperTab from './superadmin/ScraperTab';
 import TeamPortraitImportTab from './superadmin/TeamPortraitImportTab';
+import ClubRostersTab from './superadmin/ClubRostersTab';
 import GroupsTab from './superadmin/GroupsTab';
 import ActivityLogTab from './superadmin/ActivityLogTab';
 import { findMatchdaysWithoutResultsAfter4Days, runAutoImport } from '../services/autoMatchResultImportService';
@@ -5113,6 +5114,9 @@ function SuperAdminDashboard() {
         <button className={selectedTab === 'team-portrait' ? 'active' : ''} onClick={() => setSelectedTab('team-portrait')}>
           <Download size={16} /> Team-Portrait
         </button>
+        <button className={selectedTab === 'club-rosters' ? 'active' : ''} onClick={() => setSelectedTab('club-rosters')}>
+          <Users size={16} /> Meldelisten
+        </button>
         <button className={selectedTab === 'groups' ? 'active' : ''} onClick={() => setSelectedTab('groups')}>
           <Trophy size={16} /> Gruppen
         </button>
@@ -5158,6 +5162,7 @@ function SuperAdminDashboard() {
           {selectedTab === 'scraper' && renderScraper()}
           {selectedTab === 'import' && <ImportTab />}
           {selectedTab === 'team-portrait' && <TeamPortraitImportTab />}
+          {selectedTab === 'club-rosters' && <ClubRostersTab />}
           {selectedTab === 'groups' && renderGroups()}
           {selectedTab === 'activity' && renderActivity()}
         </div>

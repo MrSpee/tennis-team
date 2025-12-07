@@ -145,9 +145,17 @@ const LiveResultsWithDB = () => {
           if (!rosterError && teamRoster && teamRoster.length > 0) {
             console.log(`✅ ${teamRoster.length} Meldelisten-Spieler gefunden für Home-Team ${homeTeamId}, Saison ${matchSeason}`);
             
-            // Für jeden Spieler ohne player_id: Führe Fuzzy-Matching durch
-            for (const roster of teamRoster) {
-              if (!roster.player_id) {
+            // ✅ WICHTIG: Prüfe ob alle Einträge bereits gematched sind
+            const unmatchedEntries = teamRoster.filter(r => !r.player_id);
+            const fullyMatched = unmatchedEntries.length === 0;
+            
+            if (fullyMatched) {
+              console.log(`✅ Alle ${teamRoster.length} Meldelisten-Spieler bereits gematched - keine weitere Aktion nötig`);
+            } else {
+              console.log(`⚠️ ${unmatchedEntries.length}/${teamRoster.length} Spieler noch nicht gematched - führe Matching durch...`);
+              
+              // Für jeden Spieler ohne player_id: Führe Fuzzy-Matching durch
+              for (const roster of unmatchedEntries) {
                 try {
                   console.log(`🔍 Matche Spieler ohne player_id: ${roster.player_name}`);
                   const matchedPlayerId = await matchRosterPlayerToUnified(roster, homeTeamId);
@@ -405,9 +413,17 @@ const LiveResultsWithDB = () => {
             if (!rosterError && teamRoster && teamRoster.length > 0) {
               console.log(`✅ ${teamRoster.length} Meldelisten-Spieler gefunden für Team ${awayTeamId}, Saison ${matchSeason}`);
               
-              // Für jeden Spieler ohne player_id: Führe Fuzzy-Matching durch
-              for (const roster of teamRoster) {
-                if (!roster.player_id) {
+              // ✅ WICHTIG: Prüfe ob alle Einträge bereits gematched sind
+              const unmatchedEntries = teamRoster.filter(r => !r.player_id);
+              const fullyMatched = unmatchedEntries.length === 0;
+              
+              if (fullyMatched) {
+                console.log(`✅ Alle ${teamRoster.length} Meldelisten-Spieler bereits gematched - keine weitere Aktion nötig`);
+              } else {
+                console.log(`⚠️ ${unmatchedEntries.length}/${teamRoster.length} Spieler noch nicht gematched - führe Matching durch...`);
+                
+                // Für jeden Spieler ohne player_id: Führe Fuzzy-Matching durch
+                for (const roster of unmatchedEntries) {
                   try {
                     console.log(`🔍 Matche Spieler ohne player_id: ${roster.player_name}`);
                     const matchedPlayerId = await matchRosterPlayerToUnified(roster, awayTeamId);
