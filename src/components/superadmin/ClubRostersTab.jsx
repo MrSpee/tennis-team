@@ -30,6 +30,14 @@ const ClubRostersTab = () => {
   const [maxClubs, setMaxClubs] = useState('');
   const [dryRun, setDryRun] = useState(true);
   
+  // Club-Nummern finden
+  const [showFindClubNumbers, setShowFindClubNumbers] = useState(false);
+  const [isFindingClubNumbers, setIsFindingClubNumbers] = useState(false);
+  const [findClubNumbersProgress, setFindClubNumbersProgress] = useState(null);
+  const [findClubNumbersResult, setFindClubNumbersResult] = useState(null);
+  const [maxClubsToFind, setMaxClubsToFind] = useState('');
+  const [dryRunFind, setDryRunFind] = useState(true);
+  
   // Lade Vereine und Teams beim Mount
   useEffect(() => {
     loadClubsAndTeams();
@@ -298,6 +306,56 @@ const ClubRostersTab = () => {
     return filtered;
   };
   
+  const handleFindClubNumbers = async () => {
+    setIsFindingClubNumbers(true);
+    setError(null);
+    setFindClubNumbersResult(null);
+    setFindClubNumbersProgress({ current: 0, total: 0, message: 'Starte Suche nach Club-Nummern...' });
+    
+    try {
+      const response = await fetch('/api/import/find-club-numbers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          maxClubs: maxClubsToFind || null,
+          dryRun: dryRunFind
+        })
+      });
+      
+      const responseText = await response.text();
+      
+      if (!response.ok) {
+        let errorData;
+        try {
+          errorData = JSON.parse(responseText);
+        } catch (e) {
+          throw new Error(`HTTP ${response.status}: ${responseText || response.statusText}`);
+        }
+        const errorMsg = errorData.error || errorData.message || errorData.details || `HTTP ${response.status}`;
+        throw new Error(errorMsg);
+      }
+      
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (e) {
+        throw new Error(`Ungültige JSON-Response: ${responseText.substring(0, 200)}`);
+      }
+      
+      setFindClubNumbersResult(result);
+      
+      // Lade Teams neu, um aktualisierte club_number zu haben
+      await loadClubsAndTeams();
+      
+    } catch (err) {
+      console.error('Error finding club numbers:', err);
+      setError(err.message || 'Fehler beim Finden der Club-Nummern');
+    } finally {
+      setIsFindingClubNumbers(false);
+      setFindClubNumbersProgress(null);
+    }
+  };
+  
   const handleBulkImport = async () => {
     setIsBulkImporting(true);
     setError(null);
@@ -370,14 +428,186 @@ const ClubRostersTab = () => {
               Importiere Meldelisten direkt von nuLiga clubPools-Seiten
             </p>
           </div>
-          <button
-            onClick={() => setShowBulkImport(!showBulkImport)}
-            className="bulk-import-toggle"
-          >
-            {showBulkImport ? 'Einzel-Import' : 'Bulk-Import'}
-          </button>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button
+              onClick={() => {
+                setShowFindClubNumbers(!showFindClubNumbers);
+                setShowBulkImport(false);
+              }}
+              className="bulk-import-toggle"
+              style={{ 
+                background: showFindClubNumbers ? '#3b82f6' : '#6b7280',
+                color: 'white'
+              }}
+            >
+              {showFindClubNumbers ? 'Zurück' : '🔍 Club-Nummern finden'}
+            </button>
+            <button
+              onClick={() => {
+                setShowBulkImport(!showBulkImport);
+                setShowFindClubNumbers(false);
+              }}
+              className="bulk-import-toggle"
+            >
+              {showBulkImport ? 'Einzel-Import' : 'Bulk-Import'}
+            </button>
+          </div>
         </div>
       </div>
+      
+      {/* Club-Nummern finden Bereich */}
+      {showFindClubNumbers && (
+        <div className="bulk-import-section">
+          <h3 className="bulk-import-title">
+            🔍 Club-Nummern automatisch finden
+          </h3>
+          <p className="bulk-import-description">
+            Diese Funktion durchsucht die nuLiga Vereinssuche-Seite, um automatisch Club-Nummern für alle Vereine in der Datenbank zu finden. 
+            <strong> Wichtig:</strong> Die Suche kann einige Zeit dauern, da zwischen den Requests Pausen eingelegt werden, um nicht als Bot erkannt zu werden (10-15 Sekunden pro Verein).
+          </p>
+          
+          <div className="bulk-import-controls">
+            <div className="input-group">
+              <label htmlFor="maxClubsToFind">
+                Max. Anzahl Vereine (leer = alle)
+              </label>
+              <input
+                id="maxClubsToFind"
+                type="number"
+                placeholder="z.B. 10"
+                value={maxClubsToFind}
+                onChange={(e) => setMaxClubsToFind(e.target.value)}
+                className="number-input"
+              />
+            </div>
+            
+            <div className="input-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input
+                id="dryRunFind"
+                type="checkbox"
+                checked={dryRunFind}
+                onChange={(e) => setDryRunFind(e.target.checked)}
+              />
+              <label htmlFor="dryRunFind" style={{ margin: 0, cursor: 'pointer' }}>
+                Dry Run (nur testen, keine Änderungen speichern)
+              </label>
+            </div>
+            
+            <button
+              onClick={handleFindClubNumbers}
+              disabled={isFindingClubNumbers}
+              className="bulk-import-button"
+            >
+              {isFindingClubNumbers ? (
+                <>
+                  <Loader className="spinner" size={18} />
+                  Suche läuft...
+                </>
+              ) : (
+                <>
+                  <Search size={18} />
+                  Club-Nummern finden
+                </>
+              )}
+            </button>
+          </div>
+          
+          {findClubNumbersProgress && (
+            <div className="bulk-import-progress">
+              <p>{findClubNumbersProgress.message}</p>
+              {findClubNumbersProgress.total > 0 && (
+                <div className="progress-bar">
+                  <div
+                    className="progress-fill"
+                    style={{ width: `${(findClubNumbersProgress.current / findClubNumbersProgress.total) * 100}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+          
+          {findClubNumbersResult && (
+            <div className="bulk-import-results">
+              <h4>Ergebnisse:</h4>
+              <div className="results-summary">
+                <span>
+                  <strong>{findClubNumbersResult.summary?.success || 0}</strong> erfolgreich
+                </span>
+                <span>
+                  <strong>{findClubNumbersResult.summary?.errors || 0}</strong> Fehler
+                </span>
+                <span>
+                  <strong>{findClubNumbersResult.summary?.total || 0}</strong> insgesamt
+                </span>
+                {findClubNumbersResult.summary?.dryRun && (
+                  <span style={{ color: '#f59e0b' }}>
+                    ⚠️ Dry Run (keine Änderungen gespeichert)
+                  </span>
+                )}
+              </div>
+              
+              {findClubNumbersResult.results && findClubNumbersResult.results.length > 0 && (
+                <div className="results-table-container">
+                  <table className="results-table">
+                    <thead>
+                      <tr>
+                        <th>Verein</th>
+                        <th>Status</th>
+                        <th>Club-Nummer</th>
+                        <th>Details</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {findClubNumbersResult.results.map((result, idx) => (
+                        <tr key={idx}>
+                          <td>{result.clubName}</td>
+                          <td>
+                            <span className={`status-badge status-${result.status}`}>
+                              {result.status === 'success' && '✅ Erfolg'}
+                              {result.status === 'not_found' && '❌ Nicht gefunden'}
+                              {result.status === 'low_confidence' && '⚠️ Niedrige Übereinstimmung'}
+                              {result.status === 'error' && '❌ Fehler'}
+                            </span>
+                          </td>
+                          <td>
+                            {result.clubNumber ? (
+                              <code>{result.clubNumber}</code>
+                            ) : (
+                              <span style={{ color: '#9ca3af' }}>-</span>
+                            )}
+                          </td>
+                          <td>
+                            <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                              {result.message}
+                              {result.matchedClubName && result.matchedClubName !== result.clubName && (
+                                <div style={{ marginTop: '0.25rem', fontStyle: 'italic' }}>
+                                  Gefundener Name: {result.matchedClubName} ({Math.round((result.matchScore || 0) * 100)}% Übereinstimmung)
+                                </div>
+                              )}
+                              {result.alternatives && result.alternatives.length > 0 && (
+                                <div style={{ marginTop: '0.5rem' }}>
+                                  <strong>Alternativen:</strong>
+                                  <ul style={{ margin: '0.25rem 0', paddingLeft: '1.5rem' }}>
+                                    {result.alternatives.map((alt, altIdx) => (
+                                      <li key={altIdx}>
+                                        {alt.clubName} (Club-Nr: {alt.clubNumber}, {Math.round(alt.score * 100)}%)
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       
       {/* Bulk-Import Bereich */}
       {showBulkImport && (
