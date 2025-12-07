@@ -664,6 +664,96 @@ async function ensureTeamMembership(supabase, playerId, teamId, normalizedSeason
 }
 
 /**
+ * Erstellt automatisch ein Team, wenn es nicht existiert
+ * @param {Object} supabase - Supabase Client
+ * @param {string} clubId - Club-ID
+ * @param {string} contestType - Kategorie (z.B. "Herren 40", "Damen 30")
+ * @param {string|number} teamNumber - Mannschaftsnummer (z.B. "1", "2")
+ * @param {string} clubName - Name des Clubs (für Fallback)
+ * @returns {Promise<string|null>} Team-ID oder null bei Fehler
+ */
+async function createTeamIfNotExists(supabase, clubId, contestType, teamNumber, clubName) {
+  try {
+    if (!clubId) {
+      console.warn(`[parse-club-rosters] ⚠️ Keine clubId vorhanden, kann Team nicht erstellen`);
+      return null;
+    }
+    
+    // Normalisiere teamNumber zu String
+    const teamNumberStr = String(teamNumber || '1').trim();
+    
+    console.log(`[parse-club-rosters] ➕ Erstelle Team: ${contestType} Mannschaft ${teamNumberStr} für Club ${clubId}`);
+    
+    // Lade Club-Informationen für club_name
+    const { data: clubInfo } = await supabase
+      .from('club_info')
+      .select('name')
+      .eq('id', clubId)
+      .single();
+    
+    const clubNameToUse = clubInfo?.name || clubName || 'Unbekannt';
+    
+    // Erstelle Team
+    const { data: newTeam, error: createError } = await supabase
+      .from('team_info')
+      .insert({
+        club_id: clubId,
+        club_name: clubNameToUse,
+        team_name: teamNumberStr,
+        category: contestType,
+        region: 'Mittelrhein'
+      })
+      .select('id')
+      .single();
+    
+    if (createError) {
+      // Prüfe ob Team bereits existiert (Unique Constraint Violation)
+      if (createError.code === '23505') {
+        console.log(`[parse-club-rosters] ℹ️ Team existiert bereits, suche es...`);
+        // Suche nach existierendem Team
+        const { data: existingTeam } = await supabase
+          .from('team_info')
+          .select('id')
+          .eq('club_id', clubId)
+          .eq('category', contestType)
+          .eq('team_name', teamNumberStr)
+          .single();
+        
+        if (existingTeam) {
+          console.log(`[parse-club-rosters] ✅ Existierendes Team gefunden: ${existingTeam.id}`);
+          return existingTeam.id;
+        }
+      }
+      
+      console.error(`[parse-club-rosters] ❌ Fehler beim Erstellen des Teams:`, createError);
+      return null;
+    }
+    
+    console.log(`[parse-club-rosters] ✅ Team erstellt: ${newTeam.id} (${contestType} Mannschaft ${teamNumberStr})`);
+    
+    // Erstelle auch team_seasons Eintrag (wird später beim Speichern der Meldeliste benötigt)
+    // Normalisiere Saison-Format (konsistent mit DB: "Winter 2025/26")
+    const normalizeSeason = (s) => {
+      if (!s) return s;
+      // Konvertiere "Winter 2025/2026" zu "Winter 2025/26"
+      return s.replace(/(\d{4})\/(\d{4})/, (match, year1, year2) => {
+        return `${year1}/${year2.slice(2)}`;
+      });
+    };
+    
+    // Versuche Saison aus dem Handler-Kontext zu bekommen (wird später übergeben)
+    // Für jetzt: Erstelle einen generischen Eintrag
+    // Der team_seasons Eintrag wird beim Speichern der Meldeliste erstellt/aktualisiert
+    
+    return newTeam.id;
+    
+  } catch (error) {
+    console.error(`[parse-club-rosters] ❌ Fehler in createTeamIfNotExists:`, error);
+    return null;
+  }
+}
+
+/**
  * Speichert die Meldeliste in der Datenbank mit Fuzzy-Matching zu players_unified
  */
 async function saveTeamRoster(supabase, teamId, season, roster) {
@@ -877,8 +967,8 @@ async function handler(req, res) {
       await saveClubNumber(supabase, effectiveClubId, clubNumber);
     }
     
-    // Speichere Meldelisten wenn apply=true und teamMapping vorhanden
-    if (apply && Object.keys(teamMapping).length > 0) {
+    // Speichere Meldelisten wenn apply=true (teamMapping ist optional, Teams werden automatisch erstellt wenn nicht vorhanden)
+    if (apply) {
       const supabase = createSupabaseClient(true); // Service Role für RLS-Umgehung
       const failedRosters = [];
       
@@ -937,14 +1027,71 @@ async function handler(req, res) {
             }
           }
           
-          if (!teamId) {
+          // Strategie 3: Automatisch Team erstellen, wenn nicht gefunden
+          if (!teamId && effectiveClubId) {
+            console.log(`[parse-club-rosters] ➕ Erstelle automatisch Team für "${team.contestType}" Mannschaft ${teamNumber}`);
+            teamId = await createTeamIfNotExists(
+              supabase, 
+              effectiveClubId, 
+              team.contestType, 
+              teamNumber, 
+              clubName
+            );
+            
+            if (teamId) {
+              console.log(`[parse-club-rosters] ✅ Team automatisch erstellt: ${teamId}`);
+              
+              // Erstelle auch team_seasons Eintrag für das neue Team
+              const normalizeSeason = (s) => {
+                if (!s) return s;
+                return s.replace(/(\d{4})\/(\d{4})/, (match, year1, year2) => {
+                  return `${year1}/${year2.slice(2)}`;
+                });
+              };
+              
+              const normalizedSeason = normalizeSeason(targetSeason);
+              
+              // Prüfe ob team_seasons Eintrag bereits existiert
+              const { data: existingSeason } = await supabase
+                .from('team_seasons')
+                .select('id')
+                .eq('team_id', teamId)
+                .eq('season', normalizedSeason)
+                .maybeSingle();
+              
+              if (!existingSeason) {
+                const { error: seasonError } = await supabase
+                  .from('team_seasons')
+                  .insert({
+                    team_id: teamId,
+                    season: normalizedSeason,
+                    is_active: true
+                  });
+                
+                if (seasonError) {
+                  console.warn(`[parse-club-rosters] ⚠️ Fehler beim Erstellen von team_seasons:`, seasonError);
+                } else {
+                  console.log(`[parse-club-rosters] ✅ team_seasons Eintrag erstellt für Team ${teamId}, Saison ${normalizedSeason}`);
+                }
+              }
+            } else {
+              failedRosters.push({
+                teamName: `${team.teamName} (Mannschaft ${teamNumber})`,
+                contestType: team.contestType,
+                teamNumber: parseInt(teamNumber),
+                reason: `Team konnte nicht erstellt werden für "${team.contestType}" Mannschaft ${teamNumber}`
+              });
+              console.warn(`[parse-club-rosters] ⚠️ Team konnte nicht erstellt werden für "${team.contestType}" Mannschaft ${teamNumber}`);
+              continue;
+            }
+          } else if (!teamId) {
             failedRosters.push({
               teamName: `${team.teamName} (Mannschaft ${teamNumber})`,
               contestType: team.contestType,
               teamNumber: parseInt(teamNumber),
-              reason: `Kein Team-Mapping gefunden für "${team.contestType}" Mannschaft ${teamNumber}`
+              reason: `Kein Team-Mapping gefunden und keine clubId vorhanden für "${team.contestType}" Mannschaft ${teamNumber}`
             });
-            console.warn(`[parse-club-rosters] ⚠️ Kein Team gefunden für "${team.contestType}" Mannschaft ${teamNumber}`);
+            console.warn(`[parse-club-rosters] ⚠️ Kein Team gefunden und keine clubId für "${team.contestType}" Mannschaft ${teamNumber}`);
             continue;
           }
           
