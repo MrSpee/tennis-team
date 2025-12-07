@@ -135,23 +135,55 @@ const ClubRostersTab = () => {
       
       setParsedData(result);
       
+      // Auto-Match Verein basierend auf erkanntem Vereinsnamen
+      if (result.clubName) {
+        console.log(`[ClubRostersTab] 🔍 Suche Verein: "${result.clubName}"`);
+        
+        // Versuche exakten Match
+        let matchingClub = allClubs.find(c => 
+          c.name.toLowerCase().trim() === result.clubName.toLowerCase().trim()
+        );
+        
+        // Fallback: Teilstring-Match
+        if (!matchingClub) {
+          matchingClub = allClubs.find(c => 
+            c.name.toLowerCase().includes(result.clubName.toLowerCase()) ||
+            result.clubName.toLowerCase().includes(c.name.toLowerCase())
+          );
+        }
+        
+        if (matchingClub) {
+          console.log(`[ClubRostersTab] ✅ Verein gefunden: "${matchingClub.name}" (${matchingClub.id})`);
+          setSelectedClubId(matchingClub.id);
+        } else {
+          console.warn(`[ClubRostersTab] ⚠️ Kein Verein gefunden für: "${result.clubName}"`);
+        }
+      }
+      
       // Auto-Match Teams basierend auf Contest Type und Category
       // Warte kurz, damit selectedClubId gesetzt werden kann
       setTimeout(() => {
         const autoMapping = {};
+        const clubIdToUse = selectedClubId || (result.clubName ? allClubs.find(c => 
+          c.name.toLowerCase().trim() === result.clubName?.toLowerCase().trim()
+        )?.id : null);
+        
         result.teams?.forEach(team => {
           // Versuche Team zu finden basierend auf Contest Type (z.B. "Herren 40")
-          // Filtere nach Club-Nummer, falls Club bereits zugeordnet
+          // Filtere nach Club-ID oder Club-Nummer
           const matchingTeam = allTeams.find(t => {
             const categoryMatch = t.category === team.contestType;
-            // Wenn Club bereits zugeordnet, filtere auch nach club_id
-            if (selectedClubId) {
-              return categoryMatch && t.club_id === selectedClubId;
+            
+            // Wenn Club-ID verfügbar, filtere danach
+            if (clubIdToUse) {
+              return categoryMatch && t.club_id === clubIdToUse;
             }
-            // Sonst auch nach club_number matchen, falls vorhanden
+            
+            // Sonst nach club_number matchen, falls vorhanden
             if (result.clubNumber && t.club_number) {
               return categoryMatch && t.club_number === result.clubNumber;
             }
+            
             return categoryMatch;
           });
           
@@ -161,7 +193,7 @@ const ClubRostersTab = () => {
         });
         
         setTeamMapping(autoMapping);
-      }, 100);
+      }, 200);
       
     } catch (err) {
       console.error('Error parsing club rosters:', err);
@@ -597,7 +629,14 @@ const ClubRostersTab = () => {
               <Building2 size={24} />
               <div style={{ flex: 1 }}>
                 <h3>Verein</h3>
-                <p className="club-number">Club-Nummer: {parsedData.clubNumber}</p>
+                {parsedData.clubName && (
+                  <p className="club-name" style={{ fontSize: '1rem', fontWeight: '700', color: '#1e40af', marginBottom: '0.5rem' }}>
+                    🏢 {parsedData.clubName}
+                  </p>
+                )}
+                {parsedData.clubNumber && (
+                  <p className="club-number">Club-Nummer: {parsedData.clubNumber}</p>
+                )}
               </div>
               <div className="club-select-wrapper">
                 <label htmlFor="clubSelect" style={{ fontSize: '0.875rem', fontWeight: '600', color: '#475569', marginBottom: '0.5rem', display: 'block' }}>

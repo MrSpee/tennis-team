@@ -57,6 +57,60 @@ async function parseClubPoolsPage(clubPoolsUrl, targetSeason) {
       throw new Error('Club-Nummer konnte nicht aus URL extrahiert werden');
     }
     
+    // Extrahiere Vereinsnamen aus HTML
+    // Der Vereinsname steht vor "Namentliche Mannschaftsmeldung"
+    // Format: "VKC Köln" (dick/fett) gefolgt von "Namentliche Mannschaftsmeldung"
+    let clubName = null;
+    
+    // Pattern 1: Suche nach Text vor "Namentliche Mannschaftsmeldung"
+    // Der Vereinsname steht meist in einem <h1>, <h2>, <strong> oder <b> Tag
+    const mannschaftsmeldungIndex = html.indexOf('Namentliche Mannschaftsmeldung');
+    if (mannschaftsmeldungIndex !== -1) {
+      // Suche im Bereich 200 Zeichen vor "Namentliche Mannschaftsmeldung"
+      const searchSection = html.substring(Math.max(0, mannschaftsmeldungIndex - 500), mannschaftsmeldungIndex);
+      
+      // Pattern 1: <h1>Vereinsname</h1>
+      const h1Match = searchSection.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+      if (h1Match) {
+        clubName = h1Match[1].trim();
+        console.log(`[parse-club-rosters] ✅ Vereinsname gefunden (h1): "${clubName}"`);
+      }
+      
+      // Pattern 2: <h2>Vereinsname</h2>
+      if (!clubName) {
+        const h2Match = searchSection.match(/<h2[^>]*>([^<]+)<\/h2>/i);
+        if (h2Match) {
+          clubName = h2Match[1].trim();
+          console.log(`[parse-club-rosters] ✅ Vereinsname gefunden (h2): "${clubName}"`);
+        }
+      }
+      
+      // Pattern 3: <strong>Vereinsname</strong> oder <b>Vereinsname</b>
+      if (!clubName) {
+        const strongMatch = searchSection.match(/<(?:strong|b)[^>]*>([^<]+)<\/(?:strong|b)>/i);
+        if (strongMatch) {
+          clubName = strongMatch[1].trim();
+          console.log(`[parse-club-rosters] ✅ Vereinsname gefunden (strong/b): "${clubName}"`);
+        }
+      }
+      
+      // Pattern 4: Text direkt vor "Namentliche Mannschaftsmeldung" (ohne HTML-Tags)
+      if (!clubName) {
+        // Entferne HTML-Tags und suche nach Text
+        const textOnly = searchSection.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        // Suche nach Großbuchstaben-Wörtern (Vereinsnamen sind meist groß geschrieben)
+        const nameMatch = textOnly.match(/([A-ZÄÖÜ][a-zäöüß\s]+(?:[A-ZÄÖÜ][a-zäöüß\s]+)*)\s*Namentliche/i);
+        if (nameMatch && nameMatch[1]) {
+          clubName = nameMatch[1].trim();
+          console.log(`[parse-club-rosters] ✅ Vereinsname gefunden (Text-Pattern): "${clubName}"`);
+        }
+      }
+    }
+    
+    if (!clubName) {
+      console.warn(`[parse-club-rosters] ⚠️ Vereinsname konnte nicht automatisch erkannt werden`);
+    }
+    
     // Finde den Bereich für die Ziel-Saison
     // Die Saison wird als Überschrift angezeigt, z.B. "Winter 2025/2026"
     // Versuche verschiedene Saison-Formate (z.B. "Winter 2025/2026" vs "Winter 2025/26")
@@ -102,7 +156,7 @@ async function parseClubPoolsPage(clubPoolsUrl, targetSeason) {
       if (allSeasons) {
         console.warn(`[parse-club-rosters] ⚠️ Verfügbare Saisons auf der Seite:`, allSeasons.map(s => s.replace(/<[^>]+>/g, '')).slice(0, 5));
       }
-      return { clubNumber, teams: [] };
+      return { clubNumber, clubName, teams: [] };
     }
     
     // Extrahiere den Bereich nach der Saison-Überschrift (bis zur nächsten h2 oder Ende)
@@ -160,7 +214,7 @@ async function parseClubPoolsPage(clubPoolsUrl, targetSeason) {
     }
     
     console.log(`[parse-club-rosters] ✅ ${teams.length} Teams für Saison "${targetSeason}" gefunden`);
-    return { clubNumber, teams };
+    return { clubNumber, clubName, teams };
     
   } catch (error) {
     console.error('[parse-club-rosters] ❌ Fehler beim Parsen der clubPools-Seite:', error);
@@ -623,23 +677,24 @@ async function handler(req, res) {
     }
     
     // Parse clubPools-Seite
-    const { clubNumber, teams } = await parseClubPoolsPage(clubPoolsUrl, targetSeason);
+    const { clubNumber, clubName, teams } = await parseClubPoolsPage(clubPoolsUrl, targetSeason);
     
     const results = {
       clubNumber,
+      clubName,
       teams: [],
       savedRosters: []
     };
     
     // Speichere Club-Nummer wenn apply=true und clubId vorhanden
     if (apply && clubId && clubNumber) {
-      const supabase = createSupabaseClient();
+      const supabase = createSupabaseClient(true); // Service Role für RLS-Umgehung
       await saveClubNumber(supabase, clubId, clubNumber);
     }
     
     // Speichere Meldelisten wenn apply=true und teamMapping vorhanden
     if (apply && Object.keys(teamMapping).length > 0) {
-      const supabase = createSupabaseClient();
+      const supabase = createSupabaseClient(true); // Service Role für RLS-Umgehung
       const failedRosters = [];
       
       for (const team of teams) {
