@@ -25,108 +25,239 @@ async function searchClubOnNuLiga(clubName) {
     // URL für die Vereinssuche (POST-Request)
     const searchUrl = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/clubSearch';
     
-    // Form-Daten für POST-Request
-    const formData = new URLSearchParams();
-    formData.append('searchFor', clubName);
-    formData.append('federation', 'TVM');
-    formData.append('region', 'DE.WE.TVM');
-    formData.append('showSearchForm', '1');
-    formData.append('clubSearch', 'Suchen');
-    formData.append('WOSubmitAction', 'clubSearch');
-    
-    const response = await fetch(searchUrl, {
-      method: 'POST',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer': 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/clubSearch?federation=TVM&showSearchForm=1'
-      },
-      body: formData.toString(),
-      redirect: 'follow' // WICHTIG: Folge Redirects automatisch
-    });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
-    // ✅ WICHTIG: Extrahiere Club-Nummer aus der finalen URL (nach Redirect)
-    const finalUrl = response.url;
-    console.log(`[find-club-numbers] 📍 Finale URL nach Redirect: ${finalUrl}`);
-    
-    // Extrahiere Club-Nummer aus der URL (z.B. clubInfoDisplay?club=36154)
-    let clubNumber = null;
-    const clubNumberMatch = finalUrl.match(/[?&]club=(\d+)/);
-    if (clubNumberMatch) {
-      clubNumber = clubNumberMatch[1];
-      console.log(`[find-club-numbers] ✅ Club-Nummer aus URL extrahiert: ${clubNumber}`);
-    }
-    
-    // Lade HTML für weitere Analyse
-    const html = await response.text();
-    
-    // Wenn keine Club-Nummer in URL, suche in HTML nach Club-Nummern
-    if (!clubNumber) {
-      console.log(`[find-club-numbers] ⚠️ Keine Club-Nummer in URL, suche in HTML...`);
-      const clubLinkPattern = /club(?:Pools|Portrait|InfoDisplay|Meetings|Teams)\?club=(\d+)/gi;
-      const clubLinks = [...html.matchAll(clubLinkPattern)];
-      const directClubPattern = /[?&]club=(\d+)/gi;
-      const directClubs = [...html.matchAll(directClubPattern)];
+    // Generiere alternative Suchbegriffe, falls die erste Suche fehlschlägt
+    const generateSearchTerms = (name) => {
+      const terms = [name]; // Original-Name zuerst
       
-      const allClubNumbers = new Set();
-      clubLinks.forEach(match => allClubNumbers.add(match[1]));
-      directClubs.forEach(match => allClubNumbers.add(match[1]));
-      
-      if (allClubNumbers.size > 0) {
-        // Nimm die erste gefundene Club-Nummer (meist die richtige bei exakter Suche)
-        clubNumber = Array.from(allClubNumbers)[0];
-        console.log(`[find-club-numbers] ✅ Club-Nummer in HTML gefunden: ${clubNumber}`);
+      // Entferne Bindestriche und ersetze durch Leerzeichen
+      const withoutHyphens = name.replace(/-/g, ' ');
+      if (withoutHyphens !== name) {
+        terms.push(withoutHyphens);
       }
-    }
+      
+      // Teile den Namen in Wörter auf
+      const words = name.split(/[\s-]+/).filter(w => w.length > 0);
+      
+      // Wenn mehr als 2 Wörter, versuche verschiedene Kombinationen
+      if (words.length > 2) {
+        // Letzte 2 Wörter (oft Stadt/Ort)
+        terms.push(words.slice(-2).join(' '));
+        // Vorletztes Wort (oft der eigentliche Vereinsname)
+        if (words.length > 2) {
+          terms.push(words[words.length - 2]);
+        }
+        // Nur letztes Wort
+        terms.push(words.slice(-1).join(' '));
+      } else if (words.length > 1) {
+        // Nur letztes Wort
+        terms.push(words.slice(-1).join(' '));
+      }
+      
+      // Entferne Duplikate
+      return [...new Set(terms)];
+    };
     
-    if (!clubNumber) {
-      console.log(`[find-club-numbers] ❌ Keine Club-Nummer gefunden für "${clubName}"`);
-      return [];
-    }
+    const searchTerms = generateSearchTerms(clubName);
+    console.log(`[find-club-numbers] 📋 Suchbegriffe: ${searchTerms.join(', ')}`);
     
-    // Extrahiere Vereinsnamen aus HTML
+    // Versuche jeden Suchbegriff
+    for (let termIndex = 0; termIndex < searchTerms.length; termIndex++) {
+      const searchTerm = searchTerms[termIndex];
+      console.log(`[find-club-numbers] 🔍 Versuche Suchbegriff ${termIndex + 1}/${searchTerms.length}: "${searchTerm}"`);
+      
+      // Form-Daten für POST-Request
+      const formData = new URLSearchParams();
+      formData.append('searchFor', searchTerm);
+      formData.append('federation', 'TVM');
+      formData.append('region', 'DE.WE.TVM');
+      formData.append('showSearchForm', '1');
+      formData.append('clubSearch', 'Suchen');
+      formData.append('WOSubmitAction', 'clubSearch');
+      
+      const response = await fetch(searchUrl, {
+        method: 'POST',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Referer': 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/clubSearch?federation=TVM&showSearchForm=1'
+        },
+        body: formData.toString(),
+        redirect: 'follow' // WICHTIG: Folge Redirects automatisch
+      });
+      
+      if (!response.ok) {
+        if (termIndex < searchTerms.length - 1) {
+          console.log(`[find-club-numbers] ⚠️ HTTP ${response.status}, versuche nächsten Suchbegriff...`);
+          continue;
+        }
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      // ✅ WICHTIG: Extrahiere Club-Nummer aus der finalen URL (nach Redirect)
+      const finalUrl = response.url;
+      console.log(`[find-club-numbers] 📍 Finale URL nach Redirect: ${finalUrl}`);
+      
+      // Extrahiere Club-Nummer aus der URL (z.B. clubInfoDisplay?club=36154)
+      let clubNumber = null;
+      const clubNumberMatch = finalUrl.match(/[?&]club=(\d+)/);
+      if (clubNumberMatch) {
+        clubNumber = clubNumberMatch[1];
+        console.log(`[find-club-numbers] ✅ Club-Nummer aus URL extrahiert: ${clubNumber}`);
+      }
+      
+      // Lade HTML für weitere Analyse
+      const html = await response.text();
+      
+      // Prüfe ob "Keine Treffer" in der Antwort steht
+      if (html.includes('Keine Treffer')) {
+        console.log(`[find-club-numbers] ⚠️ Keine Treffer für "${searchTerm}"`);
+        if (termIndex < searchTerms.length - 1) {
+          continue; // Versuche nächsten Suchbegriff
+        }
+      }
+      
+      // Wenn keine Club-Nummer in URL, suche in HTML nach Club-Nummern
+      if (!clubNumber) {
+      console.log(`[find-club-numbers] ⚠️ Keine Club-Nummer in URL, suche in HTML...`);
+      
+      // Prüfe ob wir auf einer Suchergebnis-Seite sind
+      const isSearchResultsPage = finalUrl.includes('clubSearch') && !finalUrl.includes('club=');
+      
+      if (isSearchResultsPage) {
+        console.log(`[find-club-numbers] 📋 Auf Suchergebnis-Seite gelandet, parse Ergebnisse...`);
+        
+        // Suche nach Club-Links in Suchergebnissen
+        // Pattern: Links die zu clubInfoDisplay, clubPools, etc. führen
+        const clubLinkPatterns = [
+          /href=["']([^"']*club(?:InfoDisplay|Pools|Portrait|Meetings|Teams)\?club=(\d+)[^"']*)["']/gi,
+          /href=["']([^"']*[?&]club=(\d+)[^"']*)["']/gi
+        ];
+        
+        const foundClubs = new Map(); // Map<clubNumber, {url, context}>
+        
+        clubLinkPatterns.forEach(pattern => {
+          const matches = [...html.matchAll(pattern)];
+          matches.forEach(match => {
+            const foundClubNumber = match[2] || match[1]?.match(/[?&]club=(\d+)/)?.[1];
+            if (foundClubNumber) {
+              // Extrahiere Kontext um den Link (Vereinsname)
+              const linkStart = match.index;
+              const contextStart = Math.max(0, linkStart - 200);
+              const contextEnd = Math.min(html.length, linkStart + match[0].length + 200);
+              const context = html.substring(contextStart, contextEnd);
+              
+              // Versuche Vereinsnamen aus dem Kontext zu extrahieren
+              const nameMatch = context.match(/>([^<]{5,50}?)</);
+              const clubNameFromContext = nameMatch ? nameMatch[1].trim() : null;
+              
+              if (!foundClubs.has(foundClubNumber)) {
+                foundClubs.set(foundClubNumber, {
+                  url: match[1] || match[0],
+                  context: clubNameFromContext,
+                  fullContext: context.substring(0, 300)
+                });
+              }
+            }
+          });
+        });
+        
+        console.log(`[find-club-numbers] 🔍 ${foundClubs.size} verschiedene Club-Nummern in Suchergebnissen gefunden`);
+        
+        if (foundClubs.size > 0) {
+          // Versuche das beste Match zu finden basierend auf Vereinsnamen
+          let bestMatch = null;
+          let bestScore = 0;
+          
+          foundClubs.forEach((data, foundClubNumber) => {
+            const contextName = data.context || '';
+            const score = calculateSimilarity(clubName, contextName);
+            console.log(`[find-club-numbers]   - Club ${foundClubNumber}: "${contextName}" (Score: ${score.toFixed(2)})`);
+            
+            if (score > bestScore) {
+              bestScore = score;
+              bestMatch = {
+                clubNumber: foundClubNumber,
+                clubName: contextName,
+                score: score
+              };
+            }
+          });
+          
+          if (bestMatch && bestMatch.score >= 0.5) {
+            clubNumber = bestMatch.clubNumber;
+            console.log(`[find-club-numbers] ✅ Bestes Match gefunden: Club ${clubNumber} (Score: ${bestMatch.score.toFixed(2)})`);
+          } else if (foundClubs.size === 1) {
+            // Wenn nur ein Ergebnis, nimm es
+            const onlyClub = Array.from(foundClubs.entries())[0];
+            clubNumber = onlyClub[0];
+            console.log(`[find-club-numbers] ✅ Einziges Ergebnis gefunden: Club ${clubNumber}`);
+          }
+        }
+      } else {
+        // Normale Suche in HTML (falls wir auf einer Detail-Seite sind)
+        const clubLinkPattern = /club(?:Pools|Portrait|InfoDisplay|Meetings|Teams)\?club=(\d+)/gi;
+        const clubLinks = [...html.matchAll(clubLinkPattern)];
+        const directClubPattern = /[?&]club=(\d+)/gi;
+        const directClubs = [...html.matchAll(directClubPattern)];
+        
+        const allClubNumbers = new Set();
+        clubLinks.forEach(match => allClubNumbers.add(match[1]));
+        directClubs.forEach(match => allClubNumbers.add(match[1]));
+        
+        if (allClubNumbers.size > 0) {
+          clubNumber = Array.from(allClubNumbers)[0];
+          console.log(`[find-club-numbers] ✅ Club-Nummer in HTML gefunden: ${clubNumber}`);
+        }
+      }
+      
+      // Wenn wir eine Club-Nummer gefunden haben, breche ab
+      if (clubNumber) {
+        // Extrahiere Vereinsnamen aus HTML für das beste Match
+        let foundClubName = null;
     let foundClubName = null;
     
-    // Pattern 1: <h1>Vereinsname<br />Vereinsinfo</h1> oder <h1>Vereinsname</h1>
-    const h1Match = html.match(/<h1[^>]*>([^<]+)(?:<br[^>]*>)?/i);
-    if (h1Match) {
-      foundClubName = h1Match[1].trim();
-    }
-    
-    // Pattern 2: <div id="title">Vereinsname</div>
-    if (!foundClubName) {
-      const titleMatch = html.match(/<div[^>]*id=["']title["'][^>]*>([^<]+)<\/div>/i);
-      if (titleMatch) {
-        foundClubName = titleMatch[1].trim();
+        // Pattern 1: <h1>Vereinsname<br />Vereinsinfo</h1> oder <h1>Vereinsname</h1>
+        const h1Match = html.match(/<h1[^>]*>([^<]+)(?:<br[^>]*>)?/i);
+        if (h1Match) {
+          foundClubName = h1Match[1].trim();
+        }
+        
+        // Pattern 2: <div id="title">Vereinsname</div>
+        if (!foundClubName) {
+          const titleMatch = html.match(/<div[^>]*id=["']title["'][^>]*>([^<]+)<\/div>/i);
+          if (titleMatch) {
+            foundClubName = titleMatch[1].trim();
+          }
+        }
+        
+        // Pattern 3: <title>...Vereinsname...</title>
+        if (!foundClubName) {
+          const titleTagMatch = html.match(/<title[^>]*>.*?([A-ZÄÖÜ][^<&]+?)(?:\s*&ndash;|\s*–|<\/title>)/i);
+          if (titleTagMatch) {
+            foundClubName = titleTagMatch[1].trim();
+          }
+        }
+        
+        // ✅ WICHTIG: Initialisiere results Array
+        const results = [];
+        
+        results.push({
+          clubNumber: clubNumber,
+          clubName: foundClubName || clubName, // Fallback auf Suchbegriff
+          matchScore: foundClubName ? calculateSimilarity(clubName, foundClubName) : 0.8
+        });
+        
+        // Sortiere nach Match-Score (beste Matches zuerst)
+        results.sort((a, b) => b.matchScore - a.matchScore);
+        
+        console.log(`[find-club-numbers] ✅ ${results.length} mögliche Treffer gefunden für "${clubName}"`);
+        return results;
       }
     }
     
-    // Pattern 3: <title>...Vereinsname...</title>
-    if (!foundClubName) {
-      const titleTagMatch = html.match(/<title[^>]*>.*?([A-ZÄÖÜ][^<&]+?)(?:\s*&ndash;|\s*–|<\/title>)/i);
-      if (titleTagMatch) {
-        foundClubName = titleTagMatch[1].trim();
-      }
-    }
-    
-    // ✅ WICHTIG: Initialisiere results Array
-    const results = [];
-    
-    results.push({
-      clubNumber: clubNumber,
-      clubName: foundClubName || clubName, // Fallback auf Suchbegriff
-      matchScore: foundClubName ? calculateSimilarity(clubName, foundClubName) : 0.8
-    });
-    
-    // Sortiere nach Match-Score (beste Matches zuerst)
-    results.sort((a, b) => b.matchScore - a.matchScore);
-    
-    console.log(`[find-club-numbers] ✅ ${results.length} mögliche Treffer gefunden für "${clubName}"`);
-    return results;
+    // Wenn wir hier ankommen, wurde keine Club-Nummer gefunden
+    console.log(`[find-club-numbers] ❌ Keine Club-Nummer gefunden für "${clubName}" nach ${searchTerms.length} Versuchen`);
+    return [];
     
   } catch (error) {
     console.error(`[find-club-numbers] ❌ Fehler beim Suchen nach "${clubName}":`, error);
