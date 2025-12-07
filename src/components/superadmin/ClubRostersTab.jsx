@@ -42,6 +42,7 @@ const ClubRostersTab = () => {
   // Vereins-Übersicht mit Meldelisten-Status
   const [clubsWithRosters, setClubsWithRosters] = useState([]);
   const [loadingClubsOverview, setLoadingClubsOverview] = useState(false);
+  const [importingClubIds, setImportingClubIds] = useState(new Set()); // Track welche Clubs gerade importiert werden
   
   // Lade Vereine und Teams beim Mount
   useEffect(() => {
@@ -495,6 +496,79 @@ const ClubRostersTab = () => {
     }
   };
   
+  // Importiere Meldelisten für einen einzelnen Verein
+  const handleImportClubRoster = async (clubId, clubNumber, clubName) => {
+    if (!clubNumber) {
+      setError(`Keine Club-Nummer für ${clubName} vorhanden`);
+      return;
+    }
+    
+    // Markiere Club als importierend
+    setImportingClubIds(prev => new Set(prev).add(clubId));
+    setError(null);
+    
+    try {
+      const clubPoolsUrl = `https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/clubPools?club=${clubNumber}`;
+      
+      console.log(`[ClubRostersTab] 📥 Importiere Meldelisten für ${clubName} (Club-Nr: ${clubNumber})`);
+      
+      const response = await fetch('/api/import/parse-club-rosters', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clubPoolsUrl,
+          targetSeason,
+          apply: true // Automatisch speichern
+        })
+      });
+      
+      const responseText = await response.text();
+      
+      if (!response.ok) {
+        let errorData;
+        try {
+          errorData = JSON.parse(responseText);
+        } catch (e) {
+          throw new Error(`HTTP ${response.status}: ${responseText || response.statusText}`);
+        }
+        const errorMsg = errorData.error || errorData.message || errorData.details || `HTTP ${response.status}`;
+        throw new Error(errorMsg);
+      }
+      
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (e) {
+        throw new Error(`Ungültige JSON-Response: ${responseText.substring(0, 200)}`);
+      }
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Unbekannter Fehler beim Import');
+      }
+      
+      console.log(`[ClubRostersTab] ✅ Meldelisten für ${clubName} erfolgreich importiert:`, result);
+      
+      // Zeige Erfolgsmeldung
+      setError(null);
+      alert(`✅ Meldelisten für ${clubName} erfolgreich importiert!\n\n${result.savedRosters?.length || 0} Teams gespeichert`);
+      
+      // Lade Übersicht neu
+      await loadClubsOverview();
+      await loadClubsAndTeams();
+      
+    } catch (err) {
+      console.error(`[ClubRostersTab] ❌ Fehler beim Import für ${clubName}:`, err);
+      setError(`Fehler beim Import für ${clubName}: ${err.message}`);
+    } finally {
+      // Entferne Club aus importierend-Liste
+      setImportingClubIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(clubId);
+        return newSet;
+      });
+    }
+  };
+  
   const handleBulkImport = async () => {
     setIsBulkImporting(true);
     setError(null);
@@ -661,6 +735,7 @@ const ClubRostersTab = () => {
                       <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: '600' }}>Meldelisten<br/><span style={{ fontSize: '0.75rem', fontWeight: '400', color: '#6b7280' }}>(Teams / Spieler)</span></th>
                       <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: '600' }}>Saisons</th>
                       <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: '600' }}>Status</th>
+                      <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: '600' }}>Aktionen</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -802,6 +877,84 @@ const ClubRostersTab = () => {
                               fontWeight: '600'
                             }}>
                               ❌ Fehlt
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '0.5rem', textAlign: 'center' }}>
+                          {club.clubNumber ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'center' }}>
+                              {/* URL-Generator */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <a
+                                  href={`https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/clubPools?club=${club.clubNumber}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    color: '#3b82f6',
+                                    textDecoration: 'none',
+                                    fontSize: '0.75rem',
+                                    padding: '0.25rem 0.5rem',
+                                    background: '#eff6ff',
+                                    borderRadius: '4px',
+                                    border: '1px solid #bfdbfe'
+                                  }}
+                                  onMouseEnter={(e) => e.currentTarget.style.background = '#dbeafe'}
+                                  onMouseLeave={(e) => e.currentTarget.style.background = '#eff6ff'}
+                                >
+                                  <ExternalLink size={14} />
+                                  URL öffnen
+                                </a>
+                              </div>
+                              
+                              {/* Import-Button */}
+                              <button
+                                onClick={() => handleImportClubRoster(club.id, club.clubNumber, club.name)}
+                                disabled={importingClubIds.has(club.id)}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.25rem',
+                                  padding: '0.375rem 0.75rem',
+                                  background: importingClubIds.has(club.id) ? '#9ca3af' : '#10b981',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '600',
+                                  cursor: importingClubIds.has(club.id) ? 'not-allowed' : 'pointer',
+                                  transition: 'background 0.2s',
+                                  whiteSpace: 'nowrap'
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (!importingClubIds.has(club.id)) {
+                                    e.currentTarget.style.background = '#059669';
+                                  }
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (!importingClubIds.has(club.id)) {
+                                    e.currentTarget.style.background = '#10b981';
+                                  }
+                                }}
+                              >
+                                {importingClubIds.has(club.id) ? (
+                                  <>
+                                    <Loader className="spinner" size={14} />
+                                    Import läuft...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download size={14} />
+                                    Hole Mannschaftslisten für {targetSeason}
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          ) : (
+                            <span style={{ color: '#9ca3af', fontSize: '0.75rem', fontStyle: 'italic' }}>
+                              Keine Club-Nummer
                             </span>
                           )}
                         </td>
