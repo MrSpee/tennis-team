@@ -512,6 +512,85 @@ async function matchPlayerToUnified(supabase, rosterPlayer) {
 }
 
 /**
+ * Erstellt oder aktualisiert team_membership für einen Spieler
+ * @param {Function} callback - Callback mit (created, updated) Parametern
+ */
+async function ensureTeamMembership(supabase, playerId, teamId, normalizedSeason, callback = null) {
+  try {
+    // Prüfe ob team_membership bereits existiert
+    const { data: existing, error: checkError } = await supabase
+      .from('team_memberships')
+      .select('id, is_active')
+      .eq('player_id', playerId)
+      .eq('team_id', teamId)
+      .eq('season', normalizedSeason)
+      .maybeSingle();
+    
+    if (checkError && checkError.code !== 'PGRST116') {
+      console.warn(`[parse-club-rosters] ⚠️ Fehler beim Prüfen der team_membership:`, checkError);
+      return false;
+    }
+    
+    if (existing) {
+      // Membership existiert bereits - aktiviere sie falls inaktiv
+      if (!existing.is_active) {
+        const { error: updateError } = await supabase
+          .from('team_memberships')
+          .update({ is_active: true })
+          .eq('id', existing.id);
+        
+        if (updateError) {
+          console.warn(`[parse-club-rosters] ⚠️ Fehler beim Aktivieren der team_membership:`, updateError);
+          return false;
+        }
+        console.log(`[parse-club-rosters] ✅ team_membership aktiviert für Spieler ${playerId} in Team ${teamId}`);
+        if (callback) callback(false, true); // updated = true
+        return true;
+      } else {
+        console.log(`[parse-club-rosters] ℹ️ team_membership existiert bereits (aktiv) für Spieler ${playerId} in Team ${teamId}`);
+        if (callback) callback(false, false); // weder created noch updated
+        return true;
+      }
+    }
+    
+    // Prüfe ob Spieler bereits andere Teams in dieser Saison hat (für is_primary)
+    const { data: otherMemberships } = await supabase
+      .from('team_memberships')
+      .select('id, is_primary')
+      .eq('player_id', playerId)
+      .eq('season', normalizedSeason)
+      .eq('is_active', true);
+    
+    const hasPrimaryTeam = otherMemberships?.some(m => m.is_primary) || false;
+    
+    // Erstelle neue team_membership
+    const { error: insertError } = await supabase
+      .from('team_memberships')
+      .insert({
+        player_id: playerId,
+        team_id: teamId,
+        season: normalizedSeason,
+        role: 'player',
+        is_primary: !hasPrimaryTeam, // Erstes Team wird primär
+        is_active: true
+      });
+    
+    if (insertError) {
+      console.warn(`[parse-club-rosters] ⚠️ Fehler beim Erstellen der team_membership:`, insertError);
+      return false;
+    }
+    
+    console.log(`[parse-club-rosters] ✅ team_membership erstellt für Spieler ${playerId} in Team ${teamId} (is_primary: ${!hasPrimaryTeam})`);
+    if (callback) callback(true, false); // created = true
+    return true;
+    
+  } catch (error) {
+    console.error(`[parse-club-rosters] ❌ Fehler in ensureTeamMembership:`, error);
+    return false;
+  }
+}
+
+/**
  * Speichert die Meldeliste in der Datenbank mit Fuzzy-Matching zu players_unified
  */
 async function saveTeamRoster(supabase, teamId, season, roster) {
@@ -550,6 +629,8 @@ async function saveTeamRoster(supabase, teamId, season, roster) {
     const rosterEntries = [];
     let matchedCount = 0;
     let unmatchedCount = 0;
+    let membershipCreatedCount = 0;
+    let membershipUpdatedCount = 0;
     
     for (const player of roster) {
       // Validierung: rank muss positiv sein (Constraint in DB)
@@ -565,6 +646,14 @@ async function saveTeamRoster(supabase, teamId, season, roster) {
       }
       
       const matchResult = await matchPlayerToUnified(supabase, player);
+      
+      // Wenn Spieler gematcht wurde: Erstelle/aktualisiere team_membership
+      if (matchResult.playerId) {
+        const membershipResult = await ensureTeamMembership(supabase, matchResult.playerId, teamId, normalizedSeason, (created, updated) => {
+          if (created) membershipCreatedCount++;
+          if (updated) membershipUpdatedCount++;
+        });
+      }
       
       rosterEntries.push({
         team_id: teamId,
@@ -615,12 +704,15 @@ async function saveTeamRoster(supabase, teamId, season, roster) {
     }
     
     console.log(`[parse-club-rosters] ✅ ${data.length} Spieler in team_roster gespeichert (${matchedCount} mit player_id verknüpft, ${unmatchedCount} ohne player_id)`);
+    console.log(`[parse-club-rosters] ✅ ${membershipCreatedCount} team_memberships erstellt, ${membershipUpdatedCount} aktualisiert`);
     return {
       roster: data,
       stats: {
         total: rosterEntries.length, // Anzahl tatsächlich gespeicherter Einträge
         matched: matchedCount,
-        unmatched: unmatchedCount
+        unmatched: unmatchedCount,
+        membershipsCreated: membershipCreatedCount,
+        membershipsUpdated: membershipUpdatedCount
       }
     };
     

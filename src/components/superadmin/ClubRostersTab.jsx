@@ -595,6 +595,16 @@ const ClubRostersTab = () => {
                 {importResult.savedRosters.map((roster, idx) => (
                   <li key={idx}>
                     {roster.teamName}: {roster.matched || 0}/{roster.total || 0} Spieler gematcht
+                    {roster.membershipsCreated > 0 && (
+                      <span style={{ marginLeft: '0.5rem', color: '#10b981', fontSize: '0.875rem' }}>
+                        · {roster.membershipsCreated} Mannschaftszugehörigkeiten erstellt
+                      </span>
+                    )}
+                    {roster.membershipsUpdated > 0 && (
+                      <span style={{ marginLeft: '0.5rem', color: '#3b82f6', fontSize: '0.875rem' }}>
+                        · {roster.membershipsUpdated} aktualisiert
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
