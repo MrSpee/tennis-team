@@ -739,8 +739,10 @@ function PlayerProfileSimple() {
     try {
       const now = new Date();
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const thirtyDaysAgo = new Date(today);
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       
-      // Lade alle anstehenden Spieltage für die Teams des Spielers
+      // Lade sowohl zukünftige als auch vergangene Spiele (letzte 30 Tage)
       const { data: matchdays, error } = await supabase
         .from('matchdays')
         .select(`
@@ -764,26 +766,53 @@ function PlayerProfileSimple() {
           )
         `)
         .or(`home_team_id.in.(${teamIds.join(',')}),away_team_id.in.(${teamIds.join(',')})`)
-        .gte('match_date', today.toISOString().split('T')[0])
+        .gte('match_date', thirtyDaysAgo.toISOString().split('T')[0])
+        .not('status', 'in', '("cancelled", "postponed")')
         .order('match_date', { ascending: true })
         .order('start_time', { ascending: true });
       
       if (error) {
-        console.error('❌ Fehler beim Laden der anstehenden Spiele:', error);
+        console.error('❌ Fehler beim Laden der Spiele:', error);
         setUpcomingMatches([]);
         return;
       }
       
       // Filtere abgesagte/verschobene Spiele aus
-      const upcoming = (matchdays || []).filter(m => 
+      const matches = (matchdays || []).filter(m => 
         m.status !== 'cancelled' && m.status !== 'postponed'
       );
       
-      console.log('✅ Anstehende Spiele geladen:', upcoming.length);
-      setUpcomingMatches(upcoming);
+      // Lade Match-Ergebnisse für diese Matchdays
+      const matchdayIds = matches.map(m => m.id);
+      let matchResultsMap = {};
+      
+      if (matchdayIds.length > 0) {
+        const { data: allResults } = await supabase
+          .from('match_results')
+          .select('*')
+          .in('matchday_id', matchdayIds);
+        
+        // Gruppiere Ergebnisse nach matchday_id
+        (allResults || []).forEach(result => {
+          if (!matchResultsMap[result.matchday_id]) {
+            matchResultsMap[result.matchday_id] = [];
+          }
+          matchResultsMap[result.matchday_id].push(result);
+        });
+      }
+      
+      // Füge Ergebnisse zu jedem Matchday hinzu
+      const matchesWithResults = matches.map(m => ({
+        ...m,
+        results: matchResultsMap[m.id] || [],
+        hasResults: (matchResultsMap[m.id] || []).length > 0
+      }));
+      
+      console.log('✅ Spiele geladen (zukünftige + vergangene):', matchesWithResults.length);
+      setUpcomingMatches(matchesWithResults);
       
     } catch (error) {
-      console.error('❌ Fehler beim Laden der anstehenden Spiele:', error);
+      console.error('❌ Fehler beim Laden der Spiele:', error);
       setUpcomingMatches([]);
     } finally {
       setLoadingUpcomingMatches(false);
@@ -1472,7 +1501,7 @@ function PlayerProfileSimple() {
         </div>
       )}
       
-      {/* ✅ NEU: Anstehende Spiele */}
+      {/* ✅ NEU: Anstehende Spiele + Vergangene ohne vollständige Ergebnisse */}
       {!loadingUpcomingMatches && upcomingMatches.length > 0 && (
         <div className="fade-in" style={{ marginBottom: '1.5rem' }}>
           <div className="lk-card-full">
@@ -1483,10 +1512,10 @@ function PlayerProfileSimple() {
               color: 'white'
             }}>
               <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: '700', color: 'white' }}>
-                📅 Anstehende Spiele
+                📅 Spiele
               </h2>
               <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.875rem', opacity: 0.9 }}>
-                {upcomingMatches.length} {upcomingMatches.length === 1 ? 'Spiel' : 'Spiele'} in den kommenden Wochen
+                {upcomingMatches.length} {upcomingMatches.length === 1 ? 'Spiel' : 'Spiele'} (zukünftige + vergangene ohne vollständige Ergebnisse)
               </p>
             </div>
             
@@ -1503,6 +1532,7 @@ function PlayerProfileSimple() {
                   const matchDateOnly = new Date(matchDate);
                   matchDateOnly.setHours(0, 0, 0, 0);
                   const daysUntilMatch = Math.ceil((matchDateOnly - today) / (1000 * 60 * 60 * 24));
+                  const isPast = daysUntilMatch < 0;
                   
                   // Prüfe Zu-/Absage des Spielers
                   const playerAvailability = match.match_availability?.find(
@@ -1517,13 +1547,23 @@ function PlayerProfileSimple() {
                     ? `${playerTeam.club_name}${playerTeam.team_name ? ` ${playerTeam.team_name}` : ''}`.trim()
                     : 'Unbekannt';
                   
+                  // Lade Spieler-Daten für Match-Ergebnisse
+                  const playerResults = (match.results || []).filter(r => 
+                    r.home_player_id === player?.id ||
+                    r.home_player1_id === player?.id ||
+                    r.home_player2_id === player?.id ||
+                    r.guest_player_id === player?.id ||
+                    r.guest_player1_id === player?.id ||
+                    r.guest_player2_id === player?.id
+                  );
+                  
                   return (
                     <div
                       key={match.id}
                       style={{
                         padding: '1rem',
-                        background: daysUntilMatch <= 7 ? '#fef3c7' : '#f0fdf4',
-                        border: `2px solid ${daysUntilMatch <= 7 ? '#f59e0b' : '#10b981'}`,
+                        background: isPast ? '#fef3c7' : (daysUntilMatch <= 7 ? '#fef3c7' : '#f0fdf4'),
+                        border: `2px solid ${isPast ? '#f59e0b' : (daysUntilMatch <= 7 ? '#f59e0b' : '#10b981')}`,
                         borderRadius: '8px',
                         transition: 'all 0.2s'
                       }}
@@ -1551,9 +1591,29 @@ function PlayerProfileSimple() {
                               {match.league && <span>{match.league}</span>}
                             </div>
                           )}
+                          
+                          {/* ✅ NEU: Zeige Match-Ergebnisse für vergangene Spiele */}
+                          {isPast && playerResults.length > 0 && (
+                            <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: 'rgba(255, 255, 255, 0.7)', borderRadius: '6px', fontSize: '0.75rem' }}>
+                              <div style={{ fontWeight: '600', marginBottom: '0.5rem', color: '#1f2937' }}>Deine Ergebnisse:</div>
+                              {playerResults.map((result, idx) => {
+                                const isInHomeTeam = result.home_player_id === player?.id || result.home_player1_id === player?.id || result.home_player2_id === player?.id;
+                                const didWin = isInHomeTeam ? result.winner === 'home' : result.winner === 'guest';
+                                const scoreDisplay = result.set1_home != null && result.set1_guest != null
+                                  ? `${result.set1_home}:${result.set1_guest}${result.set2_home != null && result.set2_guest != null ? `, ${result.set2_home}:${result.set2_guest}` : ''}${result.set3_home != null && result.set3_guest != null ? `, ${result.set3_home}:${result.set3_guest}` : ''}`
+                                  : 'Kein Ergebnis';
+                                
+                                return (
+                                  <div key={idx} style={{ marginBottom: '0.25rem', color: '#4b5563' }}>
+                                    <span style={{ fontWeight: '600' }}>Match {result.match_number}</span> ({result.match_type}): {scoreDisplay} {didWin ? '✅' : result.winner ? '❌' : '⏳'}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
-                          {daysUntilMatch === 0 && (
+                          {daysUntilMatch === 0 && !isPast && (
                             <>
                               <span style={{
                                 padding: '0.25rem 0.5rem',
@@ -1597,6 +1657,39 @@ function PlayerProfileSimple() {
                                 📊 Live-Ergebnisse
                               </button>
                             </>
+                          )}
+                          {/* ✅ NEU: Link zu Spieltag-Ergebnissen für vergangene Spiele */}
+                          {isPast && (
+                            <button
+                              onClick={() => navigate(`/ergebnisse/${match.id}`)}
+                              style={{
+                                padding: '0.5rem 0.75rem',
+                                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontSize: '0.75rem',
+                                fontWeight: '600',
+                                color: 'white',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s',
+                                whiteSpace: 'nowrap',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.25rem'
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = 'linear-gradient(135deg, #059669 0%, #047857 100%)';
+                                e.currentTarget.style.transform = 'translateY(-1px)';
+                                e.currentTarget.style.boxShadow = '0 4px 8px rgba(16, 185, 129, 0.3)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+                                e.currentTarget.style.transform = 'translateY(0)';
+                                e.currentTarget.style.boxShadow = 'none';
+                              }}
+                            >
+                              📊 Ergebnisse anzeigen
+                            </button>
                           )}
                           {daysUntilMatch === 1 && (
                             <span style={{

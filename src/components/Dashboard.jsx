@@ -2616,14 +2616,28 @@ function Dashboard() {
                               borderTop: playerData.activities.length > 1 ? '1px solid rgba(0,0,0,0.1)' : 'none'
                             }}>
                               {playerData.activities.map((item, activityIndex) => {
+                                // ✅ FIX: Normalisiere beide Daten auf Mitternacht für korrekte Tagesberechnung
+                                const matchDate = new Date(item.timestamp);
+                                const matchDateOnly = new Date(matchDate.getFullYear(), matchDate.getMonth(), matchDate.getDate());
+                                const nowDateOnly = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                                
+                                // Berechne Differenz in Tagen
+                                const diffInMs = nowDateOnly - matchDateOnly;
+                                const daysAgo = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+                                
+                                // Für Stunden-Berechnung (wenn weniger als 24h): Verwende echte Zeit-Differenz
                                 const timeAgo = Math.floor((now - item.timestamp) / (1000 * 60 * 60));
-                                const daysAgo = Math.floor(timeAgo / 24);
                                 
                                 let timeLabel = '';
-                                if (timeAgo < 1) timeLabel = 'vor weniger als 1h';
-                                else if (timeAgo < 24) timeLabel = `vor ${timeAgo}h`;
-                                else if (daysAgo === 1) timeLabel = 'gestern';
-                                else timeLabel = `vor ${daysAgo} Tagen`;
+                                if (daysAgo === 0) {
+                                  // Heute: Zeige Stunden
+                                  if (timeAgo < 1) timeLabel = 'vor weniger als 1h';
+                                  else timeLabel = `vor ${timeAgo}h`;
+                                } else if (daysAgo === 1) {
+                                  timeLabel = 'gestern';
+                                } else {
+                                  timeLabel = `vor ${daysAgo} Tagen`;
+                                }
 
                                 if (item.type === 'match_result') {
                                   return (

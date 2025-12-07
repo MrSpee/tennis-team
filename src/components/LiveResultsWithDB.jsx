@@ -36,6 +36,9 @@ const LiveResultsWithDB = () => {
   
   // State für Match-Status (Spielabbrüche etc.)
   const [matchStatuses, setMatchStatuses] = useState({});
+  
+  // State für Walkover-Gewinner (wenn kampflos)
+  const [walkoverWinners, setWalkoverWinners] = useState({}); // {matchId: 'home' | 'guest'}
 
   // Lade echte Daten aus der Datenbank
   useEffect(() => {
@@ -1230,6 +1233,23 @@ const LiveResultsWithDB = () => {
       return match;
     }));
     setMatchStatuses(prev => ({ ...prev, [matchId]: status }));
+    
+    // Wenn Status auf "normal" geändert wird, entferne Walkover-Gewinner
+    if (status === 'normal') {
+      setWalkoverWinners(prev => {
+        const newState = { ...prev };
+        delete newState[matchId];
+        return newState;
+      });
+    }
+  };
+  
+  // ✅ NEU: Handler für Walkover-Gewinner-Auswahl
+  const handleWalkoverWinnerChange = (matchId, winner) => {
+    setWalkoverWinners(prev => ({
+      ...prev,
+      [matchId]: winner
+    }));
   };
 
   const saveMatchResult = async (matchData) => {
@@ -1251,13 +1271,21 @@ const LiveResultsWithDB = () => {
         (score.home && score.home !== '-') || (score.guest && score.guest !== '-')
       );
 
-      if (!hasPlayerData && !hasScoreData) {
+      // Bei Walkover ist keine Spieler- oder Score-Daten erforderlich, aber Gewinner muss gewählt sein
+      const matchStatus = matchData.matchStatus || 'normal';
+      const isWalkover = matchStatus === 'walkover';
+      
+      if (!isWalkover && !hasPlayerData && !hasScoreData) {
         alert('Bitte wähle mindestens einen Spieler oder gib ein Ergebnis ein!');
         return;
       }
+      
+      if (isWalkover && !walkoverWinners[matchData.id]) {
+        alert('Bitte wähle, welches Team kampflos gewinnt!');
+        return;
+      }
 
-      // Hole Match-Status (Spielabbruch etc.)
-      const matchStatus = matchData.matchStatus || 'normal';
+      // Prüfe ob Spielabbruch (matchStatus wurde bereits oben deklariert)
       const isAborted = ['retired', 'walkover', 'disqualified', 'defaulted'].includes(matchStatus);
       
       // Bereite Daten für Supabase vor
@@ -1403,63 +1431,65 @@ const LiveResultsWithDB = () => {
 
       // Füge Satz-Ergebnisse hinzu (nur wenn nicht leer)
       const scores = matchData.scores;
+      
+      // Normale Eingabe
       resultData.set1_home = scores[0].home && scores[0].home !== '-' && scores[0].home !== '' ? parseInt(scores[0].home) : null;
-      resultData.set1_guest = scores[0].guest && scores[0].guest !== '-' && scores[0].guest !== '' ? parseInt(scores[0].guest) : null;
-      resultData.set2_home = scores[1].home && scores[1].home !== '-' && scores[1].home !== '' ? parseInt(scores[1].home) : null;
-      resultData.set2_guest = scores[1].guest && scores[1].guest !== '-' && scores[1].guest !== '' ? parseInt(scores[1].guest) : null;
-      resultData.set3_home = scores[2].home && scores[2].home !== '-' && scores[2].home !== '' ? parseInt(scores[2].home) : null;
-      resultData.set3_guest = scores[2].guest && scores[2].guest !== '-' && scores[2].guest !== '' ? parseInt(scores[2].guest) : null;
+        resultData.set1_guest = scores[0].guest && scores[0].guest !== '-' && scores[0].guest !== '' ? parseInt(scores[0].guest) : null;
+        resultData.set2_home = scores[1].home && scores[1].home !== '-' && scores[1].home !== '' ? parseInt(scores[1].home) : null;
+        resultData.set2_guest = scores[1].guest && scores[1].guest !== '-' && scores[1].guest !== '' ? parseInt(scores[1].guest) : null;
+        resultData.set3_home = scores[2].home && scores[2].home !== '-' && scores[2].home !== '' ? parseInt(scores[2].home) : null;
+        resultData.set3_guest = scores[2].guest && scores[2].guest !== '-' && scores[2].guest !== '' ? parseInt(scores[2].guest) : null;
 
-      // Berechne Gesamtergebnis nur wenn alle Sätze gespielt sind
-      let homeSets = 0;
-      let guestSets = 0;
-      let allSetsPlayed = true;
-      
-      if (scores[0].home && scores[0].guest && scores[0].home !== '-' && scores[0].guest !== '-') {
-        if (parseInt(scores[0].home) > parseInt(scores[0].guest)) homeSets++;
-        else guestSets++;
-      } else {
-        allSetsPlayed = false;
-      }
-      
-      if (scores[1].home && scores[1].guest && scores[1].home !== '-' && scores[1].guest !== '-') {
-        if (parseInt(scores[1].home) > parseInt(scores[1].guest)) homeSets++;
-        else guestSets++;
-      } else {
-        allSetsPlayed = false;
-      }
-      
-      if (scores[2].home && scores[2].guest && scores[2].home !== '-' && scores[2].guest !== '-') {
-        if (parseInt(scores[2].home) > parseInt(scores[2].guest)) homeSets++;
-        else guestSets++;
-      } else {
-        allSetsPlayed = false;
-      }
-
-      // Tennis Match Logic - Korrekte Implementierung der Regeln
-      const calculateMatchWinner = (sets) => {
-        let homeSetsWon = 0;
-        let guestSetsWon = 0;
-
-        // Prüfe jeden Satz
-        for (let i = 0; i < sets.length; i++) {
-          const set = sets[i];
-          const home = parseInt(set.home) || 0;
-          const guest = parseInt(set.guest) || 0;
-
-          if (home === 0 && guest === 0) continue; // Leerer Satz
-
-          const setWinner = calculateSetWinner(home, guest, i === 2); // 3. Satz ist Champions Tiebreak
-
-          if (setWinner === 'home') homeSetsWon++;
-          else if (setWinner === 'guest') guestSetsWon++;
+        // Berechne Gesamtergebnis nur wenn alle Sätze gespielt sind
+        let homeSets = 0;
+        let guestSets = 0;
+        let allSetsPlayed = true;
+        
+        if (scores[0].home && scores[0].guest && scores[0].home !== '-' && scores[0].guest !== '-') {
+          if (parseInt(scores[0].home) > parseInt(scores[0].guest)) homeSets++;
+          else guestSets++;
+        } else {
+          allSetsPlayed = false;
+        }
+        
+        if (scores[1].home && scores[1].guest && scores[1].home !== '-' && scores[1].guest !== '-') {
+          if (parseInt(scores[1].home) > parseInt(scores[1].guest)) homeSets++;
+          else guestSets++;
+        } else {
+          allSetsPlayed = false;
+        }
+        
+        if (scores[2].home && scores[2].guest && scores[2].home !== '-' && scores[2].guest !== '-') {
+          if (parseInt(scores[2].home) > parseInt(scores[2].guest)) homeSets++;
+          else guestSets++;
+        } else {
+          allSetsPlayed = false;
         }
 
-        // Best of 3: Wer 2 Sätze gewinnt, gewinnt das Match
-        if (homeSetsWon >= 2) return 'home';
-        if (guestSetsWon >= 2) return 'guest';
-        return null; // Match noch nicht beendet
-      };
+        // Tennis Match Logic - Korrekte Implementierung der Regeln
+        const calculateMatchWinner = (sets) => {
+          let homeSetsWon = 0;
+          let guestSetsWon = 0;
+
+          // Prüfe jeden Satz
+          for (let i = 0; i < sets.length; i++) {
+            const set = sets[i];
+            const home = parseInt(set.home) || 0;
+            const guest = parseInt(set.guest) || 0;
+
+            if (home === 0 && guest === 0) continue; // Leerer Satz
+
+            const setWinner = calculateSetWinner(home, guest, i === 2); // 3. Satz ist Champions Tiebreak
+
+            if (setWinner === 'home') homeSetsWon++;
+            else if (setWinner === 'guest') guestSetsWon++;
+          }
+
+          // Best of 3: Wer 2 Sätze gewinnt, gewinnt das Match
+          if (homeSetsWon >= 2) return 'home';
+          if (guestSetsWon >= 2) return 'guest';
+          return null; // Match noch nicht beendet
+        };
 
       const calculateSetWinner = (home, guest, isChampionsTiebreak = false) => {
         if (isChampionsTiebreak) {
@@ -1504,14 +1534,21 @@ const LiveResultsWithDB = () => {
         // Der User muss beim Eingeben darauf achten, den richtigen Status zu wählen
         // Für eine bessere UX könnten wir später eine explizite Gewinner-Auswahl hinzufügen
         
-        if (matchStatus === 'retired') {
+        if (matchStatus === 'walkover') {
+          // ✅ NEU: Bei Walkover: Verwende explizit gewählten Gewinner
+          matchWinner = walkoverWinners[matchData.id] || 'home'; // Fallback zu 'home' wenn nicht gewählt
+          
+          // Setze Standard-Ergebnis für Walkover (6:0, 6:0)
+          resultData.set1_home = matchWinner === 'home' ? 6 : 0;
+          resultData.set1_guest = matchWinner === 'guest' ? 6 : 0;
+          resultData.set2_home = matchWinner === 'home' ? 6 : 0;
+          resultData.set2_guest = matchWinner === 'guest' ? 6 : 0;
+          resultData.set3_home = null;
+          resultData.set3_guest = null;
+        } else if (matchStatus === 'retired') {
           // Der Spieler, der NICHT aufgegeben hat, gewinnt
-          // Wir müssen prüfen, WELCHER Spieler aufgegeben hat
           // Standard: Wenn matchStatus = retired, nehmen wir an, dass der GAST aufgegeben hat
           matchWinner = 'home'; // Default: Heim gewinnt bei retired
-        } else if (matchStatus === 'walkover') {
-          // Kampflos: Der anwesende Spieler gewinnt
-          matchWinner = 'home'; // Default: Heim gewinnt bei w/o
         } else if (matchStatus === 'disqualified') {
           // Der NICHT disqualifizierte Spieler gewinnt
           matchWinner = 'home'; // Default: Heim gewinnt bei Disqualifikation
@@ -2089,7 +2126,49 @@ const LiveResultsWithDB = () => {
             <option value="disqualified">⛔ Disqualifikation</option>
             <option value="defaulted">❌ Nicht angetreten</option>
           </select>
-          {matchData.matchStatus && matchData.matchStatus !== 'normal' && (
+          
+          {/* ✅ NEU: Gewinner-Auswahl bei Walkover */}
+          {matchData.matchStatus === 'walkover' && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', fontSize: '0.875rem', color: '#92400e' }}>
+                🏆 Welches Team gewinnt kampflos?
+              </label>
+              <select
+                value={walkoverWinners[matchData.id] || ''}
+                onChange={(e) => handleWalkoverWinnerChange(matchData.id, e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  borderRadius: '6px',
+                  border: '2px solid #f59e0b',
+                  fontSize: '0.875rem',
+                  backgroundColor: '#fef3c7',
+                  fontWeight: '600'
+                }}
+              >
+                <option value="">-- Bitte wählen --</option>
+                <option value="home">
+                  🏠 {match?.home_team?.club_name || 'Heim-Team'} {match?.home_team?.team_name || ''}
+                </option>
+                <option value="guest">
+                  ✈️ {match?.away_team?.club_name || 'Gast-Team'} {match?.away_team?.team_name || ''}
+                </option>
+              </select>
+              <div style={{ 
+                marginTop: '0.5rem', 
+                padding: '0.5rem', 
+                backgroundColor: 'rgba(255, 255, 255, 0.7)', 
+                borderRadius: '6px',
+                fontSize: '0.75rem',
+                color: '#92400e',
+                lineHeight: '1.5'
+              }}>
+                ℹ️ Wähle, welches Team kampflos gewinnt. Das Ergebnis wird automatisch als 6:0, 6:0 gespeichert.
+              </div>
+            </div>
+          )}
+          
+          {matchData.matchStatus && matchData.matchStatus !== 'normal' && matchData.matchStatus !== 'walkover' && (
             <div style={{ 
               marginTop: '0.5rem', 
               padding: '0.5rem', 
