@@ -302,18 +302,61 @@ function calculateSimilarity(str1, str2) {
  */
 async function saveClubNumber(supabase, clubId, clubNumber) {
   try {
+    // Prüfe zuerst, ob es Teams mit dieser club_id gibt
+    const { data: teams, error: teamsError } = await supabase
+      .from('team_info')
+      .select('id, club_id')
+      .eq('club_id', clubId)
+      .limit(1);
+    
+    if (teamsError) {
+      console.error(`[find-club-numbers] ❌ Fehler beim Prüfen der Teams:`, teamsError);
+      throw teamsError;
+    }
+    
+    if (!teams || teams.length === 0) {
+      console.warn(`[find-club-numbers] ⚠️ Keine Teams mit club_id ${clubId} gefunden - Club-Nummer kann nicht gespeichert werden`);
+      // Versuche trotzdem, falls es Teams mit club_name gibt
+      const { data: clubs } = await supabase
+        .from('club_info')
+        .select('name')
+        .eq('id', clubId)
+        .single();
+      
+      if (clubs) {
+        // Suche Teams nach club_name
+        const { error: updateByNameError } = await supabase
+          .from('team_info')
+          .update({ club_number: clubNumber })
+          .eq('club_name', clubs.name);
+        
+        if (updateByNameError) {
+          throw new Error(`Keine Teams gefunden und Update nach club_name fehlgeschlagen: ${updateByNameError.message}`);
+        }
+        console.log(`[find-club-numbers] ✅ Club-Nummer ${clubNumber} für Club "${clubs.name}" via club_name gespeichert`);
+        return;
+      }
+      throw new Error(`Keine Teams mit club_id ${clubId} gefunden`);
+    }
+    
     // Update alle Teams dieses Clubs
-    const { error: updateError } = await supabase
+    const { data: updatedTeams, error: updateError } = await supabase
       .from('team_info')
       .update({ club_number: clubNumber })
-      .eq('club_id', clubId);
+      .eq('club_id', clubId)
+      .select('id');
     
     if (updateError) {
       console.error(`[find-club-numbers] ❌ Fehler beim Speichern der Club-Nummer:`, updateError);
       throw updateError;
     }
     
-    console.log(`[find-club-numbers] ✅ Club-Nummer ${clubNumber} für Club ${clubId} gespeichert`);
+    const updatedCount = updatedTeams?.length || 0;
+    console.log(`[find-club-numbers] ✅ Club-Nummer ${clubNumber} für Club ${clubId} gespeichert (${updatedCount} Teams aktualisiert)`);
+    
+    if (updatedCount === 0) {
+      throw new Error(`Keine Teams aktualisiert - möglicherweise RLS-Problem oder keine Teams mit club_id ${clubId}`);
+    }
   } catch (error) {
     console.error(`[find-club-numbers] ❌ Fehler beim Speichern:`, error);
     throw error;
@@ -404,13 +447,14 @@ async function handler(req, res) {
         // Nimm das beste Match (höchster Score)
         const bestMatch = searchResults[0];
         
-        // Prüfe ob Match-Score hoch genug ist (mindestens 0.7)
-        if (bestMatch.matchScore < 0.7) {
+        // Prüfe ob Match-Score hoch genug ist (mindestens 0.5 für automatisches Speichern)
+        // Bei niedrigerem Score wird trotzdem gespeichert, aber mit Warnung
+        if (bestMatch.matchScore < 0.5) {
           results.push({
             clubId: club.id,
             clubName: club.name,
             status: 'low_confidence',
-            message: `Niedrige Übereinstimmung (${Math.round(bestMatch.matchScore * 100)}%): ${bestMatch.clubName}`,
+            message: `Sehr niedrige Übereinstimmung (${Math.round(bestMatch.matchScore * 100)}%): ${bestMatch.clubName} - nicht gespeichert`,
             clubNumber: bestMatch.clubNumber,
             alternatives: searchResults.slice(0, 3).map(r => ({
               clubNumber: r.clubNumber,
@@ -424,7 +468,20 @@ async function handler(req, res) {
         
         // Speichere Club-Nummer (wenn nicht dryRun)
         if (!dryRun) {
-          await saveClubNumber(supabase, club.id, bestMatch.clubNumber);
+          try {
+            await saveClubNumber(supabase, club.id, bestMatch.clubNumber);
+          } catch (saveError) {
+            console.error(`[find-club-numbers] ❌ Fehler beim Speichern für ${club.name}:`, saveError);
+            results.push({
+              clubId: club.id,
+              clubName: club.name,
+              status: 'error',
+              message: `Club-Nummer gefunden, aber Speichern fehlgeschlagen: ${saveError.message}`,
+              clubNumber: bestMatch.clubNumber
+            });
+            errorCount++;
+            continue;
+          }
         }
         
         results.push({
