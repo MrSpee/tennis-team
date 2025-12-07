@@ -355,7 +355,8 @@ const ClubRostersTab = () => {
             Automatischer Bulk-Import
           </h3>
           <p className="bulk-import-description">
-            Importiert automatisch Meldelisten für alle Vereine mit club_number in der Datenbank.
+            Importiert automatisch Meldelisten für alle Vereine. 
+            <strong> Wichtig:</strong> Der Bulk-Import funktioniert nur, wenn die Teams bereits eine `club_number` haben oder eine `clubPools`-URL in `team_seasons.source_url` vorhanden ist.
             Die Teams werden automatisch zugeordnet basierend auf Category.
           </p>
           
@@ -565,6 +566,23 @@ const ClubRostersTab = () => {
                   </li>
                 ))}
               </ul>
+            )}
+            {importResult.failedTeams && importResult.failedTeams.length > 0 && (
+              <div style={{ marginTop: '1rem', padding: '1rem', background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '8px' }}>
+                <strong style={{ color: '#dc2626' }}>⚠️ Probleme beim Import:</strong>
+                <ul style={{ marginTop: '0.5rem', paddingLeft: '1.5rem' }}>
+                  {importResult.failedTeams.map((failed, idx) => (
+                    <li key={idx} style={{ color: '#991b1b', marginBottom: '0.25rem' }}>
+                      <strong>{failed.contestType || failed.teamName}</strong>: {failed.reason}
+                      {failed.teamUrl && (
+                        <div style={{ fontSize: '0.875rem', color: '#7f1d1d', marginTop: '0.25rem' }}>
+                          URL: <a href={failed.teamUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6' }}>{failed.teamUrl}</a>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </div>
         </div>

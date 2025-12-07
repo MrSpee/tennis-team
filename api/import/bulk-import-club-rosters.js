@@ -26,7 +26,19 @@ function buildClubPoolsUrl(clubNumber) {
 }
 
 /**
- * Importiert Meldelisten für alle Vereine mit club_number
+ * Extrahiert club_number aus einer clubPools-URL
+ */
+function extractClubNumberFromUrl(url) {
+  if (!url) return null;
+  const match = url.match(/[?&]club=(\d+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Importiert Meldelisten für alle Vereine
+ * Strategie: 
+ * 1. Versuche Teams mit club_number zu finden
+ * 2. Falls keine vorhanden: Lade alle Clubs und versuche clubPools-URLs zu konstruieren
  */
 async function bulkImportClubRosters(supabase, targetSeason, options = {}) {
   const {
@@ -45,9 +57,9 @@ async function bulkImportClubRosters(supabase, targetSeason, options = {}) {
   };
   
   try {
-    // 1. Lade alle Teams mit club_number
+    // 1. Versuche zuerst Teams mit club_number zu finden
     console.log('[bulk-import-club-rosters] 🔍 Lade Teams mit club_number...');
-    const { data: teams, error: teamsError } = await supabase
+    const { data: teamsWithClubNumber, error: teamsError } = await supabase
       .from('team_info')
       .select('id, club_id, club_name, team_name, category, club_number, club_info!inner(id, name)')
       .not('club_number', 'is', null)
@@ -57,41 +69,134 @@ async function bulkImportClubRosters(supabase, targetSeason, options = {}) {
       throw new Error(`Fehler beim Laden der Teams: ${teamsError.message}`);
     }
     
-    if (!teams || teams.length === 0) {
-      return {
-        ...results,
-        message: 'Keine Teams mit club_number gefunden'
-      };
-    }
+    let clubs = [];
     
-    // 2. Gruppiere Teams nach Club-Nummer
-    const clubsMap = new Map();
-    teams.forEach(team => {
-      if (!team.club_number) return;
+    if (teamsWithClubNumber && teamsWithClubNumber.length > 0) {
+      // Strategie 1: Verwende Teams mit club_number
+      console.log(`[bulk-import-club-rosters] ✅ ${teamsWithClubNumber.length} Teams mit club_number gefunden`);
       
-      if (!clubsMap.has(team.club_number)) {
-        clubsMap.set(team.club_number, {
-          clubNumber: team.club_number,
-          clubId: team.club_id,
-          clubName: team.club_name || team.club_info?.name,
-          teams: []
+      const clubsMap = new Map();
+      teamsWithClubNumber.forEach(team => {
+        if (!team.club_number) return;
+        
+        if (!clubsMap.has(team.club_number)) {
+          clubsMap.set(team.club_number, {
+            clubNumber: team.club_number,
+            clubId: team.club_id,
+            clubName: team.club_name || team.club_info?.name,
+            teams: []
+          });
+        }
+        
+        clubsMap.get(team.club_number).teams.push({
+          id: team.id,
+          category: team.category,
+          teamName: team.team_name
         });
+      });
+      
+      clubs = Array.from(clubsMap.values());
+    } else {
+      // Strategie 2: Lade alle Clubs und versuche club_number aus team_seasons.source_url zu extrahieren
+      console.log('[bulk-import-club-rosters] ⚠️ Keine Teams mit club_number gefunden. Versuche club_number aus source_url zu extrahieren...');
+      
+      const { data: allClubs, error: clubsError } = await supabase
+        .from('club_info')
+        .select('id, name')
+        .order('name', { ascending: true });
+      
+      if (clubsError) {
+        throw new Error(`Fehler beim Laden der Vereine: ${clubsError.message}`);
       }
       
-      clubsMap.get(team.club_number).teams.push({
-        id: team.id,
-        category: team.category,
-        teamName: team.team_name
-      });
-    });
+      if (!allClubs || allClubs.length === 0) {
+        return {
+          ...results,
+          message: 'Keine Vereine in der Datenbank gefunden'
+        };
+      }
+      
+      // Für jeden Club: Suche nach team_seasons mit clubPools-URLs
+      const clubsMap = new Map();
+      
+      for (const club of allClubs) {
+        // Lade Teams dieses Clubs mit team_seasons
+        const { data: teams, error: teamsError2 } = await supabase
+          .from('team_info')
+          .select(`
+            id,
+            club_id,
+            club_name,
+            team_name,
+            category,
+            team_seasons(
+              source_url,
+              season
+            )
+          `)
+          .eq('club_id', club.id);
+        
+        if (teamsError2) {
+          console.warn(`[bulk-import-club-rosters] ⚠️ Fehler beim Laden der Teams für Club ${club.name}:`, teamsError2.message);
+          continue;
+        }
+        
+        if (!teams || teams.length === 0) continue;
+        
+        // Versuche club_number aus source_url zu extrahieren
+        let clubNumber = null;
+        for (const team of teams) {
+          if (team.team_seasons && Array.isArray(team.team_seasons) && team.team_seasons.length > 0) {
+            for (const season of team.team_seasons) {
+              if (season.season === targetSeason && season.source_url) {
+                if (season.source_url.includes('clubPools')) {
+                  clubNumber = extractClubNumberFromUrl(season.source_url);
+                  if (clubNumber) break;
+                }
+              }
+            }
+            if (clubNumber) break;
+          }
+        }
+        
+        if (clubNumber) {
+          if (!clubsMap.has(clubNumber)) {
+            clubsMap.set(clubNumber, {
+              clubNumber: clubNumber,
+              clubId: club.id,
+              clubName: club.name,
+              teams: []
+            });
+          }
+          
+          teams.forEach(team => {
+            clubsMap.get(clubNumber).teams.push({
+              id: team.id,
+              category: team.category,
+              teamName: team.team_name
+            });
+          });
+        }
+      }
+      
+      clubs = Array.from(clubsMap.values());
+      
+      if (clubs.length === 0) {
+        return {
+          ...results,
+          message: 'Keine Vereine mit clubPools-URLs gefunden. Bitte verwende zuerst den Einzel-Import, um clubPools-URLs zu importieren. Diese werden dann automatisch für den Bulk-Import verwendet.'
+        };
+      }
+      
+      console.log(`[bulk-import-club-rosters] ✅ ${clubs.length} Vereine mit clubPools-URLs gefunden`);
+    }
     
-    const clubs = Array.from(clubsMap.values());
     results.total = clubs.length;
     
     // Limit für Test-Zwecke
     const clubsToProcess = maxClubs ? clubs.slice(0, maxClubs) : clubs;
     
-    console.log(`[bulk-import-club-rosters] 📊 ${clubsToProcess.length} Vereine mit club_number gefunden`);
+    console.log(`[bulk-import-club-rosters] 📊 ${clubsToProcess.length} Vereine gefunden (${clubs.length} insgesamt)`);
     
     // 3. Importiere Meldelisten für jeden Verein
     for (let i = 0; i < clubsToProcess.length; i++) {
@@ -120,9 +225,42 @@ async function bulkImportClubRosters(supabase, targetSeason, options = {}) {
         // Erstelle Team-Mapping automatisch
         const teamMapping = {};
         parseResult.teams.forEach(team => {
-          const matchingTeam = club.teams.find(t => t.category === team.contestType);
+          // Versuche exaktes Matching
+          let matchingTeam = club.teams.find(t => t.category === team.contestType);
+          
+          // Falls kein exaktes Match: Versuche flexible Matching
+          if (!matchingTeam) {
+            // Normalisiere Kategorien für Vergleich (z.B. "Damen 30" vs "Frauen 30")
+            const normalizeCategory = (cat) => {
+              if (!cat) return '';
+              return cat.toLowerCase()
+                .replace(/damen/g, 'damen')
+                .replace(/frauen/g, 'damen')
+                .replace(/herren/g, 'herren')
+                .trim();
+            };
+            
+            const normalizedContestType = normalizeCategory(team.contestType);
+            matchingTeam = club.teams.find(t => {
+              const normalizedCategory = normalizeCategory(t.category);
+              return normalizedCategory === normalizedContestType;
+            });
+          }
+          
+          // Falls immer noch kein Match: Versuche Teilstring-Matching
+          if (!matchingTeam) {
+            matchingTeam = club.teams.find(t => {
+              const contestLower = team.contestType.toLowerCase();
+              const categoryLower = t.category.toLowerCase();
+              return contestLower.includes(categoryLower) || categoryLower.includes(contestLower);
+            });
+          }
+          
           if (matchingTeam) {
             teamMapping[team.contestType] = matchingTeam.id;
+            console.log(`[bulk-import-club-rosters] ✅ Team-Mapping: "${team.contestType}" → "${matchingTeam.category}" (${matchingTeam.id})`);
+          } else {
+            console.warn(`[bulk-import-club-rosters] ⚠️ Kein Team-Match gefunden für "${team.contestType}"`);
           }
         });
         
@@ -144,35 +282,98 @@ async function bulkImportClubRosters(supabase, targetSeason, options = {}) {
           
           // Importiere Meldelisten für jedes Team
           const savedRosters = [];
+          const failedRosters = [];
+          
           for (const [contestType, teamId] of Object.entries(teamMapping)) {
             const team = parseResult.teams.find(t => t.contestType === contestType);
-            if (team && team.roster && team.roster.length > 0) {
-              try {
-                const saved = await saveTeamRoster(supabase, teamId, targetSeason, team.roster);
-                savedRosters.push({
-                  teamName: team.teamName,
-                  contestType: contestType,
-                  total: saved.stats.total,
-                  matched: saved.stats.matched
-                });
-                
-                // Pause zwischen Teams
-                await new Promise(resolve => setTimeout(resolve, delayBetweenTeams));
-              } catch (error) {
-                console.error(`[bulk-import-club-rosters] ❌ Fehler beim Speichern der Meldeliste für Team ${team.teamName}:`, error);
-              }
+            
+            if (!team) {
+              failedRosters.push({
+                contestType,
+                teamId,
+                reason: 'Team nicht in Parse-Ergebnis gefunden'
+              });
+              continue;
+            }
+            
+            if (!team.roster || team.roster.length === 0) {
+              failedRosters.push({
+                contestType,
+                teamName: team.teamName,
+                teamId,
+                reason: `Keine Spieler in Meldeliste gefunden (Roster leer oder Parsing fehlgeschlagen)`,
+                teamUrl: team.teamUrl
+              });
+              console.warn(`[bulk-import-club-rosters] ⚠️ Team "${contestType}" hat leere Meldeliste (${team.roster?.length || 0} Spieler)`);
+              continue;
+            }
+            
+            try {
+              const saved = await saveTeamRoster(supabase, teamId, targetSeason, team.roster);
+              savedRosters.push({
+                teamName: team.teamName,
+                contestType: contestType,
+                total: saved.stats.total,
+                matched: saved.stats.matched
+              });
+              
+              // Pause zwischen Teams
+              await new Promise(resolve => setTimeout(resolve, delayBetweenTeams));
+            } catch (error) {
+              console.error(`[bulk-import-club-rosters] ❌ Fehler beim Speichern der Meldeliste für Team ${team.teamName}:`, error);
+              failedRosters.push({
+                contestType,
+                teamName: team.teamName,
+                teamId,
+                reason: `Fehler beim Speichern: ${error.message}`
+              });
             }
           }
           
-          results.success++;
-          results.clubs.push({
-            clubNumber: club.clubNumber,
-            clubName: club.clubName,
-            status: 'success',
-            teamsImported: Object.keys(teamMapping).length,
-            totalPlayers: savedRosters.reduce((sum, r) => sum + (r.total || 0), 0),
-            matchedPlayers: savedRosters.reduce((sum, r) => sum + (r.matched || 0), 0)
-          });
+          // Warnung wenn Roster leer waren
+          if (failedRosters.length > 0) {
+            console.warn(`[bulk-import-club-rosters] ⚠️ ${failedRosters.length} Teams mit Problemen:`, failedRosters);
+          }
+          
+          // Status basierend auf Erfolg
+          const hasFailures = failedRosters.length > 0;
+          const hasSuccesses = savedRosters.length > 0;
+          
+          if (hasFailures && !hasSuccesses) {
+            results.failed++;
+            results.clubs.push({
+              clubNumber: club.clubNumber,
+              clubName: club.clubName,
+              status: 'failed',
+              reason: `${failedRosters.length} Teams konnten nicht importiert werden`,
+              failedTeams: failedRosters,
+              teamsImported: 0,
+              totalPlayers: 0,
+              matchedPlayers: 0
+            });
+          } else if (hasFailures && hasSuccesses) {
+            results.success++;
+            results.clubs.push({
+              clubNumber: club.clubNumber,
+              clubName: club.clubName,
+              status: 'partial',
+              teamsImported: savedRosters.length,
+              teamsFailed: failedRosters.length,
+              totalPlayers: savedRosters.reduce((sum, r) => sum + (r.total || 0), 0),
+              matchedPlayers: savedRosters.reduce((sum, r) => sum + (r.matched || 0), 0),
+              failedTeams: failedRosters
+            });
+          } else {
+            results.success++;
+            results.clubs.push({
+              clubNumber: club.clubNumber,
+              clubName: club.clubName,
+              status: 'success',
+              teamsImported: savedRosters.length,
+              totalPlayers: savedRosters.reduce((sum, r) => sum + (r.total || 0), 0),
+              matchedPlayers: savedRosters.reduce((sum, r) => sum + (r.matched || 0), 0)
+            });
+          }
         } else {
           // Dry-Run: Nur zählen
           results.success++;

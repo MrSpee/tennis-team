@@ -30,7 +30,7 @@ function Rankings() {
   const [lkCalculations, setLkCalculations] = useState({});
   const [allMatches, setAllMatches] = useState([]);
   const [rosterRanks, setRosterRanks] = useState({}); // {playerId: rank} für Sortierung nach Meldelisten-Rang
-  const [currentSeason, setCurrentSeason] = useState('Winter 2025/26'); // Aktuelle Saison (für Meldelisten)
+  const [currentSeason, setCurrentSeason] = useState('Winter 2025/26'); // Aktuelle Saison (für Meldelisten) - wird dynamisch geladen
   
   // LK-Berechnung Konstanten
   const SEASON_START = new Date('2025-09-29');
@@ -297,7 +297,12 @@ function Rankings() {
         console.log(`[Rankings] ✅ Meldeliste vollständig gematched (${matchedEntries}/${totalEntries}) - keine weitere Aktion nötig`);
       }
       
-      const { data: roster, error: rosterError } = await supabase
+      // Versuche verschiedene Saison-Formate
+      let roster = null;
+      let rosterError = null;
+      
+      // Versuche 1: Exakte Saison
+      let { data, error } = await supabase
         .from('team_roster')
         .select(`
           id,
@@ -308,11 +313,53 @@ function Rankings() {
           tvm_id,
           birth_year,
           team_id,
+          season,
           team_info!inner(club_id)
         `)
         .eq('team_id', selectedTeamId)
         .eq('season', currentSeason)
-        .order('rank', { ascending: true }); // Sortiere nach Rang
+        .order('rank', { ascending: true });
+      
+      if (error || !data || data.length === 0) {
+        // Versuche 2: Alle Saisons für dieses Team (nehme die neueste)
+        const { data: allRosters, error: allError } = await supabase
+          .from('team_roster')
+          .select(`
+            id,
+            player_id,
+            rank,
+            player_name,
+            lk,
+            tvm_id,
+            birth_year,
+            team_id,
+            season,
+            team_info!inner(club_id)
+          `)
+          .eq('team_id', selectedTeamId)
+          .order('created_at', { ascending: false });
+        
+        if (!allError && allRosters && allRosters.length > 0) {
+          // Finde die häufigste Saison (falls mehrere vorhanden)
+          const seasonCounts = {};
+          allRosters.forEach(r => {
+            seasonCounts[r.season] = (seasonCounts[r.season] || 0) + 1;
+          });
+          const mostCommonSeason = Object.keys(seasonCounts).reduce((a, b) => 
+            seasonCounts[a] > seasonCounts[b] ? a : b
+          );
+          
+          // Update currentSeason und filtere nach dieser Saison
+          setCurrentSeason(mostCommonSeason);
+          roster = allRosters.filter(r => r.season === mostCommonSeason);
+          console.log(`✅ Meldeliste gefunden für Saison: ${mostCommonSeason} (${roster.length} Spieler)`);
+        } else {
+          roster = [];
+          rosterError = allError;
+        }
+      } else {
+        roster = data;
+      }
       
       if (rosterError) {
         console.warn('⚠️ Error loading roster (Tabelle existiert möglicherweise noch nicht):', rosterError);
@@ -363,9 +410,14 @@ function Rankings() {
       // Filtere nach Club
       const clubRoster = roster.filter(r => r.team_info?.club_id === selectedClubId);
       
+      // ✅ WICHTIG: Auch wenn keine Meldeliste vorhanden ist, zeige leere Liste (nicht return!)
+      // Das Team sollte trotzdem im Dropdown erscheinen
       if (clubRoster.length === 0) {
+        console.log(`ℹ️ Keine Meldeliste für Team ${selectedTeamId} gefunden - zeige leere Liste`);
         setFilteredPlayers([]);
         setRosterRanks({});
+        // NICHT return - lade stattdessen Spieler aus team_memberships als Fallback
+        // (wird weiter unten behandelt)
         return;
       }
       

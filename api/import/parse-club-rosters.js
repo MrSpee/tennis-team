@@ -59,11 +59,49 @@ async function parseClubPoolsPage(clubPoolsUrl, targetSeason) {
     
     // Finde den Bereich für die Ziel-Saison
     // Die Saison wird als Überschrift angezeigt, z.B. "Winter 2025/2026"
-    const seasonPattern = new RegExp(`<h2[^>]*>\\s*${targetSeason.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*</h2>`, 'i');
-    const seasonMatch = html.match(seasonPattern);
+    // Versuche verschiedene Saison-Formate (z.B. "Winter 2025/2026" vs "Winter 2025/26")
+    const normalizedSeason = targetSeason.replace(/\s+/g, ' ').trim();
+    let seasonPattern = new RegExp(`<h2[^>]*>\\s*${normalizedSeason.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*</h2>`, 'i');
+    let seasonMatch = html.match(seasonPattern);
+    
+    // Fallback: Versuche alternative Saison-Formate
+    if (!seasonMatch) {
+      // Versuche "Winter 2025/26" statt "Winter 2025/2026"
+      const altSeason = normalizedSeason.replace(/(\d{4})\/(\d{4})/, (match, y1, y2) => {
+        const shortY2 = y2.substring(2); // "2026" -> "26"
+        return `${y1}/${shortY2}`;
+      });
+      if (altSeason !== normalizedSeason) {
+        seasonPattern = new RegExp(`<h2[^>]*>\\s*${altSeason.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*</h2>`, 'i');
+        seasonMatch = html.match(seasonPattern);
+        if (seasonMatch) {
+          console.log(`[parse-club-rosters] ✅ Saison mit alternativem Format gefunden: "${altSeason}"`);
+        }
+      }
+    }
+    
+    // Fallback 2: Versuche umgekehrt (von "2025/26" zu "2025/2026")
+    if (!seasonMatch) {
+      const altSeason2 = normalizedSeason.replace(/(\d{4})\/(\d{2})/, (match, y1, y2) => {
+        const fullY2 = y2.length === 2 ? `20${y2}` : y2; // "26" -> "2026"
+        return `${y1}/${fullY2}`;
+      });
+      if (altSeason2 !== normalizedSeason) {
+        seasonPattern = new RegExp(`<h2[^>]*>\\s*${altSeason2.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*</h2>`, 'i');
+        seasonMatch = html.match(seasonPattern);
+        if (seasonMatch) {
+          console.log(`[parse-club-rosters] ✅ Saison mit alternativem Format gefunden: "${altSeason2}"`);
+        }
+      }
+    }
     
     if (!seasonMatch) {
       console.warn(`[parse-club-rosters] ⚠️ Saison "${targetSeason}" nicht gefunden auf der Seite`);
+      // Debug: Zeige verfügbare Saisons
+      const allSeasons = html.match(/<h2[^>]*>([^<]+)<\/h2>/gi);
+      if (allSeasons) {
+        console.warn(`[parse-club-rosters] ⚠️ Verfügbare Saisons auf der Seite:`, allSeasons.map(s => s.replace(/<[^>]+>/g, '')).slice(0, 5));
+      }
       return { clubNumber, teams: [] };
     }
     
@@ -102,6 +140,13 @@ async function parseClubPoolsPage(clubPoolsUrl, targetSeason) {
       // Parse die Meldeliste direkt von der Team-Detail-Seite
       const roster = await parseRosterFromClubPoolsPage(teamUrl);
       
+      // Warnung wenn Roster leer ist
+      if (!roster || roster.length === 0) {
+        console.warn(`[parse-club-rosters] ⚠️ Keine Spieler für Team "${contestType}" gefunden (URL: ${teamUrl})`);
+      } else {
+        console.log(`[parse-club-rosters] ✅ ${roster.length} Spieler für Team "${contestType}" gefunden`);
+      }
+      
       // Kurze Pause zwischen Requests (um nicht als Bot erkannt zu werden)
       await new Promise(resolve => setTimeout(resolve, 500));
       
@@ -109,7 +154,8 @@ async function parseClubPoolsPage(clubPoolsUrl, targetSeason) {
         contestType, // z.B. "Herren 40"
         teamName,    // z.B. "Herren 40"
         teamUrl,     // clubPools-URL für dieses Team
-        roster       // Meldeliste (Array von Spielern)
+        roster: roster || [], // Meldeliste (Array von Spielern) - immer Array, auch wenn leer
+        playerCount: roster?.length || 0 // Anzahl Spieler für einfachere Anzeige
       });
     }
     
@@ -169,9 +215,10 @@ async function parseRosterFromClubPoolsPage(teamUrl) {
     // Pattern für clubPools-Seite: Rang | Mannschaft | LK | ID-Nummer | Name (Jahrgang) | Nation | ...
     // Die Struktur ist: <tr><td>Rang</td><td>Mannschaft</td><td>LK</td><td>ID-Nummer</td><td>Name (Jahrgang)</td>...
     // WICHTIG: <td> Elemente können Whitespace und Zeilenumbrüche enthalten
+    // WICHTIG: Das Geburtsjahr steht NACH dem </a> Tag, nicht im <a> Tag!
     // Pattern 1: Vollständige Zeile mit allen Feldern
-    // Angepasst für clubPools-Struktur: Rang | Mannschaft | LK | ID-Nummer | Name (Jahrgang)
-    const fullRowPattern = /<tr[^>]*>(?![\s\S]*?<th)[\s\S]*?<td[^>]*>[\s\S]*?(\d{1,2})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d+)[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(LK[\d,\.]+)[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d{7,})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>[\s\S]*?(?:\((\d{4})\))?[\s\S]*?<\/td>/gi;
+    // Struktur: <td>Rang</td><td>Mannschaft</td><td>LK</td><td>ID-Nummer</td><td><a>Name</a> (Jahrgang)</td>
+    const fullRowPattern = /<tr[^>]*>(?![\s\S]*?<th)[\s\S]*?<td[^>]*>[\s\S]*?(\d{1,2})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d+)[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(LK[\d,\.]+)[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d{7,})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>([\s\S]*?)<\/td>/gi;
     
     let match;
     while ((match = fullRowPattern.exec(htmlToParse)) !== null) {
@@ -179,34 +226,36 @@ async function parseRosterFromClubPoolsPage(teamUrl) {
       const lk = match[3].trim();
       const tvmId = match[4].trim();
       const name = match[5].trim();
-      let birthYear = match[6] ? parseInt(match[6], 10) : null;
       
-      if (!birthYear) {
-        const rowEnd = htmlToParse.indexOf('</tr>', match.index);
-        const rowContent = htmlToParse.substring(match.index, rowEnd);
-        const birthMatch = rowContent.match(/\((\d{4})\)/);
-        if (birthMatch) {
-          birthYear = parseInt(birthMatch[1], 10);
-        }
+      // Geburtsjahr steht NACH dem </a> Tag im selben <td>
+      let birthYear = null;
+      const nameCellContent = match[6] || ''; // Inhalt nach </a> bis </td>
+      const birthMatch = nameCellContent.match(/\((\d{4})\)/);
+      if (birthMatch) {
+        birthYear = parseInt(birthMatch[1], 10);
       }
       
-      // Auf clubPools-Seite gibt es keine Einzel/Doppel-Bilanzen
-      roster.push({
-        rank,
-        name,
-        lk: lk.startsWith('LK') ? lk : `LK ${lk}`,
-        tvmId,
-        birthYear,
-        singles: null,
-        doubles: null,
-        total: null
-      });
+      // Validierung: Name und TVM-ID müssen vorhanden sein
+      if (name && name.length > 2 && tvmId && tvmId.match(/^\d+$/)) {
+        roster.push({
+          rank,
+          name,
+          lk: lk.startsWith('LK') ? lk : `LK ${lk}`,
+          tvmId,
+          birthYear,
+          singles: null,
+          doubles: null,
+          total: null
+        });
+      } else {
+        console.warn(`[parse-club-rosters] ⚠️ Ungültige Zeile übersprungen: rank=${rank}, name="${name}", tvmId="${tvmId}"`);
+      }
     }
     
-      // Pattern 2: Fallback - Vereinfachtes Pattern (ohne Geburtsjahr)
-      if (roster.length === 0) {
-        console.log('[parse-club-rosters] ⚠️ Vollständiges Pattern hat keine Ergebnisse, versuche vereinfachtes Pattern...');
-        const simpleRowPattern = /<tr[^>]*>(?![\s\S]*?<th)[\s\S]*?<td[^>]*>[\s\S]*?(\d{1,2})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d+)[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(LK[\d,\.]+)[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d{7,})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/gi;
+    // Pattern 2: Fallback - Vereinfachtes Pattern (ohne Geburtsjahr)
+    if (roster.length === 0) {
+      console.log('[parse-club-rosters] ⚠️ Vollständiges Pattern hat keine Ergebnisse, versuche vereinfachtes Pattern...');
+      const simpleRowPattern = /<tr[^>]*>(?![\s\S]*?<th)[\s\S]*?<td[^>]*>[\s\S]*?(\d{1,2})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d+)[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(LK[\d,\.]+)[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d{7,})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>([\s\S]*?)<\/td>/gi;
       let simpleMatch;
       
       while ((simpleMatch = simpleRowPattern.exec(htmlToParse)) !== null) {
@@ -214,15 +263,13 @@ async function parseRosterFromClubPoolsPage(teamUrl) {
         const lk = simpleMatch[3].trim();
         const tvmId = simpleMatch[4].trim();
         const name = simpleMatch[5].trim();
-        let birthYear = simpleMatch[6] ? parseInt(simpleMatch[6], 10) : null;
         
-        if (!birthYear) {
-          const rowEnd = htmlToParse.indexOf('</tr>', simpleMatch.index);
-          const rowContent = htmlToParse.substring(simpleMatch.index, rowEnd);
-          const birthMatch = rowContent.match(/\((\d{4})\)/);
-          if (birthMatch) {
-            birthYear = parseInt(birthMatch[1], 10);
-          }
+        // Geburtsjahr aus dem Inhalt nach </a> extrahieren
+        let birthYear = null;
+        const nameCellContent = simpleMatch[6] || '';
+        const birthMatch = nameCellContent.match(/\((\d{4})\)/);
+        if (birthMatch) {
+          birthYear = parseInt(birthMatch[1], 10);
         }
         
         if (name && name.length > 2 && tvmId && tvmId.match(/^\d+$/)) {
@@ -240,13 +287,62 @@ async function parseRosterFromClubPoolsPage(teamUrl) {
       }
     }
     
-    console.log(`[parse-club-rosters] ✅ ${roster.length} Spieler aus Meldeliste extrahiert`);
+    if (roster.length === 0) {
+      console.warn(`[parse-club-rosters] ⚠️ KEINE Spieler aus Meldeliste extrahiert für URL: ${teamUrl}`);
+      console.warn(`[parse-club-rosters] ⚠️ HTML-Länge: ${html.length} Zeichen`);
+      
+      // Debug: Speichere HTML-Snippet für Analyse
+      const tableMatchDebug = html.match(/<table[^>]*class\s*=\s*["']result-set["'][^>]*>/i);
+      if (!tableMatchDebug) {
+        console.warn(`[parse-club-rosters] ⚠️ Keine Tabelle mit class="result-set" gefunden`);
+      }
+      
+      const spielerHeadingDebug = html.indexOf('<h2>Spieler');
+      if (spielerHeadingDebug === -1) {
+        console.warn(`[parse-club-rosters] ⚠️ Keine "<h2>Spieler</h2>" Überschrift gefunden`);
+      }
+      
+      // Versuche alternative Patterns
+      const alternativePatterns = [
+        /<tr[^>]*>[\s\S]*?<td[^>]*>(\d+)[\s\S]*?<\/td>[\s\S]*?<td[^>]*>([^<]+)<\/a>/gi,
+        /<td[^>]*>(\d{1,2})<\/td>[\s\S]*?<td[^>]*>([^<]+)<\/a>/gi
+      ];
+      
+      for (let i = 0; i < alternativePatterns.length; i++) {
+        const altPattern = alternativePatterns[i];
+        const altMatches = html.match(altPattern);
+        if (altMatches && altMatches.length > 0) {
+          console.warn(`[parse-club-rosters] ⚠️ Alternative Pattern ${i + 1} hat ${altMatches.length} Matches gefunden, aber Struktur passt nicht`);
+        }
+      }
+    } else {
+      console.log(`[parse-club-rosters] ✅ ${roster.length} Spieler aus Meldeliste extrahiert`);
+    }
+    
     return roster;
     
   } catch (error) {
     console.error('[parse-club-rosters] ❌ Fehler beim Parsen der Meldeliste:', error);
+    console.error('[parse-club-rosters] ❌ URL war:', teamUrl);
     return [];
   }
+}
+
+/**
+ * Normalisiert Namen für Vergleich (behandelt "Nachname, Vorname" und "Vorname Nachname")
+ */
+function normalizeNameForComparison(name) {
+  if (!name) return '';
+  // Entferne Leerzeichen und konvertiere zu lowercase
+  const normalized = name.toLowerCase().trim().replace(/\s+/g, ' ');
+  
+  // Wenn Format "Nachname, Vorname" → konvertiere zu "Vorname Nachname"
+  const commaMatch = normalized.match(/^([^,]+),\s*(.+)$/);
+  if (commaMatch) {
+    return `${commaMatch[2]} ${commaMatch[1]}`.trim();
+  }
+  
+  return normalized;
 }
 
 /**
@@ -288,38 +384,26 @@ function calculateSimilarity(str1, str2) {
  */
 async function matchPlayerToUnified(supabase, rosterPlayer) {
   try {
-    // 1. Exakte Übereinstimmung (Name)
-    const { data: exactMatches } = await supabase
-      .from('players_unified')
-      .select('id, name, current_lk, tvm_id')
-      .ilike('name', rosterPlayer.name)
-      .limit(5);
+    const rosterName = rosterPlayer.name;
+    const normalizedRosterName = normalizeNameForComparison(rosterName);
     
-    if (exactMatches && exactMatches.length > 0) {
-      const exactMatch = exactMatches.find(p => 
-        p.name.toLowerCase() === rosterPlayer.name.toLowerCase()
-      );
-      if (exactMatch) {
-        console.log(`[parse-club-rosters] ✅ Exaktes Match gefunden: ${exactMatch.name} (${exactMatch.id})`);
-        return { playerId: exactMatch.id, confidence: 100, matchType: 'exact' };
-      }
-    }
+    console.log(`[parse-club-rosters] 🔍 Matche Spieler: "${rosterName}" (normalisiert: "${normalizedRosterName}")`);
     
-    // 2. TVM-ID Match (falls vorhanden)
+    // 1. TVM-ID Match (falls vorhanden) - HÖCHSTE Priorität (eindeutig!)
     if (rosterPlayer.tvmId) {
-      const { data: tvmMatches } = await supabase
+      const { data: tvmMatch } = await supabase
         .from('players_unified')
         .select('id, name, tvm_id')
         .eq('tvm_id', rosterPlayer.tvmId)
         .maybeSingle();
       
-      if (tvmMatches) {
-        console.log(`[parse-club-rosters] ✅ TVM-ID Match gefunden: ${tvmMatches.name} (${tvmMatches.id})`);
-        return { playerId: tvmMatches.id, confidence: 95, matchType: 'tvm_id' };
+      if (tvmMatch) {
+        console.log(`[parse-club-rosters] ✅ TVM-ID Match gefunden: ${tvmMatch.name} (${tvmMatch.id})`);
+        return { playerId: tvmMatch.id, confidence: 100, matchType: 'tvm_id' };
       }
     }
     
-    // 3. Fuzzy-Matching (Name-Ähnlichkeit)
+    // 2. Lade alle Spieler für Matching
     const { data: allPlayers } = await supabase
       .from('players_unified')
       .select('id, name, current_lk, tvm_id')
@@ -329,12 +413,30 @@ async function matchPlayerToUnified(supabase, rosterPlayer) {
       return { playerId: null, confidence: 0, matchType: 'none' };
     }
     
+    // 3. Exakte Übereinstimmung (Name) - auch mit normalisiertem Namen
+    const exactMatch = allPlayers.find(p => {
+      const normalizedPlayerName = normalizeNameForComparison(p.name);
+      return normalizedPlayerName === normalizedRosterName || 
+             p.name.toLowerCase() === rosterName.toLowerCase();
+    });
+    
+    if (exactMatch) {
+      console.log(`[parse-club-rosters] ✅ Exaktes Match gefunden: ${exactMatch.name} (${exactMatch.id})`);
+      return { playerId: exactMatch.id, confidence: 100, matchType: 'exact' };
+    }
+    
+    // 4. Fuzzy-Matching (Name-Ähnlichkeit) mit normalisiertem Namen
     const matches = allPlayers
-      .map(player => ({
-        ...player,
-        similarity: calculateSimilarity(player.name, rosterPlayer.name)
-      }))
-      .filter(m => m.similarity >= 70)
+      .map(player => {
+        const normalizedPlayerName = normalizeNameForComparison(player.name);
+        const similarity1 = calculateSimilarity(player.name, rosterName);
+        const similarity2 = calculateSimilarity(normalizedPlayerName, normalizedRosterName);
+        return {
+          ...player,
+          similarity: Math.max(similarity1, similarity2) // Nimm höchste Similarity
+        };
+      })
+      .filter(m => m.similarity >= 80) // Mindestens 80% Ähnlichkeit
       .sort((a, b) => b.similarity - a.similarity);
     
     if (matches.length > 0) {
@@ -360,14 +462,30 @@ async function matchPlayerToUnified(supabase, rosterPlayer) {
  */
 async function saveTeamRoster(supabase, teamId, season, roster) {
   try {
-    console.log(`[parse-club-rosters] 💾 Speichere Meldeliste für Team ${teamId}, Saison ${season}...`);
+    // Normalisiere Saison-Format (konsistent mit DB: "Winter 2025/26")
+    const normalizeSeason = (s) => {
+      if (!s) return s;
+      // Konvertiere "Winter 2025/2026" zu "Winter 2025/26"
+      return s.replace(/(\d{4})\/(\d{4})/, (match, y1, y2) => {
+        const shortY2 = y2.substring(2); // "2026" -> "26"
+        return `${y1}/${shortY2}`;
+      });
+    };
+    
+    const normalizedSeason = normalizeSeason(season);
+    console.log(`[parse-club-rosters] 💾 Speichere Meldeliste für Team ${teamId}, Saison ${normalizedSeason} (original: ${season})...`);
+    
+    // Validierung: Roster muss vorhanden sein
+    if (!roster || roster.length === 0) {
+      throw new Error('Roster ist leer - keine Spieler zum Speichern');
+    }
     
     // Lösche alte Einträge für dieses Team/Saison
     const { error: deleteError } = await supabase
       .from('team_roster')
       .delete()
       .eq('team_id', teamId)
-      .eq('season', season);
+      .eq('season', normalizedSeason);
     
     if (deleteError) {
       console.warn('[parse-club-rosters] ⚠️ Fehler beim Löschen alter Einträge:', deleteError);
@@ -380,14 +498,26 @@ async function saveTeamRoster(supabase, teamId, season, roster) {
     let unmatchedCount = 0;
     
     for (const player of roster) {
+      // Validierung: rank muss positiv sein (Constraint in DB)
+      if (!player.rank || player.rank <= 0) {
+        console.warn(`[parse-club-rosters] ⚠️ Ungültiger Rang für Spieler "${player.name}": ${player.rank} - überspringe`);
+        continue;
+      }
+      
+      // Validierung: name muss vorhanden sein
+      if (!player.name || player.name.trim().length < 2) {
+        console.warn(`[parse-club-rosters] ⚠️ Ungültiger Name für Spieler mit Rang ${player.rank}: "${player.name}" - überspringe`);
+        continue;
+      }
+      
       const matchResult = await matchPlayerToUnified(supabase, player);
       
       rosterEntries.push({
         team_id: teamId,
-        season: season,
+        season: normalizedSeason, // Verwende normalisierte Saison
         rank: player.rank,
-        player_name: player.name,
-        lk: player.lk,
+        player_name: player.name.trim(),
+        lk: player.lk || null,
         tvm_id: player.tvmId || null,
         birth_year: player.birthYear || null,
         singles_record: player.singles || null,
@@ -408,6 +538,11 @@ async function saveTeamRoster(supabase, teamId, season, roster) {
     
     console.log(`[parse-club-rosters] 📊 Matching-Ergebnisse: ${matchedCount} gematcht, ${unmatchedCount} nicht gematcht`);
     
+    // Validierung: Mindestens ein Eintrag muss vorhanden sein
+    if (rosterEntries.length === 0) {
+      throw new Error('Keine gültigen Spieler-Einträge zum Speichern (alle wurden gefiltert)');
+    }
+    
     // Erstelle neue Einträge
     const { data, error } = await supabase
       .from('team_roster')
@@ -415,14 +550,21 @@ async function saveTeamRoster(supabase, teamId, season, roster) {
       .select();
     
     if (error) {
-      throw error;
+      console.error(`[parse-club-rosters] ❌ Fehler beim INSERT in team_roster:`, error);
+      console.error(`[parse-club-rosters] ❌ Erste 3 Einträge:`, rosterEntries.slice(0, 3).map(e => ({
+        team_id: e.team_id,
+        season: e.season,
+        rank: e.rank,
+        player_name: e.player_name.substring(0, 30)
+      })));
+      throw new Error(`Fehler beim Speichern in Datenbank: ${error.message} (Code: ${error.code || 'unknown'})`);
     }
     
-    console.log(`[parse-club-rosters] ✅ ${data.length} Spieler in team_roster gespeichert (${matchedCount} mit player_id verknüpft)`);
+    console.log(`[parse-club-rosters] ✅ ${data.length} Spieler in team_roster gespeichert (${matchedCount} mit player_id verknüpft, ${unmatchedCount} ohne player_id)`);
     return {
       roster: data,
       stats: {
-        total: roster.length,
+        total: rosterEntries.length, // Anzahl tatsächlich gespeicherter Einträge
         matched: matchedCount,
         unmatched: unmatchedCount
       }
@@ -498,27 +640,50 @@ async function handler(req, res) {
     // Speichere Meldelisten wenn apply=true und teamMapping vorhanden
     if (apply && Object.keys(teamMapping).length > 0) {
       const supabase = createSupabaseClient();
+      const failedRosters = [];
       
       for (const team of teams) {
         const teamId = teamMapping[team.contestType] || teamMapping[team.teamName];
         
-        if (teamId && team.roster && team.roster.length > 0) {
-          try {
-            const savedRoster = await saveTeamRoster(supabase, teamId, targetSeason, team.roster);
-            results.savedRosters.push({
-              teamName: team.teamName,
-              contestType: team.contestType,
-              ...savedRoster.stats
-            });
-          } catch (error) {
-            console.error(`[parse-club-rosters] ❌ Fehler beim Speichern der Meldeliste für ${team.teamName}:`, error);
-            results.savedRosters.push({
-              teamName: team.teamName,
-              contestType: team.contestType,
-              error: error.message
-            });
-          }
+        if (!teamId) {
+          failedRosters.push({
+            teamName: team.teamName,
+            contestType: team.contestType,
+            reason: 'Kein Team-Mapping gefunden'
+          });
+          continue;
         }
+        
+        if (!team.roster || team.roster.length === 0) {
+          failedRosters.push({
+            teamName: team.teamName,
+            contestType: team.contestType,
+            teamUrl: team.teamUrl,
+            reason: `Keine Spieler in Meldeliste gefunden (${team.roster?.length || 0} Spieler) - Parsing fehlgeschlagen oder Meldeliste leer`
+          });
+          console.warn(`[parse-club-rosters] ⚠️ Team "${team.contestType}" hat leere Meldeliste - wird nicht gespeichert`);
+          continue;
+        }
+        
+        try {
+          const savedRoster = await saveTeamRoster(supabase, teamId, targetSeason, team.roster);
+          results.savedRosters.push({
+            teamName: team.teamName,
+            contestType: team.contestType,
+            ...savedRoster.stats
+          });
+        } catch (error) {
+          console.error(`[parse-club-rosters] ❌ Fehler beim Speichern der Meldeliste für ${team.teamName}:`, error);
+          failedRosters.push({
+            teamName: team.teamName,
+            contestType: team.contestType,
+            reason: `Fehler beim Speichern: ${error.message}`
+          });
+        }
+      }
+      
+      if (failedRosters.length > 0) {
+        results.failedTeams = failedRosters;
       }
     }
     
@@ -531,10 +696,21 @@ async function handler(req, res) {
       roster: apply ? undefined : (team.roster || []) // Nur im Dry-Run die vollständigen Daten senden
     }));
     
+    // Erstelle detaillierte Nachricht
+    let message = `${teams.length} Teams für Saison "${targetSeason}" gefunden${clubNumber ? ` (Club-Nummer: ${clubNumber})` : ''}`;
+    if (apply) {
+      if (results.savedRosters && results.savedRosters.length > 0) {
+        message += ` - ${results.savedRosters.length} Meldelisten gespeichert`;
+      }
+      if (results.failedTeams && results.failedTeams.length > 0) {
+        message += ` - ⚠️ ${results.failedTeams.length} Teams konnten nicht importiert werden`;
+      }
+    }
+    
     return withCors(res, 200, {
       success: true,
       ...results,
-      message: `${teams.length} Teams für Saison "${targetSeason}" gefunden${clubNumber ? ` (Club-Nummer: ${clubNumber})` : ''}${apply && results.savedRosters.length > 0 ? ` - ${results.savedRosters.length} Meldelisten gespeichert` : ''}`
+      message
     });
     
   } catch (error) {
