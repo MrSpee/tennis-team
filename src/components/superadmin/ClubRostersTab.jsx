@@ -37,11 +37,140 @@ const ClubRostersTab = () => {
   const [findClubNumbersResult, setFindClubNumbersResult] = useState(null);
   const [maxClubsToFind, setMaxClubsToFind] = useState('');
   const [dryRunFind, setDryRunFind] = useState(true);
+  const [selectedClubsForSearch, setSelectedClubsForSearch] = useState(new Set()); // Club-IDs für Suche
+  
+  // Vereins-Übersicht mit Meldelisten-Status
+  const [clubsWithRosters, setClubsWithRosters] = useState([]);
+  const [loadingClubsOverview, setLoadingClubsOverview] = useState(false);
   
   // Lade Vereine und Teams beim Mount
   useEffect(() => {
     loadClubsAndTeams();
+    loadClubsOverview();
   }, []);
+  
+  // Lade Übersicht der Vereine mit Meldelisten-Status
+  const loadClubsOverview = async () => {
+    setLoadingClubsOverview(true);
+    try {
+      // Lade alle Vereine
+      const { data: clubs, error: clubsError } = await supabase
+        .from('club_info')
+        .select('id, name, city')
+        .order('name', { ascending: true });
+      
+      if (clubsError) throw clubsError;
+      
+      // Lade Teams mit club_number
+      const { data: teams, error: teamsError } = await supabase
+        .from('team_info')
+        .select('id, club_id, club_number')
+        .not('club_number', 'is', null);
+      
+      if (teamsError) throw teamsError;
+      
+      // Gruppiere Teams nach club_id und extrahiere club_number
+      const clubNumbersMap = new Map();
+      teams?.forEach(team => {
+        if (team.club_id && team.club_number) {
+          clubNumbersMap.set(team.club_id, team.club_number);
+        }
+      });
+      
+      // Lade Meldelisten-Status für jeden Verein
+      // WICHTIG: Zähle Teams und Spieler pro Saison, um Vollständigkeit zu prüfen
+      const { data: rosterData, error: rosterError } = await supabase
+        .from('team_roster')
+        .select(`
+          team_id,
+          season,
+          player_name,
+          team_info!inner(club_id, club_name, category, team_name)
+        `);
+      
+      if (rosterError) throw rosterError;
+      
+      // Gruppiere Meldelisten nach club_id und season
+      const rostersByClub = new Map();
+      rosterData?.forEach(roster => {
+        const clubId = roster.team_info?.club_id;
+        const season = roster.season;
+        if (clubId && season) {
+          if (!rostersByClub.has(clubId)) {
+            rostersByClub.set(clubId, {
+              clubId,
+              seasons: new Map() // Map<season, {teams: Set, playerCount: number}>
+            });
+          }
+          const clubData = rostersByClub.get(clubId);
+          if (!clubData.seasons.has(season)) {
+            clubData.seasons.set(season, {
+              teams: new Set(),
+              playerCount: 0
+            });
+          }
+          const seasonData = clubData.seasons.get(season);
+          // Zähle eindeutige Teams (team_id)
+          if (roster.team_id) {
+            seasonData.teams.add(roster.team_id);
+          }
+          // Zähle Spieler (jeder Eintrag = ein Spieler)
+          if (roster.player_name) {
+            seasonData.playerCount++;
+          }
+        }
+      });
+      
+      // Erstelle Übersicht
+      const overview = (clubs || []).map(club => {
+        const hasRoster = rostersByClub.has(club.id);
+        const rosterInfo = rostersByClub.get(club.id);
+        const clubNumber = clubNumbersMap.get(club.id);
+        
+        // Berechne Gesamtstatistiken über alle Saisons
+        let totalTeams = 0;
+        let totalPlayers = 0;
+        const seasons = [];
+        
+        if (hasRoster && rosterInfo.seasons.size > 0) {
+          rosterInfo.seasons.forEach((seasonData, season) => {
+            seasons.push({
+              season,
+              teamCount: seasonData.teams.size,
+              playerCount: seasonData.playerCount
+            });
+            totalTeams += seasonData.teams.size;
+            totalPlayers += seasonData.playerCount;
+          });
+        }
+        
+        // Prüfe Vollständigkeit: Ein Verein hat vollständige Meldelisten, wenn:
+        // 1. Es gibt Meldelisten-Daten (hasRoster)
+        // 2. Es gibt mindestens eine Saison mit Teams und Spielern
+        // 3. Die Daten sind plausibel (mehr als 0 Teams und Spieler)
+        const isComplete = hasRoster && seasons.length > 0 && 
+          seasons.some(s => s.teamCount > 0 && s.playerCount > 0);
+        
+        return {
+          id: club.id,
+          name: club.name,
+          city: club.city,
+          clubNumber: clubNumber || null,
+          hasRoster: isComplete,
+          seasons: seasons.sort((a, b) => b.season.localeCompare(a.season)), // Neueste zuerst
+          totalTeams,
+          totalPlayers
+        };
+      });
+      
+      setClubsWithRosters(overview);
+      
+    } catch (err) {
+      console.error('Error loading clubs overview:', err);
+    } finally {
+      setLoadingClubsOverview(false);
+    }
+  };
   
   const loadClubsAndTeams = async () => {
     try {
@@ -275,6 +404,8 @@ const ClubRostersTab = () => {
       
       // Lade Teams neu, um aktualisierte Daten zu haben
       await loadClubsAndTeams();
+      // Lade auch Übersicht neu
+      await loadClubsOverview();
       
     } catch (err) {
       console.error('Error importing club rosters:', err);
@@ -313,10 +444,16 @@ const ClubRostersTab = () => {
     setFindClubNumbersProgress({ current: 0, total: 0, message: 'Starte Suche nach Club-Nummern...' });
     
     try {
+      // Wenn Clubs ausgewählt wurden, verwende diese, sonst alle
+      const clubIds = selectedClubsForSearch.size > 0 
+        ? Array.from(selectedClubsForSearch)
+        : null;
+      
       const response = await fetch('/api/import/find-club-numbers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          clubIds: clubIds,
           maxClubs: maxClubsToFind || null,
           dryRun: dryRunFind
         })
@@ -346,6 +483,8 @@ const ClubRostersTab = () => {
       
       // Lade Teams neu, um aktualisierte club_number zu haben
       await loadClubsAndTeams();
+      // Lade auch Übersicht neu
+      await loadClubsOverview();
       
     } catch (err) {
       console.error('Error finding club numbers:', err);
@@ -404,6 +543,8 @@ const ClubRostersTab = () => {
       
       // Lade Teams neu
       await loadClubsAndTeams();
+      // Lade auch Übersicht neu
+      await loadClubsOverview();
       
     } catch (err) {
       console.error('Error bulk importing club rosters:', err);
@@ -466,6 +607,232 @@ const ClubRostersTab = () => {
             <strong> Wichtig:</strong> Die Suche kann einige Zeit dauern, da zwischen den Requests Pausen eingelegt werden, um nicht als Bot erkannt zu werden (10-15 Sekunden pro Verein).
           </p>
           
+          {/* Vereins-Übersicht mit Meldelisten-Status */}
+          <div style={{ 
+            marginTop: '1.5rem', 
+            padding: '1rem', 
+            background: '#f9fafb', 
+            borderRadius: '8px',
+            border: '1px solid #e5e7eb'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h4 style={{ fontSize: '1rem', fontWeight: '600', margin: 0 }}>
+                📊 Vereins-Übersicht (Meldelisten-Status)
+              </h4>
+              <span style={{
+                background: '#3b82f6',
+                color: 'white',
+                padding: '0.25rem 0.75rem',
+                borderRadius: '12px',
+                fontSize: '0.875rem',
+                fontWeight: '600'
+              }}>
+                {clubsWithRosters.filter(c => c.hasRoster).length} / {clubsWithRosters.length} integriert
+              </span>
+            </div>
+            
+            {loadingClubsOverview ? (
+              <div style={{ textAlign: 'center', padding: '2rem' }}>
+                <Loader className="spinner" size={20} />
+                <p style={{ marginTop: '0.5rem', color: '#6b7280' }}>Lade Übersicht...</p>
+              </div>
+            ) : (
+              <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid #e5e7eb', background: '#f3f4f6' }}>
+                      <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: '600', width: '40px' }}>#</th>
+                      <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: '600' }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedClubsForSearch.size === clubsWithRosters.length && clubsWithRosters.length > 0}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedClubsForSearch(new Set(clubsWithRosters.map(c => c.id)));
+                            } else {
+                              setSelectedClubsForSearch(new Set());
+                            }
+                          }}
+                          style={{ marginRight: '0.5rem' }}
+                        />
+                        Verein
+                      </th>
+                      <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: '600' }}>Club-Nummer</th>
+                      <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: '600' }}>Meldelisten<br/><span style={{ fontSize: '0.75rem', fontWeight: '400', color: '#6b7280' }}>(Teams / Spieler)</span></th>
+                      <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: '600' }}>Saisons</th>
+                      <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: '600' }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {clubsWithRosters.map((club, index) => (
+                      <tr 
+                        key={club.id}
+                        style={{ 
+                          borderBottom: '1px solid #e5e7eb',
+                          background: club.hasRoster ? '#f0fdf4' : '#fef2f2'
+                        }}
+                      >
+                        <td style={{ padding: '0.5rem', textAlign: 'center', color: '#6b7280', fontWeight: '600' }}>
+                          {index + 1}
+                        </td>
+                        <td style={{ padding: '0.5rem' }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedClubsForSearch.has(club.id)}
+                            onChange={(e) => {
+                              const newSet = new Set(selectedClubsForSearch);
+                              if (e.target.checked) {
+                                newSet.add(club.id);
+                              } else {
+                                newSet.delete(club.id);
+                              }
+                              setSelectedClubsForSearch(newSet);
+                            }}
+                            style={{ marginRight: '0.5rem' }}
+                          />
+                          <strong>{club.name}</strong>
+                          {club.city && (
+                            <span style={{ color: '#6b7280', marginLeft: '0.5rem' }}>
+                              ({club.city})
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '0.5rem' }}>
+                          {club.clubNumber ? (
+                            <code style={{ 
+                              background: '#e0e7ff', 
+                              padding: '0.125rem 0.375rem', 
+                              borderRadius: '4px',
+                              fontSize: '0.75rem'
+                            }}>
+                              {club.clubNumber}
+                            </code>
+                          ) : (
+                            <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>Nicht vorhanden</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '0.5rem', textAlign: 'center' }}>
+                          {club.hasRoster && club.totalTeams > 0 && club.totalPlayers > 0 ? (
+                            <span style={{ 
+                              color: '#16a34a', 
+                              fontWeight: '600',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              gap: '0.125rem'
+                            }}>
+                              <CheckCircle size={16} />
+                              <span style={{ fontSize: '0.875rem' }}>
+                                {club.totalTeams} Teams
+                              </span>
+                              <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                {club.totalPlayers} Spieler
+                              </span>
+                            </span>
+                          ) : (
+                            <span style={{ 
+                              color: '#dc2626', 
+                              fontWeight: '600',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '0.25rem'
+                            }}>
+                              <AlertCircle size={16} />
+                              Keine
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '0.5rem', textAlign: 'center' }}>
+                          {club.hasRoster && club.seasons.length > 0 ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                              {club.seasons.map((seasonInfo, idx) => (
+                                <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
+                                  <span 
+                                    style={{ 
+                                      background: '#dbeafe', 
+                                      padding: '0.125rem 0.375rem', 
+                                      borderRadius: '4px',
+                                      fontSize: '0.75rem',
+                                      fontWeight: '600'
+                                    }}
+                                  >
+                                    {seasonInfo.season}
+                                  </span>
+                                  <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>
+                                    {seasonInfo.teamCount} Teams, {seasonInfo.playerCount} Spieler
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ color: '#9ca3af' }}>-</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '0.5rem', textAlign: 'center' }}>
+                          {club.hasRoster && club.clubNumber ? (
+                            <span style={{ 
+                              background: '#dcfce7', 
+                              color: '#16a34a',
+                              padding: '0.25rem 0.5rem', 
+                              borderRadius: '4px',
+                              fontSize: '0.75rem',
+                              fontWeight: '600'
+                            }}>
+                              ✅ Vollständig
+                            </span>
+                          ) : club.hasRoster ? (
+                            <span style={{ 
+                              background: '#fef3c7', 
+                              color: '#d97706',
+                              padding: '0.25rem 0.5rem', 
+                              borderRadius: '4px',
+                              fontSize: '0.75rem',
+                              fontWeight: '600'
+                            }}>
+                              ⚠️ Fehlt Club-Nr.
+                            </span>
+                          ) : (
+                            <span style={{ 
+                              background: '#fee2e2', 
+                              color: '#dc2626',
+                              padding: '0.25rem 0.5rem', 
+                              borderRadius: '4px',
+                              fontSize: '0.75rem',
+                              fontWeight: '600'
+                            }}>
+                              ❌ Fehlt
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                
+                <div style={{ 
+                  marginTop: '1rem', 
+                  padding: '0.75rem', 
+                  background: '#eff6ff', 
+                  borderRadius: '6px',
+                  fontSize: '0.875rem'
+                }}>
+                  <strong>Legende:</strong>
+                  <ul style={{ margin: '0.5rem 0 0 1.5rem', padding: 0 }}>
+                    <li><strong>✅ Vollständig:</strong> Verein hat vollständige Meldelisten (Teams und Spieler pro Saison) und Club-Nummer</li>
+                    <li><strong>⚠️ Fehlt Club-Nr.:</strong> Verein hat vollständige Meldelisten, aber keine Club-Nummer</li>
+                    <li><strong>❌ Fehlt:</strong> Verein hat keine vollständigen Meldelisten (keine Teams/Spieler-Daten pro Saison)</li>
+                  </ul>
+                  <p style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                    <strong>Hinweis:</strong> Ein Verein gilt als "vollständig integriert", wenn für mindestens eine Saison sowohl die Anzahl der Teams als auch die Anzahl der Spieler bekannt sind. 
+                    Markiere Vereine per Checkbox, um nur diese für die Club-Nummer-Suche zu verwenden. 
+                    Wenn keine ausgewählt sind, werden alle Vereine durchsucht.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+          
           <div className="bulk-import-controls">
             <div className="input-group">
               <label htmlFor="maxClubsToFind">
@@ -507,6 +874,11 @@ const ClubRostersTab = () => {
                 <>
                   <Search size={18} />
                   Club-Nummern finden
+                  {selectedClubsForSearch.size > 0 && (
+                    <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', opacity: 0.8 }}>
+                      ({selectedClubsForSearch.size} ausgewählt)
+                    </span>
+                  )}
                 </>
               )}
             </button>
