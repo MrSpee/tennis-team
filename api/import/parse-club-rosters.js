@@ -684,52 +684,62 @@ async function createTeamIfNotExists(supabase, clubId, contestType, teamNumber, 
     
     console.log(`[parse-club-rosters] ➕ Erstelle Team: ${contestType} Mannschaft ${teamNumberStr} für Club ${clubId}`);
     
-    // Lade Club-Informationen für club_name
-    const { data: clubInfo } = await supabase
-      .from('club_info')
-      .select('name')
-      .eq('id', clubId)
-      .single();
-    
-    const clubNameToUse = clubInfo?.name || clubName || 'Unbekannt';
-    
-    // Erstelle Team
-    const { data: newTeam, error: createError } = await supabase
+    // ✅ WICHTIG: Verwende RPC-Funktion für Team-Erstellung (umgeht RLS und nutzt bestehende Datenbank-Logik)
+    // Prüfe zuerst, ob Team bereits existiert
+    const { data: existingTeam } = await supabase
       .from('team_info')
-      .insert({
-        club_id: clubId,
-        club_name: clubNameToUse,
-        team_name: teamNumberStr,
-        category: contestType,
-        region: 'Mittelrhein'
-      })
       .select('id')
-      .single();
+      .eq('club_id', clubId)
+      .eq('category', contestType)
+      .eq('team_name', teamNumberStr)
+      .maybeSingle();
+    
+    if (existingTeam) {
+      console.log(`[parse-club-rosters] ✅ Team existiert bereits: ${existingTeam.id} (${contestType} Mannschaft ${teamNumberStr})`);
+      return existingTeam.id;
+    }
+    
+    // Erstelle Team via RPC-Funktion (nutzt bestehende Datenbank-Funktion)
+    console.log(`[parse-club-rosters] ➕ Erstelle Team via RPC: ${contestType} Mannschaft ${teamNumberStr}`);
+    const { data: newTeam, error: createError } = await supabase
+      .rpc('create_team_as_super_admin', {
+        p_team_name: teamNumberStr,
+        p_category: contestType,
+        p_club_id: clubId,
+        p_region: 'Mittelrhein',
+        p_tvm_link: null
+      });
     
     if (createError) {
-      // Prüfe ob Team bereits existiert (Unique Constraint Violation)
-      if (createError.code === '23505') {
-        console.log(`[parse-club-rosters] ℹ️ Team existiert bereits, suche es...`);
-        // Suche nach existierendem Team
-        const { data: existingTeam } = await supabase
-          .from('team_info')
-          .select('id')
-          .eq('club_id', clubId)
-          .eq('category', contestType)
-          .eq('team_name', teamNumberStr)
-          .single();
-        
-        if (existingTeam) {
-          console.log(`[parse-club-rosters] ✅ Existierendes Team gefunden: ${existingTeam.id}`);
-          return existingTeam.id;
-        }
+      console.error(`[parse-club-rosters] ❌ Fehler beim Erstellen des Teams via RPC:`, createError);
+      
+      // Fallback: Versuche nochmal direkt zu suchen (falls RPC-Funktion nicht existiert)
+      const { data: fallbackTeam } = await supabase
+        .from('team_info')
+        .select('id')
+        .eq('club_id', clubId)
+        .eq('category', contestType)
+        .eq('team_name', teamNumberStr)
+        .maybeSingle();
+      
+      if (fallbackTeam) {
+        console.log(`[parse-club-rosters] ✅ Team gefunden (Fallback): ${fallbackTeam.id}`);
+        return fallbackTeam.id;
       }
       
-      console.error(`[parse-club-rosters] ❌ Fehler beim Erstellen des Teams:`, createError);
       return null;
     }
     
-    console.log(`[parse-club-rosters] ✅ Team erstellt: ${newTeam.id} (${contestType} Mannschaft ${teamNumberStr})`);
+    // RPC gibt Array zurück, nimm ersten Eintrag
+    const team = Array.isArray(newTeam) ? newTeam[0] : newTeam;
+    const teamId = team?.id || null;
+    
+    if (!teamId) {
+      console.error(`[parse-club-rosters] ❌ RPC-Funktion gab keine Team-ID zurück`);
+      return null;
+    }
+    
+    console.log(`[parse-club-rosters] ✅ Team erstellt via RPC: ${teamId} (${contestType} Mannschaft ${teamNumberStr})`);
     
     // Erstelle auch team_seasons Eintrag (wird später beim Speichern der Meldeliste benötigt)
     // Normalisiere Saison-Format (konsistent mit DB: "Winter 2025/26")
