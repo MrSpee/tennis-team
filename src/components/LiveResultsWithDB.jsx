@@ -119,6 +119,7 @@ const LiveResultsWithDB = () => {
       const homeTeamCategory = matchData.home_team?.category; // z.B. "Herren 30", "Damen", etc.
       
       // ✅ NEU: Lade Meldelisten-Spieler aus team_roster für das spezifische Team
+      // WICHTIG: Alle Spieler werden SOFORT zu players_unified gematcht (keine temporären roster_ IDs)
       let rosterPlayers = [];
       if (homeTeamId && matchSeason) {
         try {
@@ -141,29 +142,50 @@ const LiveResultsWithDB = () => {
           if (!rosterError && teamRoster && teamRoster.length > 0) {
             console.log(`✅ ${teamRoster.length} Meldelisten-Spieler gefunden für Home-Team ${homeTeamId}, Saison ${matchSeason}`);
             
-            // Konvertiere team_roster Einträge zu homePlayers Format
-            rosterPlayers = teamRoster.map(roster => {
-              if (roster.player_id && roster.players_unified) {
-                return {
-                  id: roster.player_id,
-                  name: roster.players_unified.name,
-                  current_lk: roster.players_unified.current_lk || roster.players_unified.season_start_lk || roster.lk,
-                  season_start_lk: roster.players_unified.season_start_lk || roster.lk,
-                  rank: roster.rank,
-                  fromRoster: true
-                };
-              } else {
-                return {
-                  id: `roster_${roster.id}`,
-                  name: roster.player_name,
-                  current_lk: roster.lk,
-                  season_start_lk: roster.lk,
-                  rank: roster.rank,
-                  fromRoster: true,
-                  tvm_id: roster.tvm_id
-                };
+            // Für jeden Spieler ohne player_id: Führe Fuzzy-Matching durch
+            for (const roster of teamRoster) {
+              if (!roster.player_id) {
+                try {
+                  console.log(`🔍 Matche Spieler ohne player_id: ${roster.player_name}`);
+                  const matchedPlayerId = await matchRosterPlayerToUnified(roster, homeTeamId);
+                  
+                  // Update team_roster mit player_id
+                  await supabase
+                    .from('team_roster')
+                    .update({ player_id: matchedPlayerId })
+                    .eq('id', roster.id);
+                  
+                  // Lade aktualisierte Spieler-Daten
+                  const { data: updatedPlayer } = await supabase
+                    .from('players_unified')
+                    .select('id, name, current_lk, season_start_lk')
+                    .eq('id', matchedPlayerId)
+                    .single();
+                  
+                  if (updatedPlayer) {
+                    roster.player_id = matchedPlayerId;
+                    roster.players_unified = updatedPlayer;
+                  }
+                } catch (matchError) {
+                  console.error(`❌ Fehler beim Matchen von ${roster.player_name}:`, matchError);
+                  // Weiter machen, Spieler wird später beim Speichern behandelt
+                }
               }
-            });
+            }
+            
+            // Konvertiere team_roster Einträge zu homePlayers Format (NUR mit player_id)
+            rosterPlayers = teamRoster
+              .filter(roster => roster.player_id && roster.players_unified) // Nur Spieler mit player_id
+              .map(roster => ({
+                id: roster.player_id, // IMMER echte UUID, nie roster_ ID
+                name: roster.players_unified.name,
+                current_lk: roster.players_unified.current_lk || roster.players_unified.season_start_lk || roster.lk,
+                season_start_lk: roster.players_unified.season_start_lk || roster.lk,
+                rank: roster.rank,
+                fromRoster: true
+              }));
+            
+            console.log(`✅ ${rosterPlayers.length} Meldelisten-Spieler mit player_id geladen`);
           } else if (rosterError) {
             console.warn('⚠️ Fehler beim Laden der Home-Team Meldeliste:', rosterError);
           } else {
@@ -357,6 +379,7 @@ const LiveResultsWithDB = () => {
       
       if (awayClubName) {
         // ✅ NEU: Zuerst versuche Meldelisten-Spieler aus team_roster zu laden
+        // WICHTIG: Alle Spieler werden SOFORT zu players_unified gematcht (keine temporären roster_ IDs)
         let rosterPlayers = [];
         if (awayTeamId && matchSeason) {
           try {
@@ -379,31 +402,50 @@ const LiveResultsWithDB = () => {
             if (!rosterError && teamRoster && teamRoster.length > 0) {
               console.log(`✅ ${teamRoster.length} Meldelisten-Spieler gefunden für Team ${awayTeamId}, Saison ${matchSeason}`);
               
-              // Konvertiere team_roster Einträge zu opponentPlayers Format
-              rosterPlayers = teamRoster.map(roster => {
-                // Wenn player_id vorhanden ist, nutze Daten aus players_unified
-                if (roster.player_id && roster.players_unified) {
-                  return {
-                    id: roster.player_id,
-                    name: roster.players_unified.name,
-                    current_lk: roster.players_unified.current_lk || roster.players_unified.season_start_lk || roster.lk,
-                    season_start_lk: roster.players_unified.season_start_lk || roster.lk,
-                    rank: roster.rank, // Rang in Meldeliste
-                    fromRoster: true // Flag: Kommt aus Meldeliste
-                  };
-                } else {
-                  // Kein player_id Match: Nutze Daten aus team_roster
-                  return {
-                    id: `roster_${roster.id}`, // Temporäre ID
-                    name: roster.player_name,
-                    current_lk: roster.lk,
-                    season_start_lk: roster.lk,
-                    rank: roster.rank,
-                    fromRoster: true,
-                    tvm_id: roster.tvm_id
-                  };
+              // Für jeden Spieler ohne player_id: Führe Fuzzy-Matching durch
+              for (const roster of teamRoster) {
+                if (!roster.player_id) {
+                  try {
+                    console.log(`🔍 Matche Spieler ohne player_id: ${roster.player_name}`);
+                    const matchedPlayerId = await matchRosterPlayerToUnified(roster, awayTeamId);
+                    
+                    // Update team_roster mit player_id
+                    await supabase
+                      .from('team_roster')
+                      .update({ player_id: matchedPlayerId })
+                      .eq('id', roster.id);
+                    
+                    // Lade aktualisierte Spieler-Daten
+                    const { data: updatedPlayer } = await supabase
+                      .from('players_unified')
+                      .select('id, name, current_lk, season_start_lk')
+                      .eq('id', matchedPlayerId)
+                      .single();
+                    
+                    if (updatedPlayer) {
+                      roster.player_id = matchedPlayerId;
+                      roster.players_unified = updatedPlayer;
+                    }
+                  } catch (matchError) {
+                    console.error(`❌ Fehler beim Matchen von ${roster.player_name}:`, matchError);
+                    // Weiter machen, Spieler wird später beim Speichern behandelt
+                  }
                 }
-              });
+              }
+              
+              // Konvertiere team_roster Einträge zu opponentPlayers Format (NUR mit player_id)
+              rosterPlayers = teamRoster
+                .filter(roster => roster.player_id && roster.players_unified) // Nur Spieler mit player_id
+                .map(roster => ({
+                  id: roster.player_id, // IMMER echte UUID, nie roster_ ID
+                  name: roster.players_unified.name,
+                  current_lk: roster.players_unified.current_lk || roster.players_unified.season_start_lk || roster.lk,
+                  season_start_lk: roster.players_unified.season_start_lk || roster.lk,
+                  rank: roster.rank, // Rang in Meldeliste
+                  fromRoster: true // Flag: Kommt aus Meldeliste
+                }));
+              
+              console.log(`✅ ${rosterPlayers.length} Meldelisten-Spieler mit player_id geladen`);
             } else if (rosterError) {
               console.warn('⚠️ Fehler beim Laden der Meldeliste:', rosterError);
             } else {
@@ -911,6 +953,173 @@ const LiveResultsWithDB = () => {
     }
   };
   
+  // Helper-Funktion: Berechnet Ähnlichkeit zwischen zwei Strings (Dice Coefficient)
+  const calculateSimilarity = (str1, str2) => {
+    if (!str1 || !str2) return 0;
+    
+    const normalize = (s) => s.toLowerCase().trim().replace(/\s+/g, ' ');
+    const s1 = normalize(str1);
+    const s2 = normalize(str2);
+    
+    if (s1 === s2) return 100;
+    
+    // Dice Coefficient: Berechnet Ähnlichkeit basierend auf Bigrammen
+    const getBigrams = (s) => {
+      const bigrams = new Set();
+      for (let i = 0; i < s.length - 1; i++) {
+        bigrams.add(s.substring(i, i + 2));
+      }
+      return bigrams;
+    };
+    
+    const bigrams1 = getBigrams(s1);
+    const bigrams2 = getBigrams(s2);
+    
+    let intersection = 0;
+    bigrams1.forEach(bigram => {
+      if (bigrams2.has(bigram)) intersection++;
+    });
+    
+    const union = bigrams1.size + bigrams2.size;
+    if (union === 0) return 0;
+    
+    return Math.round((2 * intersection / union) * 100);
+  };
+
+  // Helper-Funktion: Normalisiert Namen für Vergleich (behandelt "Nachname, Vorname" und "Vorname Nachname")
+  const normalizeNameForComparison = (name) => {
+    if (!name) return '';
+    // Entferne Leerzeichen und konvertiere zu lowercase
+    const normalized = name.toLowerCase().trim().replace(/\s+/g, ' ');
+    
+    // Wenn Format "Nachname, Vorname" → konvertiere zu "Vorname Nachname"
+    const commaMatch = normalized.match(/^([^,]+),\s*(.+)$/);
+    if (commaMatch) {
+      return `${commaMatch[2]} ${commaMatch[1]}`.trim();
+    }
+    
+    return normalized;
+  };
+
+  // Helper-Funktion: Führt Fuzzy-Matching mit players_unified durch und gibt player_id zurück
+  const matchRosterPlayerToUnified = async (rosterEntry, teamId) => {
+    try {
+      const rosterName = rosterEntry.player_name;
+      const normalizedRosterName = normalizeNameForComparison(rosterName);
+      
+      console.log(`🔍 Matche Spieler: "${rosterName}" (normalisiert: "${normalizedRosterName}")`);
+      
+      // 1. TVM-ID Match (falls vorhanden) - HÖCHSTE Priorität (eindeutig!)
+      if (rosterEntry.tvm_id) {
+        const { data: tvmMatch } = await supabase
+          .from('players_unified')
+          .select('id, name, tvm_id')
+          .eq('tvm_id', rosterEntry.tvm_id)
+          .maybeSingle();
+        
+        if (tvmMatch) {
+          console.log(`✅ TVM-ID Match gefunden: ${tvmMatch.name} (${tvmMatch.id})`);
+          return tvmMatch.id;
+        }
+      }
+      
+      // 2. Exakte Übereinstimmung (Name) - auch mit normalisiertem Namen
+      const { data: allPlayers } = await supabase
+        .from('players_unified')
+        .select('id, name, current_lk, tvm_id')
+        .limit(1000); // Lade mehr Spieler für besseres Matching
+      
+      if (allPlayers && allPlayers.length > 0) {
+        // Prüfe exakte Übereinstimmung (auch mit normalisiertem Namen)
+        const exactMatch = allPlayers.find(p => {
+          const normalizedPlayerName = normalizeNameForComparison(p.name);
+          return normalizedPlayerName === normalizedRosterName || 
+                 p.name.toLowerCase() === rosterName.toLowerCase();
+        });
+        
+        if (exactMatch) {
+          console.log(`✅ Exaktes Match gefunden: ${exactMatch.name} (${exactMatch.id})`);
+          return exactMatch.id;
+        }
+        
+        // 3. Fuzzy-Matching (Name-Ähnlichkeit) mit normalisiertem Namen
+        const matches = allPlayers
+          .map(player => {
+            const normalizedPlayerName = normalizeNameForComparison(player.name);
+            const similarity1 = calculateSimilarity(player.name, rosterName);
+            const similarity2 = calculateSimilarity(normalizedPlayerName, normalizedRosterName);
+            return {
+              ...player,
+              similarity: Math.max(similarity1, similarity2) // Nimm höchste Similarity
+            };
+          })
+          .filter(m => m.similarity >= 80) // Mindestens 80% Ähnlichkeit
+          .sort((a, b) => b.similarity - a.similarity);
+        
+        if (matches.length > 0) {
+          const bestMatch = matches[0];
+          console.log(`🎯 Fuzzy-Match gefunden: ${bestMatch.name} (${bestMatch.similarity}% Ähnlichkeit)`);
+          return bestMatch.id;
+        }
+      }
+      
+      // 4. Kein Match gefunden: Erstelle neuen Spieler
+      console.log(`🆕 Kein Match gefunden, erstelle neuen Spieler: ${rosterEntry.player_name}`);
+      
+      // WICHTIG: Normalisiere den Namen (konvertiere "Nachname, Vorname" zu "Vorname Nachname")
+      let normalizedName = rosterEntry.player_name;
+      const commaMatch = normalizedName.match(/^([^,]+),\s*(.+)$/);
+      if (commaMatch) {
+        normalizedName = `${commaMatch[2]} ${commaMatch[1]}`.trim();
+        console.log(`📝 Normalisiere Namen: "${rosterEntry.player_name}" → "${normalizedName}"`);
+      }
+      
+      const { data: newPlayer, error: createError } = await supabase
+        .from('players_unified')
+        .insert({
+          name: normalizedName, // Verwende normalisierten Namen
+          is_active: false,
+          current_lk: rosterEntry.lk || null,
+          season_start_lk: rosterEntry.lk || null,
+          tvm_id: rosterEntry.tvm_id || null,
+          birth_date: rosterEntry.birth_year ? `${rosterEntry.birth_year}-01-01` : null,
+          player_type: 'opponent',
+          ranking: null
+        })
+        .select('id')
+        .single();
+      
+      if (createError) {
+        console.error('❌ Fehler beim Erstellen des Spielers:', createError);
+        throw createError;
+      }
+      
+      console.log('✅ Neuer Spieler erfolgreich erstellt:', newPlayer.id);
+      
+      // Erstelle Team-Membership, falls Team-ID vorhanden
+      if (teamId) {
+        try {
+          await supabase
+            .from('team_memberships')
+            .insert({
+              player_id: newPlayer.id,
+              team_id: teamId,
+              is_active: true,
+              role: 'player'
+            });
+        } catch (membershipError) {
+          console.warn('⚠️ Fehler beim Erstellen der Team-Membership:', membershipError);
+          // Nicht kritisch, weiter machen
+        }
+      }
+      
+      return newPlayer.id;
+    } catch (error) {
+      console.error('❌ Fehler in matchRosterPlayerToUnified:', error);
+      throw error;
+    }
+  };
+  
   // Helper-Funktion: Erstelle einen neuen Spieler in players_unified
   const createNewPlayer = async (playerName) => {
     try {
@@ -1082,24 +1291,43 @@ const LiveResultsWithDB = () => {
       resultData.notes = notesText || null;
 
       // Füge Spieler-IDs hinzu (nur wenn nicht leer)
+      // WICHTIG: Alle Spieler sollten jetzt echte UUIDs sein (aus players_unified)
+      // Meldelisten-Spieler wurden bereits beim Laden gematcht
       if (matchData.type === 'Einzel') {
-        resultData.home_player_id = matchData.homePlayer && matchData.homePlayer !== '' ? matchData.homePlayer : null;
+        // Home Player: Sollte immer UUID sein (oder Text-Name für Freitext-Eingabe)
+        const homePlayer = matchData.homePlayer && matchData.homePlayer !== '' ? matchData.homePlayer : null;
+        if (homePlayer) {
+          if (homePlayer.includes('-') && homePlayer.length === 36) {
+            // UUID: Direkt verwenden (aus players_unified)
+            resultData.home_player_id = homePlayer;
+          } else {
+            // Text-Name: Neuen Spieler erstellen (Freitext-Eingabe)
+            console.log('🆕 Home Player ist Text-Name, erstelle neuen Spieler:', homePlayer);
+            try {
+              resultData.home_player_id = await createNewPlayer(homePlayer);
+            } catch (createError) {
+              console.error('❌ Fehler beim Erstellen des Home Players:', createError);
+              throw createError;
+            }
+          }
+        } else {
+          resultData.home_player_id = null;
+        }
         
-        // Prüfe ob guestPlayer eine UUID ist oder ein Text
+        // Guest Player: Sollte immer UUID sein (oder Text-Name für Freitext-Eingabe)
         const guestPlayer = matchData.guestPlayer && matchData.guestPlayer !== '' ? matchData.guestPlayer : null;
         console.log('🔍 Guest Player Value:', guestPlayer);
         if (guestPlayer) {
-          // Prüfe ob es eine UUID ist (enthält Bindestriche und ist 36 Zeichen lang)
           if (guestPlayer.includes('-') && guestPlayer.length === 36) {
+            // UUID: Direkt verwenden (aus players_unified)
             console.log('✅ Guest Player ist UUID, verwende direkt:', guestPlayer);
             resultData.guest_player_id = guestPlayer;
           } else {
-            // Es ist ein Text-Name - erstelle neuen Spieler in players_unified
+            // Text-Name: Neuen Spieler erstellen (Freitext-Eingabe)
             console.log('🆕 Guest Player ist Text-Name, erstelle neuen Spieler:', guestPlayer);
             try {
-              const newPlayerId = await createNewPlayer(guestPlayer);
-              resultData.guest_player_id = newPlayerId;
-              console.log('✅ Neuer Spieler erstellt und zugewiesen:', newPlayerId);
+              resultData.guest_player_id = await createNewPlayer(guestPlayer);
+              console.log('✅ Neuer Spieler erstellt und zugewiesen:', resultData.guest_player_id);
             } catch (createError) {
               console.error('❌ Fehler beim Erstellen des Guest Players:', createError);
               throw createError;
@@ -1110,24 +1338,42 @@ const LiveResultsWithDB = () => {
           resultData.guest_player_id = null;
         }
       } else {
-        resultData.home_player1_id = matchData.homePlayers[0] && matchData.homePlayers[0] !== '' ? matchData.homePlayers[0] : null;
-        resultData.home_player2_id = matchData.homePlayers[1] && matchData.homePlayers[1] !== '' ? matchData.homePlayers[1] : null;
+        // Doppel: Prüfe beide Home-Spieler
+        const homePlayer1 = matchData.homePlayers[0] && matchData.homePlayers[0] !== '' ? matchData.homePlayers[0] : null;
+        const homePlayer2 = matchData.homePlayers[1] && matchData.homePlayers[1] !== '' ? matchData.homePlayers[1] : null;
         
-        // Prüfe beide Gegner-Spieler
+        if (homePlayer1) {
+          if (homePlayer1.includes('-') && homePlayer1.length === 36) {
+            resultData.home_player1_id = homePlayer1;
+          } else {
+            resultData.home_player1_id = await createNewPlayer(homePlayer1);
+          }
+        } else {
+          resultData.home_player1_id = null;
+        }
+        
+        if (homePlayer2) {
+          if (homePlayer2.includes('-') && homePlayer2.length === 36) {
+            resultData.home_player2_id = homePlayer2;
+          } else {
+            resultData.home_player2_id = await createNewPlayer(homePlayer2);
+          }
+        } else {
+          resultData.home_player2_id = null;
+        }
+        
+        // Prüfe beide Guest-Spieler
         const guestPlayer1 = matchData.guestPlayers[0] && matchData.guestPlayers[0] !== '' ? matchData.guestPlayers[0] : null;
         const guestPlayer2 = matchData.guestPlayers[1] && matchData.guestPlayers[1] !== '' ? matchData.guestPlayers[1] : null;
         
         if (guestPlayer1) {
-          // Prüfe ob es eine UUID ist
           if (guestPlayer1.includes('-') && guestPlayer1.length === 36) {
             console.log('✅ Guest Player 1 ist UUID:', guestPlayer1);
             resultData.guest_player1_id = guestPlayer1;
           } else {
-            // Erstelle neuen Spieler in players_unified
             console.log('🆕 Guest Player 1 ist Text-Name, erstelle neuen Spieler:', guestPlayer1);
             try {
-              const newPlayerId = await createNewPlayer(guestPlayer1);
-              resultData.guest_player1_id = newPlayerId;
+              resultData.guest_player1_id = await createNewPlayer(guestPlayer1);
             } catch (createError) {
               console.error('❌ Fehler beim Erstellen von Guest Player 1:', createError);
               throw createError;
@@ -1138,16 +1384,13 @@ const LiveResultsWithDB = () => {
         }
         
         if (guestPlayer2) {
-          // Prüfe ob es eine UUID ist
           if (guestPlayer2.includes('-') && guestPlayer2.length === 36) {
             console.log('✅ Guest Player 2 ist UUID:', guestPlayer2);
             resultData.guest_player2_id = guestPlayer2;
           } else {
-            // Erstelle neuen Spieler in players_unified
             console.log('🆕 Guest Player 2 ist Text-Name, erstelle neuen Spieler:', guestPlayer2);
             try {
-              const newPlayerId = await createNewPlayer(guestPlayer2);
-              resultData.guest_player2_id = newPlayerId;
+              resultData.guest_player2_id = await createNewPlayer(guestPlayer2);
             } catch (createError) {
               console.error('❌ Fehler beim Erstellen von Guest Player 2:', createError);
               throw createError;
