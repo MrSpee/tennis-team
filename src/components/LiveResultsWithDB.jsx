@@ -72,21 +72,35 @@ export const matchRosterPlayerToUnified = async (rosterEntry, teamId) => {
     }
     
     // 2. Exakte Übereinstimmung (Name) - auch mit normalisiertem Namen
+    // WICHTIG: Lade auch player_type und is_active für Priorisierung
     const { data: allPlayers } = await supabase
       .from('players_unified')
-      .select('id, name, current_lk, tvm_id')
+      .select('id, name, current_lk, tvm_id, player_type, is_active')
       .limit(1000);
     
     if (allPlayers && allPlayers.length > 0) {
       // Prüfe exakte Übereinstimmung (auch mit normalisiertem Namen)
-      const exactMatch = allPlayers.find(p => {
+      // WICHTIG: Bevorzuge app_user und aktive Spieler
+      const exactMatches = allPlayers.filter(p => {
         const normalizedPlayerName = normalizeNameForComparison(p.name);
         return normalizedPlayerName === normalizedRosterName || 
                p.name.toLowerCase() === rosterName.toLowerCase();
       });
       
-      if (exactMatch) {
-        console.log(`✅ Exaktes Match gefunden: ${exactMatch.name} (${exactMatch.id})`);
+      if (exactMatches.length > 0) {
+        // Sortiere: app_user und aktive Spieler zuerst
+        exactMatches.sort((a, b) => {
+          // Priorität 1: app_user > opponent
+          if (a.player_type === 'app_user' && b.player_type !== 'app_user') return -1;
+          if (a.player_type !== 'app_user' && b.player_type === 'app_user') return 1;
+          // Priorität 2: is_active = true > false
+          if (a.is_active && !b.is_active) return -1;
+          if (!a.is_active && b.is_active) return 1;
+          return 0;
+        });
+        
+        const exactMatch = exactMatches[0];
+        console.log(`✅ Exaktes Match gefunden: ${exactMatch.name} (${exactMatch.id}, ${exactMatch.player_type}, aktiv: ${exactMatch.is_active})`);
         return exactMatch.id;
       }
       
@@ -102,11 +116,23 @@ export const matchRosterPlayerToUnified = async (rosterEntry, teamId) => {
           };
         })
         .filter(m => m.similarity >= 80)
-        .sort((a, b) => b.similarity - a.similarity);
+        .sort((a, b) => {
+          // Sortiere nach Ähnlichkeit, aber bevorzuge app_user und aktive Spieler
+          if (a.similarity !== b.similarity) {
+            return b.similarity - a.similarity;
+          }
+          // Bei gleicher Ähnlichkeit: app_user > opponent
+          if (a.player_type === 'app_user' && b.player_type !== 'app_user') return -1;
+          if (a.player_type !== 'app_user' && b.player_type === 'app_user') return 1;
+          // Bei gleicher Ähnlichkeit: is_active = true > false
+          if (a.is_active && !b.is_active) return -1;
+          if (!a.is_active && b.is_active) return 1;
+          return 0;
+        });
       
       if (matches.length > 0) {
         const bestMatch = matches[0];
-        console.log(`🎯 Fuzzy-Match gefunden: ${bestMatch.name} (${bestMatch.similarity}% Ähnlichkeit)`);
+        console.log(`🎯 Fuzzy-Match gefunden: ${bestMatch.name} (${bestMatch.similarity}% Ähnlichkeit, ${bestMatch.player_type}, aktiv: ${bestMatch.is_active})`);
         return bestMatch.id;
       }
     }

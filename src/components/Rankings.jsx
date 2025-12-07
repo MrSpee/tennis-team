@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Users, TrendingUp } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { supabase } from '../lib/supabaseClient';
@@ -17,6 +18,7 @@ import './Dashboard.css';
  */
 function Rankings() {
   const { players, playerTeams } = useData();
+  const navigate = useNavigate();
   
   // State Management
   const [sortBy, setSortBy] = useState('registered');
@@ -213,43 +215,205 @@ function Rankings() {
       return;
     }
     
-    // ✅ WICHTIG: Wenn kein spezifisches Team ausgewählt, verwende team_memberships (alte Logik)
+    // ✅ WICHTIG: Wenn kein spezifisches Team ausgewählt, lade ALLE Spieler des Vereins aus ALLEN Meldelisten
     if (selectedTeamId === 'all') {
-      if (!players || players.length === 0) {
-        setFilteredPlayers([]);
-        setRosterRanks({});
-        return;
-      }
-      
       try {
-        const { data: memberships, error } = await supabase
-          .from('team_memberships')
-          .select('player_id, team_id, team_info!inner(club_id)')
-          .eq('is_active', true);
+        console.log(`[Rankings] 🔍 Lade ALLE Spieler des Vereins (Club-ID: ${selectedClubId}) aus ALLEN Meldelisten`);
         
-        if (error) {
-          console.error('Error loading memberships:', error);
-          return;
+        // Lade ALLE Meldelisten-Einträge für diesen Verein (alle Kategorien, alle Teams)
+        const { data: allRosters, error: rosterError } = await supabase
+          .from('team_roster')
+          .select(`
+            id,
+            player_id,
+            rank,
+            player_name,
+            lk,
+            tvm_id,
+            birth_year,
+            team_id,
+            team_number,
+            season,
+            team_info!inner(category, club_id, team_name)
+          `)
+          .eq('team_info.club_id', selectedClubId)
+          .eq('season', currentSeason)
+          .order('rank', { ascending: true });
+        
+        if (rosterError) {
+          console.warn('⚠️ Fehler beim Laden der Meldelisten:', rosterError);
         }
         
-        const clubPlayerIds = memberships
-          .filter(m => m.team_info?.club_id === selectedClubId)
-          .map(m => m.player_id);
+        // Helper-Funktion: Parse LK-Wert mit Plausibilitätsprüfung
+        const parseLK = (lkString) => {
+          if (!lkString) return null;
+          
+          // Normalisiere LK-String
+          let normalized = String(lkString).trim()
+            .replace(/^LK\s*/i, '')
+            .replace(/,/g, '.')
+            .replace(/\s+/g, '');
+          
+          const parsed = parseFloat(normalized);
+          
+          // Plausibilitätsprüfung: LK sollte zwischen 1.0 und 30.0 liegen
+          if (isNaN(parsed) || parsed < 1.0 || parsed > 30.0) {
+            console.warn(`⚠️ Ungültiger LK-Wert erkannt: "${lkString}" (parsed: ${parsed}) - wird ignoriert`);
+            return null;
+          }
+          
+          return parsed;
+        };
         
-        let filtered = players.filter(p => clubPlayerIds.includes(p.id));
-        filtered = filtered.filter(p => p.name !== 'Theo Tester');
+        // Sammle alle eindeutigen player_ids und Roster-Einträge
+        const playerIds = new Set();
+        const rosterRankMap = {}; // {playerId: minRank} - niedrigster Rang über alle Teams
         
-        const sorted = filtered.sort((a, b) => {
-          const lkA = parseFloat((a.current_lk || a.season_start_lk || a.ranking || '25').replace('LK ', '').replace(',', '.'));
-          const lkB = parseFloat((b.current_lk || b.season_start_lk || b.ranking || '25').replace('LK ', '').replace(',', '.'));
-          return lkA - lkB;
+        if (allRosters && allRosters.length > 0) {
+          allRosters.forEach(rosterEntry => {
+            if (rosterEntry.player_id) {
+              playerIds.add(rosterEntry.player_id);
+              // Speichere den niedrigsten Rang für jeden Spieler
+              if (!rosterRankMap[rosterEntry.player_id] || rosterEntry.rank < rosterRankMap[rosterEntry.player_id]) {
+                rosterRankMap[rosterEntry.player_id] = rosterEntry.rank;
+              }
+            }
+          });
+        }
+        
+        // ✅ WICHTIG: Prüfe ob es Spieler ohne player_id gibt, die gematched werden müssen
+        const unmatchedRosters = allRosters?.filter(r => !r.player_id) || [];
+        if (unmatchedRosters.length > 0) {
+          console.log(`[Rankings] ⚠️ ${unmatchedRosters.length} Spieler ohne player_id gefunden - führe Matching durch...`);
+          
+          try {
+            // Importiere matchRosterPlayerToUnified
+            const { matchRosterPlayerToUnified } = await import('../components/LiveResultsWithDB');
+            
+            for (const rosterEntry of unmatchedRosters) {
+              try {
+                // Finde team_id für diesen Roster-Eintrag
+                const teamId = rosterEntry.team_id;
+                if (!teamId) {
+                  console.warn(`[Rankings] ⚠️ Keine team_id für Roster-Eintrag ${rosterEntry.id}`);
+                  continue;
+                }
+                
+                console.log(`[Rankings] 🔍 Matche Spieler: ${rosterEntry.player_name}`);
+                const matchedPlayerId = await matchRosterPlayerToUnified(rosterEntry, teamId);
+                
+                // Update team_roster mit player_id
+                const { error: updateError } = await supabase
+                  .from('team_roster')
+                  .update({ player_id: matchedPlayerId })
+                  .eq('id', rosterEntry.id)
+                  .eq('season', currentSeason);
+                
+                if (updateError) {
+                  console.error(`[Rankings] ❌ Fehler beim Speichern von player_id für ${rosterEntry.player_name}:`, updateError);
+                } else {
+                  console.log(`[Rankings] ✅ player_id ${matchedPlayerId} für ${rosterEntry.player_name} in team_roster gespeichert`);
+                  // Füge zur playerIds-Liste hinzu
+                  playerIds.add(matchedPlayerId);
+                  rosterEntry.player_id = matchedPlayerId;
+                  
+                  // Aktualisiere rosterRankMap
+                  if (!rosterRankMap[matchedPlayerId] || rosterEntry.rank < rosterRankMap[matchedPlayerId]) {
+                    rosterRankMap[matchedPlayerId] = rosterEntry.rank;
+                  }
+                }
+              } catch (matchError) {
+                console.error(`[Rankings] ❌ Fehler beim Matchen von ${rosterEntry.player_name}:`, matchError);
+              }
+            }
+          } catch (importError) {
+            console.error(`[Rankings] ❌ Fehler beim Importieren von matchRosterPlayerToUnified:`, importError);
+          }
+        }
+        
+        // ✅ WICHTIG: Lade vollständige Spieler-Daten aus players_unified (AKTUELLSTE DATEN!)
+        let playersMap = new Map();
+        if (playerIds.size > 0) {
+          const { data: playersData, error: playersError } = await supabase
+            .from('players_unified')
+            .select('*')
+            .in('id', Array.from(playerIds));
+          
+          if (playersError) {
+            console.warn('⚠️ Error loading players_unified:', playersError);
+          } else if (playersData) {
+            playersData.forEach(p => {
+              playersMap.set(p.id, p);
+            });
+            console.log(`[Rankings] ✅ ${playersData.length} Spieler-Daten aus players_unified geladen (aktuellste Daten!)`);
+          }
+        }
+        
+        // ✅ WICHTIG: Erstelle kombinierte Spieler-Liste - PRIORISIERE players_unified Daten!
+        const combinedPlayers = Array.from(playerIds).map(playerId => {
+          const playerData = playersMap.get(playerId);
+          
+          // ✅ WICHTIG: Wenn Matching stattgefunden hat, verwende players_unified Daten (aktuellste Daten!)
+          if (!playerData) {
+            // Fallback: Sollte nicht passieren, da wir nur gematched Spieler anzeigen
+            console.warn(`[Rankings] ⚠️ Keine players_unified Daten für player_id ${playerId} gefunden`);
+            return null;
+          }
+          
+          // Parse und validiere LK-Werte aus players_unified (aktuellste Daten!)
+          const currentLK = parseLK(playerData.current_lk);
+          const seasonStartLK = parseLK(playerData.season_start_lk);
+          const rankingLK = parseLK(playerData.ranking);
+          
+          // Bestimme die beste verfügbare LK (priorisiere current_lk > season_start_lk > ranking)
+          const bestLK = currentLK || seasonStartLK || rankingLK;
+          
+          // ✅ WICHTIG: Verwende players_unified Daten (aktuellste Daten nach Matching!)
+          return {
+            id: playerId,
+            name: playerData.name, // ✅ Aus players_unified (aktuellster Name!)
+            current_lk: playerData.current_lk, // ✅ Aus players_unified (aktuellste LK!)
+            season_start_lk: playerData.season_start_lk, // ✅ Aus players_unified
+            ranking: playerData.ranking, // ✅ Aus players_unified
+            tvm_id: playerData.tvm_id, // ✅ Aus players_unified
+            birth_date: playerData.birth_date, // ✅ Aus players_unified
+            is_active: playerData.is_active, // ✅ Aus players_unified
+            has_player_id: true, // ✅ Alle Spieler in dieser Liste haben player_id (da gematched)
+            player_type: playerData.player_type, // ✅ Aus players_unified
+            email: playerData.email, // ✅ Aus players_unified
+            phone: playerData.phone, // ✅ Aus players_unified
+            profile_image: playerData.profile_image, // ✅ Aus players_unified
+            rank: rosterRankMap[playerId] || null, // Aus Roster (für Anzeige) - als "rank" für Kompatibilität
+            roster_rank: rosterRankMap[playerId] || null, // Aus Roster (für Anzeige)
+            _parsed_lk: bestLK // Für Sortierung (intern)
+          };
+        }).filter(p => {
+          if (!p || p.name === 'Theo Tester') return false;
+          return true;
         });
         
+        // Sortiere nach LK (aufsteigend = beste LK zuerst)
+        // Spieler ohne gültige LK kommen ans Ende
+        const sorted = combinedPlayers.sort((a, b) => {
+          const lkA = a._parsed_lk ?? 999; // Spieler ohne LK ans Ende
+          const lkB = b._parsed_lk ?? 999;
+          
+          if (lkA !== lkB) {
+            return lkA - lkB;
+          }
+          
+          // Bei gleicher LK: Sortiere nach Name
+          return (a.name || '').localeCompare(b.name || '');
+        });
+        
+        console.log(`✅ Alle Spieler des Vereins geladen: ${sorted.length} Spieler aus ${allRosters?.length || 0} Meldelisten-Einträgen`);
         setFilteredPlayers(sorted);
+        setRosterRanks(rosterRankMap);
         loadPlayerStats(sorted);
-        setRosterRanks({});
       } catch (error) {
-        console.error('Error loading filtered players:', error);
+        console.error('Error loading all club players:', error);
+        setFilteredPlayers([]);
+        setRosterRanks({});
       }
       return;
     }
@@ -599,11 +763,62 @@ function Rankings() {
         };
       });
       
-      // 5. Filtere "Theo Tester" heraus
-      const filtered = combinedPlayers.filter(p => p.name !== 'Theo Tester');
+      // Helper-Funktion: Parse LK-Wert mit Plausibilitätsprüfung
+      const parseLK = (lkString) => {
+        if (!lkString) return null;
+        
+        // Normalisiere LK-String
+        let normalized = String(lkString).trim()
+          .replace(/^LK\s*/i, '')
+          .replace(/,/g, '.')
+          .replace(/\s+/g, '');
+        
+        const parsed = parseFloat(normalized);
+        
+        // Plausibilitätsprüfung: LK sollte zwischen 1.0 und 30.0 liegen
+        if (isNaN(parsed) || parsed < 1.0 || parsed > 30.0) {
+          console.warn(`⚠️ Ungültiger LK-Wert erkannt: "${lkString}" (parsed: ${parsed}) - wird ignoriert`);
+          return null;
+        }
+        
+        return parsed;
+      };
+      
+      // 5. Filtere "Theo Tester" heraus und füge geparste LK hinzu
+      const filtered = combinedPlayers
+        .filter(p => p.name !== 'Theo Tester')
+        .map(p => {
+          // Parse und validiere LK-Werte
+          const currentLK = parseLK(p.current_lk);
+          const seasonStartLK = parseLK(p.season_start_lk);
+          const rankingLK = parseLK(p.ranking);
+          
+          // Bestimme die beste verfügbare LK (priorisiere current_lk > season_start_lk > ranking)
+          const bestLK = currentLK || seasonStartLK || rankingLK;
+          
+          return {
+            ...p,
+            _parsed_lk: bestLK // Für Sortierung (intern)
+          };
+        });
       
       // 6. Sortiere nach Rang (bereits von DB sortiert, aber sicherstellen)
-      const sorted = filtered.sort((a, b) => a.rank - b.rank);
+      // Bei gleichem Rang: Sortiere nach LK
+      const sorted = filtered.sort((a, b) => {
+        if (a.rank !== b.rank) {
+          return a.rank - b.rank;
+        }
+        
+        // Bei gleichem Rang: Sortiere nach LK
+        const lkA = a._parsed_lk ?? 999;
+        const lkB = b._parsed_lk ?? 999;
+        if (lkA !== lkB) {
+          return lkA - lkB;
+        }
+        
+        // Bei gleicher LK: Sortiere nach Name
+        return (a.name || '').localeCompare(b.name || '');
+      });
       
       // 7. Speichere Roster-Ränge für Anzeige
       setRosterRanks(rosterRankMap);
@@ -652,32 +867,80 @@ function Rankings() {
   // ✅ NEU: Lade aktuelle Saison aus team_seasons (für Meldelisten)
   useEffect(() => {
     const loadCurrentSeason = async () => {
-      if (!selectedTeamId || selectedTeamId === 'all') {
-        // Wenn kein spezifisches Team ausgewählt, verwende Standard-Saison
-        return;
-      }
-      
       try {
-        const { data: teamSeason } = await supabase
-          .from('team_seasons')
-          .select('season')
-          .eq('team_id', selectedTeamId)
-          .eq('is_active', true)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        
-        if (teamSeason?.season) {
-          setCurrentSeason(teamSeason.season);
-          console.log('✅ Aktuelle Saison für Meldelisten geladen:', teamSeason.season);
+        // Wenn ein spezifisches Team ausgewählt ist, lade Saison für dieses Team
+        if (selectedTeamId && selectedTeamId !== 'all') {
+          const { data: teamSeason } = await supabase
+            .from('team_seasons')
+            .select('season')
+            .eq('team_id', selectedTeamId)
+            .eq('is_active', true)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          
+          if (teamSeason?.season) {
+            setCurrentSeason(teamSeason.season);
+            console.log('✅ Aktuelle Saison für Meldelisten geladen:', teamSeason.season);
+            return;
+          }
         }
+        
+        // Fallback 1: Wenn Club ausgewählt, lade Saison aus team_seasons des Clubs
+        if (selectedClubId && selectedClubTeams.length > 0) {
+          const { data: clubSeasons } = await supabase
+            .from('team_seasons')
+            .select('season')
+            .eq('is_active', true)
+            .in('team_id', selectedClubTeams.map(t => t.id))
+            .order('created_at', { ascending: false })
+            .limit(10);
+          
+          if (clubSeasons && clubSeasons.length > 0) {
+            // Finde die häufigste Saison
+            const seasonCounts = {};
+            clubSeasons.forEach(s => {
+              seasonCounts[s.season] = (seasonCounts[s.season] || 0) + 1;
+            });
+            const mostCommonSeason = Object.keys(seasonCounts).sort((a, b) => seasonCounts[b] - seasonCounts[a])[0];
+            if (mostCommonSeason) {
+              setCurrentSeason(mostCommonSeason);
+              console.log('✅ Aktuelle Saison für Meldelisten geladen (aus Club):', mostCommonSeason);
+              return;
+            }
+          }
+        }
+        
+        // Fallback 2: Lade neueste Saison aus team_roster
+        const { data: rosterSeasons } = await supabase
+          .from('team_roster')
+          .select('season')
+          .order('created_at', { ascending: false })
+          .limit(100);
+        
+        if (rosterSeasons && rosterSeasons.length > 0) {
+          const seasonCounts = {};
+          rosterSeasons.forEach(r => {
+            seasonCounts[r.season] = (seasonCounts[r.season] || 0) + 1;
+          });
+          const mostCommonSeason = Object.keys(seasonCounts).sort((a, b) => seasonCounts[b] - seasonCounts[a])[0];
+          if (mostCommonSeason) {
+            setCurrentSeason(mostCommonSeason);
+            console.log('✅ Aktuelle Saison für Meldelisten geladen (aus team_roster):', mostCommonSeason);
+            return;
+          }
+        }
+        
+        // Fallback 3: Verwende Standard-Saison
+        setCurrentSeason('Winter 2025/26');
       } catch (error) {
         console.warn('⚠️ Fehler beim Laden der Saison:', error);
+        setCurrentSeason('Winter 2025/26');
       }
     };
     
     loadCurrentSeason();
-  }, [selectedTeamId]);
+  }, [selectedTeamId, selectedClubId, selectedClubTeams]);
   
   useEffect(() => {
     if (selectedClubId && players) {
@@ -1025,9 +1288,37 @@ function Rankings() {
     return playerStats[playerId] || { wins: 0, losses: 0, total: 0 };
   };
   
+  // Helper-Funktion: Formatiert LK-Wert einheitlich als "LK X.X"
+  const formatLK = (lkValue) => {
+    if (!lkValue) return 'LK ?';
+    
+    // Normalisiere LK-String
+    let normalized = String(lkValue).trim()
+      .replace(/^LK\s*/i, '')
+      .replace(/,/g, '.')
+      .replace(/\s+/g, '');
+    
+    const parsed = parseFloat(normalized);
+    
+    // Plausibilitätsprüfung: LK sollte zwischen 1.0 und 30.0 liegen
+    if (isNaN(parsed) || parsed < 1.0 || parsed > 30.0) {
+      return 'LK ?';
+    }
+    
+    // Formatiere als "LK X.X" (eine Dezimalstelle)
+    return `LK ${parsed.toFixed(1)}`;
+  };
+  
   const getRankingColor = (ranking) => {
     if (!ranking) return '#gray';
-    const lk = parseInt(ranking.replace('LK ', '').trim()) || 99;
+    
+    // Parse LK-Wert für Farbbestimmung
+    let normalized = String(ranking).trim()
+      .replace(/^LK\s*/i, '')
+      .replace(/,/g, '.')
+      .replace(/\s+/g, '');
+    
+    const lk = parseFloat(normalized) || 99;
     if (lk <= 9) return '#10b981';
     if (lk <= 11) return '#3b82f6';
     return '#f59e0b';
@@ -1167,7 +1458,32 @@ function Rankings() {
                 <div className="ranking-card-header">
                   <div>
                     <h3 className="player-name-large">
-                      <span className="position-number">{index + 1}</span> - {player.name}
+                      <span className="position-number">{index + 1}</span> -{' '}
+                      {player.has_player_id ? (
+                        <span
+                          onClick={() => navigate(`/player/${encodeURIComponent(player.name)}`)}
+                          style={{
+                            cursor: 'pointer',
+                            color: '#3b82f6',
+                            textDecoration: 'none',
+                            transition: 'all 0.2s',
+                            borderBottom: '1px solid transparent'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.color = '#2563eb';
+                            e.currentTarget.style.borderBottomColor = '#2563eb';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.color = '#3b82f6';
+                            e.currentTarget.style.borderBottomColor = 'transparent';
+                          }}
+                          title="Zum Profil springen"
+                        >
+                          {player.name}
+                        </span>
+                      ) : (
+                        <span>{player.name}</span>
+                      )}
                       {/* ✅ NEU: Zeige Meldelisten-Rang (immer vorhanden, da aus Meldeliste) */}
                       {player.rank && (
                         <span style={{
@@ -1213,16 +1529,16 @@ function Rankings() {
                         marginLeft: '3rem',
                         fontStyle: 'italic'
                       }}>
-                        📅 Saison-Start: {player.season_start_lk}
+                        📅 Saison-Start: {formatLK(player.season_start_lk)}
                       </div>
                     )}
                   </div>
                   <div className="player-stats">
                     <span 
                       className="ranking-badge"
-                      style={{ backgroundColor: getRankingColor(player.current_lk || player.ranking) }}
+                      style={{ backgroundColor: getRankingColor(player.current_lk || player.season_start_lk || player.ranking) }}
                     >
-                      {player.current_lk || player.ranking || 'LK ?'}
+                      {formatLK(player.current_lk || player.season_start_lk || player.ranking)}
                     </span>
                     <span className="points-badge">
                       🎾 {stats.wins + stats.losses}/{stats.total}
