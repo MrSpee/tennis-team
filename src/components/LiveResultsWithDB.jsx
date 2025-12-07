@@ -14,6 +14,158 @@ import {
 } from '../services/gamificationService';
 import './LiveResults.css';
 
+// Helper-Funktion: Führt Fuzzy-Matching mit players_unified durch und gibt player_id zurück
+export const matchRosterPlayerToUnified = async (rosterEntry, teamId) => {
+  // Hilfsfunktionen für Matching
+  const normalizeNameForComparison = (name) => {
+    if (!name) return '';
+    const normalized = name.toLowerCase().trim().replace(/\s+/g, ' ');
+    const commaMatch = normalized.match(/^([^,]+),\s*(.+)$/);
+    if (commaMatch) {
+      return `${commaMatch[2]} ${commaMatch[1]}`.trim();
+    }
+    return normalized;
+  };
+  
+  const calculateSimilarity = (str1, str2) => {
+    if (!str1 || !str2) return 0;
+    const normalize = (s) => s.toLowerCase().trim().replace(/\s+/g, '');
+    const s1 = normalize(str1);
+    const s2 = normalize(str2);
+    if (s1 === s2) return 100;
+    const getBigrams = (s) => {
+      const bigrams = new Set();
+      for (let i = 0; i < s.length - 1; i++) {
+        bigrams.add(s.substring(i, i + 2));
+      }
+      return bigrams;
+    };
+    const bigrams1 = getBigrams(s1);
+    const bigrams2 = getBigrams(s2);
+    let intersection = 0;
+    bigrams1.forEach(bigram => {
+      if (bigrams2.has(bigram)) intersection++;
+    });
+    const union = bigrams1.size + bigrams2.size;
+    if (union === 0) return 0;
+    return Math.round((2 * intersection / union) * 100);
+  };
+  
+  try {
+    const rosterName = rosterEntry.player_name;
+    const normalizedRosterName = normalizeNameForComparison(rosterName);
+    
+    console.log(`🔍 Matche Spieler: "${rosterName}" (normalisiert: "${normalizedRosterName}")`);
+    
+    // 1. TVM-ID Match (falls vorhanden) - HÖCHSTE Priorität (eindeutig!)
+    if (rosterEntry.tvm_id) {
+      const { data: tvmMatch } = await supabase
+        .from('players_unified')
+        .select('id, name, tvm_id')
+        .eq('tvm_id', rosterEntry.tvm_id)
+        .maybeSingle();
+      
+      if (tvmMatch) {
+        console.log(`✅ TVM-ID Match gefunden: ${tvmMatch.name} (${tvmMatch.id})`);
+        return tvmMatch.id;
+      }
+    }
+    
+    // 2. Exakte Übereinstimmung (Name) - auch mit normalisiertem Namen
+    const { data: allPlayers } = await supabase
+      .from('players_unified')
+      .select('id, name, current_lk, tvm_id')
+      .limit(1000);
+    
+    if (allPlayers && allPlayers.length > 0) {
+      // Prüfe exakte Übereinstimmung (auch mit normalisiertem Namen)
+      const exactMatch = allPlayers.find(p => {
+        const normalizedPlayerName = normalizeNameForComparison(p.name);
+        return normalizedPlayerName === normalizedRosterName || 
+               p.name.toLowerCase() === rosterName.toLowerCase();
+      });
+      
+      if (exactMatch) {
+        console.log(`✅ Exaktes Match gefunden: ${exactMatch.name} (${exactMatch.id})`);
+        return exactMatch.id;
+      }
+      
+      // 3. Fuzzy-Matching (Name-Ähnlichkeit) mit normalisiertem Namen
+      const matches = allPlayers
+        .map(player => {
+          const normalizedPlayerName = normalizeNameForComparison(player.name);
+          const similarity1 = calculateSimilarity(player.name, rosterName);
+          const similarity2 = calculateSimilarity(normalizedPlayerName, normalizedRosterName);
+          return {
+            ...player,
+            similarity: Math.max(similarity1, similarity2)
+          };
+        })
+        .filter(m => m.similarity >= 80)
+        .sort((a, b) => b.similarity - a.similarity);
+      
+      if (matches.length > 0) {
+        const bestMatch = matches[0];
+        console.log(`🎯 Fuzzy-Match gefunden: ${bestMatch.name} (${bestMatch.similarity}% Ähnlichkeit)`);
+        return bestMatch.id;
+      }
+    }
+    
+    // 4. Kein Match gefunden: Erstelle neuen Spieler
+    console.log(`🆕 Kein Match gefunden, erstelle neuen Spieler: ${rosterEntry.player_name}`);
+    
+    let normalizedName = rosterEntry.player_name;
+    const commaMatch = normalizedName.match(/^([^,]+),\s*(.+)$/);
+    if (commaMatch) {
+      normalizedName = `${commaMatch[2]} ${commaMatch[1]}`.trim();
+      console.log(`📝 Normalisiere Namen: "${rosterEntry.player_name}" → "${normalizedName}"`);
+    }
+    
+    const { data: newPlayer, error: createError } = await supabase
+      .from('players_unified')
+      .insert({
+        name: normalizedName,
+        is_active: false,
+        current_lk: rosterEntry.lk || null,
+        season_start_lk: rosterEntry.lk || null,
+        tvm_id: rosterEntry.tvm_id || null,
+        birth_date: rosterEntry.birth_year ? `${rosterEntry.birth_year}-01-01` : null,
+        player_type: 'opponent',
+        ranking: null
+      })
+      .select('id')
+      .single();
+    
+    if (createError) {
+      console.error('❌ Fehler beim Erstellen des Spielers:', createError);
+      throw createError;
+    }
+    
+    console.log('✅ Neuer Spieler erfolgreich erstellt:', newPlayer.id);
+    
+    // Erstelle Team-Membership, falls Team-ID vorhanden
+    if (teamId) {
+      try {
+        await supabase
+          .from('team_memberships')
+          .insert({
+            player_id: newPlayer.id,
+            team_id: teamId,
+            is_active: true,
+            role: 'player'
+          });
+      } catch (membershipError) {
+        console.warn('⚠️ Fehler beim Erstellen der Team-Membership:', membershipError);
+      }
+    }
+    
+    return newPlayer.id;
+  } catch (error) {
+    console.error('❌ Fehler in matchRosterPlayerToUnified:', error);
+    throw error;
+  }
+};
+
 const LiveResultsWithDB = () => {
   const { matchId } = useParams();
   const navigate = useNavigate();
@@ -1020,124 +1172,6 @@ const LiveResultsWithDB = () => {
     return normalized;
   };
 
-  // Helper-Funktion: Führt Fuzzy-Matching mit players_unified durch und gibt player_id zurück
-  const matchRosterPlayerToUnified = async (rosterEntry, teamId) => {
-    try {
-      const rosterName = rosterEntry.player_name;
-      const normalizedRosterName = normalizeNameForComparison(rosterName);
-      
-      console.log(`🔍 Matche Spieler: "${rosterName}" (normalisiert: "${normalizedRosterName}")`);
-      
-      // 1. TVM-ID Match (falls vorhanden) - HÖCHSTE Priorität (eindeutig!)
-      if (rosterEntry.tvm_id) {
-        const { data: tvmMatch } = await supabase
-          .from('players_unified')
-          .select('id, name, tvm_id')
-          .eq('tvm_id', rosterEntry.tvm_id)
-          .maybeSingle();
-        
-        if (tvmMatch) {
-          console.log(`✅ TVM-ID Match gefunden: ${tvmMatch.name} (${tvmMatch.id})`);
-          return tvmMatch.id;
-        }
-      }
-      
-      // 2. Exakte Übereinstimmung (Name) - auch mit normalisiertem Namen
-      const { data: allPlayers } = await supabase
-        .from('players_unified')
-        .select('id, name, current_lk, tvm_id')
-        .limit(1000); // Lade mehr Spieler für besseres Matching
-      
-      if (allPlayers && allPlayers.length > 0) {
-        // Prüfe exakte Übereinstimmung (auch mit normalisiertem Namen)
-        const exactMatch = allPlayers.find(p => {
-          const normalizedPlayerName = normalizeNameForComparison(p.name);
-          return normalizedPlayerName === normalizedRosterName || 
-                 p.name.toLowerCase() === rosterName.toLowerCase();
-        });
-        
-        if (exactMatch) {
-          console.log(`✅ Exaktes Match gefunden: ${exactMatch.name} (${exactMatch.id})`);
-          return exactMatch.id;
-        }
-        
-        // 3. Fuzzy-Matching (Name-Ähnlichkeit) mit normalisiertem Namen
-        const matches = allPlayers
-          .map(player => {
-            const normalizedPlayerName = normalizeNameForComparison(player.name);
-            const similarity1 = calculateSimilarity(player.name, rosterName);
-            const similarity2 = calculateSimilarity(normalizedPlayerName, normalizedRosterName);
-            return {
-              ...player,
-              similarity: Math.max(similarity1, similarity2) // Nimm höchste Similarity
-            };
-          })
-          .filter(m => m.similarity >= 80) // Mindestens 80% Ähnlichkeit
-          .sort((a, b) => b.similarity - a.similarity);
-        
-        if (matches.length > 0) {
-          const bestMatch = matches[0];
-          console.log(`🎯 Fuzzy-Match gefunden: ${bestMatch.name} (${bestMatch.similarity}% Ähnlichkeit)`);
-          return bestMatch.id;
-        }
-      }
-      
-      // 4. Kein Match gefunden: Erstelle neuen Spieler
-      console.log(`🆕 Kein Match gefunden, erstelle neuen Spieler: ${rosterEntry.player_name}`);
-      
-      // WICHTIG: Normalisiere den Namen (konvertiere "Nachname, Vorname" zu "Vorname Nachname")
-      let normalizedName = rosterEntry.player_name;
-      const commaMatch = normalizedName.match(/^([^,]+),\s*(.+)$/);
-      if (commaMatch) {
-        normalizedName = `${commaMatch[2]} ${commaMatch[1]}`.trim();
-        console.log(`📝 Normalisiere Namen: "${rosterEntry.player_name}" → "${normalizedName}"`);
-      }
-      
-      const { data: newPlayer, error: createError } = await supabase
-        .from('players_unified')
-        .insert({
-          name: normalizedName, // Verwende normalisierten Namen
-          is_active: false,
-          current_lk: rosterEntry.lk || null,
-          season_start_lk: rosterEntry.lk || null,
-          tvm_id: rosterEntry.tvm_id || null,
-          birth_date: rosterEntry.birth_year ? `${rosterEntry.birth_year}-01-01` : null,
-          player_type: 'opponent',
-          ranking: null
-        })
-        .select('id')
-        .single();
-      
-      if (createError) {
-        console.error('❌ Fehler beim Erstellen des Spielers:', createError);
-        throw createError;
-      }
-      
-      console.log('✅ Neuer Spieler erfolgreich erstellt:', newPlayer.id);
-      
-      // Erstelle Team-Membership, falls Team-ID vorhanden
-      if (teamId) {
-        try {
-          await supabase
-            .from('team_memberships')
-            .insert({
-              player_id: newPlayer.id,
-              team_id: teamId,
-              is_active: true,
-              role: 'player'
-            });
-        } catch (membershipError) {
-          console.warn('⚠️ Fehler beim Erstellen der Team-Membership:', membershipError);
-          // Nicht kritisch, weiter machen
-        }
-      }
-      
-      return newPlayer.id;
-    } catch (error) {
-      console.error('❌ Fehler in matchRosterPlayerToUnified:', error);
-      throw error;
-    }
-  };
   
   // Helper-Funktion: Erstelle einen neuen Spieler in players_unified
   const createNewPlayer = async (playerName) => {

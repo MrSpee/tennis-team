@@ -270,14 +270,16 @@ async function parseRosterFromClubPoolsPage(teamUrl) {
     // Die Struktur ist: <tr><td>Rang</td><td>Mannschaft</td><td>LK</td><td>ID-Nummer</td><td>Name (Jahrgang)</td>...
     // WICHTIG: <td> Elemente können Whitespace und Zeilenumbrüche enthalten
     // WICHTIG: Das Geburtsjahr steht NACH dem </a> Tag, nicht im <a> Tag!
+    // WICHTIG: Die Spalte "Mannschaft" kommt NACH "Rang" und enthält die Mannschaftsnummer (1, 2, 3, etc.)
     // Pattern 1: Vollständige Zeile mit allen Feldern
     // Struktur: <td>Rang</td><td>Mannschaft</td><td>LK</td><td>ID-Nummer</td><td><a>Name</a> (Jahrgang)</td>
-    const fullRowPattern = /<tr[^>]*>(?![\s\S]*?<th)[\s\S]*?<td[^>]*>[\s\S]*?(\d{1,2})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d+)[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(LK[\d,\.]+)[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d{7,})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>([\s\S]*?)<\/td>/gi;
+    // Verbessertes Pattern: Erzwinge, dass die 2. Spalte (Mannschaft) eine Zahl ist
+    const fullRowPattern = /<tr[^>]*>(?![\s\S]*?<th)[\s\S]*?<td[^>]*>[\s\S]*?(\d{1,2})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d{1,2})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(LK[\d,\.]+)[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d{7,})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>([\s\S]*?)<\/td>/gi;
     
     let match;
     while ((match = fullRowPattern.exec(htmlToParse)) !== null) {
       const rank = parseInt(match[1], 10);
-      const teamNumber = parseInt(match[2], 10); // Mannschaftsnummer (1, 2, 3, etc.)
+      const teamNumber = parseInt(match[2], 10); // Mannschaftsnummer (1, 2, 3, etc.) - WICHTIG: Aus Spalte "Mannschaft"
       const lk = match[3].trim();
       const tvmId = match[4].trim();
       const name = match[5].trim();
@@ -290,11 +292,11 @@ async function parseRosterFromClubPoolsPage(teamUrl) {
         birthYear = parseInt(birthMatch[1], 10);
       }
       
-      // Validierung: Name und TVM-ID müssen vorhanden sein
-      if (name && name.length > 2 && tvmId && tvmId.match(/^\d+$/)) {
+      // Validierung: Name, TVM-ID und teamNumber müssen vorhanden sein
+      if (name && name.length > 2 && tvmId && tvmId.match(/^\d+$/) && teamNumber && teamNumber > 0) {
         roster.push({
           rank,
-          teamNumber, // Mannschaftsnummer (1, 2, 3, etc.)
+          teamNumber, // Mannschaftsnummer (1, 2, 3, etc.) - WICHTIG: Aus Spalte "Mannschaft"
           name,
           lk: lk.startsWith('LK') ? lk : `LK ${lk}`,
           tvmId,
@@ -303,6 +305,7 @@ async function parseRosterFromClubPoolsPage(teamUrl) {
           doubles: null,
           total: null
         });
+        console.log(`[parse-club-rosters] ✅ Spieler geparst: ${name} (Rang ${rank}, Mannschaft ${teamNumber}, LK ${lk}, TVM-ID ${tvmId})`);
       } else {
         console.warn(`[parse-club-rosters] ⚠️ Ungültige Zeile übersprungen: rank=${rank}, teamNumber=${teamNumber}, name="${name}", tvmId="${tvmId}"`);
       }
@@ -311,12 +314,12 @@ async function parseRosterFromClubPoolsPage(teamUrl) {
     // Pattern 2: Fallback - Vereinfachtes Pattern (ohne Geburtsjahr)
     if (roster.length === 0) {
       console.log('[parse-club-rosters] ⚠️ Vollständiges Pattern hat keine Ergebnisse, versuche vereinfachtes Pattern...');
-      const simpleRowPattern = /<tr[^>]*>(?![\s\S]*?<th)[\s\S]*?<td[^>]*>[\s\S]*?(\d{1,2})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d+)[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(LK[\d,\.]+)[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d{7,})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>([\s\S]*?)<\/td>/gi;
+      const simpleRowPattern = /<tr[^>]*>(?![\s\S]*?<th)[\s\S]*?<td[^>]*>[\s\S]*?(\d{1,2})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d{1,2})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(LK[\d,\.]+)[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d{7,})[\s\S]*?<\/td>[\s\S]*?<td[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>([\s\S]*?)<\/td>/gi;
       let simpleMatch;
       
       while ((simpleMatch = simpleRowPattern.exec(htmlToParse)) !== null) {
         const rank = parseInt(simpleMatch[1], 10);
-        const teamNumber = parseInt(simpleMatch[2], 10); // Mannschaftsnummer (1, 2, 3, etc.)
+        const teamNumber = parseInt(simpleMatch[2], 10); // Mannschaftsnummer (1, 2, 3, etc.) - WICHTIG: Aus Spalte "Mannschaft"
         const lk = simpleMatch[3].trim();
         const tvmId = simpleMatch[4].trim();
         const name = simpleMatch[5].trim();
@@ -329,10 +332,10 @@ async function parseRosterFromClubPoolsPage(teamUrl) {
           birthYear = parseInt(birthMatch[1], 10);
         }
         
-        if (name && name.length > 2 && tvmId && tvmId.match(/^\d+$/)) {
+        if (name && name.length > 2 && tvmId && tvmId.match(/^\d+$/) && teamNumber && teamNumber > 0) {
           roster.push({
             rank,
-            teamNumber, // Mannschaftsnummer (1, 2, 3, etc.)
+            teamNumber, // Mannschaftsnummer (1, 2, 3, etc.) - WICHTIG: Aus Spalte "Mannschaft"
             name,
             lk: lk.startsWith('LK') ? lk : `LK ${lk}`,
             tvmId,
@@ -341,6 +344,7 @@ async function parseRosterFromClubPoolsPage(teamUrl) {
             doubles: null,
             total: null
           });
+          console.log(`[parse-club-rosters] ✅ Spieler geparst (Fallback): ${name} (Rang ${rank}, Mannschaft ${teamNumber}, LK ${lk}, TVM-ID ${tvmId})`);
         }
       }
     }
@@ -897,8 +901,9 @@ async function handler(req, res) {
           // z.B. "Herren 50" + "1" → Suche nach Team mit category="Herren 50" und team_name="1"
           let teamId = null;
           
-          // Strategie 1: Direktes Mapping über contestType (für einfache Fälle)
-          teamId = teamMapping[team.contestType] || teamMapping[team.teamName];
+          // Strategie 1: Direktes Mapping über contestType-teamNumber (z.B. "Herren 50-1")
+          const teamKey = `${team.contestType}-${teamNumber}`;
+          teamId = teamMapping[teamKey] || teamMapping[team.contestType] || teamMapping[team.teamName];
           
           // Strategie 2: Wenn mehrere Teams in derselben Kategorie, suche nach team_name
           if (!teamId || Object.keys(rosterByTeamNumber).length > 1) {

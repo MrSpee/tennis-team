@@ -332,11 +332,8 @@ function Rankings() {
       let roster = null;
       let rosterError = null;
       
-      // ✅ WICHTIG: Lade Roster für ALLE Teams derselben Kategorie und desselben Vereins
-      // Filtere dann basierend auf team_number:
-      // - Mannschaft 1: Zeige team_number >= 1 (also 1, 2, 3, etc.)
-      // - Mannschaft 2: Zeige team_number >= 2 (also 2, 3, etc.), aber NICHT 1
-      // Versuche 1: Exakte Saison
+      // Lade Roster für ALLE Teams derselben Kategorie und desselben Vereins
+      // Dann filtern wir basierend auf team_number
       let { data, error } = await supabase
         .from('team_roster')
         .select(`
@@ -446,30 +443,50 @@ function Rankings() {
         return;
       }
       
-      // ✅ WICHTIG: Filtere basierend auf team_number gemäß Wettspielordnung
-      // - Mannschaft 1 (team_number = 1): Zeige alle Spieler mit team_number >= 1
-      // - Mannschaft 2 (team_number = 2): Zeige nur Spieler mit team_number >= 2 (NICHT 1)
-      // - Mannschaft 3 (team_number = 3): Zeige nur Spieler mit team_number >= 3 (NICHT 1, 2)
-      // etc.
-      // FALLBACK: Wenn team_number null ist, verwende team_name aus team_info
+      // Filtere: Zeige nur Spieler, die zum ausgewählten Team gehören ODER zu höheren Teams
+      // WICHTIG: Ein Spieler mit team_number = 1 darf NUR in Mannschaft 1 angezeigt werden
+      // Ein Spieler mit team_number = 2 darf in Mannschaft 1 UND 2 angezeigt werden
       const filteredRoster = roster.filter(r => {
-        // Versuche team_number zu verwenden, sonst team_name
+        // Bestimme team_number des Spielers aus dem Roster-Eintrag
+        // WICHTIG: team_number ist die Mannschaftsnummer des Spielers (aus der Meldeliste)
+        // team_name aus team_info ist die Mannschaft, zu der dieser Roster-Eintrag gehört
         let playerTeamNumber = r.team_number;
+        
+        // ✅ WICHTIG: Wenn team_number null ist, verwenden wir team_name aus team_info als Fallback
+        // ABER: Das bedeutet, dass dieser Roster-Eintrag zu diesem Team gehört
+        // Wenn selectedTeamNumber = 2 und team_name = "2", dann gehört der Spieler zu Team 2 → anzeigen
+        // Wenn selectedTeamNumber = 2 und team_name = "1", dann gehört der Spieler zu Team 1 → NICHT anzeigen
         if (playerTeamNumber === null || playerTeamNumber === undefined) {
-          // Fallback: Verwende team_name aus team_info
+          // Fallback: Verwende team_name aus team_info (das ist die Mannschaft, zu der dieser Roster-Eintrag gehört)
           const teamName = r.team_info?.team_name;
           if (teamName) {
             playerTeamNumber = parseInt(teamName, 10);
             if (isNaN(playerTeamNumber)) {
-              playerTeamNumber = 1; // Fallback: 1 wenn team_name nicht parsebar
+              console.log(`[Rankings] ⚠️ Kann team_name "${teamName}" nicht parsen für ${r.player_name} - überspringe`);
+              return false;
             }
           } else {
-            playerTeamNumber = 1; // Fallback: 1 wenn team_name nicht vorhanden
+            console.log(`[Rankings] ⚠️ Keine team_name gefunden für ${r.player_name} - überspringe`);
+            return false;
           }
         }
         
-        // Zeige nur Spieler mit team_number >= selectedTeamNumber
-        return playerTeamNumber >= selectedTeamNumber;
+        // ✅ WICHTIG: Zeige nur Spieler mit playerTeamNumber >= selectedTeamNumber
+        // selectedTeamNumber = 1: Zeige playerTeamNumber >= 1 (also 1, 2, 3, etc.)
+        // selectedTeamNumber = 2: Zeige playerTeamNumber >= 2 (also 2, 3, etc.), aber NICHT 1
+        // 
+        // STRENGE PRÜFUNG: Ein Spieler mit playerTeamNumber = 1 darf NUR in Mannschaft 1 angezeigt werden!
+        // Ein Spieler mit playerTeamNumber = 2 darf in Mannschaft 1 UND 2 angezeigt werden.
+        // Ein Spieler mit playerTeamNumber = 3 darf in Mannschaft 1, 2 UND 3 angezeigt werden.
+        const shouldShow = playerTeamNumber >= selectedTeamNumber;
+        
+        if (!shouldShow) {
+          console.log(`[Rankings] 🚫 ${r.player_name} (playerTeamNumber=${playerTeamNumber}, team_id=${r.team_id}, team_name=${r.team_info?.team_name}, team_number=${r.team_number}) wird NICHT angezeigt für Mannschaft ${selectedTeamNumber} (${playerTeamNumber} < ${selectedTeamNumber})`);
+        } else {
+          console.log(`[Rankings] ✅ ${r.player_name} (playerTeamNumber=${playerTeamNumber}, team_id=${r.team_id}, team_name=${r.team_info?.team_name}, team_number=${r.team_number}) wird angezeigt für Mannschaft ${selectedTeamNumber} (${playerTeamNumber} >= ${selectedTeamNumber})`);
+        }
+        
+        return shouldShow;
       });
       
       console.log(`[Rankings] 📊 Roster gefiltert: ${roster.length} → ${filteredRoster.length} Spieler (team_number >= ${selectedTeamNumber})`);
@@ -488,12 +505,50 @@ function Rankings() {
         return;
       }
       
-      // 2. Sammle alle player_ids (die vorhanden sind)
+      // 2. Prüfe ob das ausgewählte Team bereits vollständig gematched ist
+      const selectedTeamUnmatchedEntries = clubRoster.filter(r => !r.player_id);
+      const selectedTeamFullyMatched = selectedTeamUnmatchedEntries.length === 0;
+      
+      if (selectedTeamFullyMatched) {
+        console.log(`[Rankings] ✅ Alle Spieler für Team ${selectedTeamId} bereits gematched - kein Matching nötig`);
+      } else {
+        // Führe Matching für alle Spieler ohne player_id durch
+        console.log(`[Rankings] ⚠️ ${selectedTeamUnmatchedEntries.length}/${clubRoster.length} Spieler noch nicht gematched - führe Matching durch...`);
+        
+        // Importiere matchRosterPlayerToUnified
+        const { matchRosterPlayerToUnified } = await import('../components/LiveResultsWithDB');
+        
+        for (const rosterEntry of selectedTeamUnmatchedEntries) {
+          try {
+            console.log(`[Rankings] 🔍 Matche Spieler: ${rosterEntry.player_name}`);
+            const matchedPlayerId = await matchRosterPlayerToUnified(rosterEntry, selectedTeamId);
+            
+            // ✅ WICHTIG: Update team_roster mit player_id - wird permanent in DB gespeichert
+            const { error: updateError } = await supabase
+              .from('team_roster')
+              .update({ player_id: matchedPlayerId })
+              .eq('id', rosterEntry.id)
+              .eq('season', currentSeason); // Zusätzliche Sicherheit: nur für aktuelle Saison
+            
+            if (updateError) {
+              console.error(`[Rankings] ❌ Fehler beim Speichern von player_id für ${rosterEntry.player_name}:`, updateError);
+            } else {
+              console.log(`[Rankings] ✅ player_id ${matchedPlayerId} für ${rosterEntry.player_name} in team_roster gespeichert`);
+              // Update lokalen Eintrag
+              rosterEntry.player_id = matchedPlayerId;
+            }
+          } catch (matchError) {
+            console.error(`[Rankings] ❌ Fehler beim Matchen von ${rosterEntry.player_name}:`, matchError);
+          }
+        }
+      }
+      
+      // 3. Sammle alle player_ids (die vorhanden sind)
       const playerIds = clubRoster
         .filter(r => r.player_id)
         .map(r => r.player_id);
       
-      // 3. Lade vollständige Spieler-Daten aus players_unified (nur für Einträge mit player_id)
+      // 4. Lade vollständige Spieler-Daten aus players_unified (nur für Einträge mit player_id)
       let playersMap = new Map();
       if (playerIds.length > 0) {
         const { data: playersData, error: playersError } = await supabase
@@ -1319,3 +1374,4 @@ function Rankings() {
 }
 
 export default Rankings;
+

@@ -673,80 +673,200 @@ const ClubRostersTab = () => {
           <div className="teams-list">
             <h3 className="teams-list-title">
               <Users size={20} />
-              Teams ({parsedData.teams?.length || 0})
+              Mannschaften
             </h3>
             
             {parsedData.teams?.map((team, idx) => {
-              const isExpanded = expandedTeams.has(team.contestType);
-              const teamOptions = getTeamOptions(team.contestType);
-              const selectedTeamId = teamMapping[team.contestType];
+              // Gruppiere Spieler nach team_number (Mannschaftsnummer)
+              const playersByTeamNumber = {};
+              if (team.roster && team.roster.length > 0) {
+                team.roster.forEach(player => {
+                  const teamNum = player.teamNumber || 1; // Fallback: 1 wenn nicht vorhanden
+                  if (!playersByTeamNumber[teamNum]) {
+                    playersByTeamNumber[teamNum] = [];
+                  }
+                  playersByTeamNumber[teamNum].push(player);
+                });
+              }
               
-              return (
-                <div key={idx} className="team-card">
-                  <div 
-                    className="team-card-header"
-                    onClick={() => toggleTeamExpansion(team.contestType)}
-                  >
-                    <div className="team-header-left">
-                      {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-                      <div>
-                        <h4 className="team-name">{team.teamName}</h4>
-                        <p className="team-meta">
-                          {team.playerCount || 0} Spieler
-                          {team.contestType && ` · ${team.contestType}`}
-                        </p>
+              // Sortiere team_number (1, 2, 3, etc.)
+              const sortedTeamNumbers = Object.keys(playersByTeamNumber)
+                .map(n => parseInt(n, 10))
+                .sort((a, b) => a - b);
+              
+              // Wenn nur eine Mannschaft vorhanden ist, zeige wie bisher
+              if (sortedTeamNumbers.length === 1) {
+                const teamNumber = sortedTeamNumbers[0];
+                const roster = playersByTeamNumber[teamNumber];
+                const teamKey = `${team.contestType}-${teamNumber}`;
+                const isExpanded = expandedTeams.has(teamKey);
+                const teamOptions = getTeamOptions(team.contestType);
+                const selectedTeamId = teamMapping[teamKey] || teamMapping[team.contestType];
+                
+                return (
+                  <div key={idx} className="team-card">
+                    <div 
+                      className="team-card-header"
+                      onClick={() => toggleTeamExpansion(teamKey)}
+                    >
+                      <div className="team-header-left">
+                        {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                        <div>
+                          <h4 className="team-name">{team.teamName}</h4>
+                          <p className="team-meta">
+                            {roster.length} Spieler
+                            {team.contestType && ` · ${team.contestType}`}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="team-header-right">
+                        <select
+                          value={selectedTeamId || ''}
+                          onChange={(e) => {
+                            setTeamMapping({
+                              ...teamMapping,
+                              [teamKey]: e.target.value || null
+                            });
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="team-select"
+                        >
+                          <option value="">Team zuordnen...</option>
+                          {teamOptions.map(opt => (
+                            <option key={opt.id} value={opt.id}>
+                              {opt.club_name} {opt.team_name || ''} ({opt.category})
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     </div>
-                    <div className="team-header-right">
-                      <select
-                        value={selectedTeamId || ''}
-                        onChange={(e) => {
-                          setTeamMapping({
-                            ...teamMapping,
-                            [team.contestType]: e.target.value || null
-                          });
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                        className="team-select"
-                      >
-                        <option value="">Team zuordnen...</option>
-                        {teamOptions.map(opt => (
-                          <option key={opt.id} value={opt.id}>
-                            {opt.club_name} {opt.team_name || ''} ({opt.category})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  
-                  {isExpanded && team.roster && team.roster.length > 0 && (
-                    <div className="team-roster-table">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Rang</th>
-                            <th>Name</th>
-                            <th>LK</th>
-                            <th>TVM-ID</th>
-                            <th>Geburtsjahr</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {team.roster.map((player, pIdx) => (
-                            <tr key={pIdx}>
-                              <td className="rank-cell">{player.rank}</td>
-                              <td className="name-cell">{player.name}</td>
-                              <td className="lk-cell">{player.lk || '-'}</td>
-                              <td className="tvm-id-cell">{player.tvmId || '-'}</td>
-                              <td className="birth-year-cell">{player.birthYear || '-'}</td>
+                    
+                    {isExpanded && roster && roster.length > 0 && (
+                      <div className="team-roster-table">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Rang</th>
+                              <th>Mannschaft</th>
+                              <th>Name</th>
+                              <th>LK</th>
+                              <th>TVM-ID</th>
+                              <th>Geburtsjahr</th>
                             </tr>
+                          </thead>
+                          <tbody>
+                            {roster.map((player, pIdx) => (
+                              <tr key={pIdx}>
+                                <td className="rank-cell">{player.rank}</td>
+                                <td className="team-number-cell">{player.teamNumber || '-'}</td>
+                                <td className="name-cell">{player.name}</td>
+                                <td className="lk-cell">{player.lk || '-'}</td>
+                                <td className="tvm-id-cell">{player.tvmId || '-'}</td>
+                                <td className="birth-year-cell">{player.birthYear || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+              
+              // Wenn mehrere Mannschaften vorhanden sind, zeige jede separat
+              return sortedTeamNumbers.map(teamNumber => {
+                const roster = playersByTeamNumber[teamNumber];
+                const teamKey = `${team.contestType}-${teamNumber}`;
+                const isExpanded = expandedTeams.has(teamKey);
+                const teamOptions = getTeamOptions(team.contestType);
+                // Filtere Teams nach team_name, wenn möglich
+                const filteredTeamOptions = teamOptions.filter(opt => {
+                  // Versuche team_name zu matchen (z.B. "1" === "1")
+                  if (opt.team_name) {
+                    const optTeamNum = parseInt(opt.team_name, 10);
+                    if (!isNaN(optTeamNum) && optTeamNum === teamNumber) {
+                      return true;
+                    }
+                  }
+                  // Wenn nur ein Team in dieser Kategorie, zeige es auch
+                  if (teamOptions.length === 1) {
+                    return true;
+                  }
+                  return false;
+                });
+                const selectedTeamId = teamMapping[teamKey];
+                
+                return (
+                  <div key={`${idx}-${teamNumber}`} className="team-card">
+                    <div 
+                      className="team-card-header"
+                      onClick={() => toggleTeamExpansion(teamKey)}
+                    >
+                      <div className="team-header-left">
+                        {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                        <div>
+                          <h4 className="team-name">
+                            {team.contestType} {teamNumber}
+                            {teamNumber === 1 && <span style={{ fontSize: '0.75rem', color: '#10b981', marginLeft: '0.5rem' }}>⭐</span>}
+                          </h4>
+                          <p className="team-meta">
+                            {roster.length} Spieler · Mannschaft {teamNumber}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="team-header-right">
+                        <select
+                          value={selectedTeamId || ''}
+                          onChange={(e) => {
+                            setTeamMapping({
+                              ...teamMapping,
+                              [teamKey]: e.target.value || null
+                            });
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="team-select"
+                        >
+                          <option value="">Team zuordnen...</option>
+                          {(filteredTeamOptions.length > 0 ? filteredTeamOptions : teamOptions).map(opt => (
+                            <option key={opt.id} value={opt.id}>
+                              {opt.club_name} {opt.team_name || ''} ({opt.category})
+                            </option>
                           ))}
-                        </tbody>
-                      </table>
+                        </select>
+                      </div>
                     </div>
-                  )}
-                </div>
-              );
+                    
+                    {isExpanded && roster && roster.length > 0 && (
+                      <div className="team-roster-table">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Rang</th>
+                              <th>Mannschaft</th>
+                              <th>Name</th>
+                              <th>LK</th>
+                              <th>TVM-ID</th>
+                              <th>Geburtsjahr</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {roster.map((player, pIdx) => (
+                              <tr key={pIdx}>
+                                <td className="rank-cell">{player.rank}</td>
+                                <td className="team-number-cell">{player.teamNumber || '-'}</td>
+                                <td className="name-cell">{player.name}</td>
+                                <td className="lk-cell">{player.lk || '-'}</td>
+                                <td className="tvm-id-cell">{player.tvmId || '-'}</td>
+                                <td className="birth-year-cell">{player.birthYear || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              });
             })}
           </div>
           
@@ -754,7 +874,7 @@ const ClubRostersTab = () => {
           <div className="import-actions">
             <div className="import-info">
               <p>
-                {Object.values(teamMapping).filter(id => id).length} von {parsedData.teams?.length || 0} Teams zugeordnet
+                {Object.values(teamMapping).filter(id => id).length} Mannschaften zugeordnet
               </p>
             </div>
             <button
