@@ -1,0 +1,159 @@
+{
+  "championship": "Köln-Leverkusen Winter 2025/2026",
+  "extractedAt": "2025-12-06T20:35:01.552Z",
+  "groups": [
+    "43"
+  ],
+  "teams": [
+    {
+      "nuLigaTeamId": "3472117",
+      "teamName": "TV Dellbrück 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?team=3472117&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&amp;group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3471572",
+      "teamName": "TC Ford Köln 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?team=3471572&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&amp;group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3471569",
+      "teamName": "KölnerTHC Stadion RW 2",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?team=3471569&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&amp;group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3511412",
+      "teamName": "TG GW im DJK Bocklemünd 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?team=3511412&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&amp;group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3471133",
+      "teamName": "VKC Köln 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?team=3471133&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&amp;group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3472117",
+      "teamName": "TV Dellbrück 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3472117&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3471133",
+      "teamName": "VKC Köln 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3471133&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3471133",
+      "teamName": "VKC Köln 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3471133&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3471569",
+      "teamName": "KölnerTHC Stadion RW 2",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3471569&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3471569",
+      "teamName": "KölnerTHC Stadion RW 2",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3471569&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3471572",
+      "teamName": "TC Ford Köln 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3471572&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3471133",
+      "teamName": "VKC Köln 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3471133&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3511412",
+      "teamName": "TG GW im DJK Bocklemünd 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3511412&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3471569",
+      "teamName": "KölnerTHC Stadion RW 2",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3471569&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3511412",
+      "teamName": "TG GW im DJK Bocklemünd 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3511412&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3471572",
+      "teamName": "TC Ford Köln 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3471572&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3472117",
+      "teamName": "TV Dellbrück 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3472117&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3472117",
+      "teamName": "TV Dellbrück 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3472117&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3471569",
+      "teamName": "KölnerTHC Stadion RW 2",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3471569&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3511412",
+      "teamName": "TG GW im DJK Bocklemünd 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3511412&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3471572",
+      "teamName": "TC Ford Köln 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3471572&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3511412",
+      "teamName": "TG GW im DJK Bocklemünd 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3511412&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3472117",
+      "teamName": "TV Dellbrück 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3472117&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3471572",
+      "teamName": "TC Ford Köln 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3471572&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    },
+    {
+      "nuLigaTeamId": "3471133",
+      "teamName": "VKC Köln 1",
+      "teamPortraitUrl": "https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/teamPortrait?federation=TVM&amp;region=DE.WE.TVM.20&amp;team=3471133&amp;championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026&group=43",
+      "group": "43"
+    }
+  ]
+}
