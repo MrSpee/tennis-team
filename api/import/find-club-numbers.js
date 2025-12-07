@@ -113,6 +113,9 @@ async function searchClubOnNuLiga(clubName) {
       }
     }
     
+    // ✅ WICHTIG: Initialisiere results Array
+    const results = [];
+    
     results.push({
       clubNumber: clubNumber,
       clubName: foundClubName || clubName, // Fallback auf Suchbegriff
