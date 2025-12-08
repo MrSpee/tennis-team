@@ -1793,28 +1793,55 @@ const Results = () => {
           
           {activeSearchView.type === 'team' && activeSearchView.data?.teamId && (
             <div>
-              <TeamView 
-                teamId={activeSearchView.data.teamId}
-                onTeamChange={async (newTeamId) => {
-                  // Navigation zu anderem Team innerhalb der Suche
-                  const { data: teamData } = await supabase
-                    .from('team_info')
-                    .select('id, team_name, category, club_name')
-                    .eq('id', newTeamId)
-                    .single();
-                  
-                  if (teamData) {
-                    const teamName = `${teamData.club_name || ''} ${teamData.category || ''} ${teamData.team_name || ''}`.trim();
-                    setActiveSearchView({ 
-                      type: 'team', 
-                      id: newTeamId, 
-                      name: teamName,
-                      data: { teamId: newTeamId }
-                    });
-                    setSearchHistory(prev => [...prev, { type: 'team', id: newTeamId, name: teamName }]);
-                  }
-                }}
-              />
+              {loadingSearchTeamMatches ? (
+                <div style={{
+                  padding: '3rem',
+                  textAlign: 'center',
+                  color: '#6b7280'
+                }}>
+                  <div className="loading-spinner" style={{ margin: '0 auto 1rem' }}></div>
+                  <p>Lade Spiele und Tabelle...</p>
+                </div>
+              ) : (
+                <TeamView 
+                  teamId={activeSearchView.data.teamId}
+                  matches={searchTeamMatches || externalTeamMatches[activeSearchView.data.teamId] || []}
+                  leagueMatches={searchTeamLeagueMatches.length > 0 
+                    ? searchTeamLeagueMatches 
+                    : (externalLeagueMatches[activeSearchView.data.teamId] || [])}
+                  leagueMeta={searchTeamLeagueMeta || externalLeagueMeta[activeSearchView.data.teamId] || null}
+                  playerTeamIds={playerTeams.map(team => team.id)}
+                  display={display}
+                  onTeamChange={async (newTeamId) => {
+                    // Navigation zu anderem Team innerhalb der Suche
+                    const { data: teamData } = await supabase
+                      .from('team_info')
+                      .select('id, team_name, category, club_name')
+                      .eq('id', newTeamId)
+                      .single();
+                    
+                    if (teamData) {
+                      const teamName = `${teamData.club_name || ''} ${teamData.category || ''} ${teamData.team_name || ''}`.trim();
+                      setActiveSearchView({ 
+                        type: 'team', 
+                        id: newTeamId, 
+                        name: teamName,
+                        data: { teamId: newTeamId }
+                      });
+                      setSearchHistory(prev => [...prev, { type: 'team', id: newTeamId, name: teamName }]);
+                      
+                      // Lade Matches für neues Team
+                      setLoadingSearchTeamMatches(true);
+                      loadMatchesForTeam(newTeamId).then(() => {
+                        setLoadingSearchTeamMatches(false);
+                      }).catch((error) => {
+                        console.error('Error loading matches for search team:', error);
+                        setLoadingSearchTeamMatches(false);
+                      });
+                    }
+                  }}
+                />
+              )}
             </div>
           )}
           
