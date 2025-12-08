@@ -1821,21 +1821,79 @@ const Results = () => {
                   <p>Lade Spiele und Tabelle...</p>
                 </div>
               ) : (
-                <TeamView 
-                  teamId={activeSearchView.data.teamId}
-                  matches={searchTeamMatches || externalTeamMatches[activeSearchView.data.teamId] || []}
-                  leagueMatches={searchTeamLeagueMatches.length > 0 
-                    ? searchTeamLeagueMatches 
-                    : (externalLeagueMatches[activeSearchView.data.teamId] || [])}
-                  leagueMeta={searchTeamLeagueMeta || externalLeagueMeta[activeSearchView.data.teamId] || null}
-                  playerTeamIds={(() => {
-                    // Prüfe, ob das gesuchte Team zu den eigenen Teams gehört
-                    const isOwnTeam = playerTeams.some(team => team.id === activeSearchView.data.teamId);
-                    // Wenn es nicht zu den eigenen Teams gehört, leere Liste (keine "Unsere Begegnungen")
-                    // Wenn es zu den eigenen Teams gehört, alle eigenen Teams (normale Ansicht)
-                    return isOwnTeam ? playerTeams.map(team => team.id) : [];
+                <>
+                  {/* Mannschaftsdetails */}
+                  {(() => {
+                    const teamMeta = searchTeamLeagueMeta || externalLeagueMeta[activeSearchView.data.teamId];
+                    if (teamMeta) {
+                      return (
+                        <div style={{
+                          background: '#f9fafb',
+                          borderRadius: '12px',
+                          padding: '1.5rem',
+                          marginBottom: '1.5rem',
+                          border: '1px solid #e5e7eb'
+                        }}>
+                          <div style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.75rem'
+                          }}>
+                            <div style={{
+                              fontSize: '1.125rem',
+                              fontWeight: '600',
+                              color: '#1f2937'
+                            }}>
+                              {activeSearchView.name}
+                            </div>
+                            <div style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: '1rem',
+                              fontSize: '0.875rem',
+                              color: '#6b7280'
+                            }}>
+                              {teamMeta.league && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                  <span>🏆</span>
+                                  <span>{teamMeta.league}</span>
+                                </div>
+                              )}
+                              {teamMeta.group && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                  <span>📋</span>
+                                  <span>Gruppe {teamMeta.group}</span>
+                                </div>
+                              )}
+                              {teamMeta.season && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                  <span>📅</span>
+                                  <span>{teamMeta.season}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
                   })()}
-                  display={display}
+                  
+                  <TeamView 
+                    teamId={activeSearchView.data.teamId}
+                    matches={searchTeamMatches || externalTeamMatches[activeSearchView.data.teamId] || []}
+                    leagueMatches={searchTeamLeagueMatches.length > 0 
+                      ? searchTeamLeagueMatches 
+                      : (externalLeagueMatches[activeSearchView.data.teamId] || [])}
+                    leagueMeta={searchTeamLeagueMeta || externalLeagueMeta[activeSearchView.data.teamId] || null}
+                    playerTeamIds={(() => {
+                      // Prüfe, ob das gesuchte Team zu den eigenen Teams gehört
+                      const isOwnTeam = playerTeams.some(team => team.id === activeSearchView.data.teamId);
+                      // Wenn es nicht zu den eigenen Teams gehört, leere Liste (keine "Unsere Begegnungen")
+                      // Wenn es zu den eigenen Teams gehört, alle eigenen Teams (normale Ansicht)
+                      return isOwnTeam ? playerTeams.map(team => team.id) : [];
+                    })()}
+                    display={display}
                   onTeamChange={async (newTeamId) => {
                     // Navigation zu anderem Team innerhalb der Suche
                     const { data: teamData } = await supabase
@@ -1869,6 +1927,7 @@ const Results = () => {
                     }
                   }}
                 />
+                </>
               )}
             </div>
           )}
