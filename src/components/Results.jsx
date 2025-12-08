@@ -2565,6 +2565,7 @@ const Results = () => {
         </div>
       )}
     </div>
+    </div>
   );
 };
 
