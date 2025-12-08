@@ -693,6 +693,13 @@ const Results = () => {
         [teamId]: transformedMatches
       }));
       
+      // 9. Speichere auch für Suche-State (falls aktiv) - NACH transformedMatches
+      if (activeSearchView?.type === 'team' && activeSearchView.data?.teamId === teamId) {
+        setSearchTeamLeagueMatches(leagueMatchDetails);
+        setSearchTeamLeagueMeta(meta);
+        setSearchTeamMatches(transformedMatches);
+      }
+      
       console.log('✅ External team matches loaded:', {
         teamId,
         totalGroupMatches: allGroupMatchdays?.length || 0,
