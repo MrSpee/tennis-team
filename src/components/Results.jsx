@@ -292,7 +292,7 @@ const Results = () => {
       const club = searchResults?.clubs.find(c => c.id === id);
       name = club?.name || '';
       
-      // Lade alle Teams dieses Vereins
+      // Lade alle Teams dieses Vereins mit Details
       try {
         const { data: clubTeams, error: teamsError } = await supabase
           .from('team_info')
@@ -302,8 +302,46 @@ const Results = () => {
         
         if (teamsError) throw teamsError;
         
+        // Lade Details für alle Teams parallel
+        const teamsWithDetails = await Promise.all(
+          (clubTeams || []).map(async (team) => {
+            try {
+              // Lade team_seasons für Liga-Info
+              const { data: seasons } = await supabase
+                .from('team_seasons')
+                .select('season, league, group_name, is_active')
+                .eq('team_id', team.id)
+                .eq('is_active', true)
+                .limit(1)
+                .maybeSingle();
+              
+              // Lade Match-Count
+              const { data: matches, count } = await supabase
+                .from('matches')
+                .select('id', { count: 'exact', head: true })
+                .or(`home_team_id.eq.${team.id},away_team_id.eq.${team.id}`);
+              
+              return {
+                ...team,
+                details: {
+                  season: seasons?.season || null,
+                  league: seasons?.league || null,
+                  group: seasons?.group_name || null,
+                  matchCount: count || 0
+                }
+              };
+            } catch (error) {
+              console.error(`Error loading details for team ${team.id}:`, error);
+              return {
+                ...team,
+                details: null
+              };
+            }
+          })
+        );
+        
         data = {
-          teams: clubTeams || [],
+          teams: teamsWithDetails,
           clubId: id,
           clubName: name
         };
@@ -330,15 +368,50 @@ const Results = () => {
     setSearchResults(null);
   };
   
-  // ✅ Zurück-Navigation in Suche
-  const handleSearchBack = () => {
+  // ✅ Zurück-Navigation in Suche - lädt Daten neu
+  const handleSearchBack = async () => {
     if (searchHistory.length > 1) {
       // Gehe zum vorherigen Eintrag
       const newHistory = [...searchHistory];
       newHistory.pop(); // Entferne aktuellen Eintrag
       const previous = newHistory[newHistory.length - 1];
       setSearchHistory(newHistory);
-      setActiveSearchView({ type: previous.type, id: previous.id, name: previous.name });
+      
+      // Lade Daten für vorherigen Eintrag neu
+      if (previous.type === 'club') {
+        try {
+          const { data: clubTeams, error: teamsError } = await supabase
+            .from('team_info')
+            .select('id, team_name, club_name, category')
+            .eq('club_id', previous.id)
+            .order('category', { ascending: true });
+          
+          if (teamsError) throw teamsError;
+          
+          setActiveSearchView({ 
+            type: previous.type, 
+            id: previous.id, 
+            name: previous.name,
+            data: {
+              teams: clubTeams || [],
+              clubId: previous.id,
+              clubName: previous.name
+            }
+          });
+        } catch (error) {
+          console.error('Error loading club teams on back:', error);
+          setActiveSearchView({ type: previous.type, id: previous.id, name: previous.name });
+        }
+      } else if (previous.type === 'team') {
+        setActiveSearchView({ 
+          type: previous.type, 
+          id: previous.id, 
+          name: previous.name,
+          data: { teamId: previous.id }
+        });
+      } else {
+        setActiveSearchView({ type: previous.type, id: previous.id, name: previous.name });
+      }
     } else {
       // Zurück zur Suche
       setActiveSearchView(null);
@@ -1600,35 +1673,86 @@ const Results = () => {
               </h3>
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
                 gap: '1rem'
               }}>
-                {activeSearchView.data.teams.map(team => (
-                  <div
-                    key={team.id}
-                    onClick={() => handleSearchResultClick('team', team.id)}
-                    style={{
-                      padding: '1rem',
-                      background: '#f9fafb',
-                      border: '2px solid #e5e7eb',
-                      borderRadius: '12px',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = '#3b82f6';
-                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.15)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = '#e5e7eb';
-                      e.currentTarget.style.boxShadow = 'none';
-                    }}
-                  >
-                    <div style={{ fontWeight: '600', color: '#1f2937' }}>
-                      {team.category} {team.team_name}
+                {activeSearchView.data.teams.map(team => {
+                  const details = team.details;
+                  
+                  return (
+                    <div
+                      key={team.id}
+                      onClick={() => handleSearchResultClick('team', team.id)}
+                      style={{
+                        padding: '1.25rem',
+                        background: 'linear-gradient(135deg, #ffffff 0%, #f9fafb 100%)',
+                        border: '2px solid #e5e7eb',
+                        borderRadius: '12px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = '#3b82f6';
+                        e.currentTarget.style.boxShadow = '0 4px 16px rgba(59, 130, 246, 0.2)';
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = '#e5e7eb';
+                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.05)';
+                        e.currentTarget.style.transform = 'translateY(0)';
+                      }}
+                    >
+                      <div style={{ 
+                        fontWeight: '700', 
+                        color: '#1f2937',
+                        fontSize: '1.125rem',
+                        marginBottom: '0.5rem'
+                      }}>
+                        {team.category} {team.team_name}
+                      </div>
+                      {details && (
+                        <div style={{ 
+                          fontSize: '0.875rem', 
+                          color: '#6b7280',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.25rem'
+                        }}>
+                          {details.league && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <span>🏆</span>
+                              <span>{details.league}</span>
+                            </div>
+                          )}
+                          {details.group && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <span>📋</span>
+                              <span>{details.group}</span>
+                            </div>
+                          )}
+                          {details.season && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <span>📅</span>
+                              <span>{details.season}</span>
+                            </div>
+                          )}
+                          {details.matchCount > 0 && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #e5e7eb' }}>
+                              <span>⚽</span>
+                              <span>{details.matchCount} {details.matchCount === 1 ? 'Spiel' : 'Spiele'}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {!details && (
+                        <div style={{ fontSize: '0.75rem', color: '#9ca3af', fontStyle: 'italic' }}>
+                          Keine Details verfügbar
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
