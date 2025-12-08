@@ -142,6 +142,10 @@ const Results = () => {
   const [searchTeamLeagueMeta, setSearchTeamLeagueMeta] = useState(null);
   const [loadingSearchTeamMatches, setLoadingSearchTeamMatches] = useState(false);
   
+  // ✅ State für Suche-Spieler Ergebnisse
+  const [searchPlayerResults, setSearchPlayerResults] = useState(null);
+  const [loadingSearchPlayerResults, setLoadingSearchPlayerResults] = useState(false);
+  
   // ✅ NEU: Globale Suche
   const performGlobalSearch = async (term) => {
     if (!term || term.length < 2) {
@@ -376,6 +380,15 @@ const Results = () => {
       const player = searchResults?.players.find(p => p.id === id);
       name = player?.name || '';
       data = { playerId: id };
+      
+      // Lade Ergebnisse für diesen Spieler
+      setLoadingSearchPlayerResults(true);
+      loadPlayerResultsForSearch(id).then(() => {
+        setLoadingSearchPlayerResults(false);
+      }).catch((error) => {
+        console.error('Error loading results for search player:', error);
+        setLoadingSearchPlayerResults(false);
+      });
     }
     
     // Setze aktive Suche-Ansicht (neutrale View)
