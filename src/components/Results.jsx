@@ -668,13 +668,7 @@ const Results = () => {
         [teamId]: leagueMatchDetails
       }));
       
-      // 8. Speichere auch für Suche-State (falls aktiv)
-      if (activeSearchView?.type === 'team' && activeSearchView.data?.teamId === teamId) {
-        setSearchTeamLeagueMatches(leagueMatchDetails);
-        setSearchTeamLeagueMeta(meta);
-      }
-      
-      // 9. Transformiere auch zu einfachen matches (für Kompatibilität)
+      // 8. Transformiere auch zu einfachen matches (für Kompatibilität)
       const transformedMatches = (matchdays || []).map(m => {
         const isHome = m.home_team_id === teamId;
         const opponentTeam = isHome ? m.away_team : m.home_team;
