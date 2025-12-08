@@ -2182,139 +2182,52 @@ const Results = () => {
         </div>
       )}
       
-      {/* ✅ NEU: Team-Ansicht für ausgewählte Mannschaft (nur wenn keine aktive Suche) */}
+      {/* ✅ NEU: Tab-Navigation und Team-Ansicht für ausgewählte Mannschaft (nur wenn keine aktive Suche) */}
       {!activeSearchView && (selectedTeamId || selectedClubTeamId) && viewMode === 'mannschaft' && (
         <>
-          <div className="fade-in lk-card-full" style={{ marginBottom: '1rem' }}>
-            <div className="formkurve-header">
-              <div className="formkurve-title">Mein(e) Mannschaft(en)</div>
-              <div style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: '600' }}>
-                {allClubTeams.length} {allClubTeams.length === 1 ? 'Mannschaft' : 'Mannschaften'}
-              </div>
-            </div>
-            
-            <div className="season-content">
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
-                  {(() => {
-                    // Gruppiere Teams nach Kategorie, um zu prüfen ob team_name benötigt wird
-                    const teamsByCategory = allClubTeams.reduce((acc, team) => {
-                      if (!acc[team.category]) {
-                        acc[team.category] = [];
-                      }
-                      acc[team.category].push(team);
-                      return acc;
-                    }, {});
-                    
-                    return allClubTeams.map(team => {
-                      const isPrimary = playerTeams.find(pt => pt.id === team.id && pt.is_primary);
-                      const isMember = playerTeams.some(pt => pt.id === team.id);
-                      const isSelected = selectedClubTeamId === team.id || (!selectedClubTeamId && isPrimary);
-                      
-                      // Wenn mehrere Teams mit gleicher Kategorie existieren, zeige team_name an
-                      const teamsInCategory = teamsByCategory[team.category] || [];
-                      const showTeamName = teamsInCategory.length > 1 && team.team_name;
-                      const displayLabel = showTeamName 
-                        ? `${team.category} ${team.team_name}` 
-                        : team.category;
-                      
-                      return (
-                        <button
-                          key={team.id}
-                          onClick={() => {
-                            // WICHTIG: Setze immer die Team-ID, nicht die Kategorie
-                            const newTeamId = team.id === selectedClubTeamId ? null : team.id;
-                            console.log('🔵 Button clicked:', { 
-                              clickedCategory: team.category, 
-                              clickedTeamId: team.id, 
-                              clickedTeamName: team.team_name,
-                              currentSelectedId: selectedClubTeamId,
-                              newTeamId: newTeamId
-                            });
-                            setSelectedClubTeamId(newTeamId);
-                            // WICHTIG: Aktualisiere auch selectedTeamId in DataContext, damit leagueMeta neu geladen wird
-                            setSelectedTeamId(newTeamId || '');
-                          }}
-                          style={{
-                            padding: '0.5rem 1rem',
-                            background: isSelected 
-                              ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' 
-                              : 'white',
-                            color: isSelected ? 'white' : '#1f2937',
-                            border: isSelected ? '2px solid #1e40af' : '2px solid #e5e7eb',
-                            borderRadius: '8px',
-                            cursor: 'pointer',
-                            fontSize: '0.875rem',
-                            fontWeight: '600',
-                            transition: 'all 0.2s'
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!isSelected) {
-                              e.currentTarget.style.background = '#f3f4f6';
-                              e.currentTarget.style.borderColor = '#9ca3af';
-                            }
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!isSelected) {
-                              e.currentTarget.style.background = 'white';
-                              e.currentTarget.style.borderColor = '#e5e7eb';
-                            }
-                          }}
-                        >
-                          {displayLabel}
-                          {isMember && ' ⭐'}
-                        </button>
-                      );
-                    });
-                  })()}
-              </div>
+          {/* Tab-Navigation für Liga-Spielplan */}
+          <div className="fade-in" style={{ marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', background: 'white', padding: '0.5rem', borderRadius: '12px', border: '2px solid #e5e7eb' }}>
+              <button
+                onClick={() => setTeamViewTab('spiele')}
+                style={{
+                  flex: 1,
+                  padding: '0.75rem',
+                  background: teamViewTab === 'spiele' 
+                    ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' 
+                    : 'white',
+                  color: teamViewTab === 'spiele' ? 'white' : '#1f2937',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  fontWeight: '600',
+                  transition: 'all 0.2s'
+                }}
+              >
+                📊 Spiele
+              </button>
+              <button
+                onClick={() => setTeamViewTab('tabelle')}
+                style={{
+                  flex: 1,
+                  padding: '0.75rem',
+                  background: teamViewTab === 'tabelle' 
+                    ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' 
+                    : 'white',
+                  color: teamViewTab === 'tabelle' ? 'white' : '#1f2937',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  fontWeight: '600',
+                  transition: 'all 0.2s'
+                }}
+              >
+                📈 Tabelle
+              </button>
             </div>
           </div>
-
-          {/* Tab-Navigation für Liga-Spielplan */}
-          {allClubTeams.length > 0 && (
-            <div className="fade-in" style={{ marginBottom: '1rem' }}>
-              <div style={{ display: 'flex', gap: '0.5rem', background: 'white', padding: '0.5rem', borderRadius: '12px', border: '2px solid #e5e7eb' }}>
-                <button
-                  onClick={() => setTeamViewTab('spiele')}
-                  style={{
-                    flex: 1,
-                    padding: '0.75rem',
-                    background: teamViewTab === 'spiele' 
-                      ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' 
-                      : 'white',
-                    color: teamViewTab === 'spiele' ? 'white' : '#1f2937',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    fontWeight: '600',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  📊 Spiele
-                </button>
-                <button
-                  onClick={() => setTeamViewTab('tabelle')}
-                  style={{
-                    flex: 1,
-                    padding: '0.75rem',
-                    background: teamViewTab === 'tabelle' 
-                      ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' 
-                      : 'white',
-                    color: teamViewTab === 'tabelle' ? 'white' : '#1f2937',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    fontWeight: '600',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  📈 Tabelle
-                </button>
-              </div>
-            </div>
-          )}
         </>
       )}
 
