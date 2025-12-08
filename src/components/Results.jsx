@@ -134,6 +134,13 @@ const Results = () => {
   // ✅ NEU: Lade Matches für ein beliebiges Team (auch ohne Membership)
   const [externalTeamMatches, setExternalTeamMatches] = useState({});
   const [externalLeagueMatches, setExternalLeagueMatches] = useState({});
+  const [externalLeagueMeta, setExternalLeagueMeta] = useState({});
+  
+  // ✅ State für Suche-Team Matches
+  const [searchTeamMatches, setSearchTeamMatches] = useState(null);
+  const [searchTeamLeagueMatches, setSearchTeamLeagueMatches] = useState([]);
+  const [searchTeamLeagueMeta, setSearchTeamLeagueMeta] = useState(null);
+  const [loadingSearchTeamMatches, setLoadingSearchTeamMatches] = useState(false);
   
   // ✅ NEU: Globale Suche
   const performGlobalSearch = async (term) => {
@@ -352,6 +359,15 @@ const Results = () => {
       const team = searchResults?.teams.find(t => t.id === id);
       name = `${team?.club_name || ''} ${team?.category || ''} ${team?.team_name || ''}`.trim();
       data = { teamId: id };
+      
+      // Lade Matches für dieses Team
+      setLoadingSearchTeamMatches(true);
+      loadMatchesForTeam(id).then(() => {
+        setLoadingSearchTeamMatches(false);
+      }).catch((error) => {
+        console.error('Error loading matches for search team:', error);
+        setLoadingSearchTeamMatches(false);
+      });
     } else if (type === 'player') {
       const player = searchResults?.players.find(p => p.id === id);
       name = player?.name || '';
@@ -634,13 +650,31 @@ const Results = () => {
         return aTime - bTime;
       });
       
-      // 6. Speichere leagueMatches
+      // 6. Speichere leagueMeta
+      const meta = {
+        league: teamSeasons.league,
+        group: teamSeasons.group_name,
+        season: teamSeasons.season
+      };
+      
+      setExternalLeagueMeta(prev => ({
+        ...prev,
+        [teamId]: meta
+      }));
+      
+      // 7. Speichere leagueMatches
       setExternalLeagueMatches(prev => ({
         ...prev,
         [teamId]: leagueMatchDetails
       }));
       
-      // 7. Transformiere auch zu einfachen matches (für Kompatibilität)
+      // 8. Speichere auch für Suche-State (falls aktiv)
+      if (activeSearchView?.type === 'team' && activeSearchView.data?.teamId === teamId) {
+        setSearchTeamLeagueMatches(leagueMatchDetails);
+        setSearchTeamLeagueMeta(meta);
+      }
+      
+      // 9. Transformiere auch zu einfachen matches (für Kompatibilität)
       const transformedMatches = (matchdays || []).map(m => {
         const isHome = m.home_team_id === teamId;
         const opponentTeam = isHome ? m.away_team : m.home_team;
