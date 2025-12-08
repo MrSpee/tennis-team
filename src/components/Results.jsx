@@ -1825,29 +1825,52 @@ const Results = () => {
                   {/* Mannschaftsdetails */}
                   {(() => {
                     const teamMeta = searchTeamLeagueMeta || externalLeagueMeta[activeSearchView.data.teamId];
-                    // Lade Team-Daten für vollständigen Namen
-                    const [teamInfo, setTeamInfo] = React.useState(null);
-                    
-                    React.useEffect(() => {
-                      if (activeSearchView.data?.teamId) {
-                        supabase
-                          .from('team_info')
-                          .select('id, team_name, category, club_name')
-                          .eq('id', activeSearchView.data.teamId)
-                          .single()
-                          .then(({ data, error }) => {
-                            if (!error && data) {
-                              setTeamInfo(data);
-                            }
-                          });
+                    return null; // Wird durch TeamDetailsView ersetzt
+                  })()}
+                  
+                  <TeamDetailsView 
+                    teamId={activeSearchView.data.teamId}
+                    teamName={activeSearchView.name}
+                    teamMeta={searchTeamLeagueMeta || externalLeagueMeta[activeSearchView.data.teamId]}
+                    searchTeamMatches={searchTeamMatches}
+                    externalTeamMatches={externalTeamMatches}
+                    searchTeamLeagueMatches={searchTeamLeagueMatches}
+                    externalLeagueMatches={externalLeagueMatches}
+                    playerTeams={playerTeams}
+                    display={display}
+                    onTeamChange={async (newTeamId) => {
+                      // Navigation zu anderem Team innerhalb der Suche
+                      const { data: teamData } = await supabase
+                        .from('team_info')
+                        .select('id, team_name, category, club_name')
+                        .eq('id', newTeamId)
+                        .single();
+                      
+                      if (teamData) {
+                        const teamName = `${teamData.club_name || ''} ${teamData.category || ''} ${teamData.team_name || ''}`.trim();
+                        setActiveSearchView({ 
+                          type: 'team', 
+                          id: newTeamId, 
+                          name: teamName,
+                          data: { teamId: newTeamId }
+                        });
+                        setSearchHistory(prev => [...prev, { type: 'team', id: newTeamId, name: teamName }]);
+                        
+                        // Lade Matches für neues Team
+                        // Prüfe, ob das Team zu den eigenen Teams gehört
+                        const isOwnTeam = playerTeams.some(team => team.id === newTeamId);
+                        const playerTeamIdsForFilter = isOwnTeam ? playerTeams.map(team => team.id) : [];
+                        
+                        setLoadingSearchTeamMatches(true);
+                        loadMatchesForTeam(newTeamId, true, playerTeamIdsForFilter).then(() => {
+                          setLoadingSearchTeamMatches(false);
+                        }).catch((error) => {
+                          console.error('Error loading matches for search team:', error);
+                          setLoadingSearchTeamMatches(false);
+                        });
                       }
-                    }, [activeSearchView.data?.teamId]);
-                    
-                    const displayName = teamInfo 
-                      ? `${teamInfo.category || ''} ${teamInfo.team_name || ''}`.trim()
-                      : activeSearchView.name;
-                    
-                    if (teamMeta || teamInfo) {
+                    }}
+                  />
                       return (
                         <div style={{
                           background: '#f9fafb',
