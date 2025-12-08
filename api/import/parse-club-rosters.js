@@ -699,6 +699,15 @@ async function createTeamIfNotExists(supabase, clubId, contestType, teamNumber, 
       return existingTeam.id;
     }
     
+    // Hole Club-Name für Fallback
+    const { data: clubData } = await supabase
+      .from('club_info')
+      .select('name')
+      .eq('id', clubId)
+      .single();
+    
+    const clubNameForTeam = clubData?.name || clubName || 'Unbekannt';
+    
     // Erstelle Team via RPC-Funktion (nutzt bestehende Datenbank-Funktion)
     console.log(`[parse-club-rosters] ➕ Erstelle Team via RPC: ${contestType} Mannschaft ${teamNumberStr}`);
     const { data: newTeam, error: createError } = await supabase
@@ -712,9 +721,11 @@ async function createTeamIfNotExists(supabase, clubId, contestType, teamNumber, 
     
     if (createError) {
       console.error(`[parse-club-rosters] ❌ Fehler beim Erstellen des Teams via RPC:`, createError);
+      console.log(`[parse-club-rosters] 🔄 Versuche Fallback: Direktes INSERT mit Service Role`);
       
-      // Fallback: Versuche nochmal direkt zu suchen (falls RPC-Funktion nicht existiert)
-      const { data: fallbackTeam } = await supabase
+      // Fallback: Direktes INSERT mit Service Role (umgeht RLS komplett)
+      // Prüfe nochmal ob Team existiert (könnte zwischenzeitlich erstellt worden sein)
+      const { data: fallbackCheckTeam } = await supabase
         .from('team_info')
         .select('id')
         .eq('club_id', clubId)
@@ -722,12 +733,32 @@ async function createTeamIfNotExists(supabase, clubId, contestType, teamNumber, 
         .eq('team_name', teamNumberStr)
         .maybeSingle();
       
-      if (fallbackTeam) {
-        console.log(`[parse-club-rosters] ✅ Team gefunden (Fallback): ${fallbackTeam.id}`);
-        return fallbackTeam.id;
+      if (fallbackCheckTeam) {
+        console.log(`[parse-club-rosters] ✅ Team gefunden (Fallback-Check): ${fallbackCheckTeam.id}`);
+        return fallbackCheckTeam.id;
       }
       
-      return null;
+      // Versuche direktes INSERT (Service Role sollte RLS umgehen)
+      const { data: insertedTeam, error: insertError } = await supabase
+        .from('team_info')
+        .insert({
+          team_name: teamNumberStr,
+          category: contestType,
+          club_id: clubId,
+          club_name: clubNameForTeam,
+          region: 'Mittelrhein',
+          tvm_link: null
+        })
+        .select('id')
+        .single();
+      
+      if (insertError) {
+        console.error(`[parse-club-rosters] ❌ Fehler beim direkten INSERT:`, insertError);
+        return null;
+      }
+      
+      console.log(`[parse-club-rosters] ✅ Team erstellt via direkten INSERT: ${insertedTeam.id}`);
+      return insertedTeam.id;
     }
     
     // RPC gibt Array zurück, nimm ersten Eintrag
@@ -995,7 +1026,46 @@ async function handler(req, res) {
     };
     
     // clubId wird für Team-Matching benötigt
-    const effectiveClubId = clubId;
+    // Wenn nicht übergeben, versuche es aus clubNumber oder clubName zu finden
+    let effectiveClubId = clubId;
+    
+    if (!effectiveClubId && (clubNumber || clubName)) {
+      const supabase = createSupabaseClient(true);
+      
+      // Versuche zuerst über club_number
+      if (clubNumber) {
+        const { data: clubByNumber } = await supabase
+          .from('team_info')
+          .select('club_id')
+          .eq('club_number', clubNumber)
+          .limit(1)
+          .maybeSingle();
+        
+        if (clubByNumber?.club_id) {
+          effectiveClubId = clubByNumber.club_id;
+          console.log(`[parse-club-rosters] ✅ Club-ID gefunden via club_number: ${effectiveClubId}`);
+        }
+      }
+      
+      // Fallback: Suche über club_name
+      if (!effectiveClubId && clubName) {
+        const { data: clubByName } = await supabase
+          .from('club_info')
+          .select('id')
+          .ilike('name', `%${clubName}%`)
+          .limit(1)
+          .maybeSingle();
+        
+        if (clubByName?.id) {
+          effectiveClubId = clubByName.id;
+          console.log(`[parse-club-rosters] ✅ Club-ID gefunden via club_name: ${effectiveClubId}`);
+        }
+      }
+      
+      if (!effectiveClubId) {
+        console.warn(`[parse-club-rosters] ⚠️ Keine Club-ID gefunden für "${clubName}" (club_number: ${clubNumber}). Teams können nicht automatisch erstellt werden.`);
+      }
+    }
     
     // Speichere Club-Nummer wenn apply=true und clubId vorhanden
     if (apply && effectiveClubId && clubNumber) {
