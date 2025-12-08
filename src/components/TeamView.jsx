@@ -571,7 +571,7 @@ const TeamView = ({
 
                 {otherLeagueMatches.length > 0 && (
                   <div className="league-match-section">
-                    <h3>Weitere Begegnungen in der Liga</h3>
+                    <h3>{playerTeamIds.length === 0 ? 'Liga-Spiele' : 'Weitere Begegnungen in der Liga'}</h3>
                     <div className="league-match-grid">
                       {otherLeagueMatches.map(renderMatchCard)}
                     </div>
