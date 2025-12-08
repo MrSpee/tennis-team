@@ -1370,6 +1370,183 @@ const Results = () => {
     }
   };
 
+  // ✅ Lade Spieler-Ergebnisse für Suche (einzelner Spieler)
+  const loadPlayerResultsForSearch = async (playerId) => {
+    try {
+      setLoadingSearchPlayerResults(true);
+      
+      // Lade Spieler-Daten
+      const { data: playerData, error: playerError } = await supabase
+        .from('players_unified')
+        .select('id, name, current_lk, season_start_lk, ranking, player_type, profile_image')
+        .eq('id', playerId)
+        .single();
+      
+      if (playerError || !playerData) {
+        console.error('Error loading player data:', playerError);
+        setSearchPlayerResults(null);
+        return;
+      }
+      
+      // Lade alle Matches der aktuellen Saison
+      const currentSeason = getCurrentSeason();
+      const { data: seasonMatches, error: matchesError } = await supabase
+        .from('matchdays')
+        .select('id, opponent, date, location, season, home_team_id, away_team_id')
+        .eq('season', currentSeason.season)
+        .order('date');
+      
+      if (matchesError) {
+        console.error('Error loading season matches:', matchesError);
+        setSearchPlayerResults({
+          player: playerData,
+          matches: []
+        });
+        return;
+      }
+      
+      if (!seasonMatches || seasonMatches.length === 0) {
+        setSearchPlayerResults({
+          player: playerData,
+          matches: []
+        });
+        return;
+      }
+      
+      // Lade alle match_results für diese Matches
+      const matchIds = seasonMatches.map(m => m.id);
+      const { data: allResultsData, error: allResultsError } = await supabase
+        .from('match_results')
+        .select('*')
+        .in('matchday_id', matchIds);
+      
+      if (allResultsError) {
+        console.error('Error loading match results:', allResultsError);
+        setSearchPlayerResults({
+          player: playerData,
+          matches: []
+        });
+        return;
+      }
+      
+      // Sammle alle Player-IDs für Batch-Load
+      const allPlayerIds = new Set();
+      (allResultsData || []).forEach(r => {
+        if (r.home_player_id) allPlayerIds.add(r.home_player_id);
+        if (r.home_player1_id) allPlayerIds.add(r.home_player1_id);
+        if (r.home_player2_id) allPlayerIds.add(r.home_player2_id);
+        if (r.guest_player_id) allPlayerIds.add(r.guest_player_id);
+        if (r.guest_player1_id) allPlayerIds.add(r.guest_player1_id);
+        if (r.guest_player2_id) allPlayerIds.add(r.guest_player2_id);
+      });
+      
+      // Lade alle Spieler-Daten
+      const { data: allPlayersData } = await supabase
+        .from('players_unified')
+        .select('id, name, current_lk, season_start_lk, ranking, player_type, profile_image')
+        .in('id', Array.from(allPlayerIds));
+      
+      const playerDataMap = {};
+      (allPlayersData || []).forEach(p => {
+        playerDataMap[p.id] = p;
+      });
+      playerDataMap[playerId] = playerData; // Füge gesuchten Spieler hinzu
+      
+      // Filtere Match-Ergebnisse für diesen Spieler
+      const playerMatches = [];
+      
+      for (const match of seasonMatches) {
+        const resultsData = (allResultsData || []).filter(r => 
+          r.matchday_id === match.id &&
+          (r.home_player_id === playerId || r.home_player1_id === playerId || r.home_player2_id === playerId ||
+           r.guest_player_id === playerId || r.guest_player1_id === playerId || r.guest_player2_id === playerId)
+        );
+        
+        if (resultsData && resultsData.length > 0) {
+          for (const result of resultsData) {
+            const isPlayerInHomeTeam = result.home_player_id === playerId || 
+                                       result.home_player1_id === playerId || 
+                                       result.home_player2_id === playerId;
+            
+            // Lade Gegner-Daten
+            let opponentName = 'Unbekannt';
+            let opponentLK = null;
+            let partnerName = null;
+            let partnerLK = null;
+            let opponent1Name = 'Unbekannt';
+            let opponent1LK = null;
+            let opponent2Name = 'Unbekannt';
+            let opponent2LK = null;
+            
+            if (result.match_type === 'Einzel') {
+              const opponentId = isPlayerInHomeTeam ? result.guest_player_id : result.home_player_id;
+              const oppData = opponentId ? playerDataMap[opponentId] : null;
+              
+              if (oppData) {
+                opponentName = oppData.name;
+                opponentLK = oppData.current_lk;
+              }
+            } else if (result.match_type === 'Doppel') {
+              const opp1Id = isPlayerInHomeTeam ? result.guest_player1_id : result.home_player1_id;
+              const opp2Id = isPlayerInHomeTeam ? result.guest_player2_id : result.home_player2_id;
+              
+              const opp1Data = opp1Id ? playerDataMap[opp1Id] : null;
+              const opp2Data = opp2Id ? playerDataMap[opp2Id] : null;
+              
+              opponent1Name = opp1Data?.name || 'Unbekannt';
+              opponent1LK = opp1Data?.current_lk;
+              opponent2Name = opp2Data?.name || 'Unbekannt';
+              opponent2LK = opp2Data?.current_lk;
+              
+              const partnerId = isPlayerInHomeTeam
+                ? (result.home_player1_id === playerId ? result.home_player2_id : result.home_player1_id)
+                : (result.guest_player1_id === playerId ? result.guest_player2_id : result.guest_player1_id);
+              
+              const partnerData = partnerId ? playerDataMap[partnerId] : null;
+              
+              if (partnerData) {
+                partnerName = partnerData.name;
+                partnerLK = partnerData.current_lk || partnerData.season_start_lk || partnerData.ranking;
+              }
+              
+              opponentName = opponent1Name;
+              opponentLK = opponent1LK;
+            }
+            
+            playerMatches.push({
+              ...result,
+              opponent: match.opponent,
+              matchDate: match.date,
+              matchLocation: match.location,
+              opponentPlayerName: opponentName,
+              opponentPlayerLK: opponentLK,
+              opponent1Name,
+              opponent1LK,
+              opponent2Name,
+              opponent2LK,
+              partnerName,
+              partnerLK
+            });
+          }
+        }
+      }
+      
+      // Sortiere Matches nach Datum
+      const sortedMatches = playerMatches.sort((a, b) => new Date(a.matchDate) - new Date(b.matchDate));
+      
+      setSearchPlayerResults({
+        player: playerData,
+        matches: sortedMatches
+      });
+      
+    } catch (error) {
+      console.error('❌ Error loading player results for search:', error);
+      setSearchPlayerResults(null);
+    } finally {
+      setLoadingSearchPlayerResults(false);
+    }
+  };
+
   // Tennis Match Logic
   const calculateSetWinner = (home, guest, isChampionsTiebreak = false) => {
     if (isChampionsTiebreak) {
