@@ -2005,6 +2005,78 @@ const Results = () => {
         </div>
       )}
 
+      {/* ✅ NEU: Mein(e) Mannschaft(en) - nur Teams mit Spieler-Zuordnung (nur wenn keine aktive Suche) */}
+      {!activeSearchView && playerTeams && playerTeams.length > 0 && viewMode === 'mannschaft' && (
+        <div className="fade-in lk-card-full" style={{ marginBottom: '1.5rem' }}>
+          <div className="formkurve-header">
+            <div className="formkurve-title">Mein(e) Mannschaft(en)</div>
+            <div style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: '600' }}>
+              {playerTeams.length} {playerTeams.length === 1 ? 'Mannschaft' : 'Mannschaften'}
+            </div>
+          </div>
+          
+          <div className="season-content">
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+              gap: '1rem',
+              marginTop: '1rem'
+            }}>
+              {playerTeams.map(team => {
+                const isSelected = selectedTeamId === team.id || selectedClubTeamId === team.id;
+                return (
+                  <button
+                    key={team.id}
+                    onClick={() => {
+                      setSelectedTeamId(team.id);
+                      setSelectedClubTeamId(null);
+                      setTeamViewTab('spiele');
+                    }}
+                    style={{
+                      padding: '1rem',
+                      background: isSelected ? '#eff6ff' : 'white',
+                      border: `2px solid ${isSelected ? '#3b82f6' : '#e5e7eb'}`,
+                      borderRadius: '12px',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'all 0.2s',
+                      boxShadow: isSelected ? '0 4px 12px rgba(59, 130, 246, 0.15)' : 'none'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isSelected) {
+                        e.currentTarget.style.borderColor = '#3b82f6';
+                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(59, 130, 246, 0.1)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isSelected) {
+                        e.currentTarget.style.borderColor = '#e5e7eb';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }
+                    }}
+                  >
+                    <div style={{
+                      fontWeight: '600',
+                      color: '#1f2937',
+                      fontSize: '0.95rem',
+                      marginBottom: '0.25rem'
+                    }}>
+                      {team.category} {team.team_name}
+                    </div>
+                    <div style={{
+                      fontSize: '0.75rem',
+                      color: '#6b7280'
+                    }}>
+                      {team.club_name}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ✅ NEU: Mein(e) Verein(e) - mit eingeklappter Bilanz (nur wenn keine aktive Suche) */}
       {!activeSearchView && clubOverview && (
         <div className="fade-in lk-card-full" style={{ marginBottom: '1rem' }}>
