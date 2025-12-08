@@ -1823,11 +1823,7 @@ const Results = () => {
               ) : (
                 <>
                   {/* Mannschaftsdetails */}
-                  {(() => {
-                    const teamMeta = searchTeamLeagueMeta || externalLeagueMeta[activeSearchView.data.teamId];
-                    return null; // Wird durch TeamDetailsView ersetzt
-                  })()}
-                  
+                  {/* Mannschaftsdetails */}
                   <TeamDetailsView 
                     teamId={activeSearchView.data.teamId}
                     teamName={activeSearchView.name}
