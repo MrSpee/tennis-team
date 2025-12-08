@@ -2561,7 +2561,6 @@ const Results = () => {
                   })}
             </div>
           )}
-          </div>
         </div>
       )}
     </div>
