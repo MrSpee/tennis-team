@@ -1825,7 +1825,29 @@ const Results = () => {
                   {/* Mannschaftsdetails */}
                   {(() => {
                     const teamMeta = searchTeamLeagueMeta || externalLeagueMeta[activeSearchView.data.teamId];
-                    if (teamMeta) {
+                    // Lade Team-Daten für vollständigen Namen
+                    const [teamInfo, setTeamInfo] = React.useState(null);
+                    
+                    React.useEffect(() => {
+                      if (activeSearchView.data?.teamId) {
+                        supabase
+                          .from('team_info')
+                          .select('id, team_name, category, club_name')
+                          .eq('id', activeSearchView.data.teamId)
+                          .single()
+                          .then(({ data, error }) => {
+                            if (!error && data) {
+                              setTeamInfo(data);
+                            }
+                          });
+                      }
+                    }, [activeSearchView.data?.teamId]);
+                    
+                    const displayName = teamInfo 
+                      ? `${teamInfo.category || ''} ${teamInfo.team_name || ''}`.trim()
+                      : activeSearchView.name;
+                    
+                    if (teamMeta || teamInfo) {
                       return (
                         <div style={{
                           background: '#f9fafb',
@@ -1844,7 +1866,7 @@ const Results = () => {
                               fontWeight: '600',
                               color: '#1f2937'
                             }}>
-                              {activeSearchView.name}
+                              {displayName}
                             </div>
                             <div style={{
                               display: 'flex',
