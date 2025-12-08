@@ -1514,6 +1514,167 @@ const Results = () => {
         )}
       </div>
 
+      {/* ✅ Aktive Suche-Ansicht (neutrale View) */}
+      {activeSearchView && (
+        <div style={{
+          maxWidth: '1200px',
+          margin: '2rem auto',
+          background: 'white',
+          borderRadius: '16px',
+          boxShadow: '0 4px 24px rgba(0, 0, 0, 0.1)',
+          padding: '2rem'
+        }}>
+          {/* Header mit Zurück-Button */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '1rem',
+            marginBottom: '2rem',
+            paddingBottom: '1rem',
+            borderBottom: '2px solid #e5e7eb'
+          }}>
+            <button
+              onClick={handleSearchBack}
+              style={{
+                padding: '0.5rem 1rem',
+                background: '#f3f4f6',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '0.875rem',
+                fontWeight: '600',
+                color: '#374151',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}
+            >
+              ← Zurück
+            </button>
+            <div style={{ flex: 1 }}>
+              <h2 style={{
+                fontSize: '1.5rem',
+                fontWeight: '700',
+                color: '#1f2937',
+                margin: 0
+              }}>
+                {activeSearchView.name}
+              </h2>
+              <div style={{
+                fontSize: '0.875rem',
+                color: '#6b7280',
+                marginTop: '0.25rem'
+              }}>
+                {activeSearchView.type === 'club' && '🏢 Verein'}
+                {activeSearchView.type === 'team' && '🏆 Mannschaft'}
+                {activeSearchView.type === 'player' && '👤 Spieler'}
+              </div>
+            </div>
+            <button
+              onClick={handleResetSearch}
+              style={{
+                padding: '0.5rem 1rem',
+                background: '#f3f4f6',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '0.875rem',
+                fontWeight: '600',
+                color: '#374151'
+              }}
+            >
+              ✕ Schließen
+            </button>
+          </div>
+          
+          {/* Inhalt basierend auf Typ */}
+          {activeSearchView.type === 'club' && activeSearchView.data?.teams && (
+            <div>
+              <h3 style={{
+                fontSize: '1.125rem',
+                fontWeight: '600',
+                color: '#374151',
+                marginBottom: '1rem'
+              }}>
+                Mannschaften ({activeSearchView.data.teams.length})
+              </h3>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+                gap: '1rem'
+              }}>
+                {activeSearchView.data.teams.map(team => (
+                  <div
+                    key={team.id}
+                    onClick={() => handleSearchResultClick('team', team.id)}
+                    style={{
+                      padding: '1rem',
+                      background: '#f9fafb',
+                      border: '2px solid #e5e7eb',
+                      borderRadius: '12px',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = '#3b82f6';
+                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.15)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = '#e5e7eb';
+                      e.currentTarget.style.boxShadow = 'none';
+                    }}
+                  >
+                    <div style={{ fontWeight: '600', color: '#1f2937' }}>
+                      {team.category} {team.team_name}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          {activeSearchView.type === 'team' && activeSearchView.data?.teamId && (
+            <div>
+              <TeamView 
+                teamId={activeSearchView.data.teamId}
+                onTeamChange={async (newTeamId) => {
+                  // Navigation zu anderem Team innerhalb der Suche
+                  const { data: teamData } = await supabase
+                    .from('team_info')
+                    .select('id, team_name, category, club_name')
+                    .eq('id', newTeamId)
+                    .single();
+                  
+                  if (teamData) {
+                    const teamName = `${teamData.club_name || ''} ${teamData.category || ''} ${teamData.team_name || ''}`.trim();
+                    setActiveSearchView({ 
+                      type: 'team', 
+                      id: newTeamId, 
+                      name: teamName,
+                      data: { teamId: newTeamId }
+                    });
+                    setSearchHistory(prev => [...prev, { type: 'team', id: newTeamId, name: teamName }]);
+                  }
+                }}
+              />
+            </div>
+          )}
+          
+          {activeSearchView.type === 'player' && activeSearchView.data?.playerId && (
+            <div>
+              {/* Navigiere zum Spieler-Profil */}
+              {(() => {
+                const player = searchResults?.players.find(p => p.id === activeSearchView.data.playerId);
+                if (player && player.name) {
+                  navigate(`/player/${encodeURIComponent(player.name)}`);
+                }
+                return null;
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ✅ NEU: Mein(e) Verein(e) - mit eingeklappter Bilanz (nur wenn keine aktive Suche) */}
       {!activeSearchView && clubOverview && (
         <div className="fade-in lk-card-full" style={{ marginBottom: '1rem' }}>
