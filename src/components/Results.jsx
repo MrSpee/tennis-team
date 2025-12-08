@@ -2182,14 +2182,290 @@ const Results = () => {
           
           {activeSearchView.type === 'player' && activeSearchView.data?.playerId && (
             <div>
-              {/* Navigiere zum Spieler-Profil */}
-              {(() => {
-                const player = searchResults?.players.find(p => p.id === activeSearchView.data.playerId);
-                if (player && player.name) {
-                  navigate(`/player/${encodeURIComponent(player.name)}`);
-                }
-                return null;
-              })()}
+              {loadingSearchPlayerResults ? (
+                <div style={{
+                  padding: '3rem',
+                  textAlign: 'center',
+                  color: '#6b7280'
+                }}>
+                  <div className="loading-spinner" style={{ margin: '0 auto 1rem' }}></div>
+                  <p>Lade Spieler-Ergebnisse...</p>
+                </div>
+              ) : searchPlayerResults ? (
+                <div>
+                  {/* Spieler-Info */}
+                  <div style={{
+                    background: '#f9fafb',
+                    borderRadius: '12px',
+                    padding: '1.5rem',
+                    marginBottom: '1.5rem',
+                    border: '1px solid #e5e7eb'
+                  }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '1rem',
+                      marginBottom: '1rem'
+                    }}>
+                      <img 
+                        src={searchPlayerResults.player.profile_image || '/app-icon.jpg'} 
+                        alt={searchPlayerResults.player.name}
+                        style={{
+                          width: '64px',
+                          height: '64px',
+                          borderRadius: '50%',
+                          objectFit: 'cover'
+                        }}
+                      />
+                      <div>
+                        <h3 style={{
+                          fontSize: '1.25rem',
+                          fontWeight: '700',
+                          color: '#1f2937',
+                          margin: 0
+                        }}>
+                          {searchPlayerResults.player.name}
+                        </h3>
+                        <div style={{
+                          fontSize: '0.875rem',
+                          color: '#6b7280',
+                          marginTop: '0.25rem'
+                        }}>
+                          {searchPlayerResults.player.current_lk || searchPlayerResults.player.season_start_lk || searchPlayerResults.player.ranking || 'LK ?'}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Statistiken */}
+                    {searchPlayerResults.matches.length > 0 && (() => {
+                      const wins = searchPlayerResults.matches.filter(m => {
+                        const isPlayerInHomeTeam = m.home_player_id === searchPlayerResults.player.id || 
+                                                   m.home_player1_id === searchPlayerResults.player.id || 
+                                                   m.home_player2_id === searchPlayerResults.player.id;
+                        const winner = m.winner || calculateMatchWinner(m);
+                        return isPlayerInHomeTeam ? winner === 'home' : winner === 'guest';
+                      }).length;
+                      
+                      const losses = searchPlayerResults.matches.filter(m => {
+                        const isPlayerInHomeTeam = m.home_player_id === searchPlayerResults.player.id || 
+                                                   m.home_player1_id === searchPlayerResults.player.id || 
+                                                   m.home_player2_id === searchPlayerResults.player.id;
+                        const winner = m.winner || calculateMatchWinner(m);
+                        return isPlayerInHomeTeam ? winner === 'guest' : winner === 'home';
+                      }).length;
+                      
+                      return (
+                        <div style={{
+                          display: 'flex',
+                          gap: '1rem',
+                          flexWrap: 'wrap'
+                        }}>
+                          <div style={{
+                            padding: '0.75rem 1rem',
+                            background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                            borderRadius: '8px',
+                            color: 'white',
+                            fontWeight: '600'
+                          }}>
+                            🎾 {searchPlayerResults.matches.length} {searchPlayerResults.matches.length === 1 ? 'Einsatz' : 'Einsätze'}
+                          </div>
+                          <div style={{
+                            padding: '0.75rem 1rem',
+                            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                            borderRadius: '8px',
+                            color: 'white',
+                            fontWeight: '600'
+                          }}>
+                            ✅ {wins} {wins === 1 ? 'Sieg' : 'Siege'}
+                          </div>
+                          <div style={{
+                            padding: '0.75rem 1rem',
+                            background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                            borderRadius: '8px',
+                            color: 'white',
+                            fontWeight: '600'
+                          }}>
+                            ❌ {losses} {losses === 1 ? 'Niederlage' : 'Niederlagen'}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  
+                  {/* Matches */}
+                  {searchPlayerResults.matches.length > 0 ? (
+                    <div className="season-matches">
+                      {searchPlayerResults.matches.map((result, idx) => {
+                        const matchWinner = result.winner || calculateMatchWinner(result);
+                        const isPlayerInHomeTeam = result.home_player_id === searchPlayerResults.player.id || 
+                                                   result.home_player1_id === searchPlayerResults.player.id || 
+                                                   result.home_player2_id === searchPlayerResults.player.id;
+                        const isWinner = isPlayerInHomeTeam 
+                          ? matchWinner === 'home' 
+                          : matchWinner === 'guest';
+                        const setsCount = (result.set3_home > 0 || result.set3_guest > 0) ? 3 : 2;
+                        const opponentFaces = ['/face1.jpg', '/face1.png', '/face2.jpg', '/face3.jpg', '/face4.jpg', '/face5.jpg'];
+                        
+                        return (
+                          <article key={idx} className="ms-card">
+                            <header className="ms-head">
+                              <h2 className="ms-title">
+                                {result.match_type === 'Einzel' ? '👤 Einzel' : '👥 Doppel'} vs. {result.opponent}
+                              </h2>
+                            </header>
+                            <hr className="ms-divider" />
+                            <section className="ms-rows">
+                              <div className={`ms-team-group ${isWinner ? 'winner-row' : 'loser-row'}`}>
+                                <div className="ms-row" style={{ gridTemplateColumns: `auto minmax(0, 1fr) repeat(${setsCount}, 38px)` }}>
+                                  <div className="ms-avatar">
+                                    <img src={searchPlayerResults.player.profile_image || '/app-icon.jpg'} alt={searchPlayerResults.player.name} />
+                                  </div>
+                                  <div className="ms-left">
+                                    <span className="ms-name">{searchPlayerResults.player.name}</span>
+                                    <span className="ms-meta">
+                                      {searchPlayerResults.player.current_lk || searchPlayerResults.player.season_start_lk || searchPlayerResults.player.ranking || ''}
+                                    </span>
+                                    {isWinner && <span className="ms-check">✓</span>}
+                                  </div>
+                                  {isPlayerInHomeTeam ? (
+                                    <>
+                                      {result.set1_home !== null && <span className="ms-set">{result.set1_home}</span>}
+                                      {result.set2_home !== null && <span className="ms-set">{result.set2_home}</span>}
+                                      {(result.set3_home > 0 || result.set3_guest > 0) && (
+                                        <span className="ms-set tb">{result.set3_home}</span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>
+                                      {result.set1_guest !== null && <span className="ms-set">{result.set1_guest}</span>}
+                                      {result.set2_guest !== null && <span className="ms-set">{result.set2_guest}</span>}
+                                      {(result.set3_home > 0 || result.set3_guest > 0) && (
+                                        <span className="ms-set tb">{result.set3_guest}</span>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                                {result.match_type === 'Doppel' && result.partnerName && (
+                                  <div className="ms-row secondary" style={{ gridTemplateColumns: `auto minmax(0, 1fr) repeat(${setsCount}, 38px)` }}>
+                                    <div className="ms-avatar">
+                                      <img src="/app-icon.jpg" alt={result.partnerName} />
+                                    </div>
+                                    <div className="ms-left">
+                                      <span className="ms-name">{result.partnerName}</span>
+                                      {result.partnerLK && (
+                                        <span className="ms-meta">{result.partnerLK}</span>
+                                      )}
+                                    </div>
+                                    {result.set1_home !== null && <span className="ms-set empty"></span>}
+                                    {result.set2_home !== null && <span className="ms-set empty"></span>}
+                                    {(result.set3_home > 0 || result.set3_guest > 0) && (
+                                      <span className="ms-set empty"></span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              
+                              <div className={`ms-team-group opponent ${!isWinner ? 'winner-row' : 'loser-row'}`}>
+                                {result.match_type === 'Einzel' ? (
+                                  <div className="ms-row" style={{ gridTemplateColumns: `auto minmax(0, 1fr) repeat(${setsCount}, 38px)` }}>
+                                    <div className="ms-avatar opponent">
+                                      <img src={opponentFaces[idx % opponentFaces.length]} alt="Opponent" />
+                                    </div>
+                                    <div className="ms-left">
+                                      <span className="ms-name">{result.opponentPlayerName}</span>
+                                      {result.opponentPlayerLK && (
+                                        <span className="ms-meta">LK {result.opponentPlayerLK}</span>
+                                      )}
+                                      {((!isPlayerInHomeTeam && isWinner) || (isPlayerInHomeTeam && !isWinner)) && <span className="ms-check">✓</span>}
+                                    </div>
+                                    {!isPlayerInHomeTeam ? (
+                                      <>
+                                        {result.set1_home !== null && <span className="ms-set">{result.set1_home}</span>}
+                                        {result.set2_home !== null && <span className="ms-set">{result.set2_home}</span>}
+                                        {(result.set3_home > 0 || result.set3_guest > 0) && (
+                                          <span className="ms-set tb">{result.set3_home}</span>
+                                        )}
+                                      </>
+                                    ) : (
+                                      <>
+                                        {result.set1_guest !== null && <span className="ms-set">{result.set1_guest}</span>}
+                                        {result.set2_guest !== null && <span className="ms-set">{result.set2_guest}</span>}
+                                        {(result.set3_home > 0 || result.set3_guest > 0) && (
+                                          <span className="ms-set tb">{result.set3_guest}</span>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className="ms-row" style={{ gridTemplateColumns: `auto minmax(0, 1fr) repeat(${setsCount}, 38px)` }}>
+                                      <div className="ms-avatar opponent">
+                                        <img src={opponentFaces[idx % opponentFaces.length]} alt="Opponent" />
+                                      </div>
+                                      <div className="ms-left">
+                                        <span className="ms-name">{result.opponent1Name || 'Unbekannt'}</span>
+                                        {result.opponent1LK && (
+                                          <span className="ms-meta">LK {result.opponent1LK}</span>
+                                        )}
+                                        {((!isPlayerInHomeTeam && isWinner) || (isPlayerInHomeTeam && !isWinner)) && <span className="ms-check">✓</span>}
+                                      </div>
+                                      {!isPlayerInHomeTeam ? (
+                                        <>
+                                          {result.set1_home !== null && <span className="ms-set">{result.set1_home}</span>}
+                                          {result.set2_home !== null && <span className="ms-set">{result.set2_home}</span>}
+                                          {(result.set3_home > 0 || result.set3_guest > 0) && (
+                                            <span className="ms-set tb">{result.set3_home}</span>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <>
+                                          {result.set1_guest !== null && <span className="ms-set">{result.set1_guest}</span>}
+                                          {result.set2_guest !== null && <span className="ms-set">{result.set2_guest}</span>}
+                                          {(result.set3_home > 0 || result.set3_guest > 0) && (
+                                            <span className="ms-set tb">{result.set3_guest}</span>
+                                          )}
+                                        </>
+                                      )}
+                                    </div>
+                                    <div className="ms-row secondary" style={{ gridTemplateColumns: `auto minmax(0, 1fr) repeat(${setsCount}, 38px)` }}>
+                                      <div className="ms-avatar opponent">
+                                        <img src={opponentFaces[(idx + 1) % opponentFaces.length]} alt="Opponent 2" />
+                                      </div>
+                                      <div className="ms-left">
+                                        <span className="ms-name">{result.opponent2Name || 'Unbekannt'}</span>
+                                        {result.opponent2LK && (
+                                          <span className="ms-meta">LK {result.opponent2LK}</span>
+                                        )}
+                                      </div>
+                                      <span className="ms-set empty"></span>
+                                      <span className="ms-set empty"></span>
+                                      {(result.set3_home > 0 || result.set3_guest > 0) && (
+                                        <span className="ms-set empty"></span>
+                                      )}
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            </section>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="no-results">
+                      <div style={{ fontSize: '3rem' }}>🎾</div>
+                      <h3>Keine Ergebnisse</h3>
+                      <p>Für diesen Spieler wurden noch keine Ergebnisse in dieser Saison gefunden.</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="no-results">
+                  <div style={{ fontSize: '3rem' }}>🎾</div>
+                  <h3>Keine Ergebnisse gefunden</h3>
+                  <p>Es konnten keine Ergebnisse für diesen Spieler geladen werden.</p>
+                </div>
+              )}
             </div>
           )}
         </div>
