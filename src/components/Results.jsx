@@ -361,8 +361,12 @@ const Results = () => {
       data = { teamId: id };
       
       // Lade Matches für dieses Team
+      // Prüfe, ob das Team zu den eigenen Teams gehört
+      const isOwnTeam = playerTeams.some(team => team.id === id);
+      const playerTeamIdsForFilter = isOwnTeam ? playerTeams.map(team => team.id) : [];
+      
       setLoadingSearchTeamMatches(true);
-      loadMatchesForTeam(id, true).then(() => {
+      loadMatchesForTeam(id, true, playerTeamIdsForFilter).then(() => {
         setLoadingSearchTeamMatches(false);
       }).catch((error) => {
         console.error('Error loading matches for search team:', error);
