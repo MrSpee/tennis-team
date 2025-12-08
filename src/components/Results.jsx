@@ -1932,8 +1932,6 @@ const Results = () => {
                 </div>
               ) : (
                 <>
-                  {/* Mannschaftsdetails */}
-                  {/* Mannschaftsdetails */}
                   <TeamDetailsView 
                     teamId={activeSearchView.data.teamId}
                     teamName={activeSearchView.name}
