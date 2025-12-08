@@ -2009,7 +2009,7 @@ const Results = () => {
       {!activeSearchView && playerTeams && playerTeams.length > 0 && viewMode === 'mannschaft' && (
         <div className="fade-in lk-card-full" style={{ marginBottom: '1.5rem' }}>
           <div className="formkurve-header">
-            <div className="formkurve-title">Mein(e) Mannschaft(en)</div>
+            <div className="formkurve-title">Meine Mannschaft(en)</div>
             <div style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: '600' }}>
               {playerTeams.length} {playerTeams.length === 1 ? 'Mannschaft' : 'Mannschaften'}
             </div>
