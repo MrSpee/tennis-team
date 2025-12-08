@@ -37,14 +37,27 @@ const TeamView = ({
     });
   }, [leagueMatches]);
 
+  // Wenn playerTeamIds leer ist (fremdes Team), zeige alle Matches ohne Trennung
   const ownLeagueMatches = useMemo(
-    () => sortedLeagueMatches.filter(match => match.involvesPlayerTeam),
-    [sortedLeagueMatches]
+    () => {
+      if (playerTeamIds.length === 0) {
+        // Für fremde Teams: keine "Unsere Begegnungen" Sektion
+        return [];
+      }
+      return sortedLeagueMatches.filter(match => match.involvesPlayerTeam);
+    },
+    [sortedLeagueMatches, playerTeamIds]
   );
 
   const otherLeagueMatches = useMemo(
-    () => sortedLeagueMatches.filter(match => !match.involvesPlayerTeam),
-    [sortedLeagueMatches]
+    () => {
+      if (playerTeamIds.length === 0) {
+        // Für fremde Teams: zeige alle Matches als "Weitere Begegnungen"
+        return sortedLeagueMatches;
+      }
+      return sortedLeagueMatches.filter(match => !match.involvesPlayerTeam);
+    },
+    [sortedLeagueMatches, playerTeamIds]
   );
 
   // Lade leagueMeta direkt aus team_seasons, wenn teamId gesetzt ist
