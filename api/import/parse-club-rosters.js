@@ -672,7 +672,7 @@ async function ensureTeamMembership(supabase, playerId, teamId, normalizedSeason
  * @param {string} clubName - Name des Clubs (für Fallback)
  * @returns {Promise<string|null>} Team-ID oder null bei Fehler
  */
-async function createTeamIfNotExists(supabase, clubId, contestType, teamNumber, clubName) {
+async function createTeamIfNotExists(supabase, clubId, contestType, teamNumber, clubName, targetSeason = null) {
   try {
     if (!clubId) {
       console.warn(`[parse-club-rosters] ⚠️ Keine clubId vorhanden, kann Team nicht erstellen`);
@@ -741,21 +741,47 @@ async function createTeamIfNotExists(supabase, clubId, contestType, teamNumber, 
     
     console.log(`[parse-club-rosters] ✅ Team erstellt via RPC: ${teamId} (${contestType} Mannschaft ${teamNumberStr})`);
     
-    // Erstelle auch team_seasons Eintrag (wird später beim Speichern der Meldeliste benötigt)
-    // Normalisiere Saison-Format (konsistent mit DB: "Winter 2025/26")
-    const normalizeSeason = (s) => {
-      if (!s) return s;
-      // Konvertiere "Winter 2025/2026" zu "Winter 2025/26"
-      return s.replace(/(\d{4})\/(\d{4})/, (match, year1, year2) => {
-        return `${year1}/${year2.slice(2)}`;
-      });
-    };
+    // Erstelle auch team_seasons Eintrag wenn targetSeason vorhanden
+    if (targetSeason) {
+      // Normalisiere Saison-Format (konsistent mit DB: "Winter 2025/26")
+      const normalizeSeason = (s) => {
+        if (!s) return s;
+        // Konvertiere "Winter 2025/2026" zu "Winter 2025/26"
+        return s.replace(/(\d{4})\/(\d{4})/, (match, year1, year2) => {
+          return `${year1}/${year2.slice(2)}`;
+        });
+      };
+      
+      const normalizedSeason = normalizeSeason(targetSeason);
+      
+      // Prüfe ob team_seasons Eintrag bereits existiert
+      const { data: existingSeason } = await supabase
+        .from('team_seasons')
+        .select('id')
+        .eq('team_id', teamId)
+        .eq('season', normalizedSeason)
+        .maybeSingle();
+      
+      if (!existingSeason) {
+        const { error: seasonError } = await supabase
+          .from('team_seasons')
+          .insert({
+            team_id: teamId,
+            season: normalizedSeason,
+            is_active: true,
+            league: 'Automatisch erstellt', // Platzhalter
+            group_name: 'Automatisch erstellt' // Platzhalter
+          });
+        
+        if (seasonError) {
+          console.warn(`[parse-club-rosters] ⚠️ Fehler beim Erstellen von team_seasons:`, seasonError);
+        } else {
+          console.log(`[parse-club-rosters] ✅ team_seasons Eintrag für Team ${teamId} Saison ${normalizedSeason} erstellt`);
+        }
+      }
+    }
     
-    // Versuche Saison aus dem Handler-Kontext zu bekommen (wird später übergeben)
-    // Für jetzt: Erstelle einen generischen Eintrag
-    // Der team_seasons Eintrag wird beim Speichern der Meldeliste erstellt/aktualisiert
-    
-    return newTeam.id;
+    return teamId; // ✅ Korrigiert: Verwende teamId statt newTeam.id
     
   } catch (error) {
     console.error(`[parse-club-rosters] ❌ Fehler in createTeamIfNotExists:`, error);
@@ -1045,7 +1071,8 @@ async function handler(req, res) {
               effectiveClubId, 
               team.contestType, 
               teamNumber, 
-              clubName
+              clubName,
+              targetSeason // ✅ WICHTIG: Übergebe targetSeason für team_seasons Erstellung
             );
             
             if (teamId) {
