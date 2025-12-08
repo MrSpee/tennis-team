@@ -362,7 +362,7 @@ const Results = () => {
       
       // Lade Matches für dieses Team
       setLoadingSearchTeamMatches(true);
-      loadMatchesForTeam(id).then(() => {
+      loadMatchesForTeam(id, true).then(() => {
         setLoadingSearchTeamMatches(false);
       }).catch((error) => {
         console.error('Error loading matches for search team:', error);
@@ -443,9 +443,9 @@ const Results = () => {
     setSearchHistory([]);
   };
   
-  const loadMatchesForTeam = async (teamId) => {
+  const loadMatchesForTeam = async (teamId, isSearchTeam = false) => {
     try {
-      console.log('📥 Loading matches for external team:', teamId);
+      console.log('📥 Loading matches for external team:', teamId, isSearchTeam ? '(search team)' : '');
       
       // 1. Lade Team-Season Info für Liga/Gruppe
       const currentSeason = 'Winter 2025/26';
@@ -694,10 +694,15 @@ const Results = () => {
       }));
       
       // 9. Speichere auch für Suche-State (falls aktiv) - NACH transformedMatches
-      if (activeSearchView?.type === 'team' && activeSearchView.data?.teamId === teamId) {
+      if (isSearchTeam || (activeSearchView?.type === 'team' && activeSearchView.data?.teamId === teamId)) {
         setSearchTeamLeagueMatches(leagueMatchDetails);
         setSearchTeamLeagueMeta(meta);
         setSearchTeamMatches(transformedMatches);
+        console.log('✅ Search team matches saved:', {
+          leagueMatches: leagueMatchDetails.length,
+          matches: transformedMatches.length,
+          meta
+        });
       }
       
       console.log('✅ External team matches loaded:', {
@@ -1833,7 +1838,7 @@ const Results = () => {
                       
                       // Lade Matches für neues Team
                       setLoadingSearchTeamMatches(true);
-                      loadMatchesForTeam(newTeamId).then(() => {
+                      loadMatchesForTeam(newTeamId, true).then(() => {
                         setLoadingSearchTeamMatches(false);
                       }).catch((error) => {
                         console.error('Error loading matches for search team:', error);
