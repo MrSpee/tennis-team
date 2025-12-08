@@ -38,6 +38,8 @@ const Results = () => {
   // ✅ NEU: Globale Suche (Phase 2)
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState(null);
+  const [activeSearchView, setActiveSearchView] = useState(null); // { type: 'club'|'team'|'player', id: string, name: string }
+  const [searchHistory, setSearchHistory] = useState([]); // Für Navigation zurück
   
   // Nutze Matches aus DataContext
   const matches = dataContextMatches;
@@ -279,11 +281,17 @@ const Results = () => {
     return () => clearTimeout(timer);
   }, [searchTerm]);
   
-  // ✅ Handler für Suchergebnis-Klicks
+  // ✅ Handler für Suchergebnis-Klicks - öffnet neutrale View
   const handleSearchResultClick = async (type, id) => {
     console.log('🔍 Search result clicked:', type, id);
     
+    let name = '';
+    let data = null;
+    
     if (type === 'club') {
+      const club = searchResults?.clubs.find(c => c.id === id);
+      name = club?.name || '';
+      
       // Lade alle Teams dieses Vereins
       try {
         const { data: clubTeams, error: teamsError } = await supabase
@@ -294,31 +302,56 @@ const Results = () => {
         
         if (teamsError) throw teamsError;
         
-        setAllClubTeams(clubTeams || []);
-        
-        // Wähle das erste Team aus
-        if (clubTeams && clubTeams.length > 0) {
-          setSelectedClubTeamId(clubTeams[0].id);
-          setSelectedTeamId(clubTeams[0].id);
-        }
+        data = {
+          teams: clubTeams || [],
+          clubId: id,
+          clubName: name
+        };
       } catch (error) {
         console.error('Error loading club teams:', error);
       }
     } else if (type === 'team') {
-      // Wähle die Mannschaft aus
-      setSelectedClubTeamId(id);
-      setSelectedTeamId(id);
+      const team = searchResults?.teams.find(t => t.id === id);
+      name = `${team?.club_name || ''} ${team?.category || ''} ${team?.team_name || ''}`.trim();
+      data = { teamId: id };
     } else if (type === 'player') {
-      // Navigiere zum Spieler-Profil
       const player = searchResults?.players.find(p => p.id === id);
-      if (player && player.name) {
-        navigate(`/player/${encodeURIComponent(player.name)}`);
-      }
+      name = player?.name || '';
+      data = { playerId: id };
     }
     
-    // Schließe die Suche
+    // Setze aktive Suche-Ansicht (neutrale View)
+    setActiveSearchView({ type, id, name, data });
+    
+    // Füge zur History hinzu (für Zurück-Navigation)
+    setSearchHistory(prev => [...prev, { type, id, name }]);
+    
+    // Schließe Dropdown, aber behalte searchTerm für Navigation
+    setSearchResults(null);
+  };
+  
+  // ✅ Zurück-Navigation in Suche
+  const handleSearchBack = () => {
+    if (searchHistory.length > 1) {
+      // Gehe zum vorherigen Eintrag
+      const newHistory = [...searchHistory];
+      newHistory.pop(); // Entferne aktuellen Eintrag
+      const previous = newHistory[newHistory.length - 1];
+      setSearchHistory(newHistory);
+      setActiveSearchView({ type: previous.type, id: previous.id, name: previous.name });
+    } else {
+      // Zurück zur Suche
+      setActiveSearchView(null);
+      setSearchHistory([]);
+    }
+  };
+  
+  // ✅ Suche zurücksetzen
+  const handleResetSearch = () => {
     setSearchTerm('');
     setSearchResults(null);
+    setActiveSearchView(null);
+    setSearchHistory([]);
   };
   
   const loadMatchesForTeam = async (teamId) => {
@@ -1344,10 +1377,7 @@ const Results = () => {
           />
           {searchTerm && (
             <button
-              onClick={() => {
-                setSearchTerm('');
-                setSearchResults(null);
-              }}
+              onClick={handleResetSearch}
               style={{
                 position: 'absolute',
                 right: '0.75rem',
@@ -1484,8 +1514,8 @@ const Results = () => {
         )}
       </div>
 
-      {/* ✅ NEU: Mein(e) Verein(e) - mit eingeklappter Bilanz */}
-      {clubOverview && (
+      {/* ✅ NEU: Mein(e) Verein(e) - mit eingeklappter Bilanz (nur wenn keine aktive Suche) */}
+      {!activeSearchView && clubOverview && (
         <div className="fade-in lk-card-full" style={{ marginBottom: '1rem' }}>
           <div className="formkurve-header">
             <div className="formkurve-title">Mein(e) Verein(e)</div>
@@ -1589,8 +1619,8 @@ const Results = () => {
         </div>
       )}
       
-      {/* ✅ NEU: Mein(e) Mannschaft(en) mit integriertem Liga-Spielplan */}
-      {allClubTeams.length > 0 && viewMode === 'mannschaft' && (
+      {/* ✅ NEU: Mein(e) Mannschaft(en) mit integriertem Liga-Spielplan (nur wenn keine aktive Suche) */}
+      {!activeSearchView && allClubTeams.length > 0 && viewMode === 'mannschaft' && (
         <>
           <div className="fade-in lk-card-full" style={{ marginBottom: '1rem' }}>
             <div className="formkurve-header">
