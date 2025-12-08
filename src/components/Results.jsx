@@ -1562,7 +1562,7 @@ const Results = () => {
   return (
     <div className="dashboard container">
       {/* Header - Moderner Dashboard-Stil */}
-      <div className="fade-in" style={{ marginBottom: '1rem', paddingTop: '0.5rem' }}>
+      <div className="fade-in" style={{ marginBottom: '2rem', paddingTop: '0.5rem' }}>
         <h1 className="hi">
           Spielergebnisse 🏆
         </h1>
@@ -1573,17 +1573,27 @@ const Results = () => {
           color: '#6b7280',
           fontWeight: '600',
           marginTop: '0.5rem',
-          marginBottom: '1rem'
+          marginBottom: '2rem'
         }}>
           Saison: {display}
         </div>
         
-        {/* ✅ Globale Suche - direkt unter Überschrift */}
-        <div style={{
-          position: 'relative',
-          maxWidth: '600px',
-          margin: '0px auto'
-        }}>
+        {/* ✅ Globale Suche - mit deutlicher Überschrift */}
+        <div style={{ marginBottom: '2rem' }}>
+          <h2 style={{
+            fontSize: '1.25rem',
+            fontWeight: '700',
+            color: '#1f2937',
+            marginBottom: '1rem',
+            textAlign: 'center'
+          }}>
+            🔍 Globale Suche
+          </h2>
+          <div style={{
+            position: 'relative',
+            maxWidth: '600px',
+            margin: '0px auto'
+          }}>
           <input
             type="text"
             placeholder="🔍 Suche nach Verein, Mannschaft oder Spieler..."
@@ -2100,8 +2110,8 @@ const Results = () => {
         </div>
       )}
       
-      {/* ✅ NEU: Mein(e) Mannschaft(en) mit integriertem Liga-Spielplan (nur wenn keine aktive Suche) */}
-      {!activeSearchView && allClubTeams.length > 0 && viewMode === 'mannschaft' && (
+      {/* ✅ NEU: Team-Ansicht für ausgewählte Mannschaft (nur wenn keine aktive Suche) */}
+      {!activeSearchView && (selectedTeamId || selectedClubTeamId) && viewMode === 'mannschaft' && (
         <>
           <div className="fade-in lk-card-full" style={{ marginBottom: '1rem' }}>
             <div className="formkurve-header">
