@@ -209,6 +209,7 @@ const TeamView = ({
 
     const homeName = match.homeTeam?.displayName || 'Heimteam';
     const awayName = match.awayTeam?.displayName || 'Gastteam';
+    // Highlight nur, wenn es wirklich ein eigenes Team ist (nicht nur gesuchtes Team)
     const highlight = Boolean(match.involvesPlayerTeam);
 
     const showParticipationCTA = (match.isPlayerHomeTeam || match.isPlayerAwayTeam) && (statusClass === 'upcoming' || statusClass === 'live');

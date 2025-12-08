@@ -443,9 +443,9 @@ const Results = () => {
     setSearchHistory([]);
   };
   
-  const loadMatchesForTeam = async (teamId, isSearchTeam = false) => {
+  const loadMatchesForTeam = async (teamId, isSearchTeam = false, playerTeamIdsForFilter = []) => {
     try {
-      console.log('📥 Loading matches for external team:', teamId, isSearchTeam ? '(search team)' : '');
+      console.log('📥 Loading matches for external team:', teamId, isSearchTeam ? '(search team)' : '', 'playerTeamIds:', playerTeamIdsForFilter);
       
       // 1. Lade Team-Season Info für Liga/Gruppe
       const currentSeason = 'Winter 2025/26';
@@ -597,9 +597,15 @@ const Results = () => {
           : awayMatchPoints > homeMatchPoints ? 'away' 
           : null;
         
-        const isPlayerHomeTeam = match.home_team_id === teamId;
-        const isPlayerAwayTeam = match.away_team_id === teamId;
+        // Setze involvesPlayerTeam basierend auf playerTeamIdsForFilter, nicht auf teamId
+        // Wenn playerTeamIdsForFilter leer ist (fremdes Team), ist involvesPlayerTeam immer false
+        const isPlayerHomeTeam = playerTeamIdsForFilter.length > 0 && playerTeamIdsForFilter.includes(match.home_team_id);
+        const isPlayerAwayTeam = playerTeamIdsForFilter.length > 0 && playerTeamIdsForFilter.includes(match.away_team_id);
         const involvesPlayerTeam = isPlayerHomeTeam || isPlayerAwayTeam;
+        
+        // Für Highlighting: markiere das gesuchte Team (auch wenn es nicht zu eigenen Teams gehört)
+        const isSearchedHomeTeam = match.home_team_id === teamId;
+        const isSearchedAwayTeam = match.away_team_id === teamId;
         
         const buildTeamLabel = (team) => {
           if (!team) return 'Unbekannt';
@@ -621,14 +627,16 @@ const Results = () => {
             displayName: buildTeamLabel(match.home_team),
             club_name: match.home_team?.club_name || null,
             team_name: match.home_team?.team_name || null,
-            isPlayerTeam: isPlayerHomeTeam
+            isPlayerTeam: isPlayerHomeTeam,
+            isSearchedTeam: isSearchedHomeTeam
           },
           awayTeam: {
             id: match.away_team_id,
             displayName: buildTeamLabel(match.away_team),
             club_name: match.away_team?.club_name || null,
             team_name: match.away_team?.team_name || null,
-            isPlayerTeam: isPlayerAwayTeam
+            isPlayerTeam: isPlayerAwayTeam,
+            isSearchedTeam: isSearchedAwayTeam
           },
           homeMatchPoints,
           awayMatchPoints,
