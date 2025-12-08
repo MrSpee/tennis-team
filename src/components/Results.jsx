@@ -1816,7 +1816,13 @@ const Results = () => {
                     ? searchTeamLeagueMatches 
                     : (externalLeagueMatches[activeSearchView.data.teamId] || [])}
                   leagueMeta={searchTeamLeagueMeta || externalLeagueMeta[activeSearchView.data.teamId] || null}
-                  playerTeamIds={playerTeams.map(team => team.id)}
+                  playerTeamIds={(() => {
+                    // Prüfe, ob das gesuchte Team zu den eigenen Teams gehört
+                    const isOwnTeam = playerTeams.some(team => team.id === activeSearchView.data.teamId);
+                    // Wenn es nicht zu den eigenen Teams gehört, leere Liste (keine "Unsere Begegnungen")
+                    // Wenn es zu den eigenen Teams gehört, alle eigenen Teams (normale Ansicht)
+                    return isOwnTeam ? playerTeams.map(team => team.id) : [];
+                  })()}
                   display={display}
                   onTeamChange={async (newTeamId) => {
                     // Navigation zu anderem Team innerhalb der Suche
