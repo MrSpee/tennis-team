@@ -60,3 +60,4 @@ if (winterSectionIndex !== -1) {
   });
 }
 
+

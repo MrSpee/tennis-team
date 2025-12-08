@@ -30,12 +30,22 @@ const TeamView = ({
 
   const sortedLeagueMatches = useMemo(() => {
     if (!leagueMatches || leagueMatches.length === 0) return [];
-    return [...leagueMatches].sort((a, b) => {
+    
+    // Wenn playerTeamIds leer ist (fremdes Team), filtere nur Spiele dieser Mannschaft
+    let filteredMatches = leagueMatches;
+    if (playerTeamIds.length === 0 && teamId) {
+      // Nur Spiele anzeigen, an denen teamId beteiligt ist
+      filteredMatches = leagueMatches.filter(match => 
+        match.home_team_id === teamId || match.away_team_id === teamId
+      );
+    }
+    
+    return [...filteredMatches].sort((a, b) => {
       const aTime = a.date instanceof Date ? a.date.getTime() : (a.date ? new Date(a.date).getTime() : 0);
       const bTime = b.date instanceof Date ? b.date.getTime() : (b.date ? new Date(b.date).getTime() : 0);
       return aTime - bTime;
     });
-  }, [leagueMatches]);
+  }, [leagueMatches, playerTeamIds, teamId]);
 
   // Wenn playerTeamIds leer ist (fremdes Team), zeige alle Matches ohne Trennung
   const ownLeagueMatches = useMemo(
@@ -52,7 +62,7 @@ const TeamView = ({
   const otherLeagueMatches = useMemo(
     () => {
       if (playerTeamIds.length === 0) {
-        // Für fremde Teams: zeige alle Matches als "Weitere Begegnungen"
+        // Für fremde Teams: zeige alle gefilterten Matches (nur diese Mannschaft)
         return sortedLeagueMatches;
       }
       return sortedLeagueMatches.filter(match => !match.involvesPlayerTeam);
