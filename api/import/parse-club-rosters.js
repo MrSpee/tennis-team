@@ -175,6 +175,7 @@ async function parseClubPoolsPage(clubPoolsUrl, targetSeason) {
     
     let match;
     const seenTeams = new Set(); // Vermeide Duplikate
+    const teamPromises = []; // Sammle alle Team-Parsing-Promises
     
     while ((match = teamLinkPattern.exec(seasonSection)) !== null) {
       let teamUrl = match[1].replace(/&amp;/g, '&'); // Konvertiere &amp; zu &
@@ -191,26 +192,41 @@ async function parseClubPoolsPage(clubPoolsUrl, targetSeason) {
       }
       seenTeams.add(teamKey);
       
-      // Parse die Meldeliste direkt von der Team-Detail-Seite
-      const roster = await parseRosterFromClubPoolsPage(teamUrl);
+      // Sammle Promise für paralleles Parsen (mit Rate-Limiting)
+      teamPromises.push(
+        (async () => {
+          // Parse die Meldeliste direkt von der Team-Detail-Seite
+          const roster = await parseRosterFromClubPoolsPage(teamUrl);
+          
+          // Warnung wenn Roster leer ist
+          if (!roster || roster.length === 0) {
+            console.warn(`[parse-club-rosters] ⚠️ Keine Spieler für Team "${contestType}" gefunden (URL: ${teamUrl})`);
+          } else {
+            console.log(`[parse-club-rosters] ✅ ${roster.length} Spieler für Team "${contestType}" gefunden`);
+          }
+          
+          return {
+            contestType, // z.B. "Herren 40"
+            teamName,    // z.B. "Herren 40"
+            teamUrl,     // clubPools-URL für dieses Team
+            roster: roster || [], // Meldeliste (Array von Spielern) - immer Array, auch wenn leer
+            playerCount: roster?.length || 0 // Anzahl Spieler für einfachere Anzeige
+          };
+        })()
+      );
+    }
+    
+    // Paralleles Parsen mit Rate-Limiting (max 3 gleichzeitig)
+    const BATCH_SIZE = 3;
+    for (let i = 0; i < teamPromises.length; i += BATCH_SIZE) {
+      const batch = teamPromises.slice(i, i + BATCH_SIZE);
+      const batchResults = await Promise.all(batch);
+      teams.push(...batchResults);
       
-      // Warnung wenn Roster leer ist
-      if (!roster || roster.length === 0) {
-        console.warn(`[parse-club-rosters] ⚠️ Keine Spieler für Team "${contestType}" gefunden (URL: ${teamUrl})`);
-      } else {
-        console.log(`[parse-club-rosters] ✅ ${roster.length} Spieler für Team "${contestType}" gefunden`);
+      // Kurze Pause zwischen Batches (nur wenn nicht letzter Batch)
+      if (i + BATCH_SIZE < teamPromises.length) {
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
-      
-      // Kurze Pause zwischen Requests (um nicht als Bot erkannt zu werden)
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      teams.push({
-        contestType, // z.B. "Herren 40"
-        teamName,    // z.B. "Herren 40"
-        teamUrl,     // clubPools-URL für dieses Team
-        roster: roster || [], // Meldeliste (Array von Spielern) - immer Array, auch wenn leer
-        playerCount: roster?.length || 0 // Anzahl Spieler für einfachere Anzeige
-      });
     }
     
     console.log(`[parse-club-rosters] ✅ ${teams.length} Teams für Saison "${targetSeason}" gefunden`);
@@ -443,16 +459,24 @@ function calculateSimilarity(str1, str2) {
 
 /**
  * Führt Fuzzy-Matching mit players_unified durch
+ * OPTIMIERT: Nutzt bereits geladene Spieler-Liste (playerCache) für bessere Performance
  */
-async function matchPlayerToUnified(supabase, rosterPlayer) {
+async function matchPlayerToUnified(supabase, rosterPlayer, playerCache = null) {
   try {
     const rosterName = rosterPlayer.name;
     const normalizedRosterName = normalizeNameForComparison(rosterName);
     
-    console.log(`[parse-club-rosters] 🔍 Matche Spieler: "${rosterName}" (normalisiert: "${normalizedRosterName}")`);
-    
     // 1. TVM-ID Match (falls vorhanden) - HÖCHSTE Priorität (eindeutig!)
     if (rosterPlayer.tvmId) {
+      // Wenn Cache vorhanden, suche dort zuerst
+      if (playerCache) {
+        const tvmMatch = playerCache.find(p => p.tvm_id === rosterPlayer.tvmId);
+        if (tvmMatch) {
+          return { playerId: tvmMatch.id, confidence: 100, matchType: 'tvm_id' };
+        }
+      }
+      
+      // Fallback: DB-Query nur wenn nicht im Cache
       const { data: tvmMatch } = await supabase
         .from('players_unified')
         .select('id, name, tvm_id')
@@ -460,16 +484,19 @@ async function matchPlayerToUnified(supabase, rosterPlayer) {
         .maybeSingle();
       
       if (tvmMatch) {
-        console.log(`[parse-club-rosters] ✅ TVM-ID Match gefunden: ${tvmMatch.name} (${tvmMatch.id})`);
         return { playerId: tvmMatch.id, confidence: 100, matchType: 'tvm_id' };
       }
     }
     
-    // 2. Lade alle Spieler für Matching
-    const { data: allPlayers } = await supabase
-      .from('players_unified')
-      .select('id, name, current_lk, tvm_id')
-      .limit(1000);
+    // 2. Verwende Cache oder lade Spieler (nur einmal!)
+    let allPlayers = playerCache;
+    if (!allPlayers) {
+      const { data: players } = await supabase
+        .from('players_unified')
+        .select('id, name, current_lk, tvm_id')
+        .limit(1000);
+      allPlayers = players || [];
+    }
     
     if (!allPlayers || allPlayers.length === 0) {
       return { playerId: null, confidence: 0, matchType: 'none' };
@@ -483,7 +510,6 @@ async function matchPlayerToUnified(supabase, rosterPlayer) {
     });
     
     if (exactMatch) {
-      console.log(`[parse-club-rosters] ✅ Exaktes Match gefunden: ${exactMatch.name} (${exactMatch.id})`);
       return { playerId: exactMatch.id, confidence: 100, matchType: 'exact' };
     }
     
@@ -503,7 +529,6 @@ async function matchPlayerToUnified(supabase, rosterPlayer) {
     
     if (matches.length > 0) {
       const bestMatch = matches[0];
-      console.log(`[parse-club-rosters] 🎯 Fuzzy-Match gefunden: ${bestMatch.name} (${bestMatch.similarity}% Ähnlichkeit)`);
       return { 
         playerId: bestMatch.id, 
         confidence: bestMatch.similarity, 
@@ -854,58 +879,63 @@ async function saveTeamRoster(supabase, teamId, season, roster) {
       console.warn('[parse-club-rosters] ⚠️ Fehler beim Löschen alter Einträge:', deleteError);
     }
     
-    // Führe Fuzzy-Matching für jeden Spieler durch
-    console.log(`[parse-club-rosters] 🔍 Führe Fuzzy-Matching für ${roster.length} Spieler durch...`);
+    // ✅ OPTIMIERUNG: Lade Team-Info EINMAL (nicht für jeden Spieler)
+    const { data: teamInfo } = await supabase
+      .from('team_info')
+      .select('category')
+      .eq('id', teamId)
+      .single();
+    
+    const teamCategory = teamInfo?.category || null;
+    
+    // ✅ OPTIMIERUNG: Lade alle Spieler EINMAL für Batch-Matching
+    console.log(`[parse-club-rosters] 🔍 Lade Spieler-Cache für Batch-Matching...`);
+    const { data: allPlayers } = await supabase
+      .from('players_unified')
+      .select('id, name, current_lk, tvm_id')
+      .limit(1000);
+    
+    const playerCache = allPlayers || [];
+    console.log(`[parse-club-rosters] ✅ ${playerCache.length} Spieler im Cache geladen`);
+    
+    // ✅ OPTIMIERUNG: Batch-Matching ohne sequenzielle Pausen
+    console.log(`[parse-club-rosters] 🔍 Führe Batch-Matching für ${roster.length} Spieler durch...`);
     const rosterEntries = [];
+    const matchResults = [];
     let matchedCount = 0;
     let unmatchedCount = 0;
     let membershipCreatedCount = 0;
     let membershipUpdatedCount = 0;
     
-    for (const player of roster) {
-      // Validierung: rank muss positiv sein (Constraint in DB)
+    // Validiere und matche alle Spieler parallel
+    const validPlayers = roster.filter(player => {
       if (!player.rank || player.rank <= 0) {
         console.warn(`[parse-club-rosters] ⚠️ Ungültiger Rang für Spieler "${player.name}": ${player.rank} - überspringe`);
-        continue;
+        return false;
       }
-      
-      // Validierung: name muss vorhanden sein
       if (!player.name || player.name.trim().length < 2) {
         console.warn(`[parse-club-rosters] ⚠️ Ungültiger Name für Spieler mit Rang ${player.rank}: "${player.name}" - überspringe`);
-        continue;
+        return false;
       }
-      
-      const matchResult = await matchPlayerToUnified(supabase, player);
-      
-      // Wenn Spieler gematcht wurde: Erstelle/aktualisiere team_membership
-      if (matchResult.playerId) {
-        // Lade Team-Kategorie für Wettspielordnung-Prüfung
-        const { data: teamInfo } = await supabase
-          .from('team_info')
-          .select('category')
-          .eq('id', teamId)
-          .single();
-        
-        const teamCategory = teamInfo?.category || null;
-        
-        const membershipResult = await ensureTeamMembership(
-          supabase, 
-          matchResult.playerId, 
-          teamId, 
-          normalizedSeason, 
-          teamCategory,
-          (created, updated) => {
-            if (created) membershipCreatedCount++;
-            if (updated) membershipUpdatedCount++;
-          }
-        );
-      }
+      return true;
+    });
+    
+    // Matche alle Spieler parallel (ohne Pausen)
+    const matchPromises = validPlayers.map(player => 
+      matchPlayerToUnified(supabase, player, playerCache)
+    );
+    const matchResultsArray = await Promise.all(matchPromises);
+    
+    // Verarbeite Ergebnisse und erstelle rosterEntries
+    for (let i = 0; i < validPlayers.length; i++) {
+      const player = validPlayers[i];
+      const matchResult = matchResultsArray[i];
       
       rosterEntries.push({
         team_id: teamId,
-        season: normalizedSeason, // Verwende normalisierte Saison
+        season: normalizedSeason,
         rank: player.rank,
-        team_number: player.teamNumber || null, // Mannschaftsnummer (1, 2, 3, etc.)
+        team_number: player.teamNumber || null,
         player_name: player.name.trim(),
         lk: player.lk || null,
         tvm_id: player.tvmId || null,
@@ -918,13 +948,28 @@ async function saveTeamRoster(supabase, teamId, season, roster) {
       
       if (matchResult.playerId) {
         matchedCount++;
+        matchResults.push({ player, matchResult });
       } else {
         unmatchedCount++;
       }
-      
-      // Kurze Pause zwischen Matches
-      await new Promise(resolve => setTimeout(resolve, 50));
     }
+    
+    // ✅ OPTIMIERUNG: Erstelle team_memberships parallel (nach Matching)
+    console.log(`[parse-club-rosters] 🔗 Erstelle team_memberships für ${matchResults.length} gematchte Spieler...`);
+    const membershipPromises = matchResults.map(({ player, matchResult }) =>
+      ensureTeamMembership(
+        supabase,
+        matchResult.playerId,
+        teamId,
+        normalizedSeason,
+        teamCategory,
+        (created, updated) => {
+          if (created) membershipCreatedCount++;
+          if (updated) membershipUpdatedCount++;
+        }
+      )
+    );
+    await Promise.all(membershipPromises);
     
     console.log(`[parse-club-rosters] 📊 Matching-Ergebnisse: ${matchedCount} gematcht, ${unmatchedCount} nicht gematcht`);
     
