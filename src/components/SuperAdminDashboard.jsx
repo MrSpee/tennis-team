@@ -2795,8 +2795,88 @@ function SuperAdminDashboard() {
           .maybeSingle();
         
         if (teamSeason?.source_url) {
-          leagueUrl = teamSeason.source_url;
-          console.log(`[fetchGroupSnapshot] ✅ source_url aus team_seasons geladen: ${leagueUrl}`);
+          const sourceUrl = teamSeason.source_url;
+          
+          // ✅ WICHTIG: Prüfe ob source_url eine teamPortrait URL ist
+          // teamPortrait URLs müssen zu leaguePage URLs konvertiert werden
+          if (sourceUrl.includes('teamPortrait')) {
+            try {
+              const url = new URL(sourceUrl);
+              const championship = url.searchParams.get('championship');
+              const group = url.searchParams.get('group');
+              
+              if (championship) {
+                // Konvertiere teamPortrait URL zu leaguePage URL
+                // Bestimme tab basierend auf Liga (aus matchdays)
+                const league = matchdays.league || '';
+                let tab = 2; // Default: Damen/Herren
+                
+                // Prüfe Liga-Name für Tab-Bestimmung
+                if (league.includes('Köln-Leverkusen')) {
+                  const categoryMatch = league.match(/(Damen|Herren)(?:\s+(\d+))?/i);
+                  let categoryForTab = categoryMatch ? categoryMatch[1] : '';
+                  if (categoryMatch && categoryMatch[2]) {
+                    const number = parseInt(categoryMatch[2], 10);
+                    if (number >= 30) {
+                      categoryForTab = `${categoryMatch[1]} ${number}`;
+                    }
+                  }
+                  
+                  if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(categoryForTab)) {
+                    tab = 3; // Senioren
+                  } else {
+                    tab = 2; // Offene Herren/Damen
+                  }
+                } else {
+                  // TVM Ligen: Versuche Kategorie aus Team zu holen
+                  try {
+                    const { data: teamSeasonForCategory } = await supabase
+                      .from('team_seasons')
+                      .select('team_id')
+                      .eq('group_name', matchdays.group_name)
+                      .eq('season', matchdays.season)
+                      .eq('league', matchdays.league)
+                      .limit(1)
+                      .maybeSingle();
+                    
+                    if (teamSeasonForCategory?.team_id) {
+                      const { data: teamInfo } = await supabase
+                        .from('team_info')
+                        .select('category')
+                        .eq('id', teamSeasonForCategory.team_id)
+                        .maybeSingle();
+                      
+                      if (teamInfo?.category) {
+                        const normalizedCategory = normalizeCategory(teamInfo.category);
+                        if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(normalizedCategory)) {
+                          tab = 3; // Senioren
+                        } else {
+                          tab = 2; // Offene Herren/Damen
+                        }
+                      }
+                    }
+                  } catch (error) {
+                    console.warn(`[fetchGroupSnapshot] ⚠️ Fehler beim Laden der Kategorie:`, error);
+                    tab = 2;
+                  }
+                }
+                
+                // Erstelle leaguePage URL
+                leagueUrl = `https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=${encodeURIComponent(championship)}&tab=${tab}`;
+                console.log(`[fetchGroupSnapshot] ✅ teamPortrait URL konvertiert zu leaguePage: ${leagueUrl} (original: ${sourceUrl})`);
+              } else {
+                console.warn(`[fetchGroupSnapshot] ⚠️ teamPortrait URL hat keinen championship Parameter: ${sourceUrl}`);
+                leagueUrl = null; // Fallback zu normaler Logik
+              }
+            } catch (urlError) {
+              console.warn(`[fetchGroupSnapshot] ⚠️ Fehler beim Parsen der teamPortrait URL:`, urlError);
+              leagueUrl = null; // Fallback zu normaler Logik
+            }
+          } else {
+            // Normale leaguePage URL - verwende direkt
+            leagueUrl = sourceUrl;
+            console.log(`[fetchGroupSnapshot] ✅ source_url aus team_seasons geladen: ${leagueUrl}`);
+          }
         } else {
           // ✅ FALLBACK: Wenn keine source_url vorhanden, versuche basierend auf Liga die richtige Tab-Seite zu finden
           // Prüfe, ob andere Gruppen derselben Liga eine source_url haben
@@ -2810,8 +2890,80 @@ function SuperAdminDashboard() {
             .maybeSingle();
           
           if (otherTeamSeason?.source_url) {
-            leagueUrl = otherTeamSeason.source_url;
-            console.log(`[fetchGroupSnapshot] ✅ source_url aus anderer Gruppe derselben Liga geladen: ${leagueUrl}`);
+            const sourceUrl = otherTeamSeason.source_url;
+            
+            // ✅ WICHTIG: Prüfe ob source_url eine teamPortrait URL ist
+            if (sourceUrl.includes('teamPortrait')) {
+              try {
+                const url = new URL(sourceUrl);
+                const championship = url.searchParams.get('championship');
+                
+                if (championship) {
+                  // Bestimme tab basierend auf Liga
+                  const league = matchdays.league || '';
+                  let tab = 2;
+                  
+                  if (league.includes('Köln-Leverkusen')) {
+                    const categoryMatch = league.match(/(Damen|Herren)(?:\s+(\d+))?/i);
+                    let categoryForTab = categoryMatch ? categoryMatch[1] : '';
+                    if (categoryMatch && categoryMatch[2]) {
+                      const number = parseInt(categoryMatch[2], 10);
+                      if (number >= 30) {
+                        categoryForTab = `${categoryMatch[1]} ${number}`;
+                      }
+                    }
+                    
+                    if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(categoryForTab)) {
+                      tab = 3;
+                    } else {
+                      tab = 2;
+                    }
+                  } else {
+                    try {
+                      const { data: teamSeasonForCategory } = await supabase
+                        .from('team_seasons')
+                        .select('team_id')
+                        .eq('group_name', matchdays.group_name)
+                        .eq('season', matchdays.season)
+                        .eq('league', matchdays.league)
+                        .limit(1)
+                        .maybeSingle();
+                      
+                      if (teamSeasonForCategory?.team_id) {
+                        const { data: teamInfo } = await supabase
+                          .from('team_info')
+                          .select('category')
+                          .eq('id', teamSeasonForCategory.team_id)
+                          .maybeSingle();
+                        
+                        if (teamInfo?.category) {
+                          const normalizedCategory = normalizeCategory(teamInfo.category);
+                          if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(normalizedCategory)) {
+                            tab = 3;
+                          } else {
+                            tab = 2;
+                          }
+                        }
+                      }
+                    } catch (error) {
+                      console.warn(`[fetchGroupSnapshot] ⚠️ Fehler beim Laden der Kategorie:`, error);
+                      tab = 2;
+                    }
+                  }
+                  
+                  leagueUrl = `https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=${encodeURIComponent(championship)}&tab=${tab}`;
+                  console.log(`[fetchGroupSnapshot] ✅ teamPortrait URL (aus anderer Gruppe) konvertiert zu leaguePage: ${leagueUrl}`);
+                } else {
+                  leagueUrl = null;
+                }
+              } catch (urlError) {
+                console.warn(`[fetchGroupSnapshot] ⚠️ Fehler beim Parsen der teamPortrait URL:`, urlError);
+                leagueUrl = null;
+              }
+            } else {
+              leagueUrl = sourceUrl;
+              console.log(`[fetchGroupSnapshot] ✅ source_url aus anderer Gruppe derselben Liga geladen: ${leagueUrl}`);
+            }
           } else {
             // ✅ FALLBACK 2: Basierend auf Liga-Name die richtige URL bestimmen
             // WICHTIG: "Köln-Leverkusen" Ligen brauchen einen anderen championship-Parameter!
