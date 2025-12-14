@@ -959,24 +959,146 @@ async function saveTeamRoster(supabase, teamId, season, roster) {
       }
     }
     
-    // ✅ OPTIMIERUNG: Erstelle team_memberships parallel (nach Matching)
+    // ✅ OPTIMIERUNG: Erstelle team_memberships in Batches (reduziert DB-Queries)
     // Übergebe Team-Info als Cache, um redundante DB-Queries zu vermeiden
     console.log(`[parse-club-rosters] 🔗 Erstelle team_memberships für ${matchResults.length} gematchte Spieler...`);
-    const membershipPromises = matchResults.map(({ player, matchResult }) =>
-      ensureTeamMembership(
-        supabase,
-        matchResult.playerId,
-        teamId,
-        normalizedSeason,
-        teamCategory,
-        (created, updated) => {
-          if (created) membershipCreatedCount++;
-          if (updated) membershipUpdatedCount++;
-        },
-        teamInfo // ✅ Team-Info aus Cache übergeben
-      )
-    );
-    await Promise.all(membershipPromises);
+    
+    // ✅ BATCH-OPTIMIERUNG: Prüfe alle Memberships auf einmal
+    if (matchResults.length > 0) {
+      const playerIds = matchResults.map(({ matchResult }) => matchResult.playerId).filter(Boolean);
+      
+      // Lade alle existierenden Memberships für diese Spieler auf einmal
+      const { data: existingMemberships } = await supabase
+        .from('team_memberships')
+        .select('id, player_id, team_id, is_active, is_primary')
+        .in('player_id', playerIds)
+        .eq('team_id', teamId)
+        .eq('season', normalizedSeason);
+      
+      // Erstelle Map für schnellen Lookup
+      const membershipMap = new Map();
+      (existingMemberships || []).forEach(m => {
+        const key = `${m.player_id}::${m.team_id}::${normalizedSeason}`;
+        membershipMap.set(key, m);
+      });
+      
+      // Lade alle aktiven Memberships für Konfliktprüfung (batch)
+      const { data: allActiveMemberships } = await supabase
+        .from('team_memberships')
+        .select(`
+          id,
+          player_id,
+          team_id,
+          is_active,
+          team_info:team_id (
+            id,
+            category,
+            club_id
+          )
+        `)
+        .in('player_id', playerIds)
+        .eq('season', normalizedSeason)
+        .eq('is_active', true);
+      
+      // Gruppiere nach player_id für schnellen Lookup
+      const activeMembershipsByPlayer = new Map();
+      (allActiveMemberships || []).forEach(m => {
+        if (!activeMembershipsByPlayer.has(m.player_id)) {
+          activeMembershipsByPlayer.set(m.player_id, []);
+        }
+        activeMembershipsByPlayer.get(m.player_id).push(m);
+      });
+      
+      // Verarbeite alle Spieler mit Batch-Queries
+      const membershipInserts = [];
+      const membershipUpdates = [];
+      
+      for (const { player, matchResult } of matchResults) {
+        if (!matchResult.playerId) continue;
+        
+        const membershipKey = `${matchResult.playerId}::${teamId}::${normalizedSeason}`;
+        const existing = membershipMap.get(membershipKey);
+        
+        if (existing) {
+          // Membership existiert bereits
+          if (!existing.is_active) {
+            membershipUpdates.push({ id: existing.id, is_active: true });
+            membershipUpdatedCount++;
+          }
+          // Sonst: bereits aktiv, nichts zu tun
+        } else {
+          // Prüfe Konflikte (vereinfacht - nur für diesen Spieler)
+          const playerActiveMemberships = activeMembershipsByPlayer.get(matchResult.playerId) || [];
+          const hasConflict = playerActiveMemberships.some(m => {
+            const otherTeam = m.team_info;
+            return otherTeam && 
+                   otherTeam.category === teamCategory && 
+                   otherTeam.club_id === teamInfo.club_id &&
+                   otherTeam.id !== teamId;
+          });
+          
+          // Deaktiviere Konflikte (batch)
+          if (hasConflict) {
+            const conflictIds = playerActiveMemberships
+              .filter(m => {
+                const otherTeam = m.team_info;
+                return otherTeam && 
+                       otherTeam.category === teamCategory && 
+                       otherTeam.club_id === teamInfo.club_id &&
+                       otherTeam.id !== teamId;
+              })
+              .map(m => m.id);
+            
+            if (conflictIds.length > 0) {
+              await supabase
+                .from('team_memberships')
+                .update({ is_active: false })
+                .in('id', conflictIds);
+            }
+          }
+          
+          // Prüfe is_primary (vereinfacht: erstes Team wird primär)
+          const hasPrimary = playerActiveMemberships.some(m => m.is_primary && m.team_id !== teamId);
+          
+          // Füge zu Insert-Liste hinzu
+          membershipInserts.push({
+            player_id: matchResult.playerId,
+            team_id: teamId,
+            season: normalizedSeason,
+            role: 'player',
+            is_primary: !hasPrimary,
+            is_active: true
+          });
+          membershipCreatedCount++;
+        }
+      }
+      
+      // ✅ BATCH-INSERT: Erstelle alle neuen Memberships auf einmal
+      if (membershipInserts.length > 0) {
+        const { error: insertError } = await supabase
+          .from('team_memberships')
+          .insert(membershipInserts);
+        
+        if (insertError) {
+          console.warn(`[parse-club-rosters] ⚠️ Fehler beim Batch-Insert von team_memberships:`, insertError);
+        } else {
+          console.log(`[parse-club-rosters] ✅ ${membershipInserts.length} team_memberships per Batch-Insert erstellt`);
+        }
+      }
+      
+      // ✅ BATCH-UPDATE: Aktiviere alle inaktiven Memberships auf einmal
+      if (membershipUpdates.length > 0) {
+        // Supabase unterstützt kein Batch-Update, daher einzeln (aber parallel)
+        const updatePromises = membershipUpdates.map(update =>
+          supabase
+            .from('team_memberships')
+            .update({ is_active: true })
+            .eq('id', update.id)
+        );
+        await Promise.all(updatePromises);
+        console.log(`[parse-club-rosters] ✅ ${membershipUpdates.length} team_memberships per Batch-Update aktiviert`);
+      }
+    }
     
     console.log(`[parse-club-rosters] 📊 Matching-Ergebnisse: ${matchedCount} gematcht, ${unmatchedCount} nicht gematcht`);
     
