@@ -216,16 +216,16 @@ async function parseClubPoolsPage(clubPoolsUrl, targetSeason) {
       );
     }
     
-    // Paralleles Parsen mit Rate-Limiting (max 3 gleichzeitig)
-    const BATCH_SIZE = 3;
+    // ✅ OPTIMIERUNG: Paralleles Parsen mit erhöhter Batch-Größe (max 5 gleichzeitig)
+    const BATCH_SIZE = 5; // Erhöht von 3 auf 5 für bessere Performance
     for (let i = 0; i < teamPromises.length; i += BATCH_SIZE) {
       const batch = teamPromises.slice(i, i + BATCH_SIZE);
       const batchResults = await Promise.all(batch);
       teams.push(...batchResults);
       
-      // Kurze Pause zwischen Batches (nur wenn nicht letzter Batch)
+      // ✅ OPTIMIERUNG: Reduzierte Pause zwischen Batches (nur wenn nicht letzter Batch)
       if (i + BATCH_SIZE < teamPromises.length) {
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, 100)); // Reduziert von 300ms auf 100ms
       }
     }
     
@@ -552,18 +552,23 @@ async function matchPlayerToUnified(supabase, rosterPlayer, playerCache = null) 
  * 
  * @param {Function} callback - Callback mit (created, updated) Parametern
  */
-async function ensureTeamMembership(supabase, playerId, teamId, normalizedSeason, teamCategory, callback = null) {
+async function ensureTeamMembership(supabase, playerId, teamId, normalizedSeason, teamCategory, callback = null, teamInfoCache = null) {
   try {
-    // Lade Team-Informationen für Kategorie-Prüfung
-    const { data: teamInfo } = await supabase
-      .from('team_info')
-      .select('id, category, club_id')
-      .eq('id', teamId)
-      .single();
-    
+    // ✅ OPTIMIERUNG: Verwende Team-Info aus Cache, falls vorhanden
+    let teamInfo = teamInfoCache;
     if (!teamInfo) {
-      console.warn(`[parse-club-rosters] ⚠️ Team ${teamId} nicht gefunden`);
-      return false;
+      // Fallback: Lade Team-Info nur wenn nicht im Cache
+      const { data: loadedTeamInfo } = await supabase
+        .from('team_info')
+        .select('id, category, club_id')
+        .eq('id', teamId)
+        .single();
+      
+      if (!loadedTeamInfo) {
+        console.warn(`[parse-club-rosters] ⚠️ Team ${teamId} nicht gefunden`);
+        return false;
+      }
+      teamInfo = loadedTeamInfo;
     }
     
     const teamCategoryToUse = teamCategory || teamInfo.category;
@@ -955,6 +960,7 @@ async function saveTeamRoster(supabase, teamId, season, roster) {
     }
     
     // ✅ OPTIMIERUNG: Erstelle team_memberships parallel (nach Matching)
+    // Übergebe Team-Info als Cache, um redundante DB-Queries zu vermeiden
     console.log(`[parse-club-rosters] 🔗 Erstelle team_memberships für ${matchResults.length} gematchte Spieler...`);
     const membershipPromises = matchResults.map(({ player, matchResult }) =>
       ensureTeamMembership(
@@ -966,7 +972,8 @@ async function saveTeamRoster(supabase, teamId, season, roster) {
         (created, updated) => {
           if (created) membershipCreatedCount++;
           if (updated) membershipUpdatedCount++;
-        }
+        },
+        teamInfo // ✅ Team-Info aus Cache übergeben
       )
     );
     await Promise.all(membershipPromises);
