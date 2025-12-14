@@ -22,7 +22,7 @@ import TeamPortraitImportTab from './superadmin/TeamPortraitImportTab';
 import ClubRostersTab from './superadmin/ClubRostersTab';
 import GroupsTab from './superadmin/GroupsTab';
 import ActivityLogTab from './superadmin/ActivityLogTab';
-import { findMatchdaysWithoutResultsAfter4Days, runAutoImport } from '../services/autoMatchResultImportService';
+import { findMatchdaysWithoutResultsAfter4Days, runAutoImport, recordAttempt } from '../services/autoMatchResultImportService';
 import './Dashboard.css';
 import './SuperAdminDashboard.css';
 
@@ -3790,6 +3790,15 @@ function SuperAdminDashboard() {
             insertedResults: result.applyResult?.inserted || []
           });
           
+          // ✅ WICHTIG: Speichere Import-Versuch in der DB (nicht nur localStorage)
+          try {
+            const success = insertedCount > 0 && missingCount === 0;
+            await recordAttempt(supabase, match.id, success, null, success ? null : `${missingCount} Spieler ohne Zuordnung`);
+            console.log(`[handleLoadMeetingDetails] ✅ Import-Versuch in DB gespeichert für Matchday ${match.id} (success: ${success})`);
+          } catch (recordError) {
+            console.warn(`[handleLoadMeetingDetails] ⚠️ Fehler beim Speichern des Import-Versuchs:`, recordError);
+          }
+          
           const nextMatchNumber =
             result.matchMeta?.matchNumber ||
             existing.matchMeta?.matchNumber ||
@@ -3812,9 +3821,12 @@ function SuperAdminDashboard() {
           );
           await loadDashboardData();
           
-          // ✅ Aktualisiere fehlende Ergebnisse im localStorage nach Import
+          // ✅ Aktualisiere fehlende Ergebnisse im localStorage nach Import (mit kurzer Verzögerung, damit DB-Update abgeschlossen ist)
           if (applyImport) {
             try {
+              // Warte kurz, damit DB-Transaktionen abgeschlossen sind
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              
               const updatedMissingResults = await findMatchdaysWithoutResultsAfter4Days(supabase);
               const result = updatedMissingResults || [];
               localStorage.setItem('superAdminMatchdaysWithoutResults', JSON.stringify({
@@ -4001,22 +4013,25 @@ function SuperAdminDashboard() {
       // Lade Dashboard-Daten neu, um aktualisierte Status anzuzeigen
       await loadDashboardData();
       
-      // ✅ Aktualisiere auch die fehlenden Ergebnisse im localStorage (nur wenn erfolgreich importiert wurde)
-      if (successCount > 0) {
-        try {
-          const updatedMissingResults = await findMatchdaysWithoutResultsAfter4Days(supabase);
-          const result = updatedMissingResults || [];
-          localStorage.setItem('superAdminMatchdaysWithoutResults', JSON.stringify({
-            data: result,
-            timestamp: Date.now(),
-            count: result.length
-          }));
-          setMatchdaysWithoutResults(result);
-          console.log(`[SuperAdminDashboard] 💾 ${result.length} fehlende Ergebnisse im localStorage aktualisiert (nach Details-Laden)`);
-        } catch (e) {
-          console.warn('⚠️ Fehler beim Aktualisieren der fehlenden Ergebnisse:', e);
-        }
-      }
+          // ✅ Aktualisiere auch die fehlenden Ergebnisse im localStorage (nur wenn erfolgreich importiert wurde)
+          if (successCount > 0) {
+            try {
+              // Warte kurz, damit alle DB-Transaktionen abgeschlossen sind
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              
+              const updatedMissingResults = await findMatchdaysWithoutResultsAfter4Days(supabase);
+              const result = updatedMissingResults || [];
+              localStorage.setItem('superAdminMatchdaysWithoutResults', JSON.stringify({
+                data: result,
+                timestamp: Date.now(),
+                count: result.length
+              }));
+              setMatchdaysWithoutResults(result);
+              console.log(`[SuperAdminDashboard] 💾 ${result.length} fehlende Ergebnisse im localStorage aktualisiert (nach Details-Laden)`);
+            } catch (e) {
+              console.warn('⚠️ Fehler beim Aktualisieren der fehlenden Ergebnisse:', e);
+            }
+          }
     } catch (error) {
       console.error('❌ Fehler beim Laden der Details für alle Matches:', error);
       setParserMessage({

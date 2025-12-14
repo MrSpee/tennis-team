@@ -46,8 +46,9 @@ async function hasAttemptToday(supabase, matchdayId) {
 
 /**
  * Speichert einen Import-Versuch
+ * ✅ EXPORTIERT: Kann auch von anderen Komponenten verwendet werden
  */
-async function recordAttempt(supabase, matchdayId, success, errorCode = null, errorMessage = null) {
+export async function recordAttempt(supabase, matchdayId, success, errorCode = null, errorMessage = null) {
   const today = new Date().toISOString().split('T')[0];
   
   const { error } = await supabase
@@ -368,6 +369,7 @@ export async function findMatchdaysWithoutResultsAfter4Days(supabase) {
     // ✅ VERBESSERT: Prüfe ob Ergebnisse vollständig sind
     if (results && results.length > 0) {
       // ✅ WICHTIG: Walkover-Matches sind vollständig, auch ohne Spieler-IDs und Set-Ergebnisse
+      // Bei Walkover wurde das Spiel nicht gespielt, daher sind keine Spieler/Sets erforderlich
       const isWalkover = (result) => result.status === 'walkover';
       
       // Prüfe ob mindestens ein Ergebnis vollständig ist (hat Spieler UND Set-Ergebnisse ODER ist Walkover)
@@ -387,10 +389,6 @@ export async function findMatchdaysWithoutResultsAfter4Days(supabase) {
         // console.log(`[autoMatchResultImport] ✅ Matchday ${matchday.id} hat ${completeResults.length}/${results.length} vollständige Ergebnisse - überspringe`);
         continue;
       }
-      
-      // ✅ WICHTIG: Walkover-Matches sind vollständig, auch ohne Spieler-IDs und Set-Ergebnisse
-      // Bei Walkover wurde das Spiel nicht gespielt, daher sind keine Spieler/Sets erforderlich
-      const isWalkover = (result) => result.status === 'walkover';
       
       // Wenn nur unvollständige Ergebnisse vorhanden sind, zähle als "ohne Ergebnisse"
       const incompleteDetails = results.map(r => {
