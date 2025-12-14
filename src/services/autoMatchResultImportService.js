@@ -367,8 +367,15 @@ export async function findMatchdaysWithoutResultsAfter4Days(supabase) {
     
     // ✅ VERBESSERT: Prüfe ob Ergebnisse vollständig sind
     if (results && results.length > 0) {
-      // Prüfe ob mindestens ein Ergebnis vollständig ist (hat Spieler UND Set-Ergebnisse)
+      // ✅ WICHTIG: Walkover-Matches sind vollständig, auch ohne Spieler-IDs und Set-Ergebnisse
+      const isWalkover = (result) => result.status === 'walkover';
+      
+      // Prüfe ob mindestens ein Ergebnis vollständig ist (hat Spieler UND Set-Ergebnisse ODER ist Walkover)
       const completeResults = results.filter(r => {
+        // Walkover-Matches gelten immer als vollständig
+        if (isWalkover(r)) return true;
+        
+        // Normale Matches benötigen Spieler UND Set-Ergebnisse
         const hasPlayers = r.home_player_id || r.home_player1_id;
         const hasSets = r.set1_home !== null && r.set1_guest !== null;
         return hasPlayers && hasSets;
@@ -381,10 +388,15 @@ export async function findMatchdaysWithoutResultsAfter4Days(supabase) {
         continue;
       }
       
+      // ✅ WICHTIG: Walkover-Matches sind vollständig, auch ohne Spieler-IDs und Set-Ergebnisse
+      // Bei Walkover wurde das Spiel nicht gespielt, daher sind keine Spieler/Sets erforderlich
+      const isWalkover = (result) => result.status === 'walkover';
+      
       // Wenn nur unvollständige Ergebnisse vorhanden sind, zähle als "ohne Ergebnisse"
       const incompleteDetails = results.map(r => {
         const hasPlayers = r.home_player_id || r.home_player1_id;
         const hasSets = r.set1_home !== null && r.set1_guest !== null;
+        const walkover = isWalkover(r);
         return {
           id: r.id,
           hasPlayers,
@@ -393,14 +405,34 @@ export async function findMatchdaysWithoutResultsAfter4Days(supabase) {
           home_player_id: r.home_player_id,
           home_player1_id: r.home_player1_id,
           set1_home: r.set1_home,
-          set1_guest: r.set1_guest
+          set1_guest: r.set1_guest,
+          isWalkover: walkover
         };
       });
       
       // ✅ ANALYSE: Warum sind die Ergebnisse unvollständig?
-      const missingPlayersCount = results.filter(r => !r.home_player_id && !r.home_player1_id).length;
-      const missingSetsCount = results.filter(r => r.set1_home === null || r.set1_guest === null).length;
-      const hasBothIssues = results.filter(r => (!r.home_player_id && !r.home_player1_id) && (r.set1_home === null || r.set1_guest === null)).length;
+      // WICHTIG: Ignoriere Walkover-Matches bei der Zählung fehlender Spieler/Sets
+      const missingPlayersCount = results.filter(r => !isWalkover(r) && !r.home_player_id && !r.home_player1_id).length;
+      const missingSetsCount = results.filter(r => !isWalkover(r) && (r.set1_home === null || r.set1_guest === null)).length;
+      const hasBothIssues = results.filter(r => !isWalkover(r) && (!r.home_player_id && !r.home_player1_id) && (r.set1_home === null || r.set1_guest === null)).length;
+      
+      // ✅ WICHTIG: Wenn alle unvollständigen Ergebnisse Walkover sind, gelten sie als vollständig
+      const allIncompleteAreWalkovers = results.every(r => {
+        const hasPlayers = r.home_player_id || r.home_player1_id;
+        const hasSets = r.set1_home !== null && r.set1_guest !== null;
+        const isIncomplete = !hasPlayers || !hasSets;
+        return !isIncomplete || isWalkover(r);
+      });
+      
+      if (allIncompleteAreWalkovers && missingPlayersCount === 0 && missingSetsCount === 0) {
+        // Alle unvollständigen Ergebnisse sind Walkover - das ist OK!
+        console.log(`[autoMatchResultImport] ✅ Matchday ${matchday.id} hat nur Walkover-Ergebnisse (vollständig):`, {
+          matchdayId: matchday.id,
+          walkoverCount: results.filter(r => isWalkover(r)).length,
+          totalResults: results.length
+        });
+        continue; // Überspringe - Matchday ist vollständig
+      }
       
       console.log(`[autoMatchResultImport] ⚠️ Matchday ${matchday.id} hat ${results.length} unvollständige Ergebnisse:`, {
         matchdayId: matchday.id,
