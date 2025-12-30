@@ -62,6 +62,12 @@ function Dashboard() {
   const [loadingFeed, setLoadingFeed] = useState(false);
   const [socialFeedPlayers, setSocialFeedPlayers] = useState({}); // Map von playerId zu Spieler-Daten
   
+  // 🎾 State für eigene Match-Ergebnisse (für Form-Badge)
+  const [ownMatchResults, setOwnMatchResults] = useState([]);
+  
+  // 🎾 State für bestes Ranking (aus team_roster)
+  const [bestRanking, setBestRanking] = useState(null);
+  
   // 🎾 Lade aktuelle Spieler-Daten neu, wenn Feed geladen wird (für aktuelle LK)
   const refreshPlayerData = useCallback(async () => {
     if (socialFeed.length === 0) {
@@ -460,6 +466,152 @@ function Dashboard() {
     };
     
     loadSocialStats();
+  }, [player?.id]);
+  
+  // 🎾 Lade eigene Match-Ergebnisse für Form-Badge
+  useEffect(() => {
+    const loadOwnMatchResults = async () => {
+      if (!player?.id) return;
+      
+      try {
+        const twoMonthsAgo = new Date();
+        twoMonthsAgo.setDate(twoMonthsAgo.getDate() - 60);
+        
+        // Lade alle Match-Ergebnisse für den eigenen Spieler
+        const queries = [
+          supabase.from('match_results').select('*').eq('home_player_id', player.id),
+          supabase.from('match_results').select('*').eq('guest_player_id', player.id),
+          supabase.from('match_results').select('*').eq('home_player1_id', player.id),
+          supabase.from('match_results').select('*').eq('home_player2_id', player.id),
+          supabase.from('match_results').select('*').eq('guest_player1_id', player.id),
+          supabase.from('match_results').select('*').eq('guest_player2_id', player.id)
+        ];
+        
+        const allResults = await Promise.all(queries);
+        const allMatchResults = [];
+        
+        allResults.forEach(({ data, error }) => {
+          if (error) {
+            console.error('Error loading own match results:', error);
+            return;
+          }
+          if (data) {
+            allMatchResults.push(...data);
+          }
+        });
+        
+        // Lade Matchdays
+        const matchdayIds = [...new Set(allMatchResults.map(r => r.matchday_id).filter(Boolean))];
+        let matchdaysMap = {};
+        
+        if (matchdayIds.length > 0) {
+          const { data: matchdays } = await supabase
+            .from('matchdays')
+            .select('id, match_date')
+            .in('id', matchdayIds);
+          
+          if (matchdays) {
+            matchdays.forEach(md => {
+              matchdaysMap[md.id] = md;
+            });
+          }
+        }
+        
+        // Filtere nach Datum und Status
+        const filteredResults = allMatchResults
+          .filter(result => {
+            const matchday = matchdaysMap[result.matchday_id];
+            if (!matchday || !matchday.match_date) return false;
+            
+            const matchDate = new Date(matchday.match_date);
+            if (matchDate < twoMonthsAgo) return false;
+            
+            const hasResult = result.winner && (result.winner === 'home' || result.winner === 'guest' || result.winner === 'away');
+            const isCompleted = result.status === 'completed';
+            
+            return isCompleted || hasResult;
+          })
+          .map(result => {
+            const matchday = matchdaysMap[result.matchday_id];
+            const isPlayerInHomeTeam = result.home_player_id === player.id || 
+                                      result.home_player1_id === player.id || 
+                                      result.home_player2_id === player.id;
+            
+            const won = isPlayerInHomeTeam ? result.winner === 'home' : result.winner === 'guest' || result.winner === 'away';
+            
+            return {
+              ...result,
+              match_date: matchday?.match_date,
+              won
+            };
+          })
+          .sort((a, b) => {
+            const dateA = a.match_date ? new Date(a.match_date) : new Date(0);
+            const dateB = b.match_date ? new Date(b.match_date) : new Date(0);
+            return dateB - dateA; // Neueste zuerst
+          });
+        
+        setOwnMatchResults(filteredResults);
+      } catch (error) {
+        console.error('Error loading own match results:', error);
+      }
+    };
+    
+    loadOwnMatchResults();
+  }, [player?.id]);
+  
+  // 🎾 Lade bestes Ranking aus team_roster
+  useEffect(() => {
+    const loadBestRanking = async () => {
+      if (!player?.id) return;
+      
+      try {
+        // Aktuelle Saison bestimmen
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+        
+        let currentSeason = '';
+        if (currentMonth >= 4 && currentMonth <= 7) {
+          currentSeason = `Sommer ${currentYear}`;
+        } else {
+          if (currentMonth >= 8) {
+            const nextYear = currentYear + 1;
+            currentSeason = `Winter ${currentYear}/${String(nextYear).slice(-2)}`;
+          } else {
+            const prevYear = currentYear - 1;
+            currentSeason = `Winter ${prevYear}/${String(currentYear).slice(-2)}`;
+          }
+        }
+        
+        // Lade alle Rankings für diesen Spieler in der aktuellen Saison
+        const { data: rosters, error } = await supabase
+          .from('team_roster')
+          .select('rank, team_id, team_info!inner(category, team_name)')
+          .eq('player_id', player.id)
+          .eq('season', currentSeason)
+          .order('rank', { ascending: true })
+          .limit(1);
+        
+        if (error) {
+          console.error('Error loading ranking:', error);
+          return;
+        }
+        
+        if (rosters && rosters.length > 0) {
+          setBestRanking({
+            rank: rosters[0].rank,
+            team: rosters[0].team_info
+          });
+        } else {
+          setBestRanking(null);
+        }
+      } catch (error) {
+        console.error('Error loading best ranking:', error);
+      }
+    };
+    
+    loadBestRanking();
   }, [player?.id]);
   
   // 🎾 Automatische LK-Berechnung bei neuen Match-Ergebnissen
@@ -2151,6 +2303,246 @@ function Dashboard() {
                         ))}
                       </div>
             </div>
+                  );
+                })()}
+                
+                {/* 3D Badges - Form, Aktiv, Rank, Social */}
+                {(() => {
+                  // Berechne Form-Badge Daten aus eigenen Match-Ergebnissen
+                  const last5Matches = [...ownMatchResults].slice(0, 5); // Neueste 5 (bereits sortiert)
+                  const recentWins = last5Matches.filter(m => m.won).length;
+                  const recentLosses = last5Matches.filter(m => !m.won).length;
+                  const hasNoMatches = last5Matches.length === 0;
+                  const formWinRate = last5Matches.length > 0 ? Math.round((recentWins / last5Matches.length) * 100) : 0;
+                  
+                  // Form-Tag basierend auf Win-Rate (MOTIVIEREND wenn keine Spiele)
+                  let formTag = { text: 'Stabil', icon: '➡️' };
+                  if (hasNoMatches) {
+                    formTag = { text: 'Bereit für mehr!', icon: '🎾' };
+                  } else if (formWinRate >= 80) {
+                    formTag = { text: 'In Top-Form', icon: '🔥' };
+                  } else if (formWinRate >= 60) {
+                    formTag = { text: 'Gut in Form', icon: '📈' };
+                  } else if (formWinRate >= 40) {
+                    formTag = { text: 'Stabil', icon: '➡️' };
+                  } else if (formWinRate >= 20) {
+                    formTag = { text: 'Aufbauend', icon: '📉' };
+                  } else {
+                    formTag = { text: 'Schwacher Lauf', icon: '⚠️' };
+                  }
+                  
+                  // Aktivitäts-Badge (Prüfe ob aktueller Spieler eingeloggt ist)
+                  const hasUserAccount = player.user_id !== null && player.user_id !== undefined;
+                  const isCurrentUser = currentUser && player.user_id === currentUser.id;
+                  let activityText = '';
+                  let activityNumber = '';
+                  let activityIcon = '💤';
+                  let lastActiveTime = null;
+                  
+                  if (!hasUserAccount) {
+                    activityText = 'Nicht in App aktiv';
+                    activityNumber = '–';
+                    activityIcon = '🚫';
+                  } else if (isCurrentUser) {
+                    // Aktueller Spieler ist eingeloggt = Jetzt aktiv
+                    activityText = 'Jetzt aktiv';
+                    activityNumber = '0';
+                    activityIcon = '⚡';
+                    lastActiveTime = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+                  } else {
+                    const lastActive = player.updated_at || player.created_at;
+                    const lastActiveDate = lastActive ? new Date(lastActive) : new Date();
+                    const now = new Date();
+                    const diffTime = Math.abs(now.getTime() - lastActiveDate.getTime());
+                    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+                    
+                    const formatTime = (date) => date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+                    const formatDateShort = (date) => date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+                    const formatDateLong = (date) => date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' });
+                    const formatDayOfWeek = (date) => date.toLocaleDateString('de-DE', { weekday: 'short' });
+                    
+                    if (diffDays === 0) {
+                      activityText = 'Heute';
+                      activityNumber = '0';
+                      activityIcon = '⚡';
+                      lastActiveTime = formatTime(lastActiveDate);
+                    } else if (diffDays === 1) {
+                      activityText = 'Gestern';
+                      activityNumber = '1';
+                      activityIcon = '⚡';
+                      lastActiveTime = `${formatDayOfWeek(lastActiveDate)} ${formatTime(lastActiveDate)}`;
+                    } else if (diffDays < 7) {
+                      activityText = 'Vor Tagen';
+                      activityNumber = diffDays.toString();
+                      activityIcon = '📱';
+                      lastActiveTime = `${formatDayOfWeek(lastActiveDate)} ${formatTime(lastActiveDate)}`;
+                    } else if (diffDays < 30) {
+                      const weeks = Math.floor(diffDays / 7);
+                      activityText = weeks === 1 ? 'Vor Woche' : 'Vor Wochen';
+                      activityNumber = weeks.toString();
+                      activityIcon = '📱';
+                      lastActiveTime = `${formatDateShort(lastActiveDate)} ${formatTime(lastActiveDate)}`;
+                    } else if (diffDays < 365) {
+                      const months = Math.floor(diffDays / 30);
+                      activityText = months === 1 ? 'Vor Monat' : 'Vor Monaten';
+                      activityNumber = months.toString();
+                      activityIcon = '💤';
+                      lastActiveTime = formatDateShort(lastActiveDate);
+                    } else {
+                      const years = Math.floor(diffDays / 365);
+                      activityText = years === 1 ? 'Vor Jahr' : 'Vor Jahren';
+                      activityNumber = years.toString();
+                      activityIcon = '💤';
+                      lastActiveTime = formatDateLong(lastActiveDate);
+                    }
+                  }
+                  
+                  // Ranking-Badge (aus team_roster - bestes Ranking)
+                  const bestRank = bestRanking?.rank || (player.ranking ? parseInt(player.ranking) : null);
+                  const bestRankTeam = bestRanking?.team;
+                  
+                  // Social-Badge mit lustigen, provokativen Bezeichnungen (nur Follower, nicht Following)
+                  const totalSocialCount = socialStats.tennismatesCount || 0;
+                  let socialText = 'Keine Follower';
+                  if (totalSocialCount === 0) {
+                    socialText = 'Noch unsichtbar';
+                  } else if (totalSocialCount >= 1 && totalSocialCount <= 5) {
+                    socialText = 'Mini-Fanclub';
+                  } else if (totalSocialCount >= 6 && totalSocialCount <= 10) {
+                    socialText = 'Beliebt im Team';
+                  } else if (totalSocialCount >= 11 && totalSocialCount <= 20) {
+                    socialText = 'Tennis-Star';
+                  } else if (totalSocialCount >= 21 && totalSocialCount <= 50) {
+                    socialText = 'Tennis-Legende';
+                  } else if (totalSocialCount >= 51 && totalSocialCount <= 100) {
+                    socialText = 'Tennis-Ikone';
+                  } else {
+                    socialText = 'Ultra bekannt';
+                  }
+                  
+                  return (
+                    <div style={{
+                      marginTop: '1.5rem',
+                      marginBottom: '1rem',
+                      display: 'flex',
+                      gap: '1.5rem',
+                      flexWrap: 'wrap',
+                      justifyContent: 'center'
+                    }}>
+                      {/* Badge: Aktuelle Form */}
+                      <div className="badge-3d-card theme-primary">
+                        <div className="badge-3d-circle-container">
+                          <div className="badge-3d-circle">
+                            <span className="badge-3d-icon">
+                              {formTag.icon}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="badge-3d-number">{formWinRate}%</div>
+                        <div style={{
+                          fontSize: '0.75rem',
+                          color: '#6b7280',
+                          textAlign: 'center',
+                          marginTop: '0.5rem'
+                        }}>
+                          {formTag.text}
+                        </div>
+                        <div style={{
+                          fontSize: '0.65rem',
+                          color: '#9ca3af',
+                          textAlign: 'center',
+                          marginTop: '0.25rem',
+                          fontWeight: '600'
+                        }}>
+                          {recentWins} Sieg{recentWins !== 1 ? 'e' : ''}, {recentLosses} Niederlage{recentLosses !== 1 ? 'n' : ''}
+                        </div>
+                      </div>
+                      
+                      {/* Badge: Aktivität */}
+                      <div className="badge-3d-card theme-secondary">
+                        <div className="badge-3d-circle-container">
+                          <div className="badge-3d-circle">
+                            <span className="badge-3d-icon">
+                              {activityIcon}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="badge-3d-number">{activityNumber}</div>
+                        <div style={{
+                          fontSize: '0.75rem',
+                          color: '#6b7280',
+                          textAlign: 'center',
+                          marginTop: '0.5rem',
+                          lineHeight: 1.3
+                        }}>
+                          {activityText}
+                        </div>
+                        {lastActiveTime && (
+                          <div style={{
+                            fontSize: '0.6rem',
+                            color: '#9ca3af',
+                            textAlign: 'center',
+                            marginTop: '0.25rem',
+                            fontWeight: '500'
+                          }}>
+                            {lastActiveTime}
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Badge: Ranking */}
+                      <div className="badge-3d-card theme-warning">
+                        <div className="badge-3d-circle-container">
+                          <div className="badge-3d-circle">
+                            <span className="badge-3d-icon">
+                              🏆
+                            </span>
+                          </div>
+                        </div>
+                        <div className="badge-3d-number">
+                          {bestRank !== null ? `#${bestRank}` : '–'}
+                        </div>
+                        <div style={{
+                          fontSize: '0.75rem',
+                          color: '#6b7280',
+                          textAlign: 'center',
+                          marginTop: '0.5rem',
+                          lineHeight: 1.3
+                        }}>
+                          {bestRank !== null ? (
+                            bestRankTeam ? (
+                              <>
+                                {bestRankTeam.category}
+                                {bestRankTeam.team_name ? ` ${bestRankTeam.team_name}` : ''}
+                              </>
+                            ) : 'Team-Ranking'
+                          ) : 'Kein Ranking'}
+                        </div>
+                      </div>
+                      
+                      {/* Badge: Social */}
+                      <div className="badge-3d-card theme-danger">
+                        <div className="badge-3d-circle-container">
+                          <div className="badge-3d-circle">
+                            <span className="badge-3d-icon">
+                              👥
+                            </span>
+                          </div>
+                        </div>
+                        <div className="badge-3d-number">
+                          {totalSocialCount > 0 ? totalSocialCount : '0'}
+                        </div>
+                        <div style={{
+                          fontSize: '0.75rem',
+                          color: '#6b7280',
+                          textAlign: 'center',
+                          marginTop: '0.5rem',
+                          lineHeight: 1.3
+                        }}>
+                          {socialText}
+                        </div>
+                      </div>
+                    </div>
                   );
                 })()}
           </div>

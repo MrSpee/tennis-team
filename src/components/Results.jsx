@@ -2901,8 +2901,8 @@ const Results = () => {
                                 </div>
                               </div>
                               <div className="badge-3d-number">
-                                {(searchPlayerResults.tennismateCount || 0) + (searchPlayerResults.followingCount || 0) > 0 
-                                  ? (searchPlayerResults.tennismateCount || 0) + (searchPlayerResults.followingCount || 0) 
+                                {(searchPlayerResults.tennismateCount || 0) > 0 
+                                  ? (searchPlayerResults.tennismateCount || 0)
                                   : '–'}
                               </div>
                               <div style={{
@@ -2912,15 +2912,9 @@ const Results = () => {
                                 marginTop: '0.5rem',
                                 lineHeight: 1.3
                               }}>
-                                {searchPlayerResults.tennismateCount > 0 || searchPlayerResults.followingCount > 0 ? (
-                                  searchPlayerResults.tennismateCount > 0 && searchPlayerResults.followingCount > 0 ? (
-                                    `${searchPlayerResults.tennismateCount + searchPlayerResults.followingCount} Follower`
-                                  ) : searchPlayerResults.tennismateCount > 0 ? (
-                                    `${searchPlayerResults.tennismateCount} ${searchPlayerResults.tennismateCount === 1 ? 'Follower' : 'Follower'}`
-                                  ) : (
-                                    `${searchPlayerResults.followingCount} ${searchPlayerResults.followingCount === 1 ? 'Follower' : 'Follower'}`
-                                  )
-                                ) : 'Keine Follower'}
+                                {(searchPlayerResults.tennismateCount || 0) > 0 
+                                  ? `${searchPlayerResults.tennismateCount} Follower`
+                                  : 'Keine Follower'}
                               </div>
                             </div>
                           </div>
