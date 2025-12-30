@@ -58,7 +58,23 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:3000',
-        changeOrigin: true
+        changeOrigin: true,
+        ws: true,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, res) => {
+            // Stille Verbindungsfehler, wenn Backend-Server nicht läuft
+            if (err.code === 'ECONNREFUSED') {
+              console.warn('[vite] Backend-Server nicht erreichbar auf Port 3000. Starte mit: npm run dev:api');
+              if (res && !res.headersSent) {
+                res.writeHead(503, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                  error: 'Backend-Server nicht verfügbar',
+                  message: 'Bitte starte den Backend-Server mit: npm run dev:api'
+                }));
+              }
+            }
+          });
+        }
       }
     }
   }

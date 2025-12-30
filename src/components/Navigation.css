@@ -7,7 +7,7 @@
   border-top: 1px solid var(--gray-200);
   display: flex;
   justify-content: space-around;
-  padding: 0.5rem 0;
+  padding: 0.5rem 0 calc(0.5rem + env(safe-area-inset-bottom));
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
   z-index: 1000;
   overflow-x: auto; /* Falls zu viele Items */

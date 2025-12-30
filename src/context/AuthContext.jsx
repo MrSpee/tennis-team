@@ -77,12 +77,12 @@ export function AuthProvider({ children }) {
           // localStorage nicht verfügbar, kein Problem
         }
         
-        // Timeout nach 3 Sekunden - wenn Supabase nicht antwortet, fahre ohne Session fort
+        // ✅ VERBESSERT: Timeout nach 5 Sekunden (statt 3) für langsamere Verbindungen
         const timeoutPromise = new Promise((resolve) => {
           timeoutId = setTimeout(() => {
-            console.warn('⚠️ Session check timeout after 3s - continuing without session');
+            console.warn('⚠️ Session check timeout after 5s - continuing without session');
             resolve({ timeout: true });
-          }, 3000);
+          }, 5000); // Erhöht von 3s auf 5s
         });
         
         // Session-Check mit Timeout
@@ -306,35 +306,52 @@ export function AuthProvider({ children }) {
    */
   const getLoginErrorMessage = (error) => {
     const errorMsg = error?.message?.toLowerCase() || '';
+    const errorCode = error?.code?.toLowerCase() || '';
     
+    // ✅ VERBESSERT: Prüfe auch error.code für bessere Erkennung
     // Falsche Credentials
     if (errorMsg.includes('invalid login credentials') || 
-        errorMsg.includes('invalid email or password')) {
-      return '🔒 E-Mail oder Passwort falsch. Noch mal versuchen!';
+        errorMsg.includes('invalid email or password') ||
+        errorCode === 'invalid_credentials' ||
+        errorCode === 'invalid_grant') {
+      return '🔒 E-Mail oder Passwort falsch. Prüfe deine Eingabe und versuche es nochmal!';
     }
     
     // Email nicht bestätigt
-    if (errorMsg.includes('email not confirmed')) {
-      return '📧 Bitte bestätige zuerst deine E-Mail-Adresse. Schau in dein Postfach!';
+    if (errorMsg.includes('email not confirmed') ||
+        errorMsg.includes('email_not_confirmed') ||
+        errorCode === 'email_not_confirmed') {
+      return '📧 Bitte bestätige zuerst deine E-Mail-Adresse!\n\nSchau in dein Postfach (auch im Spam-Ordner) und klicke auf den Bestätigungslink.';
     }
     
     // Zu viele Versuche
-    if (errorMsg.includes('too many requests') || errorMsg.includes('rate limit')) {
-      return '⏱️ Zu viele Versuche! Warte kurz und probier es dann nochmal.';
+    if (errorMsg.includes('too many requests') || 
+        errorMsg.includes('rate limit') ||
+        errorCode === 'too_many_requests') {
+      return '⏱️ Zu viele Versuche! Warte kurz (30 Sekunden) und probier es dann nochmal.';
     }
     
     // User existiert nicht
-    if (errorMsg.includes('user not found')) {
-      return '❓ Kein Account mit dieser E-Mail gefunden. Registriere dich zuerst!';
+    if (errorMsg.includes('user not found') ||
+        errorCode === 'user_not_found') {
+      return '❓ Kein Account mit dieser E-Mail gefunden.\n\nRegistriere dich zuerst oder prüfe, ob du die richtige E-Mail-Adresse eingegeben hast.';
     }
     
     // Netzwerkfehler
-    if (errorMsg.includes('fetch') || errorMsg.includes('network')) {
-      return '📡 Keine Verbindung zum Server. Prüfe deine Internetverbindung!';
+    if (errorMsg.includes('fetch') || 
+        errorMsg.includes('network') ||
+        errorMsg.includes('failed to fetch') ||
+        errorCode === 'network_error') {
+      return '📡 Keine Verbindung zum Server!\n\nPrüfe deine Internetverbindung und versuche es erneut.';
     }
     
-    // Fallback: Ursprüngliche Fehlermeldung
-    return `Fehler: ${error.message}`;
+    // Timeout
+    if (errorMsg.includes('timeout') || errorCode === 'timeout') {
+      return '⏱️ Zeitüberschreitung!\n\nDie Verbindung dauert zu lange. Prüfe deine Internetverbindung und versuche es erneut.';
+    }
+    
+    // Fallback: Ursprüngliche Fehlermeldung mit mehr Kontext
+    return `Fehler beim Login: ${error.message || 'Unbekannter Fehler'}\n\nBitte versuche es erneut oder kontaktiere den Support.`;
   };
 
   /**
@@ -470,19 +487,23 @@ export function AuthProvider({ children }) {
       
       console.log('✅ Login successful, user:', data.user.email);
       
-      // Setze sofort authenticated
+      // ✅ VERBESSERT: Setze authenticated State SOFORT (vor async Operationen)
       setCurrentUser(data.user);
       setIsAuthenticated(true);
       
-      // Log Login-Event
-      try {
-        await LoggingService.logLogin(data.user.email, 'email');
-      } catch (logError) {
+      // Log Login-Event (non-blocking)
+      LoggingService.logLogin(data.user.email, 'email').catch(logError => {
         console.warn('⚠️ Could not log login:', logError);
-      }
+      });
       
-      // Lade Player-Daten
-      await loadPlayerData(data.user.id);
+      // ✅ VERBESSERT: Lade Player-Daten und warte darauf, aber nicht blockierend
+      try {
+        await loadPlayerData(data.user.id);
+        console.log('✅ Player data loaded after login');
+      } catch (playerError) {
+        console.error('⚠️ Error loading player data after login:', playerError);
+        // Nicht kritisch - User ist trotzdem eingeloggt
+      }
 
       return { success: true, needsProfile: false };
     } catch (error) {

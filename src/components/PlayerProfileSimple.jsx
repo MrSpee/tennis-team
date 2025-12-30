@@ -67,57 +67,66 @@ function PlayerProfileSimple() {
       const decodedName = decodeURIComponent(playerName);
       console.log('🔍 Loading player profile for:', decodedName);
       
-      // Erste versuche mit allen Feldern (auch inaktive Spieler!)
-      let { data, error } = await supabase
+      // ✅ WICHTIG: Bei Duplikaten bevorzuge aktiven Spieler mit Login
+      // Lade alle Spieler mit diesem Namen und wähle den besten
+      let { data: allPlayers, error: searchError } = await supabase
         .from('players_unified')
         .select('*')
-        .eq('name', decodedName)
-        // WICHTIG: Entferne .eq('is_active', true) - auch inaktive Spieler können gefunden werden
-        // wenn sie in Teams sind oder Ergebnisse haben
-        .single();
-
-      // Falls das fehlschlägt, versuche mit grundlegenden Feldern (auch inaktive!)
-      if (error) {
-        console.log('🔄 Trying with basic fields (including inactive players)...');
-        const result = await supabase
-          .from('players_unified')
-          .select(`
-            id,
-            name,
-            email,
-            phone,
-            ranking,
-            points,
-            current_lk,
-            season_start_lk,
-            player_type,
-            is_active,
-            user_id,
-            created_at,
-            updated_at
-          `)
-          .eq('name', decodedName)
-          // WICHTIG: Entferne .eq('is_active', true) - auch inaktive Spieler können gefunden werden
-          .single();
-        
-        data = result.data;
-        error = result.error;
-      }
+        .eq('name', decodedName);
       
-      // Falls immer noch nicht gefunden, versuche auch mit ILIKE (für Varianten)
-      if (error && error.code === 'PGRST116') {
+      if (searchError || !allPlayers || allPlayers.length === 0) {
+        // Falls das fehlschlägt, versuche mit ILIKE
         console.log('🔄 Trying with ILIKE search (case-insensitive)...');
         const result = await supabase
           .from('players_unified')
           .select('*')
-          .ilike('name', decodedName)
-          .limit(1)
-          .maybeSingle();
+          .ilike('name', decodedName);
         
-        if (result.data) {
-          data = result.data;
-          error = null;
+        allPlayers = result.data || [];
+        searchError = result.error;
+      }
+      
+      // Sortiere in JavaScript für zuverlässige Priorisierung
+      if (allPlayers && allPlayers.length > 0) {
+        allPlayers.sort((a, b) => {
+          // Priorität 1: Aktiver mit Login (höchste Priorität)
+          if (a.is_active && a.user_id && (!b.is_active || !b.user_id)) return -1;
+          if (b.is_active && b.user_id && (!a.is_active || !a.user_id)) return 1;
+          
+          // Priorität 2: Aktiver ohne Login
+          if (a.is_active && !b.is_active) return -1;
+          if (b.is_active && !a.is_active) return 1;
+          
+          // Priorität 3: Mit Login (auch wenn inaktiv)
+          if (a.user_id && !b.user_id) return -1;
+          if (b.user_id && !a.user_id) return 1;
+          
+          // Priorität 4: Ältester zuerst (meist der richtige)
+          return new Date(a.created_at) - new Date(b.created_at);
+        });
+      }
+      
+      // Wähle den besten Spieler aus (erster nach Sortierung)
+      let data = null;
+      let error = null;
+      
+      if (allPlayers && allPlayers.length > 0) {
+        data = allPlayers[0]; // Erster nach Sortierung ist der beste
+        
+        console.log(`✅ Found ${allPlayers.length} player(s) with name "${decodedName}", selected:`, data.id);
+        console.log(`   Selected player: is_active=${data.is_active}, has_login=${!!data.user_id}, current_lk=${data.current_lk}`);
+        
+        if (allPlayers.length > 1) {
+          console.warn(`⚠️ Multiple players found with name "${decodedName}". Selected: ${data.id} (is_active: ${data.is_active}, has_login: ${!!data.user_id})`);
+          console.log('   All players:', allPlayers.map(p => ({
+            id: p.id,
+            is_active: p.is_active,
+            has_login: !!p.user_id,
+            current_lk: p.current_lk
+          })));
         }
+      } else {
+        error = { code: 'PGRST116', message: 'No players found' };
       }
 
       console.log('🔍 Query result:', { data, error });

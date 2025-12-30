@@ -1,184 +1,43 @@
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-  -webkit-tap-highlight-color: transparent; /* iOS: Kein dunkler Tap-Effekt */
-}
-
 :root {
+  /* Brand Colors */
   --primary: #10b981;
   --primary-dark: #059669;
   --secondary: #3b82f6;
   --danger: #ef4444;
   --warning: #f59e0b;
   --success: #10b981;
+  
+  /* Grayscale */
   --gray-50: #f9fafb;
   --gray-100: #f3f4f6;
   --gray-200: #e5e7eb;
   --gray-300: #d1d5db;
-  --gray-400: #9ca3af;
-  --gray-500: #6b7280;
-  --gray-600: #4b5563;
   --gray-700: #374151;
-  --gray-800: #1f2937;
   --gray-900: #111827;
+
+  /* PWA Specifics */
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --tap-increment: 4px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  /* Verhindert Text-Größen-Änderung bei Orientierungswechsel */
+  -webkit-text-size-adjust: 100%; 
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  /* Native System Fonts für echtes "App-Feeling" */
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
   background-color: var(--gray-50);
   color: var(--gray-900);
-  line-height: 1.6;
-}
-
-/* Mobile: Weißer Hintergrund für bessere Header-Integration */
-@media (max-width: 768px) {
-  body {
-    background-color: white;
-  }
-}
-
-/* Einheitliche Seiten-Überschriften */
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin: 2rem 0 1.5rem 0; /* Mehr Whitespace oben */
-  padding-top: 1rem; /* Zusätzlicher Abstand zum Header */
-}
-
-.page-header h1 {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: white;
-  margin: 0;
-  line-height: 1.2;
-}
-
-.page-header p {
-  color: white;
-  font-size: 0.9375rem;
-  margin: 0.25rem 0 0 0;
-  line-height: 1.4;
-}
-
-/* Relatives Schriftgrößen-System */
-.page-header h1 {
-  font-size: 1.5rem; /* Basis-Größe = 100% */
-}
-
-/* Alle anderen Titel auf Seiten - max 75% der Überschrift-Größe */
-.page-header ~ * h2,
-.section-title,
-.card h2,
-.card h3,
-.matches-section h2,
-.rankings-info h3,
-.admin-match-header h3 {
-  font-size: 1.125rem; /* 75% von 1.5rem */
-  max-width: 75%; /* Sicherstellen dass es nicht größer wird */
-}
-
-/* Kleinere Titel - 60% der Überschrift-Größe */
-.card h4,
-.detail-title,
-.info-label {
-  font-size: 0.9rem; /* 60% von 1.5rem */
-}
-
-/* Responsive Überschriften */
-@media (max-width: 768px) {
-  .page-header {
-    margin: 1.5rem 0 1.25rem 0;
-    padding-top: 0.75rem;
-  }
-  
-  .page-header h1 {
-    font-size: 1.25rem;
-  }
-  
-  .page-header p {
-    font-size: 0.875rem;
-  }
-  
-  /* Relativ anpassen */
-  .page-header ~ * h2,
-  .section-title,
-  .card h2,
-  .card h3,
-  .matches-section h2,
-  .rankings-info h3,
-  .admin-match-header h3 {
-    font-size: 0.9375rem; /* 75% von 1.25rem */
-  }
-  
-  .card h4,
-  .detail-title,
-  .info-label {
-    font-size: 0.75rem; /* 60% von 1.25rem */
-  }
-}
-
-@media (max-width: 480px) {
-  .page-header {
-    margin: 1.25rem 0 1rem 0;
-    padding-top: 0.5rem;
-  }
-  
-  .page-header h1 {
-    font-size: 1.125rem;
-  }
-  
-  .page-header p {
-    font-size: 0.8125rem;
-  }
-  
-  /* Relativ anpassen */
-  .page-header ~ * h2,
-  .section-title,
-  .card h2,
-  .card h3,
-  .matches-section h2,
-  .rankings-info h3,
-  .admin-match-header h3 {
-    font-size: 0.84375rem; /* 75% von 1.125rem */
-  }
-  
-  .card h4,
-  .detail-title,
-  .info-label {
-    font-size: 0.675rem; /* 60% von 1.125rem */
-  }
-}
-
-/* Spieler-Badges für "Es spielen:" */
-.player-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.25rem;
-}
-
-.player-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.25rem 0.75rem;
-  background-color: var(--primary);
-  color: white;
-  border-radius: 9999px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  border: none;
-  transition: all 0.2s ease;
-}
-
-.player-badge:hover {
-  background-color: var(--primary-dark);
-  transform: translateY(-1px);
+  line-height: 1.5;
+  /* Verhindert Rubber-Banding Effekte im Header auf iOS */
+  overscroll-behavior-y: none; 
 }
 
 #root {
@@ -189,28 +48,36 @@ button {
   font-family: inherit;
 }
 
-/* Utility Classes */
+/* Container mit Safe-Area Support */
 .container {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0 1rem;
-  padding-bottom: 120px; /* Platz für Bottom-Navigation */
+  padding: 0 1rem calc(120px + var(--safe-area-bottom));
   width: 100%;
-  box-sizing: border-box;
 }
 
+/* --- UI-Elemente & Touch Standards --- */
+
 .btn {
+  /* Mindesthöhe für Touch-Targets (Apple Standard 44px) */
+  min-height: 48px; 
   padding: 0.75rem 1.5rem;
-  border-radius: 0.5rem;
+  border-radius: 0.75rem; /* Etwas runder für modernen Look */
   border: none;
   font-size: 1rem;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
+  transition: transform 0.1s active, background-color 0.2s;
+  user-select: none;
+}
+
+/* Haptisches Feedback Simulation */
+.btn:active {
+  transform: scale(0.97);
 }
 
 .btn-primary {
@@ -249,11 +116,62 @@ button {
   background-color: var(--primary-dark);
 }
 
+input, select, textarea {
+  min-height: 48px; /* Bessere Bedienbarkeit */
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--gray-300);
+  border-radius: 0.75rem;
+  font-size: 16px; /* WICHTIG: Mindestens 16px verhindert Auto-Zoom auf iOS */
+  background: white;
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+}
+
+label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: var(--gray-700);
+}
+
+/* --- PWA Header & Typo --- */
+
+.page-header {
+  padding: calc(1.5rem + env(safe-area-inset-top)) 1rem 1.5rem;
+  background: var(--primary); /* Header meist farbig in PWAs */
+  margin-bottom: 1.5rem;
+}
+
+.page-header h1 {
+  font-size: clamp(1.25rem, 5vw, 1.75rem); /* Fluid Typography */
+  font-weight: 800;
+  color: white;
+  letter-spacing: -0.025em;
+}
+
+/* Titel-Hierarchie Standard */
+h2, .section-title, .card h2 {
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+  color: var(--gray-900);
+}
+
+/* --- Cards & Badges --- */
+
 .card {
   background: white;
-  border-radius: 1rem;
-  padding: 1.5rem;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  border-radius: 1.25rem;
+  padding: 1.25rem;
+  border: 1px solid var(--gray-100);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
 }
 
 .badge {
@@ -284,27 +202,33 @@ button {
   color: #1e40af;
 }
 
-input, textarea, select {
-  width: 100%;
-  padding: 0.75rem;
-  border: 1px solid var(--gray-300);
-  border-radius: 0.5rem;
-  font-size: 1rem;
-  font-family: inherit;
-  transition: border-color 0.2s;
-}
-
-input:focus, textarea:focus, select:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
-}
-
-label {
-  display: block;
-  margin-bottom: 0.5rem;
+.player-badge {
+  padding: 0.5rem 1rem; /* Größer für Touch */
+  background-color: var(--gray-100);
+  color: var(--gray-900);
+  border-radius: 2rem;
+  font-size: 0.875rem;
   font-weight: 500;
-  color: var(--gray-700);
+}
+
+.player-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+/* --- Skeleton Loader Standard --- */
+.skeleton {
+  background: linear-gradient(90deg, var(--gray-200) 25%, var(--gray-100) 50%, var(--gray-200) 75%);
+  background-size: 200% 100%;
+  animation: loading 1.5s infinite;
+  border-radius: 0.5rem;
+}
+
+@keyframes loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 /* Animations */
@@ -327,14 +251,11 @@ label {
 @media (max-width: 768px) {
   .container {
     padding: 0 0.75rem;
-    padding-bottom: 120px;
-    overflow-x: hidden;
+    padding-bottom: calc(120px + var(--safe-area-bottom));
   }
   
   .card {
     padding: 1rem;
-    width: 100%;
-    box-sizing: border-box;
   }
   
   .btn {
@@ -346,6 +267,176 @@ label {
 @media (max-width: 375px) {
   .container {
     padding: 0 0.5rem;
-    padding-bottom: 120px;
+    padding-bottom: calc(120px + var(--safe-area-bottom));
   }
 }
+
+/* --- Dark Mode Support --- */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --gray-50: #0f172a;
+    --gray-900: #f8fafc;
+    --gray-100: #1e293b;
+    --gray-200: #334155;
+    --gray-300: #475569;
+  }
+  .card, input, select, textarea {
+    background: #1e293b;
+    border-color: var(--gray-200);
+  }
+  body {
+    background-color: var(--gray-50);
+  }
+}
+
+/* --- 3D Style Badges (Start) --- */
+
+.badge-3d-card {
+  /* Basis-Karte */
+  background: white; /* Standard Light Mode */
+  border-radius: 2.5rem; /* Sehr runde Ecken wie im Beispiel */
+  padding: 1.5rem;
+  width: 170px; /* Fixe Breite für einheitlichen Look */
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Tiefer, weicher Schatten für den Schwebe-Effekt */
+  box-shadow: 0 15px 35px rgba(0,0,0,0.1), 0 5px 15px rgba(0,0,0,0.05);
+  transition: transform 0.2s, box-shadow 0.2s;
+  /* Kein zusätzlicher Margin mehr nötig, da Icon zentriert ist */ 
+}
+
+/* Touch-Feedback */
+.badge-3d-card:active {
+  transform: scale(0.98);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+}
+
+/* Container für Kreis und Icon */
+.badge-3d-circle-container {
+  position: relative;
+  width: 130px;
+  height: 130px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+/* Der farbige Kreis */
+.badge-3d-circle {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  /* Innerer Schatten für Tiefe im Kreis */
+  box-shadow: inset 0 -10px 20px rgba(0,0,0,0.15);
+  overflow: hidden; /* Wichtig für den Sunburst-Effekt */
+}
+
+/* Das 3D Bild - zentriert im Kreis */
+.badge-3d-icon {
+  width: 90px;
+  height: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 90px;
+  line-height: 1;
+  position: relative;
+  z-index: 2;
+  /* WICHTIG: Dieser Filter erzeugt den Schatten des Icons auf dem Kreis */
+  filter: drop-shadow(0 8px 8px rgba(0,0,0,0.25));
+}
+
+/* Der Titel im Kreis - AUSGEBLENDET */
+.badge-3d-title {
+  display: none; /* Text entfernt, da redundant */
+}
+
+/* Die große Zahl unter dem Kreis */
+.badge-3d-number {
+  font-size: 2.25rem;
+  font-weight: 800;
+  line-height: 1;
+  display: block;
+}
+
+/* --- Farb-Varianten & Sunburst Effekt --- */
+
+/* Theme: Primary (Grün - Form) */
+.badge-3d-card.theme-primary .badge-3d-number {
+  color: var(--primary);
+}
+
+.badge-3d-card.theme-primary .badge-3d-circle {
+  background-color: var(--primary);
+  /* Der "Sunburst" Strahlen-Effekt */
+  background-image: repeating-conic-gradient(
+    from 0deg at 50% 50%,
+    var(--primary) 0deg 15deg,
+    var(--primary-dark) 15deg 30deg
+  );
+}
+
+/* Theme: Secondary (Blau - Aktivität) */
+.badge-3d-card.theme-secondary .badge-3d-number {
+  color: var(--secondary);
+}
+
+.badge-3d-card.theme-secondary .badge-3d-circle {
+  background-color: var(--secondary);
+  /* Sunburst Effekt mit Blau */
+  background-image: repeating-conic-gradient(
+    from 0deg at 50% 50%,
+    var(--secondary) 0deg 15deg,
+    color-mix(in srgb, var(--secondary) 85%, black) 15deg 30deg
+  );
+}
+
+/* Theme: Warning (Orange - Ranking) */
+.badge-3d-card.theme-warning .badge-3d-number {
+  color: var(--warning);
+}
+
+.badge-3d-card.theme-warning .badge-3d-circle {
+  background-color: var(--warning);
+  /* Sunburst Effekt mit Orange */
+  background-image: repeating-conic-gradient(
+    from 0deg at 50% 50%,
+    var(--warning) 0deg 15deg,
+    color-mix(in srgb, var(--warning) 85%, black) 15deg 30deg
+  );
+}
+
+/* Theme: Danger (Rot - Social) */
+.badge-3d-card.theme-danger .badge-3d-number {
+  color: var(--danger);
+}
+
+.badge-3d-card.theme-danger .badge-3d-circle {
+  background-color: var(--danger);
+  /* Sunburst Effekt mit Rot */
+  background-image: repeating-conic-gradient(
+    from 0deg at 50% 50%,
+    var(--danger) 0deg 15deg,
+    color-mix(in srgb, var(--danger) 85%, black) 15deg 30deg
+  );
+}
+
+/* --- Dark Mode Anpassungen --- */
+@media (prefers-color-scheme: dark) {
+  .badge-3d-card {
+    /* Nutzt deine definierte Dark Mode Variable */
+    background: var(--gray-100); 
+    border: 1px solid var(--gray-200);
+    /* Stärkere Schatten im Dark Mode für besseren Kontrast */
+    box-shadow: 0 15px 35px rgba(0,0,0,0.4), 0 5px 15px rgba(0,0,0,0.2);
+  }
+}
+
+/* --- 3D Style Badges (End) --- */

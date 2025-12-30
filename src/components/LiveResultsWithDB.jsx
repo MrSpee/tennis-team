@@ -12,6 +12,7 @@ import {
   getBadgeForTime,
   checkTeamBonus
 } from '../services/gamificationService';
+import '../index.css';
 import './LiveResults.css';
 
 // Helper-Funktion: Führt Fuzzy-Matching mit players_unified durch und gibt player_id zurück
@@ -217,6 +218,36 @@ const LiveResultsWithDB = () => {
   
   // State für Walkover-Gewinner (wenn kampflos)
   const [walkoverWinners, setWalkoverWinners] = useState({}); // {matchId: 'home' | 'guest'}
+  
+  // Feature Toggle: Gamification Banner
+  const [gamificationBannerEnabled, setGamificationBannerEnabled] = useState(false);
+
+  // Lade Feature-Toggle Einstellung (mit besserem Error-Handling)
+  useEffect(() => {
+    const loadBannerSetting = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('app_settings')
+          .select('setting_value')
+          .eq('setting_key', 'gamification_banner_enabled')
+          .maybeSingle(); // maybeSingle statt single - verhindert Fehler wenn Tabelle nicht existiert
+        
+        if (!error && data) {
+          setGamificationBannerEnabled(data.setting_value === 'true');
+        } else if (error && error.code !== 'PGRST116') {
+          // PGRST116 = "not found" - das ist okay, Feature bleibt deaktiviert
+          // Nur andere Fehler loggen
+          console.warn('⚠️ Fehler beim Laden der Banner-Einstellung:', error);
+        }
+        // Wenn Tabelle nicht existiert oder Setting nicht gefunden: Feature bleibt deaktiviert (Standard)
+      } catch (error) {
+        // Tabelle existiert möglicherweise nicht - das ist okay
+        console.warn('⚠️ app_settings Tabelle nicht gefunden, Feature bleibt deaktiviert');
+      }
+    };
+    
+    loadBannerSetting();
+  }, []);
 
   // Lade echte Daten aus der Datenbank
   useEffect(() => {
@@ -259,12 +290,14 @@ const LiveResultsWithDB = () => {
           *,
           home_team:home_team_id (
             id,
+            club_id,
             club_name,
             team_name,
             category
           ),
           away_team:away_team_id (
             id,
+            club_id,
             club_name,
             team_name,
             category
@@ -272,6 +305,36 @@ const LiveResultsWithDB = () => {
         `)
         .eq('id', matchId)
         .single();
+
+      // Lade Vereins-Logos separat (da club_id möglicherweise nicht vorhanden ist, nutzen wir club_name)
+      let homeClubLogo = null;
+      let awayClubLogo = null;
+
+      if (matchData?.home_team?.club_name) {
+        const { data: homeClub } = await supabase
+          .from('club_info')
+          .select('logo_url')
+          .ilike('name', matchData.home_team.club_name)
+          .maybeSingle();
+        homeClubLogo = homeClub?.logo_url || null;
+      }
+
+      if (matchData?.away_team?.club_name) {
+        const { data: awayClub } = await supabase
+          .from('club_info')
+          .select('logo_url')
+          .ilike('name', matchData.away_team.club_name)
+          .maybeSingle();
+        awayClubLogo = awayClub?.logo_url || null;
+      }
+
+      // Füge Logo-URLs zu den Team-Daten hinzu
+      if (matchData?.home_team) {
+        matchData.home_team.club_logo_url = homeClubLogo;
+      }
+      if (matchData?.away_team) {
+        matchData.away_team.club_logo_url = awayClubLogo;
+      }
 
       if (matchError) {
         console.error('Error loading match:', matchError);
@@ -2126,7 +2189,7 @@ const LiveResultsWithDB = () => {
 
   const renderMatchCard = (matchData) => {
     return (
-      <div key={matchData.id} className="match-card-editable">
+      <div key={matchData.id} className="card match-card-editable">
         <div className="match-header-editable">
           <h3>{matchData.title} - {matchData.type}</h3>
         </div>
@@ -2188,11 +2251,6 @@ const LiveResultsWithDB = () => {
             value={matchData.matchStatus || 'normal'}
             onChange={(e) => handleMatchStatusChange(matchData.id, e.target.value)}
             style={{
-              width: '100%',
-              padding: '0.75rem',
-              borderRadius: '6px',
-              border: '1px solid #d1d5db',
-              fontSize: '0.875rem',
               backgroundColor: matchData.matchStatus && matchData.matchStatus !== 'normal' ? '#fef3c7' : 'white'
             }}
           >
@@ -2213,11 +2271,7 @@ const LiveResultsWithDB = () => {
                 value={walkoverWinners[matchData.id] || ''}
                 onChange={(e) => handleWalkoverWinnerChange(matchData.id, e.target.value)}
                 style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  borderRadius: '6px',
                   border: '2px solid #f59e0b',
-                  fontSize: '0.875rem',
                   backgroundColor: '#fef3c7',
                   fontWeight: '600'
                 }}
@@ -2272,7 +2326,8 @@ const LiveResultsWithDB = () => {
         <button
           onClick={() => saveMatchResult(matchData)}
           disabled={saving}
-          className="save-button-editable"
+          className="btn btn-primary"
+          style={{ width: '100%' }}
         >
           <Save size={20} />
           {saving ? 'Speichere...' : 'Ergebnis speichern'}
@@ -2293,49 +2348,94 @@ const LiveResultsWithDB = () => {
     return (
       <div className="live-results-page">
         <div className="error">Fehler: {error}</div>
-        <button onClick={() => navigate(`/ergebnisse/${matchId}`)}>Zurück zur Übersicht</button>
+        <button onClick={() => navigate(`/ergebnisse/${matchId}`)} className="btn btn-secondary">Zurück zur Übersicht</button>
       </div>
     );
   }
 
   return (
     <div className="live-results-page">
-      {/* Header */}
-      <div className="page-header">
-        <div className="header-content">
-          <div className="header-top">
+      {/* Header - Optimiert ohne grüne Fläche */}
+      <div className="page-header-optimized">
+        <div className="header-content-optimized">
+          <div className="header-top-optimized">
             <button 
               onClick={() => navigate(`/ergebnisse/${matchId}`)}
-              className="back-button"
+              className="btn btn-secondary"
+              style={{ alignSelf: 'flex-start', marginBottom: '1rem' }}
             >
               <ArrowLeft size={16} />
               Zurück zur Übersicht
             </button>
             <h1>🎾 Ergebnisse eintragen</h1>
-            <div style={{ 
-              marginTop: '0.5rem',
-              padding: '0.75rem', 
-              background: 'linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)',
-              border: '1px solid #3b82f6',
-              borderRadius: '8px',
-              fontSize: '0.875rem',
-              color: '#1e40af',
-              lineHeight: '1.5',
-              maxWidth: '600px'
-            }}>
-              <strong>⚡ Schnell-Eingabe lohnt sich!</strong> Sammle Punkte für zeitnahe Eingaben, baue Streaks auf und gewinne Preise! 🎁 Je schneller du einträgst, desto mehr Punkte bekommst du!
-            </div>
+            {gamificationBannerEnabled && (
+              <div style={{ 
+                marginTop: '0.5rem',
+                padding: '0.75rem', 
+                background: 'linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)',
+                border: '1px solid #3b82f6',
+                borderRadius: '0.75rem',
+                fontSize: '0.875rem',
+                color: '#1e40af',
+                lineHeight: '1.5',
+                maxWidth: '600px'
+              }}>
+                <strong>⚡ Schnell-Eingabe lohnt sich!</strong> Sammle Punkte für zeitnahe Eingaben, baue Streaks auf und gewinne Preise! 🎁 Je schneller du einträgst, desto mehr Punkte bekommst du!
+              </div>
+            )}
           </div>
           {match?.home_team && match?.away_team && (
-            <div className="match-teams-info">
-              <div className="team-badge home">
-                <span className="team-label">Heim:</span>
-                <span className="team-name">{match.home_team.club_name} {match.home_team.team_name}</span>
+            <div className="match-teams-info-optimized">
+              <div className="team-badge-optimized home">
+                {match.home_team?.club_logo_url ? (
+                  <img 
+                    src={match.home_team.club_logo_url} 
+                    alt={match.home_team.club_name}
+                    className="team-logo-avatar"
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      e.target.nextElementSibling.style.display = 'flex';
+                    }}
+                  />
+                ) : null}
+                <div className="team-avatar-fallback" style={{ display: match.home_team?.club_logo_url ? 'none' : 'flex' }}>
+                  <span className="team-avatar-initials">
+                    {match.home_team.club_name.split(' ').map(word => word[0]).join('').slice(0, 2).toUpperCase()}
+                  </span>
+                </div>
+                <div className="team-info-content">
+                  <span className="team-label">Heim</span>
+                  <span className="team-name">{match.home_team.club_name}</span>
+                  {match.home_team.team_name && (
+                    <span className="team-subname">{match.home_team.team_name}</span>
+                  )}
+                </div>
               </div>
-              <span className="vs-badge">vs</span>
-              <div className="team-badge away">
-                <span className="team-label">Auswärts:</span>
-                <span className="team-name">{match.away_team.club_name} {match.away_team.team_name}</span>
+              <span className="vs-divider-optimized">vs</span>
+              <div className="team-badge-optimized away">
+                {match.away_team?.club_logo_url ? (
+                  <img 
+                    src={match.away_team.club_logo_url} 
+                    alt={match.away_team.club_name}
+                    className="team-logo-avatar"
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      e.target.nextElementSibling.style.display = 'flex';
+                    }}
+                  />
+                ) : null}
+                <div className="team-avatar-fallback away" style={{ display: match.away_team?.club_logo_url ? 'none' : 'flex' }}>
+                  <span className="team-avatar-initials">
+                    {match.away_team.club_name.split(' ').map(word => word[0]).join('').slice(0, 2).toUpperCase()}
+                  </span>
+                </div>
+                <div className="team-info-content">
+                  <span className="team-label">Auswärts</span>
+                  <span className="team-name">{match.away_team.club_name}</span>
+                  {match.away_team.team_name && (
+                    <span className="team-subname">{match.away_team.team_name}</span>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -2366,7 +2466,7 @@ const LiveResultsWithDB = () => {
       <div className="footer-navigation">
         <button 
           onClick={() => navigate(`/ergebnisse/${matchId}`)}
-          className="back-to-overview"
+          className="btn btn-secondary"
         >
           <ArrowLeft size={16} />
           Zurück zur Spielübersicht
@@ -2403,7 +2503,7 @@ const LiveResultsWithDB = () => {
             <p style={{ margin: '0 0 1rem 0', color: '#666' }}>
               Gib den Namen des Gegners ein:
             </p>
-            <input
+              <input
               type="text"
               value={freeTextValue}
               onChange={(e) => setFreeTextValue(e.target.value)}
@@ -2414,11 +2514,6 @@ const LiveResultsWithDB = () => {
               }}
               placeholder="Spieler-Name eingeben..."
               style={{
-                width: '100%',
-                padding: '0.75rem',
-                borderRadius: '6px',
-                border: '1px solid #d1d5db',
-                fontSize: '1rem',
                 marginBottom: '1rem'
               }}
               autoFocus
@@ -2430,26 +2525,13 @@ const LiveResultsWithDB = () => {
                   setFreeTextValue('');
                   setFreeTextContext(null);
                 }}
-                style={{
-                  padding: '0.5rem 1rem',
-                  borderRadius: '6px',
-                  border: '1px solid #d1d5db',
-                  backgroundColor: 'white',
-                  cursor: 'pointer'
-                }}
+                className="btn btn-secondary"
               >
                 Abbrechen
               </button>
               <button
                 onClick={handleFreeTextSubmit}
-                style={{
-                  padding: '0.5rem 1rem',
-                  borderRadius: '6px',
-                  border: 'none',
-                  backgroundColor: '#3b82f6',
-                  color: 'white',
-                  cursor: 'pointer'
-                }}
+                className="btn btn-primary"
               >
                 Übernehmen
               </button>

@@ -86,6 +86,64 @@ async function getAttemptCount(supabase, matchdayId) {
 }
 
 /**
+ * Prüft explizit, ob ein Matchday vollständige Ergebnisse hat
+ * Wird nach dem Import aufgerufen, um sicherzustellen, dass die Daten vollständig sind
+ */
+export async function checkMatchdayResultsComplete(supabase, matchdayId) {
+  const { data: results, error: resultsError } = await supabase
+    .from('match_results')
+    .select('id, home_player_id, home_player1_id, set1_home, set1_guest, status')
+    .eq('matchday_id', matchdayId);
+  
+  if (resultsError) {
+    console.warn(`[autoMatchResultImport] Fehler beim Prüfen der Ergebnisse für ${matchdayId}:`, resultsError.message);
+    return { complete: false, reason: 'DB_ERROR' };
+  }
+  
+  // Keine Ergebnisse = nicht vollständig
+  if (!results || results.length === 0) {
+    return { complete: false, reason: 'NO_RESULTS', resultsCount: 0 };
+  }
+  
+  // ✅ WICHTIG: Walkover-Matches sind vollständig, auch ohne Spieler-IDs und Set-Ergebnisse
+  const isWalkover = (result) => result.status === 'walkover';
+  
+  // Prüfe ob alle Ergebnisse vollständig sind
+  const completeResults = results.filter(r => {
+    // Walkover-Matches gelten immer als vollständig
+    if (isWalkover(r)) return true;
+    
+    // Normale Matches benötigen Spieler UND Set-Ergebnisse
+    const hasPlayers = r.home_player_id || r.home_player1_id;
+    const hasSets = r.set1_home !== null && r.set1_guest !== null;
+    return hasPlayers && hasSets;
+  });
+  
+  // Wenn alle Ergebnisse vollständig sind
+  if (completeResults.length === results.length) {
+    return { 
+      complete: true, 
+      resultsCount: results.length,
+      completeCount: completeResults.length,
+      walkoverCount: results.filter(r => isWalkover(r)).length
+    };
+  }
+  
+  // Wenn nur teilweise vollständig
+  const missingPlayersCount = results.filter(r => !isWalkover(r) && !r.home_player_id && !r.home_player1_id).length;
+  const missingSetsCount = results.filter(r => !isWalkover(r) && (r.set1_home === null || r.set1_guest === null)).length;
+  
+  return {
+    complete: false,
+    reason: missingPlayersCount > 0 ? 'MISSING_PLAYERS' : missingSetsCount > 0 ? 'MISSING_SETS' : 'INCOMPLETE',
+    resultsCount: results.length,
+    completeCount: completeResults.length,
+    missingPlayersCount,
+    missingSetsCount
+  };
+}
+
+/**
  * Findet Spieltage, die automatisch importiert werden sollten
  * - Nur Matches der letzten 4 Tage
  * - Nur Matches ohne Ergebnisse

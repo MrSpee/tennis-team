@@ -42,6 +42,12 @@ function Dashboard() {
   const [editForm, setEditForm] = useState({ league: '', group_name: '' });
   const [savingTeam, setSavingTeam] = useState(false);
   
+  // State für Gamification Banner (Feature Toggle)
+  const [gamificationBannerEnabled, setGamificationBannerEnabled] = useState(false);
+  
+  // State für Vereins-Logos
+  const [clubLogos, setClubLogos] = useState({}); // Map von clubName zu logo_url
+  
   // 🎾 State für Social Stats (Tennismates)
   const [socialStats, setSocialStats] = useState({
     tennismatesCount: 0,      // Wie viele mir folgen
@@ -152,6 +158,75 @@ function Dashboard() {
 
     return () => clearInterval(interval);
   }, []);
+
+  // Lade Gamification Banner Einstellung (Feature Toggle)
+  useEffect(() => {
+    const loadBannerSetting = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('app_settings')
+          .select('setting_value')
+          .eq('setting_key', 'gamification_banner_enabled')
+          .single();
+        
+        if (error) {
+          console.warn('⚠️ Fehler beim Laden der Banner-Einstellung:', error);
+          // Standard: Banner deaktiviert bei Fehler
+          setGamificationBannerEnabled(false);
+          return;
+        }
+        
+        if (data) {
+          const isEnabled = data.setting_value === 'true';
+          setGamificationBannerEnabled(isEnabled);
+        }
+      } catch (error) {
+        console.error('❌ Fehler beim Laden der Banner-Einstellung:', error);
+        setGamificationBannerEnabled(false);
+      }
+    };
+    
+    loadBannerSetting();
+  }, []);
+
+  // Lade Vereins-Logos für alle einzigartigen Vereinsnamen
+  useEffect(() => {
+    const loadClubLogos = async () => {
+      if (!playerTeams || playerTeams.length === 0) return;
+
+      try {
+        // Sammle alle einzigartigen Vereinsnamen
+        const uniqueClubNames = [...new Set(playerTeams.map(t => t.club_name).filter(Boolean))];
+        
+        if (uniqueClubNames.length === 0) return;
+
+        // Lade Logos für alle Vereine
+        const { data: clubs, error } = await supabase
+          .from('club_info')
+          .select('name, logo_url')
+          .in('name', uniqueClubNames);
+
+        if (error) {
+          console.warn('⚠️ Fehler beim Laden der Vereins-Logos:', error);
+          return;
+        }
+
+        // Erstelle Map von clubName zu logo_url
+        const logosMap = {};
+        (clubs || []).forEach(club => {
+          if (club.logo_url) {
+            logosMap[club.name] = club.logo_url;
+          }
+        });
+
+        setClubLogos(logosMap);
+      } catch (error) {
+        console.warn('⚠️ Fehler beim Laden der Vereins-Logos:', error);
+      }
+    };
+
+    loadClubLogos();
+  }, [playerTeams]);
 
   // 🎾 Auto-Import von Match-Ergebnissen (Empfehlung 3)
   // Watcher-System: Prüft täglich einmal Matches der letzten 4 Tage
@@ -1816,33 +1891,35 @@ function Dashboard() {
 
   return (
     <div className="dashboard container">
-      {/* 🎮 GAMIFICATION BANNER - Comic Style mit Originalbild (ganz oben) */}
-      <div className="fade-in" style={{ marginBottom: '1.5rem', marginTop: '0.5rem' }}>
-        <div className="comic-banner" onClick={() => navigate('/leaderboard')}>
-          {/* Hintergrundbild */}
-          <div className="banner-background">
-            <img 
-              src="/Banner_App.jpg" 
-              alt="Tennis Comic Duel" 
-              className="banner-bg-image"
-            />
-            <div className="banner-overlay"></div>
-          </div>
-          
-          {/* Content */}
-          <div className="banner-content-wrapper">
-            <div className="banner-content">
-              <h2 className="banner-headline">Spielergebnisse eintragen lohnt sich!</h2>
-              
-              {pastMatchesWithoutResult.length > 0 && (
-                <div className="banner-warning">
-                  ⚠️ {pastMatchesWithoutResult.length} offene {pastMatchesWithoutResult.length === 1 ? 'Eingabe' : 'Eingaben'}
-                </div>
-              )}
+      {/* 🎮 GAMIFICATION BANNER - Comic Style mit Originalbild (ganz oben) - Nur wenn aktiviert */}
+      {gamificationBannerEnabled && (
+        <div className="fade-in" style={{ marginBottom: '1.5rem', marginTop: '0.5rem' }}>
+          <div className="comic-banner" onClick={() => navigate('/leaderboard')}>
+            {/* Hintergrundbild */}
+            <div className="banner-background">
+              <img 
+                src="/Banner_App.jpg" 
+                alt="Tennis Comic Duel" 
+                className="banner-bg-image"
+              />
+              <div className="banner-overlay"></div>
+            </div>
+            
+            {/* Content */}
+            <div className="banner-content-wrapper">
+              <div className="banner-content">
+                <h2 className="banner-headline">Spielergebnisse eintragen lohnt sich!</h2>
+                
+                {pastMatchesWithoutResult.length > 0 && (
+                  <div className="banner-warning">
+                    ⚠️ {pastMatchesWithoutResult.length} offene {pastMatchesWithoutResult.length === 1 ? 'Eingabe' : 'Eingaben'}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* 1. Persönliche Begrüßung */}
       <div className="fade-in" style={{ marginBottom: '1rem' }}>
@@ -3338,6 +3415,26 @@ function Dashboard() {
                       border: '1px solid rgb(186, 230, 253)'
                     }}
                   >
+                    {clubLogos[clubName] ? (
+                      <img 
+                        src={clubLogos[clubName]} 
+                        alt={clubName}
+                        style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '50%',
+                          objectFit: 'cover',
+                          marginRight: '0.75rem',
+                          border: '2px solid rgba(3, 105, 161, 0.2)',
+                          background: 'white'
+                        }}
+                        onError={(e) => {
+                          // Fallback zu SVG-Icon wenn Logo nicht geladen werden kann
+                          e.target.style.display = 'none';
+                          e.target.nextElementSibling.style.display = 'block';
+                        }}
+                      />
+                    ) : null}
                     <svg 
                       xmlns="http://www.w3.org/2000/svg" 
                       width="20" 
@@ -3348,7 +3445,10 @@ function Dashboard() {
                       strokeWidth="2" 
                       strokeLinecap="round" 
                       strokeLinejoin="round" 
-                      style={{ marginRight: '0.5rem' }}
+                      style={{ 
+                        marginRight: '0.5rem',
+                        display: clubLogos[clubName] ? 'none' : 'block'
+                      }}
                     >
                       <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"></path>
                       <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"></path>

@@ -1378,7 +1378,7 @@ const Results = () => {
       // Lade Spieler-Daten
       const { data: playerData, error: playerError } = await supabase
         .from('players_unified')
-        .select('id, name, current_lk, season_start_lk, ranking, player_type, profile_image')
+        .select('id, name, current_lk, season_start_lk, ranking, player_type, profile_image, updated_at, created_at, user_id')
         .eq('id', playerId)
         .single();
       
@@ -1390,11 +1390,41 @@ const Results = () => {
       
       // Lade alle Matches der aktuellen Saison
       const currentSeason = getCurrentSeason();
+      // Die Datenbank verwendet "Winter 2025/26" Format
+      // Konvertiere getCurrentSeason() Format zu DB-Format
+      const currentMonth = new Date().getMonth();
+      const currentYear = new Date().getFullYear();
+      let seasonValue;
+      
+      if (currentMonth >= 4 && currentMonth <= 7) {
+        // Sommer: "Sommer 2025"
+        seasonValue = `Sommer ${currentYear}`;
+      } else {
+        // Winter: "Winter YYYY/YY+1"
+        if (currentMonth >= 8) {
+          const nextYear = currentYear + 1;
+          seasonValue = `Winter ${currentYear}/${String(nextYear).slice(-2)}`;
+        } else {
+          const prevYear = currentYear - 1;
+          seasonValue = `Winter ${prevYear}/${String(currentYear).slice(-2)}`;
+        }
+      }
+      
       const { data: seasonMatches, error: matchesError } = await supabase
         .from('matchdays')
-        .select('id, opponent, date, location, season, home_team_id, away_team_id')
-        .eq('season', currentSeason.season)
-        .order('date');
+        .select(`
+          id,
+          match_date,
+          start_time,
+          season,
+          home_team_id,
+          away_team_id,
+          venue,
+          home_team:team_info!matchdays_home_team_id_fkey(id, club_name, team_name, category),
+          away_team:team_info!matchdays_away_team_id_fkey(id, club_name, team_name, category)
+        `)
+        .eq('season', seasonValue)
+        .order('match_date', { ascending: true });
       
       if (matchesError) {
         console.error('Error loading season matches:', matchesError);
@@ -1414,11 +1444,29 @@ const Results = () => {
       }
       
       // Lade alle match_results für diese Matches
+      // Split in Batches um Supabase .in() Limit zu vermeiden (max ~100 IDs pro Query)
       const matchIds = seasonMatches.map(m => m.id);
-      const { data: allResultsData, error: allResultsError } = await supabase
+      const BATCH_SIZE = 100;
+      let allResultsData = [];
+      let allResultsError = null;
+      
+      for (let i = 0; i < matchIds.length; i += BATCH_SIZE) {
+        const batch = matchIds.slice(i, i + BATCH_SIZE);
+        const { data: batchData, error: batchError } = await supabase
         .from('match_results')
         .select('*')
-        .in('matchday_id', matchIds);
+          .in('matchday_id', batch);
+        
+        if (batchError) {
+          console.error('Error loading batch of match results:', batchError);
+          allResultsError = batchError;
+          break;
+        }
+        
+        if (batchData) {
+          allResultsData = [...allResultsData, ...batchData];
+        }
+      }
       
       if (allResultsError) {
         console.error('Error loading match results:', allResultsError);
@@ -1429,8 +1477,8 @@ const Results = () => {
         return;
       }
       
-      // Sammle alle Player-IDs für Batch-Load
-      const allPlayerIds = new Set();
+      // Sammle alle Player-IDs für Batch-Load (inkl. gesuchten Spieler)
+      const allPlayerIds = new Set([playerId]); // Füge gesuchten Spieler hinzu
       (allResultsData || []).forEach(r => {
         if (r.home_player_id) allPlayerIds.add(r.home_player_id);
         if (r.home_player1_id) allPlayerIds.add(r.home_player1_id);
@@ -1440,17 +1488,31 @@ const Results = () => {
         if (r.guest_player2_id) allPlayerIds.add(r.guest_player2_id);
       });
       
-      // Lade alle Spieler-Daten
-      const { data: allPlayersData } = await supabase
+      // Lade alle Spieler-Daten (Batch-Load wenn mehr als 100 IDs)
+      const playerIdsArray = Array.from(allPlayerIds);
+      const PLAYER_BATCH_SIZE = 100;
+      let allPlayersData = [];
+      
+      for (let i = 0; i < playerIdsArray.length; i += PLAYER_BATCH_SIZE) {
+        const batch = playerIdsArray.slice(i, i + PLAYER_BATCH_SIZE);
+        const { data: batchPlayersData } = await supabase
         .from('players_unified')
         .select('id, name, current_lk, season_start_lk, ranking, player_type, profile_image')
-        .in('id', Array.from(allPlayerIds));
+          .in('id', batch);
+        
+        if (batchPlayersData) {
+          allPlayersData = [...allPlayersData, ...batchPlayersData];
+        }
+      }
       
       const playerDataMap = {};
-      (allPlayersData || []).forEach(p => {
+      allPlayersData.forEach(p => {
         playerDataMap[p.id] = p;
       });
-      playerDataMap[playerId] = playerData; // Füge gesuchten Spieler hinzu
+      // Füge gesuchten Spieler hinzu (falls nicht bereits vorhanden)
+      if (!playerDataMap[playerId]) {
+        playerDataMap[playerId] = playerData;
+      }
       
       // Filtere Match-Ergebnisse für diesen Spieler
       const playerMatches = [];
@@ -1487,6 +1549,7 @@ const Results = () => {
                 opponentLK = oppData.current_lk;
               }
             } else if (result.match_type === 'Doppel') {
+              // Bei Doppeln: Gegner sind die beiden Spieler des gegnerischen Teams
               const opp1Id = isPlayerInHomeTeam ? result.guest_player1_id : result.home_player1_id;
               const opp2Id = isPlayerInHomeTeam ? result.guest_player2_id : result.home_player2_id;
               
@@ -1494,30 +1557,61 @@ const Results = () => {
               const opp2Data = opp2Id ? playerDataMap[opp2Id] : null;
               
               opponent1Name = opp1Data?.name || 'Unbekannt';
-              opponent1LK = opp1Data?.current_lk;
+              opponent1LK = opp1Data?.current_lk || opp1Data?.season_start_lk || null;
               opponent2Name = opp2Data?.name || 'Unbekannt';
-              opponent2LK = opp2Data?.current_lk;
+              opponent2LK = opp2Data?.current_lk || opp2Data?.season_start_lk || null;
               
-              const partnerId = isPlayerInHomeTeam
-                ? (result.home_player1_id === playerId ? result.home_player2_id : result.home_player1_id)
-                : (result.guest_player1_id === playerId ? result.guest_player2_id : result.guest_player1_id);
+              // Partner ist der andere Spieler im eigenen Team
+              let partnerId = null;
+              if (isPlayerInHomeTeam) {
+                // Spieler ist im Home-Team
+                if (result.home_player1_id === playerId) {
+                  partnerId = result.home_player2_id;
+                } else if (result.home_player2_id === playerId) {
+                  partnerId = result.home_player1_id;
+                }
+              } else {
+                // Spieler ist im Guest-Team
+                if (result.guest_player1_id === playerId) {
+                  partnerId = result.guest_player2_id;
+                } else if (result.guest_player2_id === playerId) {
+                  partnerId = result.guest_player1_id;
+                }
+              }
               
               const partnerData = partnerId ? playerDataMap[partnerId] : null;
               
               if (partnerData) {
                 partnerName = partnerData.name;
-                partnerLK = partnerData.current_lk || partnerData.season_start_lk || partnerData.ranking;
+                partnerLK = partnerData.current_lk || partnerData.season_start_lk || partnerData.ranking || null;
               }
               
-              opponentName = opponent1Name;
+              // Für Einzel-Anzeige: Kombiniere beide Gegner-Namen
+              opponentName = opponent2Name && opponent2Name !== 'Unbekannt' 
+                ? `${opponent1Name} / ${opponent2Name}`
+                : opponent1Name;
               opponentLK = opponent1LK;
             }
             
+            // Bestimme eigenes Team und Gegner-Team
+            const playerTeam = isPlayerInHomeTeam ? match.home_team : match.away_team;
+            const opponentTeam = isPlayerInHomeTeam ? match.away_team : match.home_team;
+            
+            const playerTeamName = playerTeam 
+              ? `${playerTeam.club_name} ${playerTeam.team_name || ''} (${playerTeam.category})`.trim()
+              : 'Unbekannt';
+            const opponentTeamName = opponentTeam 
+              ? `${opponentTeam.club_name} ${opponentTeam.team_name || ''} (${opponentTeam.category})`.trim()
+              : 'Unbekannt';
+            
             playerMatches.push({
               ...result,
-              opponent: match.opponent,
-              matchDate: match.date,
-              matchLocation: match.location,
+              opponent: opponentTeamName,
+              playerTeam: playerTeamName,
+              playerTeamData: playerTeam,
+              opponentTeamData: opponentTeam,
+              matchDate: match.match_date ? new Date(match.match_date) : null,
+              matchLocation: match.venue || match.location || 'Unbekannt',
               opponentPlayerName: opponentName,
               opponentPlayerLK: opponentLK,
               opponent1Name,
@@ -1532,11 +1626,122 @@ const Results = () => {
       }
       
       // Sortiere Matches nach Datum
-      const sortedMatches = playerMatches.sort((a, b) => new Date(a.matchDate) - new Date(b.matchDate));
+      const sortedMatches = playerMatches.sort((a, b) => {
+        const aTime = a.matchDate ? a.matchDate.getTime() : 0;
+        const bTime = b.matchDate ? b.matchDate.getTime() : 0;
+        return aTime - bTime;
+      });
+      
+      // ✅ Lade Team- und Vereinsinformationen für den Spieler
+      const { data: teamMemberships, error: teamsError } = await supabase
+        .from('team_memberships')
+        .select(`
+          *,
+          team_info (
+            id,
+            club_name,
+            team_name,
+            category,
+            club_id,
+            club_info (
+              id,
+              name,
+              logo_url
+            )
+          )
+        `)
+        .eq('player_id', playerId)
+        .eq('is_active', true)
+        .order('is_primary', { ascending: false });
+      
+      // Gruppiere Teams nach Verein
+      const clubsMap = new Map();
+      if (teamMemberships && !teamsError) {
+        teamMemberships.forEach(membership => {
+          const team = membership.team_info;
+          if (team && team.club_info) {
+            const clubId = team.club_info.id || team.club_id;
+            const clubName = team.club_info.name || team.club_name;
+            
+            if (!clubsMap.has(clubId)) {
+              clubsMap.set(clubId, {
+                id: clubId,
+                name: clubName,
+                logo_url: team.club_info.logo_url || null,
+                teams: []
+              });
+            }
+            
+            clubsMap.get(clubId).teams.push({
+              id: team.id,
+              team_name: team.team_name,
+              category: team.category,
+              club_name: team.club_name,
+              is_primary: membership.is_primary
+            });
+          }
+        });
+      }
+      
+      const clubs = Array.from(clubsMap.values());
+      
+      // ✅ Lade Follower-Informationen
+      const { data: followerData } = await supabase
+        .from('player_followers')
+        .select('id, follower_id, following_id')
+        .or(`follower_id.eq.${playerId},following_id.eq.${playerId}`);
+      
+      const tennismateCount = followerData?.filter(f => f.following_id === playerId).length || 0;
+      const followingCount = followerData?.filter(f => f.follower_id === playerId).length || 0;
+      
+      // ✅ Lade Team-Ranking Position (beste Position aus allen Teams)
+      let bestRank = null;
+      let bestRankTeam = null;
+      if (teamMemberships && teamMemberships.length > 0) {
+        const teamIds = teamMemberships.map(tm => tm.team_info?.id).filter(Boolean);
+        if (teamIds.length > 0) {
+          // Lade aktuelle Saison für Ranking
+          const currentMonth = new Date().getMonth();
+          const currentYear = new Date().getFullYear();
+          let seasonValue;
+          if (currentMonth >= 4 && currentMonth <= 7) {
+            seasonValue = `Sommer ${currentYear}`;
+          } else {
+            if (currentMonth >= 8) {
+              const nextYear = currentYear + 1;
+              seasonValue = `Winter ${currentYear}/${String(nextYear).slice(-2)}`;
+            } else {
+              const prevYear = currentYear - 1;
+              seasonValue = `Winter ${prevYear}/${String(currentYear).slice(-2)}`;
+            }
+          }
+          
+          // Lade Team-Roster für Ranking-Position
+          const { data: rosterData } = await supabase
+            .from('team_roster')
+            .select('rank, team_id, team_info(id, team_name, category, club_name)')
+            .eq('player_id', playerId)
+            .eq('season', seasonValue)
+            .in('team_id', teamIds)
+            .order('rank', { ascending: true })
+            .limit(1);
+          
+          if (rosterData && rosterData.length > 0) {
+            bestRank = rosterData[0].rank;
+            bestRankTeam = rosterData[0].team_info;
+          }
+        }
+      }
       
       setSearchPlayerResults({
         player: playerData,
-        matches: sortedMatches
+        matches: sortedMatches,
+        clubs: clubs,
+        teams: teamMemberships || [],
+        tennismateCount,
+        followingCount,
+        bestRank,
+        bestRankTeam
       });
       
     } catch (error) {
@@ -2193,101 +2398,755 @@ const Results = () => {
                 </div>
               ) : searchPlayerResults ? (
                 <div>
-                  {/* Spieler-Info */}
-                  <div style={{
-                    background: '#f9fafb',
-                    borderRadius: '12px',
-                    padding: '1.5rem',
+                  {/* Spieler-Info Card */}
+                  <div className="card" style={{
                     marginBottom: '1.5rem',
-                    border: '1px solid #e5e7eb'
+                    padding: '1.5rem',
+                    background: 'white'
                   }}>
+                    {/* Header mit Avatar und Name */}
                     <div style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: '1rem',
-                      marginBottom: '1rem'
+                      marginBottom: '1.5rem',
+                      paddingBottom: '1.5rem',
+                      borderBottom: '1px solid #e5e7eb'
                     }}>
                       <img 
                         src={searchPlayerResults.player.profile_image || '/app-icon.jpg'} 
                         alt={searchPlayerResults.player.name}
                         style={{
-                          width: '64px',
-                          height: '64px',
+                          width: '80px',
+                          height: '80px',
                           borderRadius: '50%',
-                          objectFit: 'cover'
+                          objectFit: 'cover',
+                          border: '3px solid #10b981',
+                          boxShadow: '0 2px 8px rgba(16, 185, 129, 0.2)'
                         }}
                       />
-                      <div>
-                        <h3 style={{
-                          fontSize: '1.25rem',
+                      <div style={{ flex: 1 }}>
+                        <h2 style={{
+                          fontSize: '1.5rem',
                           fontWeight: '700',
                           color: '#1f2937',
-                          margin: 0
+                          margin: '0 0 0.25rem 0'
                         }}>
                           {searchPlayerResults.player.name}
-                        </h3>
+                        </h2>
                         <div style={{
-                          fontSize: '0.875rem',
+                          fontSize: '1rem',
                           color: '#6b7280',
-                          marginTop: '0.25rem'
+                          fontWeight: '500'
                         }}>
                           {searchPlayerResults.player.current_lk || searchPlayerResults.player.season_start_lk || searchPlayerResults.player.ranking || 'LK ?'}
                         </div>
                       </div>
                     </div>
                     
-                    {/* Statistiken */}
-                    {searchPlayerResults.matches.length > 0 && (() => {
-                      const wins = searchPlayerResults.matches.filter(m => {
-                        const isPlayerInHomeTeam = m.home_player_id === searchPlayerResults.player.id || 
-                                                   m.home_player1_id === searchPlayerResults.player.id || 
-                                                   m.home_player2_id === searchPlayerResults.player.id;
-                        const winner = m.winner || calculateMatchWinner(m);
-                        return isPlayerInHomeTeam ? winner === 'home' : winner === 'guest';
-                      }).length;
-                      
-                      const losses = searchPlayerResults.matches.filter(m => {
-                        const isPlayerInHomeTeam = m.home_player_id === searchPlayerResults.player.id || 
-                                                   m.home_player1_id === searchPlayerResults.player.id || 
-                                                   m.home_player2_id === searchPlayerResults.player.id;
-                        const winner = m.winner || calculateMatchWinner(m);
-                        return isPlayerInHomeTeam ? winner === 'guest' : winner === 'home';
-                      }).length;
-                      
-                      return (
+                    {/* Vereinsinformationen */}
+                    {searchPlayerResults.clubs && searchPlayerResults.clubs.length > 0 && (
+                      <div style={{
+                        marginBottom: '1.5rem',
+                        padding: '1rem',
+                        background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
+                        borderRadius: '8px',
+                        border: '1px solid #bae6fd'
+                      }}>
                         <div style={{
                           display: 'flex',
-                          gap: '1rem',
-                          flexWrap: 'wrap'
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          marginBottom: '0.75rem',
+                          fontSize: '0.875rem',
+                          fontWeight: '600',
+                          color: '#0369a1',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.5px'
                         }}>
-                          <div style={{
-                            padding: '0.75rem 1rem',
-                            background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-                            borderRadius: '8px',
-                            color: 'white',
-                            fontWeight: '600'
-                          }}>
-                            🎾 {searchPlayerResults.matches.length} {searchPlayerResults.matches.length === 1 ? 'Einsatz' : 'Einsätze'}
-                          </div>
-                          <div style={{
-                            padding: '0.75rem 1rem',
-                            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                            borderRadius: '8px',
-                            color: 'white',
-                            fontWeight: '600'
-                          }}>
-                            ✅ {wins} {wins === 1 ? 'Sieg' : 'Siege'}
-                          </div>
-                          <div style={{
-                            padding: '0.75rem 1rem',
-                            background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
-                            borderRadius: '8px',
-                            color: 'white',
-                            fontWeight: '600'
-                          }}>
-                            ❌ {losses} {losses === 1 ? 'Niederlage' : 'Niederlagen'}
-                          </div>
+                          🏢 Aktiv bei
                         </div>
+                        {searchPlayerResults.clubs.map((club, idx) => (
+                          <div key={club.id} style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.75rem',
+                            marginBottom: idx < searchPlayerResults.clubs.length - 1 ? '0.75rem' : '0',
+                            paddingBottom: idx < searchPlayerResults.clubs.length - 1 ? '0.75rem' : '0',
+                            borderBottom: idx < searchPlayerResults.clubs.length - 1 ? '1px solid #bae6fd' : 'none'
+                          }}>
+                            {club.logo_url ? (
+                              <img 
+                                src={club.logo_url} 
+                                alt={club.name}
+                                style={{
+                                  width: '32px',
+                                  height: '32px',
+                                  borderRadius: '6px',
+                                  objectFit: 'cover',
+                                  border: '1px solid #e5e7eb'
+                                }}
+                              />
+                            ) : (
+                              <div style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '6px',
+                                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: 'white',
+                                fontWeight: '700',
+                                fontSize: '0.875rem'
+                              }}>
+                                {club.name.charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <div style={{ flex: 1 }}>
+                              <div style={{
+                                fontWeight: '600',
+                                color: '#1f2937',
+                                fontSize: '0.95rem'
+                              }}>
+                                {club.name}
+                              </div>
+                              <div style={{
+                                fontSize: '0.8rem',
+                                color: '#6b7280',
+                                marginTop: '0.125rem'
+                              }}>
+                                {club.teams.length} {club.teams.length === 1 ? 'Mannschaft' : 'Mannschaften'} · {club.teams.map(t => `${t.category} ${t.team_name || ''}`).join(', ')}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {/* Saison-Information */}
+                    <div style={{
+                      marginBottom: '1.5rem',
+                      padding: '0.75rem 1rem',
+                      background: 'linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%)',
+                      borderRadius: '8px',
+                      border: '1px solid #e5e7eb',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}>
+                      <span style={{ fontSize: '1.25rem' }}>📅</span>
+                      <span style={{
+                        fontSize: '0.875rem',
+                        color: '#6b7280',
+                        fontWeight: '500'
+                      }}>
+                        Saison: {(() => {
+                          const currentMonth = new Date().getMonth();
+                          const currentYear = new Date().getFullYear();
+                          if (currentMonth >= 4 && currentMonth <= 7) {
+                            return `Sommer ${currentYear}`;
+                          } else if (currentMonth >= 8) {
+                            const nextYear = currentYear + 1;
+                            return `Winter ${currentYear}/${String(nextYear).slice(-2)}`;
+                          } else {
+                            const prevYear = currentYear - 1;
+                            return `Winter ${prevYear}/${String(currentYear).slice(-2)}`;
+                          }
+                        })()}
+                      </span>
+                    </div>
+                    
+                    {/* Statistiken Dashboard */}
+                    {searchPlayerResults.matches.length > 0 && (() => {
+                      // Berechne Siege und Niederlagen
+                      const matchResults = searchPlayerResults.matches.map(m => {
+                        const isPlayerInHomeTeam = m.home_player_id === searchPlayerResults.player.id || 
+                                                   m.home_player1_id === searchPlayerResults.player.id || 
+                                                   m.home_player2_id === searchPlayerResults.player.id;
+                        const winner = m.winner || calculateMatchWinner(m);
+                        const won = isPlayerInHomeTeam ? winner === 'home' : winner === 'guest';
+                        return { ...m, won, matchDate: m.matchDate };
+                      });
+                      
+                      const wins = matchResults.filter(m => m.won).length;
+                      const losses = matchResults.filter(m => !m.won).length;
+                      const winRate = searchPlayerResults.matches.length > 0 
+                        ? Math.round((wins / searchPlayerResults.matches.length) * 100) 
+                        : 0;
+                      
+                      // Berechne aktuelle Form (letzte 5 Spiele)
+                      const last5Matches = [...matchResults].reverse().slice(0, 5);
+                      const recentWins = last5Matches.filter(m => m.won).length;
+                      const recentLosses = last5Matches.filter(m => !m.won).length;
+                      const recentWinRate = last5Matches.length > 0 ? (recentWins / last5Matches.length) * 100 : 0;
+                      
+                      // Form-Tag basierend auf letzten 5 Spielen
+                      let formTag = { text: 'Stabil', color: '#6b7280', bg: '#f3f4f6', icon: '➡️' };
+                      if (recentWinRate >= 80) {
+                        formTag = { text: 'In Top-Form', color: '#059669', bg: '#d1fae5', icon: '🔥' };
+                      } else if (recentWinRate >= 60) {
+                        formTag = { text: 'Gut in Form', color: '#10b981', bg: '#d1fae5', icon: '📈' };
+                      } else if (recentWinRate >= 40) {
+                        formTag = { text: 'Stabil', color: '#6b7280', bg: '#f3f4f6', icon: '➡️' };
+                      } else if (recentWinRate >= 20) {
+                        formTag = { text: 'Aufbauend', color: '#f59e0b', bg: '#fef3c7', icon: '📉' };
+                      } else {
+                        formTag = { text: 'Schwacher Lauf', color: '#dc2626', bg: '#fee2e2', icon: '⚠️' };
+                      }
+                      
+                      // LK-Berechnungslogik (aus Dashboard.jsx)
+                      const parseLK = (lkString) => {
+                        if (!lkString) return null;
+                        const normalized = String(lkString).trim()
+                          .replace(/^LK\s*/i, '')
+                          .replace(/,/g, '.')
+                          .replace(/\s+/g, '');
+                        const parsed = parseFloat(normalized);
+                        return isNaN(parsed) || parsed < 1 || parsed > 30 ? null : parsed;
+                      };
+                      
+                      const pointsP = (diff) => {
+                        if (diff <= -4) return 10;
+                        if (diff >= 4) return 110;
+                        if (diff < 0) {
+                          const t = (diff + 4) / 4;
+                          return 10 + 40 * (t * t);
+                        }
+                        const t = diff / 4;
+                        return 50 + 60 * (t * t);
+                      };
+                      
+                      const hurdleH = (ownLK) => 50 + 12.5 * (25 - ownLK);
+                      
+                      const calcMatchImprovement = (ownLK, oppLK, isTeamMatch = true) => {
+                        const AGE_CLASS_FACTOR = 0.8; // M40/H40
+                        const diff = ownLK - oppLK;
+                        const P = pointsP(diff);
+                        const A = AGE_CLASS_FACTOR;
+                        const H = hurdleH(ownLK);
+                        let improvement = (P * A) / H;
+                        if (isTeamMatch) improvement *= 1.1;
+                        return Math.max(0, Number(improvement.toFixed(3)));
+                      };
+                      
+                      // Start-LK des Spielers
+                      const playerLKStr = searchPlayerResults.player.current_lk || searchPlayerResults.player.season_start_lk || searchPlayerResults.player.ranking || '25';
+                      let currentLK = parseLK(playerLKStr) || 25;
+                      
+                      // Berechne LK-Kurve: Starte mit der Start-LK und berechne für jedes Match
+                      const lkCurveData = [];
+                      let startLK = currentLK; // Speichere Start-LK
+                      
+                      // Gehe chronologisch durch die Matches (von alt nach neu)
+                      [...matchResults].forEach((match, idx) => {
+                        const isPlayerInHomeTeam = match.home_player_id === searchPlayerResults.player.id || 
+                                                   match.home_player1_id === searchPlayerResults.player.id || 
+                                                   match.home_player2_id === searchPlayerResults.player.id;
+                        
+                        const playerLKBefore = currentLK;
+                        let playerLKAfter = currentLK;
+                        
+                        if (match.won) {
+                          // Berechne LK-Verbesserung nur bei Sieg
+                          let opponentLK = 25; // Fallback
+                          
+                          if (match.match_type === 'Einzel') {
+                            // Für Einzel: verwende opponentPlayerLK wenn verfügbar
+                            if (match.opponentPlayerLK) {
+                              const parsedOppLK = parseLK(match.opponentPlayerLK);
+                              if (parsedOppLK) opponentLK = parsedOppLK;
+                            }
+                            
+                            if (opponentLK !== 25) {
+                              const lkImprovement = calcMatchImprovement(currentLK, opponentLK, true);
+                              playerLKAfter = Math.max(0, currentLK - lkImprovement);
+                            }
+                          } else {
+                            // Für Doppel: verwende Durchschnitts-LK der Gegner
+                            if (match.opponent1LK && match.opponent2LK) {
+                              const opp1LK = parseLK(match.opponent1LK) || 25;
+                              const opp2LK = parseLK(match.opponent2LK) || 25;
+                              opponentLK = (opp1LK + opp2LK) / 2;
+                              
+                              // Bei Doppel: Verbesserung auf Durchschnitts-LK anwenden
+                              // Vereinfacht: verwende Spieler-LK direkt
+                              const lkImprovement = calcMatchImprovement(currentLK, opponentLK, true);
+                              playerLKAfter = Math.max(0, currentLK - lkImprovement);
+                            }
+                          }
+                        }
+                        
+                        lkCurveData.push({
+                          x: idx,
+                          lk: playerLKAfter,
+                          lkBefore: playerLKBefore,
+                          won: match.won,
+                          matchDate: match.matchDate
+                        });
+                        
+                        // Aktualisiere currentLK für nächstes Match
+                        currentLK = playerLKAfter;
+                      });
+                      
+                      // Invertiere LK für Anzeige (niedrigere LK = besser = höher im Chart)
+                      // Normalisiere auf 0-100 Bereich, invertiert (niedrigste LK = 100, höchste LK = 0)
+                      const allLKs = lkCurveData.map(d => d.lk);
+                      const minLK = Math.min(...allLKs, startLK);
+                      const maxLK = Math.max(...allLKs, startLK);
+                      const lkRange = maxLK - minLK || 1;
+                      
+                      const normalizedData = lkCurveData.map(d => ({
+                        ...d,
+                        normalizedY: 100 - ((d.lk - minLK) / lkRange) * 100 // Invertiert: niedrigere LK = höher
+                      }));
+                      
+                      // Berechne Aktivität (wann war der Spieler zuletzt in der App aktiv)
+                      const hasUserAccount = searchPlayerResults.player.user_id !== null && searchPlayerResults.player.user_id !== undefined;
+                      let activityText = '';
+                      let activityNumber = '';
+                      let activityIcon = '💤';
+                      let lastActiveTime = '';
+                      
+                      if (!hasUserAccount) {
+                        // Spieler ist nicht in der App angemeldet
+                        activityText = 'Nicht in App aktiv';
+                        activityNumber = '–';
+                        activityIcon = '🚫';
+                        lastActiveTime = '';
+                      } else {
+                        // Spieler ist angemeldet - berechne Zeit seit letzter Aktivität
+                        const lastActive = searchPlayerResults.player.updated_at || searchPlayerResults.player.created_at;
+                        const lastActiveDate = lastActive ? new Date(lastActive) : new Date();
+                        const now = new Date();
+                        const daysSinceActive = Math.floor((now - lastActiveDate) / (1000 * 60 * 60 * 24));
+                        
+                        // Formatiere genaue Zeit für Anzeige
+                        const formatTime = (date) => {
+                          const hours = date.getHours().toString().padStart(2, '0');
+                          const minutes = date.getMinutes().toString().padStart(2, '0');
+                          return `${hours}:${minutes} Uhr`;
+                        };
+                        
+                        const formatDate = (date) => {
+                          const days = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+                          return days[date.getDay()];
+                        };
+                        
+                        if (daysSinceActive === 0) {
+                          activityText = 'Heute';
+                          activityNumber = '0';
+                          activityIcon = '⚡';
+                          lastActiveTime = formatTime(lastActiveDate);
+                        } else if (daysSinceActive === 1) {
+                          activityText = 'Gestern';
+                          activityNumber = '1';
+                          activityIcon = '⚡';
+                          lastActiveTime = `${formatDate(lastActiveDate)} ${formatTime(lastActiveDate)}`;
+                        } else if (daysSinceActive < 7) {
+                          activityText = 'Vor Tagen';
+                          activityNumber = daysSinceActive.toString();
+                          activityIcon = '📱';
+                          lastActiveTime = `${formatDate(lastActiveDate)} ${formatTime(lastActiveDate)}`;
+                        } else if (daysSinceActive < 30) {
+                          const weeks = Math.floor(daysSinceActive / 7);
+                          activityText = weeks === 1 ? 'Vor Woche' : 'Vor Wochen';
+                          activityNumber = weeks.toString();
+                          activityIcon = '📱';
+                          lastActiveTime = lastActiveDate.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + formatTime(lastActiveDate);
+                        } else if (daysSinceActive < 365) {
+                          const months = Math.floor(daysSinceActive / 30);
+                          activityText = months === 1 ? 'Vor Monat' : 'Vor Monaten';
+                          activityNumber = months.toString();
+                          activityIcon = '💤';
+                          lastActiveTime = lastActiveDate.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' });
+                        } else {
+                          const years = Math.floor(daysSinceActive / 365);
+                          activityText = years === 1 ? 'Vor Jahr' : 'Vor Jahren';
+                          activityNumber = years.toString();
+                          activityIcon = '💤';
+                          lastActiveTime = lastActiveDate.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' });
+                        }
+                      }
+                      
+                      // Bestimme Win-Rate für Form-Badge
+                      const formWinRate = Math.round(recentWinRate);
+                      
+                      // Berechne Trend für Form-Badge (Vergleich mit vorherigen 5 Spielen)
+                      let formTrend = null;
+                      if (matchResults.length >= 10) {
+                        const previous5Matches = [...matchResults].reverse().slice(5, 10);
+                        const previousWins = previous5Matches.filter(m => m.won).length;
+                        const previousWinRate = (previousWins / previous5Matches.length) * 100;
+                        
+                        if (recentWinRate > previousWinRate + 10) {
+                          formTrend = '⬆️'; // Verbessert
+                        } else if (recentWinRate < previousWinRate - 10) {
+                          formTrend = '⬇️'; // Verschlechtert
+                        } else {
+                          formTrend = '➡️'; // Stabil
+                        }
+                      }
+                      
+                      return (
+                        <>
+                          {/* 3D Badges */}
+                        <div style={{
+                            marginBottom: '1.5rem',
+                          display: 'flex',
+                            gap: '1.5rem',
+                            flexWrap: 'wrap',
+                            justifyContent: 'center'
+                          }}>
+                            {/* Badge: Aktuelle Form (Verbessert) */}
+                            <div className="badge-3d-card theme-primary">
+                              <div className="badge-3d-circle-container">
+                                <div className="badge-3d-circle">
+                                  <span className="badge-3d-icon">
+                                    {formTag.icon}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="badge-3d-number">{formWinRate}%</div>
+                          <div style={{
+                                fontSize: '0.75rem',
+                                color: '#6b7280',
+                                textAlign: 'center',
+                                marginTop: '0.5rem'
+                              }}>
+                                {formTag.text}
+                              </div>
+                              {/* Win-Loss Record */}
+                              <div style={{
+                                fontSize: '0.65rem',
+                                color: '#9ca3af',
+                                textAlign: 'center',
+                                marginTop: '0.25rem',
+                                fontWeight: '600'
+                              }}>
+                                {recentWins} Sieg{recentWins !== 1 ? 'e' : ''}, {recentLosses} Niederlage{recentLosses !== 1 ? 'n' : ''} {formTrend && <span style={{ marginLeft: '0.25rem' }}>{formTrend}</span>}
+                              </div>
+                            </div>
+                            
+                            {/* Badge: Aktivität (mit Zeit) */}
+                            <div className="badge-3d-card theme-secondary">
+                              <div className="badge-3d-circle-container">
+                                <div className="badge-3d-circle">
+                                  <span className="badge-3d-icon">
+                                    {activityIcon}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="badge-3d-number">{activityNumber}</div>
+                              <div style={{
+                                fontSize: '0.75rem',
+                                color: '#6b7280',
+                                textAlign: 'center',
+                                marginTop: '0.5rem',
+                                lineHeight: 1.3
+                              }}>
+                                {activityText}
+                              </div>
+                              {/* Genauere Zeit-Anzeige */}
+                              {lastActiveTime && (
+                                <div style={{
+                                  fontSize: '0.6rem',
+                                  color: '#9ca3af',
+                                  textAlign: 'center',
+                                  marginTop: '0.25rem',
+                                  fontWeight: '500'
+                                }}>
+                                  {lastActiveTime}
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* Badge: Ranking */}
+                            <div className="badge-3d-card theme-warning">
+                              <div className="badge-3d-circle-container">
+                                <div className="badge-3d-circle">
+                                  <span className="badge-3d-icon">
+                                    🏆
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="badge-3d-number">
+                                {searchPlayerResults.bestRank !== null && searchPlayerResults.bestRank !== undefined ? `#${searchPlayerResults.bestRank}` : '–'}
+                              </div>
+                              <div style={{
+                                fontSize: '0.75rem',
+                                color: '#6b7280',
+                                textAlign: 'center',
+                                marginTop: '0.5rem',
+                                lineHeight: 1.3
+                              }}>
+                                {searchPlayerResults.bestRank !== null && searchPlayerResults.bestRank !== undefined ? (
+                                  searchPlayerResults.bestRankTeam ? (
+                                    <>
+                                      {searchPlayerResults.bestRankTeam.category}
+                                      {searchPlayerResults.bestRankTeam.team_name ? ` ${searchPlayerResults.bestRankTeam.team_name}` : ''}
+                                    </>
+                                  ) : 'Team-Ranking'
+                                ) : 'Kein Ranking'}
+                              </div>
+                            </div>
+                            
+                            {/* Badge: Tennismates/Follower */}
+                            <div className="badge-3d-card theme-danger">
+                              <div className="badge-3d-circle-container">
+                                <div className="badge-3d-circle">
+                                  <span className="badge-3d-icon">
+                                    👥
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="badge-3d-number">
+                                {(searchPlayerResults.tennismateCount || 0) + (searchPlayerResults.followingCount || 0) > 0 
+                                  ? (searchPlayerResults.tennismateCount || 0) + (searchPlayerResults.followingCount || 0) 
+                                  : '–'}
+                              </div>
+                              <div style={{
+                                fontSize: '0.75rem',
+                                color: '#6b7280',
+                                textAlign: 'center',
+                                marginTop: '0.5rem',
+                                lineHeight: 1.3
+                              }}>
+                                {searchPlayerResults.tennismateCount > 0 || searchPlayerResults.followingCount > 0 ? (
+                                  searchPlayerResults.tennismateCount > 0 && searchPlayerResults.followingCount > 0 ? (
+                                    `${searchPlayerResults.tennismateCount + searchPlayerResults.followingCount} Follower`
+                                  ) : searchPlayerResults.tennismateCount > 0 ? (
+                                    `${searchPlayerResults.tennismateCount} ${searchPlayerResults.tennismateCount === 1 ? 'Follower' : 'Follower'}`
+                                  ) : (
+                                    `${searchPlayerResults.followingCount} ${searchPlayerResults.followingCount === 1 ? 'Follower' : 'Follower'}`
+                                  )
+                                ) : 'Keine Follower'}
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {/* LK-Formkurve */}
+                          {normalizedData.length > 1 && (
+                            <div style={{
+                              marginBottom: '1.5rem',
+                              padding: '1rem',
+                              background: '#f9fafb',
+                              borderRadius: '12px',
+                              border: '1px solid #e5e7eb'
+                            }}>
+                              <div style={{
+                                fontSize: '0.875rem',
+                                fontWeight: '600',
+                                color: '#374151',
+                                marginBottom: '0.5rem'
+                              }}>
+                                📊 LK-Formkurve ({matchResults.length} Spiele)
+                              </div>
+                              <div style={{
+                                fontSize: '0.75rem',
+                                color: '#6b7280',
+                                marginBottom: '1rem'
+                              }}>
+                                Start: LK {startLK.toFixed(1)} → Aktuell: LK {currentLK.toFixed(1)} ({currentLK < startLK ? '📈' : currentLK > startLK ? '📉' : '➡️'} {currentLK < startLK ? (startLK - currentLK).toFixed(1) : currentLK > startLK ? (currentLK - startLK).toFixed(1) : '0.0'})
+                              </div>
+                              <svg 
+                                width="100%" 
+                                height="140" 
+                                viewBox="0 0 400 140" 
+                                style={{ 
+                                  overflow: 'visible',
+                                  background: 'white',
+                                  borderRadius: '8px'
+                                }}
+                              >
+                                {/* Y-Achse Labels (LK-Werte) */}
+                                <text x="15" y="20" fontSize="9" fill="#6b7280" textAnchor="end">{maxLK.toFixed(1)}</text>
+                                <text x="15" y="70" fontSize="9" fill="#6b7280" textAnchor="end">{((minLK + maxLK) / 2).toFixed(1)}</text>
+                                <text x="15" y="120" fontSize="9" fill="#6b7280" textAnchor="end">{minLK.toFixed(1)}</text>
+                                
+                                {/* Grid-Linien (horizontal) */}
+                                <line x1="20" y1="20" x2="380" y2="20" stroke="#e5e7eb" strokeWidth="1" strokeDasharray="2,2" />
+                                <line x1="20" y1="70" x2="380" y2="70" stroke="#e5e7eb" strokeWidth="1" strokeDasharray="2,2" />
+                                <line x1="20" y1="120" x2="380" y2="120" stroke="#e5e7eb" strokeWidth="1" strokeDasharray="2,2" />
+                                
+                                {/* LK-Kurve Linie */}
+                                <polyline
+                                  points={normalizedData.map((d, idx) => {
+                                    const x = 20 + (idx / (normalizedData.length - 1 || 1)) * 360;
+                                    const y = 20 + (d.normalizedY / 100) * 100;
+                                    return `${x},${y}`;
+                                  }).join(' ')}
+                                  fill="none"
+                                  stroke="#10b981"
+                                  strokeWidth="3"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                                
+                                {/* Füllung unter der Kurve */}
+                                <polygon
+                                  points={`20,120 ${normalizedData.map((d, idx) => {
+                                    const x = 20 + (idx / (normalizedData.length - 1 || 1)) * 360;
+                                    const y = 20 + (d.normalizedY / 100) * 100;
+                                    return `${x},${y}`;
+                                  }).join(' ')} 380,120`}
+                                  fill="url(#lkGradient)"
+                                  opacity="0.2"
+                                />
+                                <defs>
+                                  <linearGradient id="lkGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                    <stop offset="0%" stopColor="#10b981" stopOpacity="0.3" />
+                                    <stop offset="100%" stopColor="#10b981" stopOpacity="0.1" />
+                                  </linearGradient>
+                                </defs>
+                                
+                                {/* Punkte für jedes Spiel mit LK-Wert */}
+                                {normalizedData.map((d, idx) => {
+                                  const x = 20 + (idx / (normalizedData.length - 1 || 1)) * 360;
+                                  const y = 20 + (d.normalizedY / 100) * 100;
+                                  return (
+                                    <g key={idx}>
+                                      <circle
+                                        cx={x}
+                                        cy={y}
+                                        r="5"
+                                        fill={d.won ? '#10b981' : '#ef4444'}
+                                        stroke="white"
+                                        strokeWidth="2"
+                                      />
+                                      {/* LK-Wert als Tooltip (optional, nur bei Hover sichtbar) */}
+                                      <text
+                                        x={x}
+                                        y={y - 8}
+                                        fontSize="8"
+                                        fill="#6b7280"
+                                        textAnchor="middle"
+                                        fontWeight="600"
+                                      >
+                                        {d.lk.toFixed(1)}
+                                      </text>
+                                    </g>
+                                  );
+                                })}
+                                
+                                {/* Start/Ende Labels */}
+                                <text x="20" y="135" fontSize="10" fill="#6b7280" textAnchor="middle">Start</text>
+                                <text x="380" y="135" fontSize="10" fill="#6b7280" textAnchor="middle">Jetzt</text>
+                                
+                                {/* Pfeil für bessere LK (nach oben) */}
+                                <text x="395" y="15" fontSize="12" fill="#10b981">↑</text>
+                                <text x="390" y="25" fontSize="8" fill="#6b7280">besser</text>
+                              </svg>
+                            </div>
+                          )}
+                          
+                          {/* Statistiken Cards */}
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                            gap: '1rem'
+                          }}>
+                            <div style={{
+                              padding: '1rem',
+                            background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                              borderRadius: '12px',
+                            color: 'white',
+                              boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)'
+                            }}>
+                              <div style={{
+                                fontSize: '0.75rem',
+                                opacity: 0.9,
+                                marginBottom: '0.5rem',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.5px'
+                              }}>
+                                Einsätze
+                          </div>
+                          <div style={{
+                                fontSize: '2rem',
+                                fontWeight: '700',
+                                lineHeight: 1
+                              }}>
+                                {searchPlayerResults.matches.length}
+                              </div>
+                            </div>
+                            
+                            <div style={{
+                              padding: '1rem',
+                            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                              borderRadius: '12px',
+                            color: 'white',
+                              boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+                            }}>
+                              <div style={{
+                                fontSize: '0.75rem',
+                                opacity: 0.9,
+                                marginBottom: '0.5rem',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.5px'
+                              }}>
+                                Siege
+                          </div>
+                          <div style={{
+                                fontSize: '2rem',
+                                fontWeight: '700',
+                                lineHeight: 1
+                              }}>
+                                {wins}
+                              </div>
+                            </div>
+                            
+                            <div style={{
+                              padding: '1rem',
+                            background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                              borderRadius: '12px',
+                            color: 'white',
+                              boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)'
+                            }}>
+                              <div style={{
+                                fontSize: '0.75rem',
+                                opacity: 0.9,
+                                marginBottom: '0.5rem',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.5px'
+                              }}>
+                                Niederlagen
+                          </div>
+                              <div style={{
+                                fontSize: '2rem',
+                                fontWeight: '700',
+                                lineHeight: 1
+                              }}>
+                                {losses}
+                        </div>
+                            </div>
+                            
+                            <div style={{
+                              padding: '1rem',
+                              background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                              borderRadius: '12px',
+                              color: 'white',
+                              boxShadow: '0 4px 12px rgba(139, 92, 246, 0.3)'
+                            }}>
+                              <div style={{
+                                fontSize: '0.75rem',
+                                opacity: 0.9,
+                                marginBottom: '0.5rem',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.5px'
+                              }}>
+                                Siegquote
+                              </div>
+                              <div style={{
+                                fontSize: '2rem',
+                                fontWeight: '700',
+                                lineHeight: 1
+                              }}>
+                                {winRate}%
+                              </div>
+                            </div>
+                          </div>
+                        </>
                       );
                     })()}
                   </div>
@@ -2310,8 +3169,24 @@ const Results = () => {
                           <article key={idx} className="ms-card">
                             <header className="ms-head">
                               <h2 className="ms-title">
-                                {result.match_type === 'Einzel' ? '👤 Einzel' : '👥 Doppel'} vs. {result.opponent}
+                                {result.match_type === 'Einzel' ? '👤 Einzel' : '👥 Doppel'} vs. {result.match_type === 'Einzel' ? (result.opponentPlayerName || result.opponent) : (result.opponent1Name && result.opponent2Name ? `${result.opponent1Name} / ${result.opponent2Name}` : (result.opponent1Name || result.opponent))}
                               </h2>
+                              {/* Team-Informationen */}
+                              <div style={{
+                                marginTop: '0.5rem',
+                                fontSize: '0.75rem',
+                                color: '#6b7280',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.25rem'
+                              }}>
+                                <div>
+                                  <span style={{ fontWeight: '600' }}>Für:</span> {result.playerTeam || 'Unbekannt'}
+                                </div>
+                                <div>
+                                  <span style={{ fontWeight: '600' }}>Gegen:</span> {result.opponent || 'Unbekannt'}
+                                </div>
+                              </div>
                             </header>
                             <hr className="ms-divider" />
                             <section className="ms-rows">
@@ -3036,4 +3911,6 @@ const Results = () => {
 };
 
 export default Results;
+
+
 

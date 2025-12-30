@@ -87,11 +87,16 @@ function AppLogin() {
         
         if (result.success) {
           console.log('✅ Login successful, navigating to dashboard...');
+          // ✅ VERBESSERT: Längere Verzögerung, damit State-Updates abgeschlossen sind
+          // Warte auf Auth-State-Update und Player-Daten-Laden
           setTimeout(() => {
             navigate('/');
-          }, 100); // Kurze Verzögerung für State-Update
+          }, 500); // Erhöht von 100ms auf 500ms für stabilere Navigation
         } else {
-          setError(result.error || '❌ Login fehlgeschlagen. Prüfe deine E-Mail und dein Passwort!');
+          // ✅ VERBESSERT: Zeige spezifische Fehlermeldung
+          const errorMsg = result.error || '❌ Login fehlgeschlagen. Prüfe deine E-Mail und dein Passwort!';
+          setError(errorMsg);
+          console.error('❌ Login failed:', errorMsg);
         }
       }
     } catch (err) {

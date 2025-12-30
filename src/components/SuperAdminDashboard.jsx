@@ -10,7 +10,8 @@ import {
   Download,
   RefreshCw,
   CalendarDays,
-  Trophy
+  Trophy,
+  Settings
 } from 'lucide-react';
 import ImportTab from './ImportTab';
 import OverviewTab from './superadmin/OverviewTab';
@@ -22,7 +23,8 @@ import TeamPortraitImportTab from './superadmin/TeamPortraitImportTab';
 import ClubRostersTab from './superadmin/ClubRostersTab';
 import GroupsTab from './superadmin/GroupsTab';
 import ActivityLogTab from './superadmin/ActivityLogTab';
-import { findMatchdaysWithoutResultsAfter4Days, runAutoImport, recordAttempt } from '../services/autoMatchResultImportService';
+import TeamsLogoManager from './superadmin/TeamsLogoManager';
+import { findMatchdaysWithoutResultsAfter4Days, runAutoImport, recordAttempt, checkMatchdayResultsComplete } from '../services/autoMatchResultImportService';
 import './Dashboard.css';
 import './SuperAdminDashboard.css';
 
@@ -3821,12 +3823,34 @@ function SuperAdminDashboard() {
           );
           await loadDashboardData();
           
-          // ✅ Aktualisiere fehlende Ergebnisse im localStorage nach Import (mit kurzer Verzögerung, damit DB-Update abgeschlossen ist)
+          // ✅ VERBESSERT: Prüfe explizit, ob die Ergebnisse vollständig sind, bevor wir die Liste aktualisieren
           if (applyImport) {
             try {
               // Warte kurz, damit DB-Transaktionen abgeschlossen sind
-              await new Promise(resolve => setTimeout(resolve, 1000));
+              await new Promise(resolve => setTimeout(resolve, 1500));
               
+              // ✅ NEU: Prüfe explizit, ob dieser Matchday vollständige Ergebnisse hat
+              const completenessCheck = await checkMatchdayResultsComplete(supabase, match.id);
+              
+              if (completenessCheck.complete) {
+                console.log(`[handleLoadMeetingDetails] ✅ Matchday ${match.id} hat vollständige Ergebnisse nach Import:`, {
+                  matchdayId: match.id,
+                  resultsCount: completenessCheck.resultsCount,
+                  completeCount: completenessCheck.completeCount,
+                  walkoverCount: completenessCheck.walkoverCount
+                });
+              } else {
+                console.log(`[handleLoadMeetingDetails] ⚠️ Matchday ${match.id} hat noch unvollständige Ergebnisse:`, {
+                  matchdayId: match.id,
+                  reason: completenessCheck.reason,
+                  resultsCount: completenessCheck.resultsCount,
+                  completeCount: completenessCheck.completeCount,
+                  missingPlayersCount: completenessCheck.missingPlayersCount,
+                  missingSetsCount: completenessCheck.missingSetsCount
+                });
+              }
+              
+              // Lade die aktualisierte Liste der fehlenden Ergebnisse
               const updatedMissingResults = await findMatchdaysWithoutResultsAfter4Days(supabase);
               const result = updatedMissingResults || [];
               localStorage.setItem('superAdminMatchdaysWithoutResults', JSON.stringify({
@@ -4017,8 +4041,25 @@ function SuperAdminDashboard() {
           if (successCount > 0) {
             try {
               // Warte kurz, damit alle DB-Transaktionen abgeschlossen sind
-              await new Promise(resolve => setTimeout(resolve, 1000));
+              await new Promise(resolve => setTimeout(resolve, 1500));
               
+              // ✅ NEU: Prüfe explizit, ob die importierten Matchdays vollständige Ergebnisse haben
+              // Vereinfacht: Prüfe alle Matchdays, die wir gerade importiert haben
+              const importedMatchIds = [];
+              for (let i = 0; i < Math.min(successCount, matchdaysWithoutResults.length); i++) {
+                importedMatchIds.push(matchdaysWithoutResults[i].id);
+              }
+              
+              for (const matchdayId of importedMatchIds) {
+                const completenessCheck = await checkMatchdayResultsComplete(supabase, matchdayId);
+                if (completenessCheck.complete) {
+                  console.log(`[handleLoadDetailsForAllMatches] ✅ Matchday ${matchdayId} hat vollständige Ergebnisse nach Import`);
+                } else {
+                  console.log(`[handleLoadDetailsForAllMatches] ⚠️ Matchday ${matchdayId} hat noch unvollständige Ergebnisse:`, completenessCheck);
+                }
+              }
+              
+              // Lade die aktualisierte Liste der fehlenden Ergebnisse
               const updatedMissingResults = await findMatchdaysWithoutResultsAfter4Days(supabase);
               const result = updatedMissingResults || [];
               localStorage.setItem('superAdminMatchdaysWithoutResults', JSON.stringify({
@@ -4708,6 +4749,76 @@ function SuperAdminDashboard() {
             } else if (url.pathname.includes('leaguePage')) {
               // Es ist bereits eine Übersichts-URL
               leagueOverviewUrl = sourceUrl;
+            } else if (url.pathname.includes('teamPortrait')) {
+              // ✅ WICHTIG: teamPortrait URLs müssen zu leaguePage URLs konvertiert werden
+              const championship = url.searchParams.get('championship');
+              if (championship) {
+                // Bestimme tab basierend auf Liga (erste Matchday als Referenz)
+                const firstMatchday = matchdays[0];
+                if (firstMatchday) {
+                  // Bestimme tab basierend auf Liga
+                  const league = firstMatchday.league || '';
+                  let tab = 2; // Default: Damen/Herren
+                  
+                  if (league.includes('Köln-Leverkusen')) {
+                    const categoryMatch = league.match(/(Damen|Herren)(?:\s+(\d+))?/i);
+                    let categoryForTab = categoryMatch ? categoryMatch[1] : '';
+                    if (categoryMatch && categoryMatch[2]) {
+                      const number = parseInt(categoryMatch[2], 10);
+                      if (number >= 30) {
+                        categoryForTab = `${categoryMatch[1]} ${number}`;
+                      }
+                    }
+                    
+                    if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(categoryForTab)) {
+                      tab = 3; // Senioren
+                    } else {
+                      tab = 2; // Offene Herren/Damen
+                    }
+                  } else {
+                    // TVM Ligen: Versuche Kategorie aus Team zu holen
+                    try {
+                      const { data: teamSeason } = await supabase
+                        .from('team_seasons')
+                        .select('team_id')
+                        .eq('group_name', firstMatchday.group_name)
+                        .eq('season', firstMatchday.season)
+                        .eq('league', firstMatchday.league)
+                        .limit(1)
+                        .maybeSingle();
+                      
+                      if (teamSeason?.team_id) {
+                        const { data: teamInfo } = await supabase
+                          .from('team_info')
+                          .select('category')
+                          .eq('id', teamSeason.team_id)
+                          .maybeSingle();
+                        
+                        if (teamInfo?.category) {
+                          const normalizedCategory = normalizeCategory(teamInfo.category);
+                          if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(normalizedCategory)) {
+                            tab = 3; // Senioren
+                          } else {
+                            tab = 2; // Offene Herren/Damen
+                          }
+                        }
+                      }
+                    } catch (error) {
+                      console.warn(`[handleUpdateMeetingIdsForPastMatches] ⚠️ Fehler beim Laden der Kategorie:`, error);
+                      tab = 2;
+                    }
+                  }
+                  
+                  leagueOverviewUrl = `https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=${encodeURIComponent(championship)}&tab=${tab}`;
+                  console.log(`[handleUpdateMeetingIdsForPastMatches] ✅ teamPortrait URL konvertiert zu leaguePage: ${leagueOverviewUrl} (original: ${sourceUrl})`);
+                }
+              } else {
+                // Falls kein championship Parameter, bestimme basierend auf Liga
+                const firstMatchday = matchdays[0];
+                if (firstMatchday) {
+                  leagueOverviewUrl = await getLeagueOverviewUrl(firstMatchday.league, firstMatchday.group_name, firstMatchday.season);
+                }
+              }
             } else {
               // Unbekannte URL-Struktur, bestimme basierend auf Liga
               const firstMatchday = matchdays[0];
@@ -5150,6 +5261,8 @@ function SuperAdminDashboard() {
   );
 
   const renderClubs = () => <ClubsTab clubs={clubs} teams={teams} players={players} />;
+  
+  const renderTeamsLogos = () => <TeamsLogoManager clubs={clubs} teams={teams} />;
 
   const renderPlayers = () => (
     <PlayersTab
@@ -5255,6 +5368,160 @@ function SuperAdminDashboard() {
   const renderActivity = () => <ActivityLogTab />;
 
   // ---------------------------------------------------------------------------
+  // Settings Tab - Feature Toggles
+  // ---------------------------------------------------------------------------
+  const [settings, setSettings] = useState({});
+  const [loadingSettings, setLoadingSettings] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
+
+  // Lade Settings beim Öffnen des Tabs
+  useEffect(() => {
+    if (selectedTab === 'settings') {
+      loadSettings();
+    }
+  }, [selectedTab]);
+
+  const loadSettings = async () => {
+    setLoadingSettings(true);
+    try {
+      const { data, error } = await supabase
+        .from('app_settings')
+        .select('*')
+        .order('setting_key');
+
+      if (error) {
+        console.error('❌ Fehler beim Laden der Settings:', error);
+        return;
+      }
+
+      const settingsMap = {};
+      (data || []).forEach(setting => {
+        settingsMap[setting.setting_key] = setting;
+      });
+      setSettings(settingsMap);
+    } catch (error) {
+      console.error('❌ Fehler beim Laden der Settings:', error);
+    } finally {
+      setLoadingSettings(false);
+    }
+  };
+
+  const handleToggleSetting = async (key, currentValue) => {
+    const newValue = currentValue === 'true' ? 'false' : 'true';
+    
+    try {
+      const { error } = await supabase
+        .from('app_settings')
+        .update({ 
+          setting_value: newValue,
+          updated_at: new Date().toISOString()
+        })
+        .eq('setting_key', key);
+
+      if (error) {
+        console.error('❌ Fehler beim Speichern der Einstellung:', error);
+        alert('Fehler beim Speichern: ' + error.message);
+        return;
+      }
+
+      // Aktualisiere lokalen State
+      setSettings(prev => ({
+        ...prev,
+        [key]: {
+          ...prev[key],
+          setting_value: newValue
+        }
+      }));
+
+      setSettingsSaved(true);
+      setTimeout(() => setSettingsSaved(false), 3000);
+    } catch (error) {
+      console.error('❌ Fehler beim Speichern:', error);
+      alert('Fehler beim Speichern: ' + error.message);
+    }
+  };
+
+  const renderSettings = () => {
+    if (loadingSettings) {
+      return <div className="loading-placeholder">Lade Einstellungen…</div>;
+    }
+
+    const gamificationBanner = settings['gamification_banner_enabled'];
+
+    return (
+      <div className="card" style={{ padding: '2rem' }}>
+        <h2 style={{ marginBottom: '2rem' }}>⚙️ App-Einstellungen</h2>
+        
+        {settingsSaved && (
+          <div style={{
+            padding: '1rem',
+            backgroundColor: '#d1fae5',
+            color: '#065f46',
+            borderRadius: '0.5rem',
+            marginBottom: '1.5rem',
+            border: '1px solid #10b981'
+          }}>
+            ✅ Einstellung erfolgreich gespeichert!
+          </div>
+        )}
+
+        <div style={{ marginBottom: '2rem' }}>
+          <h3 style={{ marginBottom: '1rem', fontSize: '1.125rem', fontWeight: '600' }}>
+            Feature Toggles
+          </h3>
+          
+          {gamificationBanner ? (
+            <div style={{
+              padding: '1.5rem',
+              border: '1px solid #e5e7eb',
+              borderRadius: '0.75rem',
+              backgroundColor: '#f9fafb',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '1rem'
+            }}>
+              <div style={{ flex: 1 }}>
+                <h4 style={{ margin: '0 0 0.5rem 0', fontWeight: '600' }}>
+                  Gamification Banner
+                </h4>
+                <p style={{ margin: 0, fontSize: '0.875rem', color: '#6b7280' }}>
+                  {gamificationBanner.description || 'Aktiviert/Deaktiviert den "Spielergebnisse eintragen lohnt sich!" Banner auf der Startseite'}
+                </p>
+              </div>
+              <button
+                onClick={() => handleToggleSetting('gamification_banner_enabled', gamificationBanner.setting_value)}
+                style={{
+                  padding: '0.5rem 1rem',
+                  borderRadius: '0.5rem',
+                  border: 'none',
+                  backgroundColor: gamificationBanner.setting_value === 'true' ? '#10b981' : '#6b7280',
+                  color: 'white',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'background-color 0.2s'
+                }}
+              >
+                {gamificationBanner.setting_value === 'true' ? '✅ Aktiviert' : '❌ Deaktiviert'}
+              </button>
+            </div>
+          ) : (
+            <div style={{
+              padding: '1rem',
+              backgroundColor: '#fef3c7',
+              color: '#92400e',
+              borderRadius: '0.5rem',
+              border: '1px solid #f59e0b'
+            }}>
+              ⚠️ Einstellung "gamification_banner_enabled" nicht in der Datenbank gefunden. Bitte führe die Migration aus.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ---------------------------------------------------------------------------
   // UI Rendering
   // ---------------------------------------------------------------------------
   return (
@@ -5265,6 +5532,9 @@ function SuperAdminDashboard() {
         </button>
         <button className={selectedTab === 'clubs' ? 'active' : ''} onClick={() => setSelectedTab('clubs')}>
           <Building2 size={16} /> Vereine
+        </button>
+        <button className={selectedTab === 'teams-logos' ? 'active' : ''} onClick={() => setSelectedTab('teams-logos')}>
+          <Trophy size={16} /> Team-Logos
         </button>
         <button className={selectedTab === 'players' ? 'active' : ''} onClick={() => setSelectedTab('players')}>
           <Users size={16} /> Spieler
@@ -5289,6 +5559,9 @@ function SuperAdminDashboard() {
         </button>
         <button className={selectedTab === 'activity' ? 'active' : ''} onClick={() => setSelectedTab('activity')}>
           <Activity size={16} /> Aktivität
+        </button>
+        <button className={selectedTab === 'settings' ? 'active' : ''} onClick={() => setSelectedTab('settings')}>
+          <Settings size={16} /> Einstellungen
         </button>
       </div>
 
@@ -5324,6 +5597,7 @@ function SuperAdminDashboard() {
         <div className="dashboard-content">
           {selectedTab === 'overview' && renderOverview()}
           {selectedTab === 'clubs' && renderClubs()}
+          {selectedTab === 'teams-logos' && renderTeamsLogos()}
           {selectedTab === 'players' && renderPlayers()}
           {selectedTab === 'matchdays' && renderMatchdays()}
           {selectedTab === 'scraper' && renderScraper()}
@@ -5332,6 +5606,7 @@ function SuperAdminDashboard() {
           {selectedTab === 'club-rosters' && <ClubRostersTab />}
           {selectedTab === 'groups' && renderGroups()}
           {selectedTab === 'activity' && renderActivity()}
+          {selectedTab === 'settings' && renderSettings()}
         </div>
       )}
     </div>
