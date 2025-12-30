@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, UserPlus, UserMinus } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useData } from '../context/DataContext';
+import { useAuth } from '../context/AuthContext';
 import TeamView from './TeamView';
 import './Results.css';
 import './Dashboard.css';
@@ -12,6 +13,7 @@ const Results = () => {
   
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { currentUser, player: currentPlayer } = useAuth();
   const { 
     players, 
     playerTeams, 
@@ -40,6 +42,10 @@ const Results = () => {
   const [searchResults, setSearchResults] = useState(null);
   const [activeSearchView, setActiveSearchView] = useState(null); // { type: 'club'|'team'|'player', id: string, name: string }
   const [searchHistory, setSearchHistory] = useState([]); // Für Navigation zurück
+  
+  // 🎯 SOCIAL FEATURES (Follow/Unfollow)
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [socialLoading, setSocialLoading] = useState(false);
   
   // Nutze Matches aus DataContext
   const matches = dataContextMatches;
@@ -1744,11 +1750,82 @@ const Results = () => {
         bestRankTeam
       });
       
+      // Lade Social Features (Follow-Status) wenn eingeloggt
+      if (currentPlayer?.id && playerData.id !== currentPlayer.id) {
+        loadSocialFeatures(playerData.id);
+      }
+      
     } catch (error) {
       console.error('❌ Error loading player results for search:', error);
       setSearchPlayerResults(null);
     } finally {
       setLoadingSearchPlayerResults(false);
+    }
+  };
+  
+  // 🎯 Lade Social Features für gesuchten Spieler
+  const loadSocialFeatures = async (targetPlayerId) => {
+    if (!currentPlayer?.id || !targetPlayerId) return;
+    
+    try {
+      // Prüfe ob aktueller Spieler dem Ziel-Spieler folgt
+      const { data: followData } = await supabase
+        .from('player_followers')
+        .select('id, follower_id, following_id, is_mutual')
+        .eq('follower_id', currentPlayer.id)
+        .eq('following_id', targetPlayerId)
+        .maybeSingle();
+      
+      setIsFollowing(!!followData);
+      
+      console.log('✅ Social features loaded:', {
+        isFollowing: !!followData,
+        targetPlayerId
+      });
+    } catch (error) {
+      console.error('❌ Error loading social features:', error);
+    }
+  };
+  
+  // 🎯 FOLLOW/UNFOLLOW HANDLER
+  const handleFollowToggle = async (targetPlayerId) => {
+    if (!currentPlayer?.id || !targetPlayerId || socialLoading) return;
+    
+    setSocialLoading(true);
+    
+    try {
+      if (isFollowing) {
+        // UNFOLLOW
+        const { error } = await supabase
+          .from('player_followers')
+          .delete()
+          .eq('follower_id', currentPlayer.id)
+          .eq('following_id', targetPlayerId);
+        
+        if (error) throw error;
+        
+        setIsFollowing(false);
+        console.log('✅ Unfollowed player:', targetPlayerId);
+      } else {
+        // FOLLOW
+        const { error } = await supabase
+          .from('player_followers')
+          .insert({
+            follower_id: currentPlayer.id,
+            following_id: targetPlayerId
+          });
+        
+        if (error) throw error;
+        
+        setIsFollowing(true);
+        console.log('✅ Followed player:', targetPlayerId);
+      }
+      
+    } catch (error) {
+      console.error('❌ Error toggling follow:', error);
+      alert('Fehler beim Folgen/Entfolgen. Bitte versuche es erneut.');
+    } finally {
+      setSocialLoading(false);
     }
   };
 
@@ -2426,20 +2503,65 @@ const Results = () => {
                         }}
                       />
                       <div style={{ flex: 1 }}>
-                        <h2 style={{
-                          fontSize: '1.5rem',
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '1rem',
+                          flexWrap: 'wrap'
+                        }}>
+                          <div style={{ flex: 1, minWidth: '200px' }}>
+                            <h2 style={{
+                              fontSize: '1.5rem',
                           fontWeight: '700',
                           color: '#1f2937',
-                          margin: '0 0 0.25rem 0'
+                              margin: '0 0 0.25rem 0'
                         }}>
                           {searchPlayerResults.player.name}
-                        </h2>
+                            </h2>
                         <div style={{
-                          fontSize: '1rem',
+                              fontSize: '1rem',
                           color: '#6b7280',
-                          fontWeight: '500'
+                              fontWeight: '500'
                         }}>
                           {searchPlayerResults.player.current_lk || searchPlayerResults.player.season_start_lk || searchPlayerResults.player.ranking || 'LK ?'}
+                            </div>
+                          </div>
+                          {/* Follow-Button (nur wenn eingeloggt und nicht eigenes Profil) */}
+                          {currentPlayer?.id && searchPlayerResults.player.id !== currentPlayer.id && (
+                            <button
+                              onClick={() => handleFollowToggle(searchPlayerResults.player.id)}
+                              disabled={socialLoading}
+                              className="btn"
+                              style={{
+                                background: isFollowing 
+                                  ? 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)' 
+                                  : 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                                color: isFollowing ? '#4b5563' : 'white',
+                                border: isFollowing ? '2px solid #d1d5db' : '2px solid #6d28d9',
+                                padding: '0.5rem 1rem',
+                                fontSize: '0.875rem',
+                                fontWeight: '700',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                opacity: socialLoading ? 0.6 : 1,
+                                whiteSpace: 'nowrap'
+                              }}
+                            >
+                              {isFollowing ? (
+                                <>
+                                  <UserMinus size={18} />
+                                  Entfolgen
+                                </>
+                              ) : (
+                                <>
+                                  <UserPlus size={18} />
+                                  Folgen
+                                </>
+                              )}
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
