@@ -2334,19 +2334,19 @@ function Dashboard() {
                   // Aktivitäts-Badge (Prüfe ob aktueller Spieler eingeloggt ist)
                   const hasUserAccount = player.user_id !== null && player.user_id !== undefined;
                   const isCurrentUser = currentUser && player.user_id === currentUser.id;
+                  let activityDisplayText = '';
                   let activityText = '';
-                  let activityNumber = '';
                   let activityIcon = '💤';
                   let lastActiveTime = null;
                   
                   if (!hasUserAccount) {
+                    activityDisplayText = 'Nicht in App';
                     activityText = 'Nicht in App aktiv';
-                    activityNumber = '–';
                     activityIcon = '🚫';
                   } else if (isCurrentUser) {
-                    // Aktueller Spieler ist eingeloggt = Jetzt aktiv
+                    // Aktueller Spieler ist eingeloggt = Online
+                    activityDisplayText = 'Online';
                     activityText = 'Jetzt aktiv';
-                    activityNumber = '0';
                     activityIcon = '⚡';
                     lastActiveTime = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
                   } else {
@@ -2362,36 +2362,36 @@ function Dashboard() {
                     const formatDayOfWeek = (date) => date.toLocaleDateString('de-DE', { weekday: 'short' });
                     
                     if (diffDays === 0) {
+                      activityDisplayText = `Heute ${formatTime(lastActiveDate)}`;
                       activityText = 'Heute';
-                      activityNumber = '0';
                       activityIcon = '⚡';
                       lastActiveTime = formatTime(lastActiveDate);
                     } else if (diffDays === 1) {
+                      activityDisplayText = `Gestern ${formatTime(lastActiveDate)}`;
                       activityText = 'Gestern';
-                      activityNumber = '1';
                       activityIcon = '⚡';
                       lastActiveTime = `${formatDayOfWeek(lastActiveDate)} ${formatTime(lastActiveDate)}`;
                     } else if (diffDays < 7) {
+                      activityDisplayText = `Vor ${diffDays} Tag${diffDays > 1 ? 'en' : ''}`;
                       activityText = 'Vor Tagen';
-                      activityNumber = diffDays.toString();
                       activityIcon = '📱';
                       lastActiveTime = `${formatDayOfWeek(lastActiveDate)} ${formatTime(lastActiveDate)}`;
                     } else if (diffDays < 30) {
                       const weeks = Math.floor(diffDays / 7);
+                      activityDisplayText = `Vor ${weeks} Woche${weeks > 1 ? 'n' : ''}`;
                       activityText = weeks === 1 ? 'Vor Woche' : 'Vor Wochen';
-                      activityNumber = weeks.toString();
                       activityIcon = '📱';
                       lastActiveTime = `${formatDateShort(lastActiveDate)} ${formatTime(lastActiveDate)}`;
                     } else if (diffDays < 365) {
                       const months = Math.floor(diffDays / 30);
+                      activityDisplayText = `Vor ${months} Monat${months > 1 ? 'en' : ''}`;
                       activityText = months === 1 ? 'Vor Monat' : 'Vor Monaten';
-                      activityNumber = months.toString();
                       activityIcon = '💤';
                       lastActiveTime = formatDateShort(lastActiveDate);
                     } else {
                       const years = Math.floor(diffDays / 365);
+                      activityDisplayText = `Vor ${years} Jahr${years > 1 ? 'en' : ''}`;
                       activityText = years === 1 ? 'Vor Jahr' : 'Vor Jahren';
-                      activityNumber = years.toString();
                       activityIcon = '💤';
                       lastActiveTime = formatDateLong(lastActiveDate);
                     }
@@ -2467,17 +2467,13 @@ function Dashboard() {
                             </span>
                           </div>
                         </div>
-                        <div className="badge-3d-number">{activityNumber}</div>
-                        <div style={{
-                          fontSize: '0.75rem',
-                          color: '#6b7280',
-                          textAlign: 'center',
-                          marginTop: '0.5rem',
-                          lineHeight: 1.3
+                        <div className="badge-3d-number" style={{
+                          fontSize: '1rem',
+                          lineHeight: 1.4
                         }}>
-                          {activityText}
+                          {activityDisplayText}
                         </div>
-                        {lastActiveTime && (
+                        {lastActiveTime && activityText !== 'Jetzt aktiv' && (
                           <div style={{
                             fontSize: '0.6rem',
                             color: '#9ca3af',

@@ -236,29 +236,53 @@ function calculateSimilarity(str1, str2) {
  */
 async function matchPlayerToUnified(supabase, rosterPlayer) {
   try {
-    // 1. Exakte Übereinstimmung (Name)
+    // 1. Exakte Übereinstimmung (Name) - Normalisiere Namen für besseres Matching
+    // Normalisiere Namen: "Dr. Ellrich, Robert" → "Robert Ellrich", "Mengelkamp, Thomas" → "Thomas Mengelkamp"
+    const normalizeName = (name) => {
+      // Entferne Titel (Dr., Prof., etc.)
+      name = name.replace(/^(Dr\.|Prof\.|Mr\.|Mrs\.|Ms\.)\s*/i, '').trim();
+      // Konvertiere "Nachname, Vorname" → "Vorname Nachname"
+      const commaMatch = name.match(/^([^,]+),\s*(.+)$/);
+      if (commaMatch) {
+        return `${commaMatch[2].trim()} ${commaMatch[1].trim()}`;
+      }
+      return name.trim();
+    };
+    
+    const normalizedRosterName = normalizeName(rosterPlayer.name);
+    
     const { data: exactMatches } = await supabase
       .from('players_unified')
-      .select('id, name, current_lk, tvm_id')
-      .ilike('name', rosterPlayer.name)
-      .limit(5);
+      .select('id, name, current_lk, tvm_id_number')
+      .ilike('name', normalizedRosterName)
+      .limit(10);
     
     if (exactMatches && exactMatches.length > 0) {
+      // Prüfe erst exakte Übereinstimmung mit normalisiertem Namen
       const exactMatch = exactMatches.find(p => 
-        p.name.toLowerCase() === rosterPlayer.name.toLowerCase()
+        p.name.toLowerCase() === normalizedRosterName.toLowerCase()
       );
       if (exactMatch) {
         console.log(`[parse-team-roster] ✅ Exaktes Match gefunden: ${exactMatch.name} (${exactMatch.id})`);
         return { playerId: exactMatch.id, confidence: 100, matchType: 'exact' };
       }
+      
+      // Fallback: Prüfe auch mit Original-Namen (für Fälle wo DB-Name schon normalisiert ist)
+      const originalMatch = exactMatches.find(p => 
+        p.name.toLowerCase() === rosterPlayer.name.toLowerCase()
+      );
+      if (originalMatch) {
+        console.log(`[parse-team-roster] ✅ Exaktes Match gefunden (Original-Format): ${originalMatch.name} (${originalMatch.id})`);
+        return { playerId: originalMatch.id, confidence: 100, matchType: 'exact' };
+      }
     }
     
-    // 2. TVM-ID Match (falls vorhanden)
+    // 2. TVM-ID Match (falls vorhanden) - WICHTIG: Spalte heißt tvm_id_number, nicht tvm_id!
     if (rosterPlayer.tvmId) {
       const { data: tvmMatches } = await supabase
         .from('players_unified')
-        .select('id, name, tvm_id')
-        .eq('tvm_id', rosterPlayer.tvmId)
+        .select('id, name, tvm_id_number')
+        .eq('tvm_id_number', rosterPlayer.tvmId)
         .maybeSingle();
       
       if (tvmMatches) {
@@ -267,21 +291,32 @@ async function matchPlayerToUnified(supabase, rosterPlayer) {
       }
     }
     
-    // 3. Fuzzy-Matching (Name-Ähnlichkeit)
+    // 3. Fuzzy-Matching (Name-Ähnlichkeit) - mit normalisiertem Namen
     const { data: allPlayers } = await supabase
       .from('players_unified')
-      .select('id, name, current_lk, tvm_id')
+      .select('id, name, current_lk, tvm_id_number')
       .limit(1000); // Begrenze für Performance
     
     if (!allPlayers || allPlayers.length === 0) {
       return { playerId: null, confidence: 0, matchType: 'none' };
     }
     
-    // Berechne Similarity für alle Spieler
+    // Normalisiere Namen-Funktion (wie oben)
+    const normalizeNameForFuzzy = (name) => {
+      name = name.replace(/^(Dr\.|Prof\.|Mr\.|Mrs\.|Ms\.)\s*/i, '').trim();
+      const commaMatch = name.match(/^([^,]+),\s*(.+)$/);
+      if (commaMatch) {
+        return `${commaMatch[2].trim()} ${commaMatch[1].trim()}`;
+      }
+      return name.trim();
+    };
+    
+    // Berechne Similarity für alle Spieler (verwende normalisierten Namen)
     const matches = allPlayers
       .map(player => ({
         ...player,
-        similarity: calculateSimilarity(player.name, rosterPlayer.name)
+        normalizedName: normalizeNameForFuzzy(player.name),
+        similarity: calculateSimilarity(normalizeNameForFuzzy(player.name), normalizedRosterName)
       }))
       .filter(m => m.similarity >= 70) // Mindestens 70% Ähnlichkeit
       .sort((a, b) => b.similarity - a.similarity);

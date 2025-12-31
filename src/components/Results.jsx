@@ -2825,17 +2825,24 @@ const Results = () => {
                       
                       // Berechne Aktivität (wann war der Spieler zuletzt in der App aktiv)
                       const hasUserAccount = searchPlayerResults.player.user_id !== null && searchPlayerResults.player.user_id !== undefined;
+                      const isCurrentUser = currentPlayer && searchPlayerResults.player.user_id === currentPlayer.id;
+                      let activityDisplayText = '';
                       let activityText = '';
-                      let activityNumber = '';
                       let activityIcon = '💤';
                       let lastActiveTime = '';
                       
                       if (!hasUserAccount) {
                         // Spieler ist nicht in der App angemeldet
+                        activityDisplayText = 'Nicht in App';
                         activityText = 'Nicht in App aktiv';
-                        activityNumber = '–';
                         activityIcon = '🚫';
                         lastActiveTime = '';
+                      } else if (isCurrentUser) {
+                        // Aktueller Spieler ist eingeloggt = Online
+                        activityDisplayText = 'Online';
+                        activityText = 'Jetzt aktiv';
+                        activityIcon = '⚡';
+                        lastActiveTime = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
                       } else {
                         // Spieler ist angemeldet - berechne Zeit seit letzter Aktivität
                         const lastActive = searchPlayerResults.player.updated_at || searchPlayerResults.player.created_at;
@@ -2856,36 +2863,36 @@ const Results = () => {
                         };
                         
                         if (daysSinceActive === 0) {
+                          activityDisplayText = `Heute ${formatTime(lastActiveDate)}`;
                           activityText = 'Heute';
-                          activityNumber = '0';
                           activityIcon = '⚡';
                           lastActiveTime = formatTime(lastActiveDate);
                         } else if (daysSinceActive === 1) {
+                          activityDisplayText = `Gestern ${formatTime(lastActiveDate)}`;
                           activityText = 'Gestern';
-                          activityNumber = '1';
                           activityIcon = '⚡';
                           lastActiveTime = `${formatDate(lastActiveDate)} ${formatTime(lastActiveDate)}`;
                         } else if (daysSinceActive < 7) {
+                          activityDisplayText = `Vor ${daysSinceActive} Tag${daysSinceActive > 1 ? 'en' : ''}`;
                           activityText = 'Vor Tagen';
-                          activityNumber = daysSinceActive.toString();
                           activityIcon = '📱';
                           lastActiveTime = `${formatDate(lastActiveDate)} ${formatTime(lastActiveDate)}`;
                         } else if (daysSinceActive < 30) {
                           const weeks = Math.floor(daysSinceActive / 7);
+                          activityDisplayText = `Vor ${weeks} Woche${weeks > 1 ? 'n' : ''}`;
                           activityText = weeks === 1 ? 'Vor Woche' : 'Vor Wochen';
-                          activityNumber = weeks.toString();
                           activityIcon = '📱';
                           lastActiveTime = lastActiveDate.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + formatTime(lastActiveDate);
                         } else if (daysSinceActive < 365) {
                           const months = Math.floor(daysSinceActive / 30);
+                          activityDisplayText = `Vor ${months} Monat${months > 1 ? 'en' : ''}`;
                           activityText = months === 1 ? 'Vor Monat' : 'Vor Monaten';
-                          activityNumber = months.toString();
                           activityIcon = '💤';
                           lastActiveTime = lastActiveDate.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' });
                         } else {
                           const years = Math.floor(daysSinceActive / 365);
+                          activityDisplayText = `Vor ${years} Jahr${years > 1 ? 'en' : ''}`;
                           activityText = years === 1 ? 'Vor Jahr' : 'Vor Jahren';
-                          activityNumber = years.toString();
                           activityIcon = '💤';
                           lastActiveTime = lastActiveDate.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' });
                         }
@@ -2959,18 +2966,13 @@ const Results = () => {
                                   </span>
                                 </div>
                               </div>
-                              <div className="badge-3d-number">{activityNumber}</div>
-                              <div style={{
-                                fontSize: '0.75rem',
-                                color: '#6b7280',
-                                textAlign: 'center',
-                                marginTop: '0.5rem',
-                                lineHeight: 1.3
+                              <div className="badge-3d-number" style={{
+                                fontSize: '1rem',
+                                lineHeight: 1.4
                               }}>
-                                {activityText}
+                                {activityDisplayText}
                               </div>
-                              {/* Genauere Zeit-Anzeige */}
-                              {lastActiveTime && (
+                              {lastActiveTime && activityText !== 'Jetzt aktiv' && (
                                 <div style={{
                                   fontSize: '0.6rem',
                                   color: '#9ca3af',
