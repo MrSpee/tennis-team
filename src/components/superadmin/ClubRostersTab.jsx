@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabaseClient';
-import { Loader, CheckCircle, AlertCircle, Users, Building2, Search, Download, ExternalLink, ChevronDown, ChevronUp, CalendarDays } from 'lucide-react';
+import { Loader, CheckCircle, AlertCircle, Users, Building2, Search, Download, ExternalLink, ChevronDown, ChevronUp, CalendarDays, Trophy } from 'lucide-react';
 import './ClubRostersTab.css';
 
 const ClubRostersTab = () => {
@@ -43,6 +43,9 @@ const ClubRostersTab = () => {
   const [clubsWithRosters, setClubsWithRosters] = useState([]);
   const [loadingClubsOverview, setLoadingClubsOverview] = useState(false);
   const [importingClubIds, setImportingClubIds] = useState(new Set()); // Track welche Clubs gerade importiert werden
+  
+  // Spieler-Daten für Review (um Namen anzuzeigen)
+  const [playerDataMap, setPlayerDataMap] = useState(new Map()); // Map von playerId -> player data
   
   // Lade Vereine und Teams beim Mount
   useEffect(() => {
@@ -272,6 +275,34 @@ const ClubRostersTab = () => {
       }
       
       setParsedData(result);
+      
+      // Logge Matching-Ergebnisse falls vorhanden
+      if (result.matchingResults) {
+        console.log('[ClubRostersTab] ✅ Matching-Ergebnisse erhalten:', result.matchingResults);
+        
+        // Lade Spieler-Daten für alle gematchten Spieler
+        const playerIds = new Set();
+        result.matchingResults.forEach(teamResult => {
+          teamResult.matchingResults.forEach(({ matchResult }) => {
+            if (matchResult.playerId) {
+              playerIds.add(matchResult.playerId);
+            }
+          });
+        });
+        
+        if (playerIds.size > 0) {
+          const { data: players } = await supabase
+            .from('players_unified')
+            .select('id, name, tvm_id_number, user_id, email, current_lk')
+            .in('id', Array.from(playerIds));
+          
+          if (players) {
+            const map = new Map();
+            players.forEach(p => map.set(p.id, p));
+            setPlayerDataMap(map);
+          }
+        }
+      }
       
       // Auto-Match Verein basierend auf erkanntem Vereinsnamen
       if (result.clubName) {
@@ -1424,7 +1455,232 @@ const ClubRostersTab = () => {
             </div>
           </div>
           
-          {/* Teams-Liste */}
+          {/* Review-Section: Zeige Matching-Ergebnisse wenn vorhanden */}
+          {parsedData.matchingResults && parsedData.matchingResults.length > 0 && (
+            <div className="roster-review-section" style={{
+              marginTop: '1.5rem',
+              padding: '1.5rem',
+              background: 'white',
+              border: '2px solid #e5e7eb',
+              borderRadius: '12px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+            }}>
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center',
+                marginBottom: '1.5rem',
+                paddingBottom: '1rem',
+                borderBottom: '2px solid #e5e7eb'
+              }}>
+                <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: '700', color: '#1f2937', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Users size={24} />
+                  Spieler-Zuordnungen prüfen
+                </h3>
+                <button
+                  onClick={handleImport}
+                  disabled={isImporting || !selectedClubId || !Object.values(teamMapping).some(id => id !== null && id !== '')}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    fontSize: '1rem',
+                    fontWeight: '600',
+                    background: (!isImporting && selectedClubId && Object.values(teamMapping).some(id => id !== null && id !== '')) ? '#10b981' : '#9ca3af',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: (!isImporting && selectedClubId && Object.values(teamMapping).some(id => id !== null && id !== '')) ? 'pointer' : 'not-allowed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem'
+                  }}
+                >
+                  {isImporting ? (
+                    <>
+                      <Loader className="spinner" size={18} />
+                      Importiere...
+                    </>
+                  ) : (
+                    '✅ Alle Zuordnungen bestätigen & Importieren'
+                  )}
+                </button>
+              </div>
+              
+              {/* Statistiken */}
+              {(() => {
+                const stats = {
+                  total: 0,
+                  matched: 0,
+                  unmatched: 0,
+                  withUserAccount: 0
+                };
+                parsedData.matchingResults.forEach(teamResult => {
+                  teamResult.matchingResults.forEach(({ matchResult }) => {
+                    stats.total++;
+                    if (matchResult.playerId) {
+                      stats.matched++;
+                      if (matchResult.hasUserAccount) {
+                        stats.withUserAccount++;
+                      }
+                    } else {
+                      stats.unmatched++;
+                    }
+                  });
+                });
+                
+                return (
+                  <div style={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                    gap: '1rem',
+                    marginBottom: '1.5rem'
+                  }}>
+                    <div style={{ textAlign: 'center', padding: '1rem', background: '#f9fafb', borderRadius: '8px' }}>
+                      <div style={{ fontSize: '2rem', fontWeight: '800', color: '#1f2937' }}>{stats.total}</div>
+                      <div style={{ fontSize: '0.875rem', color: '#6b7280', fontWeight: '600' }}>Gesamt</div>
+                    </div>
+                    <div style={{ textAlign: 'center', padding: '1rem', background: '#f0fdf4', borderRadius: '8px', border: '2px solid #10b981' }}>
+                      <div style={{ fontSize: '2rem', fontWeight: '800', color: '#10b981' }}>{stats.matched}</div>
+                      <div style={{ fontSize: '0.875rem', color: '#15803d', fontWeight: '600' }}>Verknüpft</div>
+                    </div>
+                    <div style={{ textAlign: 'center', padding: '1rem', background: '#fffbeb', borderRadius: '8px', border: '2px solid #f59e0b' }}>
+                      <div style={{ fontSize: '2rem', fontWeight: '800', color: '#f59e0b' }}>{stats.unmatched}</div>
+                      <div style={{ fontSize: '0.875rem', color: '#d97706', fontWeight: '600' }}>Nicht verknüpft</div>
+                    </div>
+                    <div style={{ textAlign: 'center', padding: '1rem', background: '#eff6ff', borderRadius: '8px', border: '2px solid #3b82f6' }}>
+                      <div style={{ fontSize: '2rem', fontWeight: '800', color: '#3b82f6' }}>{stats.withUserAccount}</div>
+                      <div style={{ fontSize: '0.875rem', color: '#2563eb', fontWeight: '600' }}>Mit App-Account</div>
+                    </div>
+                  </div>
+                );
+              })()}
+              
+              {/* Review-Liste pro Team */}
+              {parsedData.matchingResults.map((teamResult, teamIdx) => (
+                <div key={teamIdx} style={{
+                  marginBottom: '2rem',
+                  padding: '1.5rem',
+                  background: '#f9fafb',
+                  borderRadius: '8px',
+                  border: '1px solid #e5e7eb'
+                }}>
+                  <h4 style={{ 
+                    margin: '0 0 1rem 0', 
+                    fontSize: '1.1rem', 
+                    fontWeight: '700', 
+                    color: '#1f2937',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem'
+                  }}>
+                    <Trophy size={20} />
+                    {teamResult.contestType} - {teamResult.teamName}
+                  </h4>
+                  
+                  <div style={{
+                    background: 'white',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    overflow: 'hidden'
+                  }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead style={{ background: '#f3f4f6' }}>
+                        <tr>
+                          <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '700', borderBottom: '2px solid #e5e7eb' }}>Rang</th>
+                          <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '700', borderBottom: '2px solid #e5e7eb' }}>Importierter Name</th>
+                          <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '700', borderBottom: '2px solid #e5e7eb' }}>TVM-ID</th>
+                          <th style={{ padding: '0.75rem', textAlign: 'center', fontSize: '0.875rem', fontWeight: '700', borderBottom: '2px solid #e5e7eb' }}>Match-Status</th>
+                          <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '700', borderBottom: '2px solid #e5e7eb' }}>Verknüpfter Spieler</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {teamResult.matchingResults.map(({ rosterPlayer, matchResult }, playerIdx) => (
+                          <tr 
+                            key={playerIdx}
+                            style={{
+                              borderBottom: '1px solid #e5e7eb',
+                              background: matchResult.playerId ? (matchResult.hasUserAccount ? '#f0fdf4' : '#fef3c7') : '#fee2e2'
+                            }}
+                          >
+                            <td style={{ padding: '0.75rem', fontSize: '0.875rem' }}>{rosterPlayer.rank}</td>
+                            <td style={{ padding: '0.75rem', fontSize: '0.875rem', fontWeight: '600' }}>
+                              {rosterPlayer.name}
+                              {rosterPlayer.birthYear && (
+                                <span style={{ color: '#6b7280', marginLeft: '0.5rem', fontSize: '0.75rem' }}>
+                                  ({rosterPlayer.birthYear})
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ padding: '0.75rem', fontSize: '0.875rem', fontFamily: 'monospace' }}>
+                              {rosterPlayer.tvmId || '–'}
+                            </td>
+                            <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                              {matchResult.playerId ? (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color: matchResult.hasUserAccount ? '#10b981' : '#f59e0b' }}>
+                                  <CheckCircle size={16} />
+                                  <span style={{ fontSize: '0.875rem', fontWeight: '600' }}>
+                                    Verknüpft
+                                    {matchResult.hasUserAccount && (
+                                      <span style={{ marginLeft: '0.25rem', fontSize: '0.75rem' }}>📱</span>
+                                    )}
+                                  </span>
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color: '#ef4444' }}>
+                                  <AlertCircle size={16} />
+                                  <span style={{ fontSize: '0.875rem', fontWeight: '600' }}>Nicht verknüpft</span>
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ padding: '0.75rem', fontSize: '0.875rem' }}>
+                              {matchResult.playerId ? (
+                                <div>
+                                  {(() => {
+                                    const matchedPlayer = playerDataMap.get(matchResult.playerId);
+                                    return matchedPlayer ? (
+                                      <>
+                                        <div style={{ fontWeight: '600', color: matchResult.hasUserAccount ? '#10b981' : '#1f2937' }}>
+                                          {matchedPlayer.name}
+                                        </div>
+                                        {matchResult.hasUserAccount && (
+                                          <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: '600' }}>✓ App-Account</span>
+                                        )}
+                                        {matchedPlayer.tvm_id_number && (
+                                          <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                                            TVM-ID: {matchedPlayer.tvm_id_number}
+                                          </div>
+                                        )}
+                                        <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                                          Match: {matchResult.matchType} ({matchResult.confidence}% sicher)
+                                        </div>
+                                      </>
+                                    ) : (
+                                      <div>
+                                        <div style={{ fontWeight: '600', color: '#6b7280' }}>
+                                          Spieler-ID: {matchResult.playerId.substring(0, 8)}...
+                                        </div>
+                                        <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '0.25rem' }}>
+                                          Lade Spieler-Daten...
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                              ) : (
+                                <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>Kein Match</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {/* Teams-Liste (wird nur angezeigt wenn keine matchingResults vorhanden sind) */}
+          {!parsedData.matchingResults && (
           <div className="teams-list">
             <h3 className="teams-list-title">
               <Users size={20} />
@@ -1624,8 +1880,10 @@ const ClubRostersTab = () => {
               });
             })}
           </div>
+          )}
           
-          {/* Import-Button */}
+          {/* Import-Button (nur wenn keine matchingResults vorhanden sind) */}
+          {!parsedData.matchingResults && (
           <div className="import-actions">
             <div className="import-info">
               <p>
@@ -1650,6 +1908,7 @@ const ClubRostersTab = () => {
               )}
             </button>
           </div>
+          )}
         </div>
       )}
     </div>

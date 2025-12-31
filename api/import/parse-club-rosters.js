@@ -467,24 +467,49 @@ async function matchPlayerToUnified(supabase, rosterPlayer, playerCache = null) 
     const normalizedRosterName = normalizeNameForComparison(rosterName);
     
     // 1. TVM-ID Match (falls vorhanden) - HÖCHSTE Priorität (eindeutig!)
+    // Wenn mehrere Spieler die gleiche TVM-ID haben, bevorzuge den mit App-Account
     if (rosterPlayer.tvmId) {
       // Wenn Cache vorhanden, suche dort zuerst
       if (playerCache) {
-        const tvmMatch = playerCache.find(p => p.tvm_id === rosterPlayer.tvmId);
-        if (tvmMatch) {
-          return { playerId: tvmMatch.id, confidence: 100, matchType: 'tvm_id' };
+        const tvmMatches = playerCache.filter(p => p.tvm_id === rosterPlayer.tvmId || p.tvm_id_number === rosterPlayer.tvmId);
+        if (tvmMatches.length > 0) {
+          // PRIORITÄT: Bevorzuge Spieler MIT App-Account
+          tvmMatches.sort((a, b) => {
+            if (a.user_id && !b.user_id) return -1;
+            if (!a.user_id && b.user_id) return 1;
+            return 0;
+          });
+          const tvmMatch = tvmMatches[0];
+          return { 
+            playerId: tvmMatch.id, 
+            confidence: 100, 
+            matchType: 'tvm_id',
+            hasUserAccount: !!tvmMatch.user_id 
+          };
         }
       }
       
       // Fallback: DB-Query nur wenn nicht im Cache
-      const { data: tvmMatch } = await supabase
+      const { data: tvmMatchesAll } = await supabase
         .from('players_unified')
-        .select('id, name, tvm_id')
-        .eq('tvm_id', rosterPlayer.tvmId)
-        .maybeSingle();
+        .select('id, name, tvm_id, tvm_id_number, user_id, email')
+        .or(`tvm_id.eq.${rosterPlayer.tvmId},tvm_id_number.eq.${rosterPlayer.tvmId}`);
       
-      if (tvmMatch) {
-        return { playerId: tvmMatch.id, confidence: 100, matchType: 'tvm_id' };
+      if (tvmMatchesAll && tvmMatchesAll.length > 0) {
+        // PRIORITÄT: Bevorzuge Spieler MIT App-Account
+        tvmMatchesAll.sort((a, b) => {
+          if (a.user_id && !b.user_id) return -1;
+          if (!a.user_id && b.user_id) return 1;
+          return 0;
+        });
+        const tvmMatch = tvmMatchesAll[0];
+        console.log(`[parse-club-rosters] ✅ TVM-ID Match gefunden: ${tvmMatch.name} (${tvmMatch.id})${tvmMatch.user_id ? ' [HAT APP-ACCOUNT]' : ''}`);
+        return { 
+          playerId: tvmMatch.id, 
+          confidence: 100, 
+          matchType: 'tvm_id',
+          hasUserAccount: !!tvmMatch.user_id 
+        };
       }
     }
     
@@ -493,7 +518,7 @@ async function matchPlayerToUnified(supabase, rosterPlayer, playerCache = null) 
     if (!allPlayers) {
       const { data: players } = await supabase
         .from('players_unified')
-        .select('id, name, current_lk, tvm_id')
+        .select('id, name, current_lk, tvm_id, tvm_id_number, user_id, email')
         .limit(1000);
       allPlayers = players || [];
     }
@@ -503,14 +528,28 @@ async function matchPlayerToUnified(supabase, rosterPlayer, playerCache = null) 
     }
     
     // 3. Exakte Übereinstimmung (Name) - auch mit normalisiertem Namen
-    const exactMatch = allPlayers.find(p => {
+    // PRIORITÄT: Bevorzuge Spieler MIT App-Account
+    const exactMatches = allPlayers.filter(p => {
       const normalizedPlayerName = normalizeNameForComparison(p.name);
       return normalizedPlayerName === normalizedRosterName || 
              p.name.toLowerCase() === rosterName.toLowerCase();
     });
     
-    if (exactMatch) {
-      return { playerId: exactMatch.id, confidence: 100, matchType: 'exact' };
+    if (exactMatches.length > 0) {
+      // Sortiere: zuerst Spieler mit user_id, dann ohne
+      exactMatches.sort((a, b) => {
+        if (a.user_id && !b.user_id) return -1;
+        if (!a.user_id && b.user_id) return 1;
+        return 0;
+      });
+      const exactMatch = exactMatches[0];
+      console.log(`[parse-club-rosters] ✅ Exaktes Match gefunden: ${exactMatch.name} (${exactMatch.id})${exactMatch.user_id ? ' [HAT APP-ACCOUNT]' : ''}`);
+      return { 
+        playerId: exactMatch.id, 
+        confidence: 100, 
+        matchType: 'exact',
+        hasUserAccount: !!exactMatch.user_id 
+      };
     }
     
     // 4. Fuzzy-Matching (Name-Ähnlichkeit) mit normalisiertem Namen
@@ -525,14 +564,27 @@ async function matchPlayerToUnified(supabase, rosterPlayer, playerCache = null) 
         };
       })
       .filter(m => m.similarity >= 80) // Mindestens 80% Ähnlichkeit
-      .sort((a, b) => b.similarity - a.similarity);
+      .sort((a, b) => {
+        // PRIORITÄT: Erst nach user_id (App-Account), dann nach Similarity
+        if (a.user_id && !b.user_id) return -1;
+        if (!a.user_id && b.user_id) return 1;
+        return b.similarity - a.similarity;
+      });
     
     if (matches.length > 0) {
       const bestMatch = matches[0];
+      console.log(`[parse-club-rosters] 🎯 Fuzzy-Match gefunden: ${bestMatch.name} (${bestMatch.similarity}% Ähnlichkeit)${bestMatch.user_id ? ' [HAT APP-ACCOUNT]' : ''}`);
       return { 
         playerId: bestMatch.id, 
         confidence: bestMatch.similarity, 
-        matchType: 'fuzzy'
+        matchType: 'fuzzy',
+        hasUserAccount: !!bestMatch.user_id,
+        allMatches: matches.slice(0, 5).map(m => ({
+          id: m.id,
+          name: m.name,
+          similarity: m.similarity,
+          hasUserAccount: !!m.user_id
+        })) // Top 5 Matches für Review
       };
     }
     
@@ -1411,6 +1463,39 @@ async function handler(req, res) {
       }
     }
     
+    // Wenn apply=false, führe Matching durch und gebe Ergebnisse zurück (für Review)
+    let allMatchingResults = null;
+    if (!apply && teams.length > 0) {
+      const supabase = createSupabaseClient(true);
+      allMatchingResults = [];
+      
+      // Lade Spieler-Cache einmal für alle Teams
+      const { data: allPlayers } = await supabase
+        .from('players_unified')
+        .select('id, name, current_lk, tvm_id, tvm_id_number, user_id, email')
+        .limit(1000);
+      const playerCache = allPlayers || [];
+      
+      for (const team of teams) {
+        if (!team.roster || team.roster.length === 0) continue;
+        
+        const teamMatchingResults = [];
+        for (const player of team.roster) {
+          const matchResult = await matchPlayerToUnified(supabase, player, playerCache);
+          teamMatchingResults.push({
+            rosterPlayer: player,
+            matchResult: matchResult
+          });
+        }
+        
+        allMatchingResults.push({
+          contestType: team.contestType,
+          teamName: team.teamName,
+          matchingResults: teamMatchingResults
+        });
+      }
+    }
+    
     // Bereite Response vor
     results.teams = teams.map(team => ({
       contestType: team.contestType,
@@ -1419,6 +1504,11 @@ async function handler(req, res) {
       playerCount: team.roster ? team.roster.length : 0,
       roster: apply ? undefined : (team.roster || []) // Nur im Dry-Run die vollständigen Daten senden
     }));
+    
+    // Füge Matching-Ergebnisse hinzu wenn apply=false
+    if (!apply && allMatchingResults) {
+      results.matchingResults = allMatchingResults;
+    }
     
     // Erstelle detaillierte Nachricht
     let message = `${teams.length} Teams für Saison "${targetSeason}" gefunden${clubNumber ? ` (Club-Nummer: ${clubNumber})` : ''}`;
