@@ -21,6 +21,7 @@ import MatchdaysTab from './superadmin/MatchdaysTab';
 import ScraperTab from './superadmin/ScraperTab';
 import TeamPortraitImportTab from './superadmin/TeamPortraitImportTab';
 import ClubRostersTab from './superadmin/ClubRostersTab';
+import RosterManagementTab from './superadmin/RosterManagementTab';
 import GroupsTab from './superadmin/GroupsTab';
 import ActivityLogTab from './superadmin/ActivityLogTab';
 import TeamsLogoManager from './superadmin/TeamsLogoManager';
@@ -5552,7 +5553,10 @@ function SuperAdminDashboard() {
           <Download size={16} /> Team-Portrait
         </button>
         <button className={selectedTab === 'club-rosters' ? 'active' : ''} onClick={() => setSelectedTab('club-rosters')}>
-          <Users size={16} /> Meldelisten
+          <Users size={16} /> Meldelisten-Import
+        </button>
+        <button className={selectedTab === 'roster-management' ? 'active' : ''} onClick={() => setSelectedTab('roster-management')}>
+          <Users size={16} /> Meldelisten-Verwaltung
         </button>
         <button className={selectedTab === 'groups' ? 'active' : ''} onClick={() => setSelectedTab('groups')}>
           <Trophy size={16} /> Gruppen
@@ -5604,6 +5608,7 @@ function SuperAdminDashboard() {
           {selectedTab === 'import' && <ImportTab />}
           {selectedTab === 'team-portrait' && <TeamPortraitImportTab />}
           {selectedTab === 'club-rosters' && <ClubRostersTab />}
+          {selectedTab === 'roster-management' && <RosterManagementTab />}
           {selectedTab === 'groups' && renderGroups()}
           {selectedTab === 'activity' && renderActivity()}
           {selectedTab === 'settings' && renderSettings()}

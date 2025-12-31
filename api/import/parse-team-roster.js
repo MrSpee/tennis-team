@@ -32,7 +32,7 @@ async function parseTeamPortrait(teamPortraitUrl) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
     
-    const html = await response.text();
+    let html = await response.text();
     
     // Finde die Spieler-Tabelle: Sie kommt nach <h2>Spieler</h2>
     const spielerHeadingIndex = html.indexOf('<h2>Spieler');
