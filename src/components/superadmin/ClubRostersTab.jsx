@@ -47,6 +47,9 @@ const ClubRostersTab = () => {
   // Spieler-Daten für Review (um Namen anzuzeigen)
   const [playerDataMap, setPlayerDataMap] = useState(new Map()); // Map von playerId -> player data
   
+  // Filter für Review-Tabelle
+  const [reviewFilter, setReviewFilter] = useState('all'); // 'all', 'fuzzy', 'unmatched', 'withAccount'
+  
   // Lade Vereine und Teams beim Mount
   useEffect(() => {
     loadClubsAndTeams();
@@ -1554,8 +1557,92 @@ const ClubRostersTab = () => {
                 );
               })()}
               
+              {/* Filter für Review-Tabelle */}
+              <div style={{
+                display: 'flex',
+                gap: '0.5rem',
+                marginBottom: '1rem',
+                padding: '0.75rem',
+                background: 'white',
+                borderRadius: '8px',
+                border: '1px solid #e5e7eb'
+              }}>
+                <button
+                  onClick={() => setReviewFilter('all')}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    borderRadius: '6px',
+                    border: '1px solid #e5e7eb',
+                    background: reviewFilter === 'all' ? '#3b82f6' : 'white',
+                    color: reviewFilter === 'all' ? 'white' : '#1f2937',
+                    fontWeight: reviewFilter === 'all' ? '600' : '400',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  Alle
+                </button>
+                <button
+                  onClick={() => setReviewFilter('fuzzy')}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    borderRadius: '6px',
+                    border: '1px solid #e5e7eb',
+                    background: reviewFilter === 'fuzzy' ? '#f59e0b' : 'white',
+                    color: reviewFilter === 'fuzzy' ? 'white' : '#1f2937',
+                    fontWeight: reviewFilter === 'fuzzy' ? '600' : '400',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  ⚠️ Fuzzy-Matches
+                </button>
+                <button
+                  onClick={() => setReviewFilter('unmatched')}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    borderRadius: '6px',
+                    border: '1px solid #e5e7eb',
+                    background: reviewFilter === 'unmatched' ? '#ef4444' : 'white',
+                    color: reviewFilter === 'unmatched' ? 'white' : '#1f2937',
+                    fontWeight: reviewFilter === 'unmatched' ? '600' : '400',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  ❌ Nicht verknüpft
+                </button>
+                <button
+                  onClick={() => setReviewFilter('withAccount')}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    borderRadius: '6px',
+                    border: '1px solid #e5e7eb',
+                    background: reviewFilter === 'withAccount' ? '#10b981' : 'white',
+                    color: reviewFilter === 'withAccount' ? 'white' : '#1f2937',
+                    fontWeight: reviewFilter === 'withAccount' ? '600' : '400',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  📱 Mit App-Account
+                </button>
+              </div>
+              
               {/* Review-Liste pro Team */}
-              {parsedData.matchingResults.map((teamResult, teamIdx) => (
+              {parsedData.matchingResults.map((teamResult, teamIdx) => {
+                // Prüfe ob Team nach Filterung noch Ergebnisse hat
+                const hasFilteredResults = teamResult.matchingResults.some(({ matchResult }) => {
+                  if (reviewFilter === 'all') return true;
+                  if (reviewFilter === 'fuzzy') return matchResult.matchType === 'fuzzy' && matchResult.confidence < 90;
+                  if (reviewFilter === 'unmatched') return !matchResult.playerId;
+                  if (reviewFilter === 'withAccount') return matchResult.hasUserAccount;
+                  return true;
+                });
+                
+                if (!hasFilteredResults) return null;
+                
+                return (
                 <div key={teamIdx} style={{
                   marginBottom: '2rem',
                   padding: '1.5rem',
@@ -1593,12 +1680,27 @@ const ClubRostersTab = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {teamResult.matchingResults.map(({ rosterPlayer, matchResult }, playerIdx) => (
+                        {(() => {
+                          // Filtere Matching-Results basierend auf Filter
+                          const filtered = teamResult.matchingResults.filter(({ matchResult }) => {
+                            if (reviewFilter === 'all') return true;
+                            if (reviewFilter === 'fuzzy') return matchResult.matchType === 'fuzzy' && matchResult.confidence < 90;
+                            if (reviewFilter === 'unmatched') return !matchResult.playerId;
+                            if (reviewFilter === 'withAccount') return matchResult.hasUserAccount;
+                            return true;
+                          });
+                          return filtered.map(({ rosterPlayer, matchResult }, playerIdx) => (
                           <tr 
                             key={playerIdx}
                             style={{
                               borderBottom: '1px solid #e5e7eb',
-                              background: matchResult.playerId ? (matchResult.hasUserAccount ? '#f0fdf4' : '#fef3c7') : '#fee2e2'
+                              background: matchResult.playerId 
+                                ? (matchResult.hasUserAccount 
+                                  ? '#f0fdf4' 
+                                  : (matchResult.matchType === 'fuzzy' && matchResult.confidence < 90 
+                                    ? '#fff7ed' // Orange für unsichere Fuzzy-Matches
+                                    : '#fef3c7'))
+                                : '#fee2e2'
                             }}
                           >
                             <td style={{ padding: '0.75rem', fontSize: '0.875rem' }}>{rosterPlayer.rank}</td>
@@ -1651,7 +1753,25 @@ const ClubRostersTab = () => {
                                         )}
                                         <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
                                           Match: {matchResult.matchType} ({matchResult.confidence}% sicher)
+                                          {matchResult.matchType === 'fuzzy' && matchResult.confidence < 90 && (
+                                            <span style={{ color: '#f59e0b', fontWeight: '600', marginLeft: '0.5rem' }}>
+                                              ⚠️ Prüfung empfohlen
+                                            </span>
+                                          )}
                                         </div>
+                                        {matchResult.allMatches && matchResult.allMatches.length > 1 && (
+                                          <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #e5e7eb' }}>
+                                            <div style={{ fontWeight: '600', marginBottom: '0.25rem' }}>Alternative Matches:</div>
+                                            {matchResult.allMatches.slice(1, 4).map((alt, idx) => {
+                                              const altPlayer = playerDataMap.get(alt.id);
+                                              return altPlayer ? (
+                                                <div key={idx} style={{ marginTop: '0.25rem', padding: '0.25rem', background: '#f9fafb', borderRadius: '4px' }}>
+                                                  {altPlayer.name} ({alt.similarity}%{alt.hasUserAccount ? ', 📱 App' : ''})
+                                                </div>
+                                              ) : null;
+                                            })}
+                                          </div>
+                                        )}
                                       </>
                                     ) : (
                                       <div>
@@ -1670,12 +1790,14 @@ const ClubRostersTab = () => {
                               )}
                             </td>
                           </tr>
-                        ))}
+                          ));
+                        })()}
                       </tbody>
                     </table>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
           
