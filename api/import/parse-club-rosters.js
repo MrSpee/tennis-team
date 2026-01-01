@@ -1196,6 +1196,46 @@ async function saveTeamRoster(supabase, teamId, season, roster) {
 }
 
 /**
+ * Lädt Club-Name aus Datenbank über Club-Nummer
+ * @param {Object} supabase - Supabase Client
+ * @param {string} clubNumber - Club-Nummer (z.B. "36154")
+ * @returns {Promise<string|null>} Club-Name oder null
+ */
+async function getClubNameFromDatabase(supabase, clubNumber) {
+  try {
+    if (!clubNumber) {
+      return null;
+    }
+
+    // Strategie: Suche über team_info.club_number (club_number ist dort gespeichert)
+    // Dann hole club_info.name über club_id
+    const { data: teamData, error: teamError } = await supabase
+      .from('team_info')
+      .select('club_id, club_info:club_id(name)')
+      .eq('club_number', clubNumber)
+      .limit(1)
+      .maybeSingle();
+    
+    if (teamData?.club_info?.name) {
+      console.log(`[parse-club-rosters] ✅ Club-Name aus DB geladen: "${teamData.club_info.name}" (Club-Nr: ${clubNumber})`);
+      return teamData.club_info.name;
+    }
+
+    // Club nicht gefunden - das ist OK (kein Fehler)
+    if (teamError && teamError.code !== 'PGRST116') {
+      console.warn(`[parse-club-rosters] ⚠️ Fehler beim Laden von Club-Name:`, teamError);
+    } else {
+      console.log(`[parse-club-rosters] ℹ️ Club ${clubNumber} nicht in DB gefunden`);
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`[parse-club-rosters] ❌ Fehler beim Laden von Club-Name aus DB:`, error);
+    return null;
+  }
+}
+
+/**
  * Speichert die Club-Nummer in team_info
  */
 async function saveClubNumber(supabase, clubId, clubNumber) {
@@ -1242,7 +1282,17 @@ async function handler(req, res) {
     }
     
     // Parse clubPools-Seite
-    const { clubNumber, clubName, teams } = await parseClubPoolsPage(clubPoolsUrl, targetSeason);
+    const { clubNumber, clubName: parsedClubName, teams } = await parseClubPoolsPage(clubPoolsUrl, targetSeason);
+    
+    // Club-Name aus Datenbank laden (höchste Priorität)
+    let clubName = parsedClubName; // Fallback: Aus HTML geparster Name
+    if (clubNumber) {
+      const supabase = createSupabaseClient(true);
+      const dbClubName = await getClubNameFromDatabase(supabase, clubNumber);
+      if (dbClubName) {
+        clubName = dbClubName; // DB-Name hat Priorität
+      }
+    }
     
     const results = {
       clubNumber,
@@ -1542,6 +1592,7 @@ handlerWithExports.parseClubPoolsPage = parseClubPoolsPage;
 handlerWithExports.parseRosterFromClubPoolsPage = parseRosterFromClubPoolsPage;
 handlerWithExports.saveTeamRoster = saveTeamRoster;
 handlerWithExports.saveClubNumber = saveClubNumber;
+handlerWithExports.getClubNameFromDatabase = getClubNameFromDatabase;
 handlerWithExports.extractClubNumber = extractClubNumber;
 module.exports = handlerWithExports;
 
