@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import { Loader, CheckCircle, AlertCircle, Users, Building2, Search, Download, ExternalLink, ChevronDown, ChevronUp, CalendarDays, Trophy } from 'lucide-react';
+import ImportedRostersManager from './ImportedRostersManager';
 import './ClubRostersTab.css';
 
 const ClubRostersTab = ({ hideHeader = false }) => {
@@ -49,6 +50,9 @@ const ClubRostersTab = ({ hideHeader = false }) => {
   
   // Filter für Review-Tabelle
   const [reviewFilter, setReviewFilter] = useState('all'); // 'all', 'fuzzy', 'unmatched', 'withAccount'
+  
+  // View-Modus: 'import' oder 'manage'
+  const [viewMode, setViewMode] = useState('import'); // 'import' oder 'manage'
   
   // Lade Vereine und Teams beim Mount
   useEffect(() => {
@@ -711,6 +715,18 @@ const ClubRostersTab = ({ hideHeader = false }) => {
           </div>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <button
+              onClick={() => setViewMode(viewMode === 'import' ? 'manage' : 'import')}
+              className="bulk-import-toggle"
+              style={{ 
+                background: viewMode === 'manage' ? '#16a34a' : '#6b7280',
+                color: 'white'
+              }}
+            >
+              {viewMode === 'manage' ? '← Zurück zum Import' : '📋 Meldelisten verwalten'}
+            </button>
+            {viewMode === 'import' && (
+              <>
+            <button
               onClick={() => {
                 setShowFindClubNumbers(!showFindClubNumbers);
                 setShowBulkImport(false);
@@ -732,13 +748,20 @@ const ClubRostersTab = ({ hideHeader = false }) => {
             >
               {showBulkImport ? 'Einzel-Import' : 'Bulk-Import'}
             </button>
+              </>
+            )}
           </div>
         </div>
       </div>
       )}
       
+      {/* Meldelisten-Verwaltung */}
+      {viewMode === 'manage' && (
+        <ImportedRostersManager />
+      )}
+      
       {/* Club-Nummern finden Bereich */}
-      {showFindClubNumbers && (
+      {viewMode === 'import' && showFindClubNumbers && (
         <div className="bulk-import-section">
           <h3 className="bulk-import-title">
             🔍 Club-Nummern automatisch finden
@@ -1345,7 +1368,7 @@ const ClubRostersTab = ({ hideHeader = false }) => {
       )}
       
       {/* Eingabe-Bereich (Einzel-Import) */}
-      {!showBulkImport && (
+      {viewMode === 'import' && !showBulkImport && (
       <div className="club-rosters-input-section">
         <div className="input-group">
           <label htmlFor="clubPoolsUrl">

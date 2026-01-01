@@ -376,17 +376,6 @@ async function saveTeamRoster(supabase, teamId, season, roster) {
   try {
     console.log(`[parse-team-roster] 💾 Speichere Meldeliste für Team ${teamId}, Saison ${season}...`);
     
-    // Lösche alte Einträge für dieses Team/Saison
-    const { error: deleteError } = await supabase
-      .from('team_roster')
-      .delete()
-      .eq('team_id', teamId)
-      .eq('season', season);
-    
-    if (deleteError) {
-      console.warn('[parse-team-roster] ⚠️ Fehler beim Löschen alter Einträge:', deleteError);
-    }
-    
     // Führe Fuzzy-Matching für jeden Spieler durch
     console.log(`[parse-team-roster] 🔍 Führe Fuzzy-Matching für ${roster.length} Spieler durch...`);
     const rosterEntries = [];
@@ -422,21 +411,88 @@ async function saveTeamRoster(supabase, teamId, season, roster) {
     
     console.log(`[parse-team-roster] 📊 Matching-Ergebnisse: ${matchedCount} gematcht, ${unmatchedCount} nicht gematcht`);
     
-    // Erstelle neue Einträge
-    const { data, error } = await supabase
-      .from('team_roster')
-      .insert(rosterEntries)
-      .select();
+    // ✅ FIX: Verwende UPSERT statt DELETE + INSERT um Duplikat-Fehler zu vermeiden
+    // Supabase's upsert funktioniert standardmäßig mit PRIMARY KEY
+    // Für UNIQUE constraints verwenden wir eine Alternative: Einzelne UPSERTs pro Eintrag
+    const savedEntries = [];
+    let upsertedCount = 0;
+    let insertedCount = 0;
     
-    if (error) {
-      throw error;
+    for (const entry of rosterEntries) {
+      try {
+        // Prüfe ob Eintrag bereits existiert
+        const { data: existing } = await supabase
+          .from('team_roster')
+          .select('id')
+          .eq('team_id', entry.team_id)
+          .eq('season', entry.season)
+          .eq('rank', entry.rank)
+          .maybeSingle();
+        
+        if (existing) {
+          // UPDATE existierenden Eintrag
+          const { data: updated, error: updateError } = await supabase
+            .from('team_roster')
+            .update(entry)
+            .eq('id', existing.id)
+            .select()
+            .single();
+          
+          if (updateError) {
+            console.warn(`[parse-team-roster] ⚠️ Fehler beim Update von Rank ${entry.rank}:`, updateError);
+          } else {
+            savedEntries.push(updated);
+            upsertedCount++;
+          }
+        } else {
+          // INSERT neuen Eintrag
+          const { data: inserted, error: insertError } = await supabase
+            .from('team_roster')
+            .insert(entry)
+            .select()
+            .single();
+          
+          if (insertError) {
+            console.warn(`[parse-team-roster] ⚠️ Fehler beim Insert von Rank ${entry.rank}:`, insertError);
+            // Falls es doch ein Duplikat gibt, versuche UPDATE
+            if (insertError.code === '23505') { // PostgreSQL duplicate key error
+              console.log(`[parse-team-roster] 🔄 Duplikat erkannt, versuche UPDATE für Rank ${entry.rank}...`);
+              const { data: updated, error: updateError } = await supabase
+                .from('team_roster')
+                .update(entry)
+                .eq('team_id', entry.team_id)
+                .eq('season', entry.season)
+                .eq('rank', entry.rank)
+                .select()
+                .single();
+              
+              if (updateError) {
+                throw updateError;
+              }
+              savedEntries.push(updated);
+              upsertedCount++;
+            } else {
+              throw insertError;
+            }
+          } else {
+            savedEntries.push(inserted);
+            insertedCount++;
+          }
+        }
+      } catch (entryError) {
+        console.error(`[parse-team-roster] ❌ Fehler beim Speichern von Rank ${entry.rank}:`, entryError);
+        // Continue mit nächstem Eintrag statt komplett zu scheitern
+      }
     }
     
-    console.log(`[parse-team-roster] ✅ ${data.length} Spieler in team_roster gespeichert (${matchedCount} mit player_id verknüpft)`);
+    console.log(`[parse-team-roster] ✅ ${savedEntries.length} Spieler in team_roster gespeichert (${insertedCount} neu, ${upsertedCount} aktualisiert, ${matchedCount} mit player_id verknüpft)`);
     return {
-      roster: data,
+      roster: savedEntries,
       stats: {
         total: roster.length,
+        saved: savedEntries.length,
+        inserted: insertedCount,
+        updated: upsertedCount,
         matched: matchedCount,
         unmatched: unmatchedCount
       }
@@ -515,7 +571,7 @@ module.exports = async function handler(req, res) {
       matchingResults: !apply ? matchingResults : null, // Matching-Ergebnisse nur bei apply=false
       saved: apply ? savedRoster : null,
       message: apply 
-        ? `${roster.length} Spieler erfolgreich gespeichert (${savedRoster?.stats?.matched || 0} mit players_unified verknüpft)`
+        ? `${savedRoster?.stats?.saved || 0} Spieler erfolgreich gespeichert (${savedRoster?.stats?.inserted || 0} neu, ${savedRoster?.stats?.updated || 0} aktualisiert, ${savedRoster?.stats?.matched || 0} mit players_unified verknüpft)`
         : `${roster.length} Spieler gefunden (Dry-Run, nicht gespeichert)`
     });
     
