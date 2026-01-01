@@ -558,45 +558,128 @@ const ClubRostersTab = ({ hideHeader = false }) => {
     setIsFindingClubNumbers(true);
     setError(null);
     setFindClubNumbersResult(null);
-    setFindClubNumbersProgress({ current: 0, total: 0, message: 'Starte Suche nach Club-Nummern...' });
     
     try {
-      // Wenn Clubs ausgewählt wurden, verwende diese, sonst alle
-      const clubIds = selectedClubsForSearch.size > 0 
-        ? Array.from(selectedClubsForSearch)
-        : null;
+      // Wenn Clubs ausgewählt wurden, verwende diese, sonst alle ohne Club-Nummer
+      let clubsToProcess = [];
+      if (selectedClubsForSearch.size > 0) {
+        clubsToProcess = clubsWithRosters.filter(c => selectedClubsForSearch.has(c.id));
+      } else {
+        // Keine Auswahl: Verarbeite alle Vereine ohne Club-Nummer
+        clubsToProcess = clubsWithRosters.filter(c => !c.clubNumber);
+      }
       
-      const response = await fetch('/api/import/find-club-numbers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clubIds: clubIds,
-          maxClubs: maxClubsToFind || null,
-          dryRun: dryRunFind
-        })
+      if (clubsToProcess.length === 0) {
+        setError('Keine Vereine zum Verarbeiten gefunden');
+        setIsFindingClubNumbers(false);
+        return;
+      }
+      
+      setFindClubNumbersProgress({ current: 0, total: clubsToProcess.length, message: 'Starte Suche nach Club-Nummern...' });
+      
+      const allResults = [];
+      let successCount = 0;
+      let errorCount = 0;
+      
+      // ✅ WICHTIG: Verarbeite Vereine nacheinander (ein Verein pro Request, um Timeout zu vermeiden)
+      for (let i = 0; i < clubsToProcess.length; i++) {
+        const club = clubsToProcess[i];
+        
+        setFindClubNumbersProgress({ 
+          current: i, 
+          total: clubsToProcess.length, 
+          message: `Suche Club-Nummer für: ${club.name} (${i + 1}/${clubsToProcess.length})...` 
+        });
+        
+        try {
+          const response = await fetch('/api/import/find-club-numbers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              clubIds: [club.id], // Nur ein Verein pro Request
+              maxClubs: 1,
+              dryRun: dryRunFind
+            })
+          });
+          
+          const responseText = await response.text();
+          
+          if (!response.ok) {
+            let errorData;
+            try {
+              errorData = JSON.parse(responseText);
+            } catch (e) {
+              throw new Error(`HTTP ${response.status}: ${responseText || response.statusText}`);
+            }
+            
+            // Wenn "Zu viele Vereine" Fehler, sollte das nicht passieren (wir senden nur 1)
+            // Aber für Sicherheit prüfen wir es trotzdem
+            if (errorData.error === 'Zu viele Vereine ausgewählt') {
+              console.warn(`[find-club-numbers] ⚠️ Unerwarteter Fehler für ${club.name}:`, errorData.message);
+              errorCount++;
+              allResults.push({
+                clubId: club.id,
+                clubName: club.name,
+                status: 'error',
+                message: errorData.message || 'Unerwarteter Fehler',
+                clubNumber: null
+              });
+              continue;
+            }
+            
+            const errorMsg = errorData.error || errorData.message || errorData.details || `HTTP ${response.status}`;
+            throw new Error(errorMsg);
+          }
+          
+          let result;
+          try {
+            result = JSON.parse(responseText);
+          } catch (e) {
+            throw new Error(`Ungültige JSON-Response: ${responseText.substring(0, 200)}`);
+          }
+          
+          if (result.results && result.results.length > 0) {
+            allResults.push(...result.results);
+            result.results.forEach(r => {
+              if (r.status === 'success') successCount++;
+              else errorCount++;
+            });
+          }
+          
+          // Kurze Pause zwischen Requests (Frontend-seitig, nicht API-seitig)
+          if (i < clubsToProcess.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500)); // 500ms Pause
+          }
+          
+        } catch (err) {
+          console.error(`Error finding club number for ${club.name}:`, err);
+          errorCount++;
+          allResults.push({
+            clubId: club.id,
+            clubName: club.name,
+            status: 'error',
+            message: err.message || 'Fehler beim Finden der Club-Nummer',
+            clubNumber: null
+          });
+        }
+      }
+      
+      // Finales Ergebnis setzen
+      setFindClubNumbersResult({
+        success: true,
+        results: allResults,
+        summary: {
+          total: clubsToProcess.length,
+          success: successCount,
+          errors: errorCount
+        }
       });
       
-      const responseText = await response.text();
-      
-      if (!response.ok) {
-        let errorData;
-        try {
-          errorData = JSON.parse(responseText);
-        } catch (e) {
-          throw new Error(`HTTP ${response.status}: ${responseText || response.statusText}`);
-        }
-        const errorMsg = errorData.error || errorData.message || errorData.details || `HTTP ${response.status}`;
-        throw new Error(errorMsg);
-      }
-      
-      let result;
-      try {
-        result = JSON.parse(responseText);
-      } catch (e) {
-        throw new Error(`Ungültige JSON-Response: ${responseText.substring(0, 200)}`);
-      }
-      
-      setFindClubNumbersResult(result);
+      setFindClubNumbersProgress({ 
+        current: clubsToProcess.length, 
+        total: clubsToProcess.length, 
+        message: `Fertig! ${successCount} erfolgreich, ${errorCount} Fehler` 
+      });
       
       // Lade Teams neu, um aktualisierte club_number zu haben
       await loadClubsAndTeams();
@@ -608,7 +691,8 @@ const ClubRostersTab = ({ hideHeader = false }) => {
       setError(err.message || 'Fehler beim Finden der Club-Nummern');
     } finally {
       setIsFindingClubNumbers(false);
-      setFindClubNumbersProgress(null);
+      // Progress bleibt für letzte Meldung stehen
+      setTimeout(() => setFindClubNumbersProgress(null), 3000);
     }
   };
   
