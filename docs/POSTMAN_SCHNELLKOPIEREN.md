@@ -164,3 +164,40 @@ POST https://tennis-team-gamma.vercel.app/api/import/parse-club-rosters
 
 **📊 Vollständige Analyse-Dokumentation:** Siehe `docs/POSTMAN_ALTE_API_DATEN_ANALYSE.md`
 
+---
+
+## 🧪 NEU: Club-Name DB-Test (nach Implementierung)
+
+**Test ob Club-Name jetzt aus DB geladen wird:**
+
+**Browser Console:**
+```javascript
+fetch('https://tennis-team-gamma.vercel.app/api/import/parse-club-rosters', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    clubPoolsUrl: 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/clubPools?club=36154',
+    targetSeason: 'Winter 2025/2026',
+    apply: false
+  })
+})
+.then(response => response.json())
+.then(data => {
+  console.log('📊 Club-Daten:', {
+    clubNumber: data.clubNumber,
+    clubName: data.clubName,  // <-- SOLLTE JETZT AUS DB KOMMEN!
+    teamsCount: data.teams?.length || 0
+  });
+  if (data.clubName) {
+    alert(`✅ Club-Name: "${data.clubName}" (Club-Nr: ${data.clubNumber})`);
+  } else {
+    alert(`⚠️ Club-Name ist null`);
+  }
+})
+.catch(error => console.error('❌ FEHLER:', error));
+```
+
+**Erwartung:** `clubName` sollte jetzt aus DB geladen werden (z.B. "VKC Köln" statt `null`)
+
+**📊 Details:** Siehe `docs/POSTMAN_CLUB_NAME_TEST.md`
+
