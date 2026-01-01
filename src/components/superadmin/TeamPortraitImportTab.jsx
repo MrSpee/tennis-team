@@ -9,7 +9,7 @@ import './TeamPortraitImportTab.css';
 const FUZZY_MATCH_THRESHOLD = 0.90; // 90% für automatische Bestätigung
 const MANUAL_REVIEW_THRESHOLD = 0.75; // 75% - unter diesem Wert manuelle Prüfung
 
-const TeamPortraitImportTab = () => {
+const TeamPortraitImportTab = ({ hideHeader = false }) => {
   const { player } = useAuth();
   
   // State Management
@@ -1084,12 +1084,14 @@ const TeamPortraitImportTab = () => {
   
   return (
     <div className="team-portrait-import-container">
+      {!hideHeader && (
       <div className="import-header">
         <h2>Team-Portrait Import</h2>
         <p className="import-subtitle">
           Importiere komplette Team-Daten direkt von der nuLiga Team-Portrait-Seite
         </p>
       </div>
+      )}
       
       {/* URL-Eingabe */}
       <div className="import-section">

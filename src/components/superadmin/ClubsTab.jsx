@@ -1,62 +1,121 @@
 import { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../../lib/supabaseClient';
-import { Building2, MapPin, Globe, Users, Trophy, Search, Filter } from 'lucide-react';
+import { Building2, MapPin, Globe, Users, Trophy, Search, Filter, Phone, Mail, ExternalLink, Award, Hash, Calendar } from 'lucide-react';
+import TeamLogoUpload from './TeamLogoUpload';
 import './ClubsTab.css';
 
 function ClubsTab({ clubs, teams, players }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRegion, setSelectedRegion] = useState('all');
   const [clubStats, setClubStats] = useState({});
+  const [clubNumbers, setClubNumbers] = useState({}); // Map: clubId -> club_number
   const [loadingStats, setLoadingStats] = useState(true);
+  const [expandedClub, setExpandedClub] = useState(null); // ID des ausgeklappten Clubs für Logo-Upload
+  const [currentSeason, setCurrentSeason] = useState(null); // Aktuelle Saison
 
-  // Lade Statistiken für alle Clubs
+  // Berechne aktuelle Saison
+  const getCurrentSeason = useMemo(() => {
+    const now = new Date();
+    const currentMonth = now.getMonth(); // 0=Jan, 11=Dez
+    const currentYear = now.getFullYear();
+    
+    let season, seasonDisplay;
+    if (currentMonth >= 4 && currentMonth <= 7) {
+      // Mai bis August = Sommer
+      season = `Sommer ${currentYear}`;
+      seasonDisplay = `Sommer ${currentYear}`;
+    } else {
+      // September bis April = Winter
+      if (currentMonth >= 8) {
+        // Sep-Dez: Winter 2024/25
+        const nextYear = currentYear + 1;
+        season = `Winter ${currentYear}/${String(nextYear).slice(-2)}`;
+        seasonDisplay = `Winter ${currentYear}/${String(nextYear).slice(-2)}`;
+      } else {
+        // Jan-Apr: Winter 2024/25 (vorheriges Jahr)
+        const prevYear = currentYear - 1;
+        season = `Winter ${prevYear}/${String(currentYear).slice(-2)}`;
+        seasonDisplay = `Winter ${prevYear}/${String(currentYear).slice(-2)}`;
+      }
+    }
+    
+    return { season, seasonDisplay };
+  }, []);
+
+  // Lade Statistiken und Club-Nummern (saison-spezifisch)
   useEffect(() => {
-    const loadClubStats = async () => {
+    const loadClubData = async () => {
       if (!clubs || clubs.length === 0) {
         setLoadingStats(false);
         return;
       }
 
+      const { season: currentSeasonValue, seasonDisplay } = getCurrentSeason;
+      setCurrentSeason(seasonDisplay);
+
       try {
         const statsMap = {};
+        const numbersMap = {};
         
-        // Lade Teams pro Club
+        // Lade alle Teams mit club_id
         const { data: teamsData } = await supabase
           .from('team_info')
-          .select('id, club_id, club_name');
+          .select('id, club_id, club_name, club_number');
         
-        // Lade Spieler pro Club (über team_memberships)
+        // Lade aktive team_seasons für die aktuelle Saison
+        const { data: activeSeasons } = await supabase
+          .from('team_seasons')
+          .select('team_id, season')
+          .eq('season', currentSeasonValue)
+          .eq('is_active', true);
+        
+        // Erstelle Set von Team-IDs mit aktiver Saison
+        const activeTeamIds = new Set((activeSeasons || []).map(ts => ts.team_id));
+        
+        // Lade Spieler pro Club (nur für Teams mit aktiver Saison)
         const { data: membershipsData } = await supabase
           .from('team_memberships')
           .select('team_id, player_id, team_info!inner(club_id)')
           .eq('is_active', true);
         
-        // Aggregiere Statistiken
+        // Aggregiere Statistiken und Club-Nummern
         clubs.forEach(club => {
           const clubTeams = (teamsData || []).filter(t => t.club_id === club.id);
-          const teamIds = clubTeams.map(t => t.id);
+          
+          // Filtere Teams mit aktiver Saison
+          const activeSeasonTeams = clubTeams.filter(t => activeTeamIds.has(t.id));
+          const activeTeamIdsForClub = activeSeasonTeams.map(t => t.id);
+          
+          // Filtere Memberships nur für aktive Teams
           const clubMemberships = (membershipsData || []).filter(m => 
-            teamIds.includes(m.team_id)
+            activeTeamIdsForClub.includes(m.team_id)
           );
           const uniquePlayers = new Set(clubMemberships.map(m => m.player_id));
           
           statsMap[club.id] = {
-            teamsCount: clubTeams.length,
+            teamsCount: activeSeasonTeams.length,
             playersCount: uniquePlayers.size,
-            activeTeams: clubTeams.length // Kann später erweitert werden
+            activeTeams: activeSeasonTeams.length
           };
+
+          // Extrahiere club_number aus Teams (nehme erste vorhandene)
+          const teamWithNumber = clubTeams.find(t => t.club_number);
+          if (teamWithNumber?.club_number) {
+            numbersMap[club.id] = teamWithNumber.club_number;
+          }
         });
         
         setClubStats(statsMap);
+        setClubNumbers(numbersMap);
       } catch (error) {
-        console.error('❌ Fehler beim Laden der Club-Statistiken:', error);
+        console.error('❌ Fehler beim Laden der Club-Daten:', error);
       } finally {
         setLoadingStats(false);
       }
     };
 
-    loadClubStats();
-  }, [clubs]);
+    loadClubData();
+  }, [clubs, getCurrentSeason]);
 
   // Verfügbare Regionen
   const regions = useMemo(() => {
@@ -96,6 +155,17 @@ function ClubsTab({ clubs, teams, players }) {
     } catch {
       return '–';
     }
+  };
+
+  const handleLogoUploadComplete = (logoUrl) => {
+    // Logo wurde erfolgreich hochgeladen
+    // expandedClub schließen - die Parent-Komponente wird beim nächsten Reload die neuen Daten laden
+    setExpandedClub(null);
+    // Optional: Kurzer Toast/Feedback hier
+  };
+
+  const toggleLogoUpload = (clubId) => {
+    setExpandedClub(expandedClub === clubId ? null : clubId);
   };
 
   return (
@@ -176,37 +246,108 @@ function ClubsTab({ clubs, teams, players }) {
         <div className="clubs-grid">
           {filteredClubs.map((club) => {
             const stats = clubStats[club.id] || { teamsCount: 0, playersCount: 0 };
+            const clubNumber = clubNumbers[club.id];
             const isVerified = club.is_verified;
             const dataSource = club.data_source;
+            const isExpanded = expandedClub === club.id;
 
             return (
               <div key={club.id} className="club-card">
-                <div className="club-card-header">
-                  <div className="club-name-section">
-                    <h3 className="club-name">{club.name}</h3>
-                    {isVerified && (
-                      <span className="verified-badge" title="Verifiziert">
-                        ✓
-                      </span>
-                    )}
-                  </div>
-                  {dataSource && (
-                    <span className="data-source-badge" title={`Quelle: ${dataSource}`}>
-                      {dataSource === 'tvm_import' ? 'TVM' : dataSource === 'tvm_scraper' ? 'Scraper' : dataSource}
-                    </span>
+                {/* Logo & Header */}
+                <div className="club-card-header-with-logo">
+                  {club.logo_url ? (
+                    <div className="club-logo">
+                      <img 
+                        src={club.logo_url} 
+                        alt={`${club.name} Logo`}
+                        onError={(e) => {
+                          e.target.style.display = 'none';
+                          e.target.nextSibling.style.display = 'flex';
+                        }}
+                      />
+                      <div className="club-logo-placeholder" style={{ display: 'none' }}>
+                        <Building2 size={32} />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="club-logo-placeholder">
+                      <Building2 size={32} />
+                    </div>
                   )}
+                  
+                  <div className="club-header-content">
+                    <div className="club-name-section">
+                      <h3 className="club-name">{club.name}</h3>
+                      {isVerified && (
+                        <span className="verified-badge" title="Verifiziert">
+                          ✓
+                        </span>
+                      )}
+                    </div>
+                    <div className="club-header-badges">
+                      {dataSource && (
+                        <span className="data-source-badge" title={`Quelle: ${dataSource}`}>
+                          {dataSource === 'tvm_import' ? 'TVM' : dataSource === 'tvm_scraper' ? 'Scraper' : dataSource}
+                        </span>
+                      )}
+                      {clubNumber && (
+                        <span className="club-number-badge" title="nuLiga Club-Nummer">
+                          <Hash size={12} />
+                          {clubNumber}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="club-card-body">
                   {/* Standort */}
-                  {(club.city || club.region) && (
+                  {(club.city || club.region || club.postal_code) && (
                     <div className="club-info-row">
                       <MapPin size={16} />
                       <span>
-                        {[club.city, club.region].filter(Boolean).join(', ') || '–'}
+                        {[
+                          club.postal_code,
+                          club.city,
+                          club.region
+                        ].filter(Boolean).join(' ') || '–'}
                       </span>
+                      {club.state && (
+                        <span className="meta-badge">{club.state}</span>
+                      )}
+                      {club.bundesland && (
+                        <span className="meta-badge">{club.bundesland}</span>
+                      )}
                     </div>
                   )}
+
+                  {/* Adresse */}
+                  {club.address && (
+                    <div className="club-info-row">
+                      <Building2 size={16} />
+                      <span>{club.address}</span>
+                    </div>
+                  )}
+
+                  {/* Kontakt */}
+                  <div className="club-contact-row">
+                    {club.phone && (
+                      <div className="club-info-row">
+                        <Phone size={16} />
+                        <a href={`tel:${club.phone}`} className="club-contact-link">
+                          {club.phone}
+                        </a>
+                      </div>
+                    )}
+                    {club.email && (
+                      <div className="club-info-row">
+                        <Mail size={16} />
+                        <a href={`mailto:${club.email}`} className="club-contact-link">
+                          {club.email}
+                        </a>
+                      </div>
+                    )}
+                  </div>
 
                   {/* Webseite */}
                   {club.website && (
@@ -219,50 +360,115 @@ function ClubsTab({ clubs, teams, players }) {
                         className="club-website-link"
                       >
                         {club.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                        <ExternalLink size={12} style={{ marginLeft: '0.25rem' }} />
                       </a>
+                    </div>
+                  )}
+
+                  {/* Plätze */}
+                  {(club.court_count || club.has_indoor_courts !== null) && (
+                    <div className="club-info-row">
+                      <Trophy size={16} />
+                      <span>
+                        {club.court_count ? `${club.court_count} Plätze` : 'Plätze unbekannt'}
+                        {club.has_indoor_courts && (
+                          <span className="meta-badge" style={{ marginLeft: '0.5rem' }}>Halle</span>
+                        )}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Saison-Info */}
+                  {currentSeason && (
+                    <div className="club-season-info">
+                      <Calendar size={16} />
+                      <span className="season-label">Aktuelle Saison:</span>
+                      <span className="season-value">{currentSeason}</span>
                     </div>
                   )}
 
                   {/* Statistiken */}
                   <div className="club-stats-row">
                     <div className="club-stat-item">
-                      <Trophy size={16} />
-                      <span className="stat-number">{stats.teamsCount}</span>
-                      <span className="stat-text">Mannschaften</span>
+                      <Trophy size={18} />
+                      <div className="stat-content">
+                        <span className="stat-number">{stats.teamsCount}</span>
+                        <span className="stat-text">Mannschaften</span>
+                      </div>
                     </div>
                     <div className="club-stat-item">
-                      <Users size={16} />
-                      <span className="stat-number">{stats.playersCount}</span>
-                      <span className="stat-text">Spieler</span>
+                      <Users size={18} />
+                      <div className="stat-content">
+                        <span className="stat-number">{stats.playersCount}</span>
+                        <span className="stat-text">Spieler</span>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Zusätzliche Infos */}
-                  <div className="club-meta">
-                    {club.postal_code && (
-                      <span className="meta-item">PLZ: {club.postal_code}</span>
-                    )}
-                    {club.federation && (
-                      <span className="meta-item">{club.federation}</span>
-                    )}
-                    {club.state && (
-                      <span className="meta-item">{club.state}</span>
-                    )}
-                  </div>
+                  {/* Verband/Region */}
+                  {(club.federation || club.region) && (
+                    <div className="club-meta">
+                      {club.federation && (
+                        <span className="meta-item">
+                          <Award size={12} style={{ marginRight: '0.25rem' }} />
+                          {club.federation}
+                        </span>
+                      )}
+                      {club.region && (
+                        <span className="meta-item">{club.region}</span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* nuLiga Link */}
+                  {clubNumber && (
+                    <div className="club-nuliga-link">
+                      <a
+                        href={`https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/clubInfoDisplay?club=${clubNumber}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="nuliga-link-button"
+                      >
+                        <ExternalLink size={14} />
+                        nuLiga-Seite öffnen
+                      </a>
+                    </div>
+                  )}
                 </div>
 
+                {/* Logo-Upload Section */}
                 <div className="club-card-footer">
-                  {club.created_at && (
-                    <span className="created-date">
-                      Erstellt: {formatDate(club.created_at)}
-                    </span>
-                  )}
-                  {club.verification_date && (
-                    <span className="verified-date">
-                      Verifiziert: {formatDate(club.verification_date)}
-                    </span>
+                  <button
+                    onClick={() => toggleLogoUpload(club.id)}
+                    className="logo-upload-toggle"
+                  >
+                    {club.logo_url ? '📷 Logo ändern' : '📷 Logo hochladen'}
+                  </button>
+                  {(club.created_at || club.verification_date) && (
+                    <div className="club-dates">
+                      {club.created_at && (
+                        <span className="created-date">
+                          Erstellt: {formatDate(club.created_at)}
+                        </span>
+                      )}
+                      {club.verification_date && (
+                        <span className="verified-date">
+                          Verifiziert: {formatDate(club.verification_date)}
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
+
+                {/* Expandable Logo Upload */}
+                {isExpanded && (
+                  <div className="club-logo-upload-section">
+                    <TeamLogoUpload 
+                      club={club}
+                      onUploadComplete={handleLogoUploadComplete}
+                    />
+                  </div>
+                )}
               </div>
             );
           })}
@@ -273,4 +479,3 @@ function ClubsTab({ clubs, teams, players }) {
 }
 
 export default ClubsTab;
-

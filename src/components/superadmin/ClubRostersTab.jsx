@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabaseClient';
 import { Loader, CheckCircle, AlertCircle, Users, Building2, Search, Download, ExternalLink, ChevronDown, ChevronUp, CalendarDays, Trophy } from 'lucide-react';
 import './ClubRostersTab.css';
 
-const ClubRostersTab = () => {
+const ClubRostersTab = ({ hideHeader = false }) => {
   // State Management
   const [clubPoolsUrl, setClubPoolsUrl] = useState('');
   const [targetSeason, setTargetSeason] = useState('Winter 2025/2026');
@@ -237,15 +237,45 @@ const ClubRostersTab = () => {
     setParsedData(null);
     
     try {
-      const response = await fetch('/api/import/parse-club-rosters', {
+      // Versuche zuerst die neue API zu nutzen
+      let useNewApi = true;
+      let response;
+      
+      try {
+        // Neue API: action: "roster"
+        response = await fetch('/api/import/nuliga-club-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+            action: 'roster',
           clubPoolsUrl,
           targetSeason,
           apply: false
         })
       });
+        
+        // Wenn 404, nutze alte API
+        if (response.status === 404) {
+          console.log('[ClubRostersTab] Neue API nicht verfügbar (404), nutze alte API');
+          useNewApi = false;
+        }
+      } catch (newApiError) {
+        console.warn('[ClubRostersTab] Neue API nicht verfügbar, nutze alte API:', newApiError);
+        useNewApi = false;
+      }
+      
+      // Fallback zur alten API
+      if (!useNewApi) {
+        response = await fetch('/api/import/parse-club-rosters', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clubPoolsUrl,
+            targetSeason,
+            apply: false
+          })
+        });
+      }
       
       // Lese Response-Text einmalig
       const responseText = await response.text();
@@ -398,6 +428,7 @@ const ClubRostersTab = () => {
     setImportResult(null);
     
     try {
+      // Nutze alte API für Import (neue API hat apply=true noch nicht implementiert)
       const response = await fetch('/api/import/parse-club-rosters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -666,6 +697,7 @@ const ClubRostersTab = () => {
   return (
     <div className="club-rosters-tab">
       {/* Header */}
+      {!hideHeader && (
       <div className="club-rosters-header">
         <div className="header-content">
           <div>
@@ -703,6 +735,7 @@ const ClubRostersTab = () => {
           </div>
         </div>
       </div>
+      )}
       
       {/* Club-Nummern finden Bereich */}
       {showFindClubNumbers && (

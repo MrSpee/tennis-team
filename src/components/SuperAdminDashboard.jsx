@@ -21,9 +21,9 @@ import MatchdaysTab from './superadmin/MatchdaysTab';
 import ScraperTab from './superadmin/ScraperTab';
 import TeamPortraitImportTab from './superadmin/TeamPortraitImportTab';
 import ClubRostersTab from './superadmin/ClubRostersTab';
+import NuLigaImportTab from './superadmin/NuLigaImportTab';
 import GroupsTab from './superadmin/GroupsTab';
 import ActivityLogTab from './superadmin/ActivityLogTab';
-import TeamsLogoManager from './superadmin/TeamsLogoManager';
 import { findMatchdaysWithoutResultsAfter4Days, runAutoImport, recordAttempt, checkMatchdayResultsComplete } from '../services/autoMatchResultImportService';
 import './Dashboard.css';
 import './SuperAdminDashboard.css';
@@ -366,7 +366,7 @@ function SuperAdminDashboard() {
   const [selectedSeasonMatch, setSelectedSeasonMatch] = useState(null);
   const [playerSearch, setPlayerSearch] = useState('');
   const [playerSort, setPlayerSort] = useState({ column: 'name', direction: 'asc' });
-  const [selectedTab, setSelectedTab] = useState('groups');
+  const [selectedTab, setSelectedTab] = useState('overview');
   const [dateFilter, setDateFilter] = useState('all');
   const [logsFilter, setLogsFilter] = useState('all');
   const [selectedPlayerRow, setSelectedPlayerRow] = useState(null);
@@ -5261,8 +5261,6 @@ function SuperAdminDashboard() {
   );
 
   const renderClubs = () => <ClubsTab clubs={clubs} teams={teams} players={players} />;
-  
-  const renderTeamsLogos = () => <TeamsLogoManager clubs={clubs} teams={teams} />;
 
   const renderPlayers = () => (
     <PlayersTab
@@ -5533,9 +5531,6 @@ function SuperAdminDashboard() {
         <button className={selectedTab === 'clubs' ? 'active' : ''} onClick={() => setSelectedTab('clubs')}>
           <Building2 size={16} /> Vereine
         </button>
-        <button className={selectedTab === 'teams-logos' ? 'active' : ''} onClick={() => setSelectedTab('teams-logos')}>
-          <Trophy size={16} /> Team-Logos
-        </button>
         <button className={selectedTab === 'players' ? 'active' : ''} onClick={() => setSelectedTab('players')}>
           <Users size={16} /> Spieler
         </button>
@@ -5548,11 +5543,8 @@ function SuperAdminDashboard() {
         <button className={selectedTab === 'import' ? 'active' : ''} onClick={() => setSelectedTab('import')}>
           <Download size={16} /> Import-Tools
         </button>
-        <button className={selectedTab === 'team-portrait' ? 'active' : ''} onClick={() => setSelectedTab('team-portrait')}>
-          <Download size={16} /> Team-Portrait
-        </button>
-        <button className={selectedTab === 'club-rosters' ? 'active' : ''} onClick={() => setSelectedTab('club-rosters')}>
-          <Users size={16} /> Meldelisten
+        <button className={selectedTab === 'nuliga-import' ? 'active' : ''} onClick={() => setSelectedTab('nuliga-import')}>
+          <Download size={16} /> nuLiga Import
         </button>
         <button className={selectedTab === 'groups' ? 'active' : ''} onClick={() => setSelectedTab('groups')}>
           <Trophy size={16} /> Gruppen
@@ -5597,13 +5589,11 @@ function SuperAdminDashboard() {
         <div className="dashboard-content">
           {selectedTab === 'overview' && renderOverview()}
           {selectedTab === 'clubs' && renderClubs()}
-          {selectedTab === 'teams-logos' && renderTeamsLogos()}
           {selectedTab === 'players' && renderPlayers()}
           {selectedTab === 'matchdays' && renderMatchdays()}
           {selectedTab === 'scraper' && renderScraper()}
           {selectedTab === 'import' && <ImportTab />}
-          {selectedTab === 'team-portrait' && <TeamPortraitImportTab />}
-          {selectedTab === 'club-rosters' && <ClubRostersTab />}
+          {selectedTab === 'nuliga-import' && <NuLigaImportTab />}
           {selectedTab === 'groups' && renderGroups()}
           {selectedTab === 'activity' && renderActivity()}
           {selectedTab === 'settings' && renderSettings()}
