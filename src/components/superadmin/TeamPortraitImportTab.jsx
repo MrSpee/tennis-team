@@ -1093,6 +1093,28 @@ const TeamPortraitImportTab = ({ hideHeader = false }) => {
       </div>
       )}
       
+      {/* Info-Box: Wann verwende ich was? */}
+      {!hideHeader && (
+        <div style={{
+          marginBottom: '1.5rem',
+          padding: '1rem',
+          background: '#ecfdf5',
+          border: '1px solid #86efac',
+          borderRadius: '8px',
+          fontSize: '0.875rem'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'start', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <Users size={18} color="#16a34a" />
+            <strong style={{ color: '#166534' }}>Laufende Updates (während der Saison)</strong>
+          </div>
+          <p style={{ margin: 0, color: '#14532d', lineHeight: '1.6' }}>
+            Aktualisiert Spieler-Statistiken (Einzel, Doppel, Gesamt) für ein einzelnes Team. 
+            Diese Daten ändern sich während der Saison. 
+            <strong> Wird automatisch ausgeführt, wenn Matchdays geladen werden.</strong>
+          </p>
+        </div>
+      )}
+      
       {/* URL-Eingabe */}
       <div className="import-section">
         <label className="import-label">

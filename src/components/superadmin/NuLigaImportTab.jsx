@@ -30,10 +30,11 @@ const NuLigaImportTab = () => {
         <button
           className={`section-tab ${selectedSection === 'rosters' ? 'active' : ''}`}
           onClick={() => setSelectedSection('rosters')}
+          title="Saison-Initialisierung: Einmalig zu Saisonbeginn alle Meldelisten importieren"
         >
           <Users size={18} />
           <span>Meldelisten</span>
-          <span className="section-subtitle">Club-Roster importieren</span>
+          <span className="section-subtitle">Saison-Initialisierung (einmalig)</span>
         </button>
         <button
           className={`section-tab ${selectedSection === 'matches' ? 'active' : ''}`}
@@ -46,10 +47,11 @@ const NuLigaImportTab = () => {
         <button
           className={`section-tab ${selectedSection === 'portrait' ? 'active' : ''}`}
           onClick={() => setSelectedSection('portrait')}
+          title="Für laufende Updates: Spieler-Statistiken (Einzel/Doppel) für ein einzelnes Team aktualisieren"
         >
           <Users size={18} />
           <span>Team-Portrait</span>
-          <span className="section-subtitle">Spieler-Statistiken</span>
+          <span className="section-subtitle">Spieler-Statistiken (laufende Updates)</span>
         </button>
       </div>
 

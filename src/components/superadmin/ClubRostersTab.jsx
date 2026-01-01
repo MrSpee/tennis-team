@@ -7,6 +7,8 @@ import './ClubRostersTab.css';
 const ClubRostersTab = ({ hideHeader = false }) => {
   // State Management
   const [clubPoolsUrl, setClubPoolsUrl] = useState('');
+  const [selectedClubForImport, setSelectedClubForImport] = useState(null); // {id, name, clubNumber}
+  const [clubsWithNumbers, setClubsWithNumbers] = useState([]); // Vereine mit Club-Nummern
   const [targetSeason, setTargetSeason] = useState('Winter 2025/2026');
   const [isLoading, setIsLoading] = useState(false);
   const [parsedData, setParsedData] = useState(null);
@@ -58,7 +60,52 @@ const ClubRostersTab = ({ hideHeader = false }) => {
   useEffect(() => {
     loadClubsAndTeams();
     loadClubsOverview();
+    loadClubsWithNumbers();
   }, []);
+
+  // Lade Vereine mit Club-Nummern für Dropdown
+  const loadClubsWithNumbers = async () => {
+    try {
+      // Lade alle eindeutigen Club/Verein-Kombinationen mit Club-Nummer
+      const { data: teamsWithNumbers, error } = await supabase
+        .from('team_info')
+        .select('club_id, club_number, club_info!inner(id, name, city)')
+        .not('club_number', 'is', null);
+
+      if (error) throw error;
+
+      // Gruppiere nach club_id, nimm die erste club_number (sollte bei allen gleich sein)
+      const clubMap = new Map();
+      teamsWithNumbers?.forEach(team => {
+        if (team.club_id && !clubMap.has(team.club_id)) {
+          clubMap.set(team.club_id, {
+            id: team.club_id,
+            name: team.club_info.name,
+            city: team.club_info.city,
+            clubNumber: team.club_number
+          });
+        }
+      });
+
+      const clubsList = Array.from(clubMap.values()).sort((a, b) => 
+        a.name.localeCompare(b.name)
+      );
+
+      setClubsWithNumbers(clubsList);
+    } catch (err) {
+      console.error('Error loading clubs with numbers:', err);
+    }
+  };
+
+  // URL automatisch generieren wenn Verein ausgewählt wird
+  useEffect(() => {
+    if (selectedClubForImport && selectedClubForImport.clubNumber) {
+      const url = `https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/clubPools?club=${selectedClubForImport.clubNumber}`;
+      setClubPoolsUrl(url);
+    } else {
+      setClubPoolsUrl('');
+    }
+  }, [selectedClubForImport]);
   
   // Lade Übersicht der Vereine mit Meldelisten-Status
   const loadClubsOverview = async () => {
@@ -231,8 +278,8 @@ const ClubRostersTab = ({ hideHeader = false }) => {
   }, [selectedClubId, parsedData, allTeams]);
   
   const handleParse = async () => {
-    if (!clubPoolsUrl) {
-      setError('Bitte gib eine clubPools-URL ein');
+    if (!selectedClubForImport || !clubPoolsUrl) {
+      setError('Bitte wähle einen Verein aus');
       return;
     }
     
@@ -1367,22 +1414,127 @@ const ClubRostersTab = ({ hideHeader = false }) => {
         </div>
       )}
       
+      {/* Banner: Vereine ohne Club-Nummer */}
+      {viewMode === 'import' && clubsWithRosters.some(c => !c.clubNumber) && (
+        <div style={{
+          marginTop: '1rem',
+          padding: '1rem 1.5rem',
+          background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+          border: '2px solid #f59e0b',
+          borderRadius: '8px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+              <AlertCircle size={20} color="#d97706" />
+              <strong style={{ fontSize: '1rem', color: '#92400e' }}>
+                {clubsWithRosters.filter(c => !c.clubNumber).length} Vereine haben noch keine Club-Nummer
+              </strong>
+            </div>
+            <p style={{ margin: 0, fontSize: '0.875rem', color: '#78350f' }}>
+              Um Meldelisten zu importieren, benötigen wir die nuLiga Club-Nummern. 
+              Diese werden automatisch über die nuLiga Vereinssuche gefunden.
+            </p>
+          </div>
+          <button
+            onClick={() => setShowFindClubNumbers(true)}
+            style={{
+              marginLeft: '1rem',
+              padding: '0.625rem 1.25rem',
+              background: '#d97706',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              fontSize: '0.875rem',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            🔍 Club-Nummern finden
+          </button>
+        </div>
+      )}
+
       {/* Eingabe-Bereich (Einzel-Import) */}
       {viewMode === 'import' && !showBulkImport && (
       <div className="club-rosters-input-section">
+        {/* Info-Box: Wann verwende ich was? */}
+        <div style={{
+          marginBottom: '1.5rem',
+          padding: '1rem',
+          background: '#eff6ff',
+          border: '1px solid #93c5fd',
+          borderRadius: '8px',
+          fontSize: '0.875rem'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'start', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <Building2 size={18} color="#2563eb" />
+            <strong style={{ color: '#1e40af' }}>Saison-Initialisierung (einmalig zu Saisonbeginn)</strong>
+          </div>
+          <p style={{ margin: 0, color: '#1e3a8a', lineHeight: '1.6' }}>
+            Importiert alle Meldelisten (Spieler mit Rang, LK, TVM-ID) für alle Teams eines Vereins. 
+            Diese Daten ändern sich während der Saison nicht mehr. 
+            <strong> Empfohlen: Bulk-Import für alle Vereine zu Saisonbeginn.</strong>
+          </p>
+        </div>
         <div className="input-group">
-          <label htmlFor="clubPoolsUrl">
+          <label htmlFor="clubSelect">
             <Building2 size={18} />
-            clubPools-URL
+            Verein auswählen
           </label>
-          <input
-            id="clubPoolsUrl"
-            type="text"
-            placeholder="https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/clubPools?club=36154"
-            value={clubPoolsUrl}
-            onChange={(e) => setClubPoolsUrl(e.target.value)}
-            className="url-input"
-          />
+          <select
+            id="clubSelect"
+            value={selectedClubForImport?.id || ''}
+            onChange={(e) => {
+              const clubId = e.target.value;
+              const club = clubsWithNumbers.find(c => c.id === clubId);
+              setSelectedClubForImport(club || null);
+            }}
+            className="club-select-input"
+            style={{
+              padding: '0.75rem',
+              border: '1px solid #d1d5db',
+              borderRadius: '6px',
+              fontSize: '0.875rem',
+              width: '100%',
+              background: 'white'
+            }}
+          >
+            <option value="">Verein auswählen...</option>
+            {clubsWithNumbers.map(club => (
+              <option key={club.id} value={club.id}>
+                {club.name} {club.city ? `(${club.city})` : ''} - Club-Nr: {club.clubNumber}
+              </option>
+            ))}
+          </select>
+          {selectedClubForImport && (
+            <div style={{ 
+              marginTop: '0.5rem', 
+              padding: '0.5rem', 
+              background: '#f0f9ff', 
+              borderRadius: '4px',
+              fontSize: '0.75rem',
+              color: '#0369a1'
+            }}>
+              <strong>Generierte URL:</strong> {clubPoolsUrl}
+            </div>
+          )}
+          {clubsWithNumbers.length === 0 && (
+            <div style={{ 
+              marginTop: '0.5rem', 
+              padding: '0.5rem', 
+              background: '#fef3c7', 
+              borderRadius: '4px',
+              fontSize: '0.75rem',
+              color: '#92400e'
+            }}>
+              ⚠️ Keine Vereine mit Club-Nummern gefunden. Verwende "Club-Nummern finden" um Club-Nummern zu importieren.
+            </div>
+          )}
         </div>
         
         <div className="input-group">
@@ -1402,7 +1554,7 @@ const ClubRostersTab = ({ hideHeader = false }) => {
         
         <button
           onClick={handleParse}
-          disabled={isLoading || !clubPoolsUrl}
+          disabled={isLoading || !selectedClubForImport || !clubPoolsUrl}
           className="parse-button"
         >
           {isLoading ? (
