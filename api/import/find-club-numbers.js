@@ -411,18 +411,35 @@ async function handler(req, res) {
     
     console.log(`[find-club-numbers] 🔍 Starte Suche für ${clubs.length} Vereine...`);
     
+    // ✅ WICHTIG: Limit pro Request, um Timeout zu vermeiden (Vercel Hobby Plan: 10 Sekunden)
+    // Jede Suche kann 3-5 Sekunden dauern + 10-15 Sekunden Delay = ~15-20 Sekunden pro Verein
+    // Limit auf 1 Verein pro Request, um sicherzustellen, dass wir das 10-Sekunden-Timeout nicht überschreiten
+    const MAX_CLUBS_PER_REQUEST = 1;
+    
+    if (clubs.length > MAX_CLUBS_PER_REQUEST) {
+      return withCors(res, 400, {
+        success: false,
+        error: 'Zu viele Vereine ausgewählt',
+        message: `Bitte wähle maximal ${MAX_CLUBS_PER_REQUEST} Verein(e) pro Request aus. Die Suche kann nur einen Verein gleichzeitig verarbeiten, um das Timeout zu vermeiden.`,
+        maxClubsPerRequest: MAX_CLUBS_PER_REQUEST,
+        selectedClubs: clubs.length
+      });
+    }
+    
     const results = [];
     let successCount = 0;
     let errorCount = 0;
     
     // Verarbeite jeden Verein (mit Pause zwischen den Requests)
+    // NOTE: Mit MAX_CLUBS_PER_REQUEST = 1 wird diese Schleife nur einmal ausgeführt
     for (let i = 0; i < clubs.length; i++) {
       const club = clubs[i];
       
       try {
-        // Pause zwischen Requests (10-15 Sekunden, um nicht als Bot erkannt zu werden)
+        // Pause zwischen Requests (nur bei mehreren Vereinen, aber mit MAX_CLUBS_PER_REQUEST = 1 wird dies nie ausgeführt)
+        // Reduziertes Delay, um Timeout zu vermeiden (3-5 Sekunden statt 10-15)
         if (i > 0) {
-          const delay = 10000 + Math.random() * 5000; // 10-15 Sekunden
+          const delay = 3000 + Math.random() * 2000; // 3-5 Sekunden (reduziert für bessere Performance)
           console.log(`[find-club-numbers] ⏳ Warte ${Math.round(delay / 1000)} Sekunden vor nächster Suche...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
