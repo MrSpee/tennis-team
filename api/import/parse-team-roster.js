@@ -501,9 +501,10 @@ module.exports = async function handler(req, res) {
     }
     
     // Speichere in DB wenn apply=true
+    // WICHTIG: Verwende Service Role für DB-Schreibvorgänge (umgeht RLS)
     let savedRoster = null;
     if (apply) {
-      const supabase = createSupabaseClient();
+      const supabase = createSupabaseClient(true); // Service Role für DB-Schreibvorgänge
       const result = await saveTeamRoster(supabase, teamId, season, roster);
       savedRoster = result;
     }
