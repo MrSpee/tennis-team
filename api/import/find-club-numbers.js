@@ -29,32 +29,66 @@ async function searchClubOnNuLiga(clubName) {
     const generateSearchTerms = (name) => {
       const terms = [name]; // Original-Name zuerst
       
+      // ✅ NEU: Entferne Zusätze wie "5 zurückgezogen am '16.09.2025'"
+      const cleanName = name.replace(/\s+\d+\s+.*?$/, '').trim();
+      if (cleanName !== name) {
+        terms.push(cleanName);
+      }
+      
       // Entferne Bindestriche und ersetze durch Leerzeichen
-      const withoutHyphens = name.replace(/-/g, ' ');
-      if (withoutHyphens !== name) {
+      const withoutHyphens = cleanName.replace(/-/g, ' ');
+      if (withoutHyphens !== cleanName) {
         terms.push(withoutHyphens);
       }
       
       // Teile den Namen in Wörter auf
-      const words = name.split(/[\s-]+/).filter(w => w.length > 0);
+      const words = cleanName.split(/[\s-]+/).filter(w => w.length > 0);
       
-      // Wenn mehr als 2 Wörter, versuche verschiedene Kombinationen
+      // ✅ VERBESSERT: Mehr Varianten für bessere Trefferquote
       if (words.length > 2) {
+        // Alle Wörter außer dem letzten (oft Stadt/Ort)
+        terms.push(words.slice(0, -1).join(' '));
         // Letzte 2 Wörter (oft Stadt/Ort)
         terms.push(words.slice(-2).join(' '));
         // Vorletztes Wort (oft der eigentliche Vereinsname)
-        if (words.length > 2) {
-          terms.push(words[words.length - 2]);
-        }
+        terms.push(words[words.length - 2]);
         // Nur letztes Wort
         terms.push(words.slice(-1).join(' '));
       } else if (words.length > 1) {
+        // Erste Wort (oft Vereinsname)
+        terms.push(words[0]);
         // Nur letztes Wort
         terms.push(words.slice(-1).join(' '));
       }
       
-      // Entferne Duplikate
-      return [...new Set(terms)];
+      // ✅ NEU: Entferne häufige Abkürzungen und ersetze sie
+      const abbreviations = {
+        'TK': 'Tennisklub',
+        'TC': 'Tennisclub',
+        'TG': 'Turngemeinde',
+        'TV': 'Turnverein',
+        'MTV': 'Männerturnverein',
+        'HTC': 'Hockey- und Tennisclub',
+        'KHT': 'Kölner Hockey- und Tennisclub',
+        'KTC': 'Kölner Tennisclub',
+        'GW': 'Gut Wohlfahrt',
+        'RW': 'Rot-Weiß',
+        'SW': 'Schwarz-Weiß',
+        'BG': 'Blau-Gelb',
+        'GWR': 'Gut Wohlfahrt Rot'
+      };
+      
+      // Versuche Abkürzungen zu erweitern
+      words.forEach((word, idx) => {
+        if (abbreviations[word]) {
+          const expanded = [...words];
+          expanded[idx] = abbreviations[word];
+          terms.push(expanded.join(' '));
+        }
+      });
+      
+      // Entferne Duplikate und leere Strings
+      return [...new Set(terms)].filter(t => t && t.length > 0);
     };
     
     const searchTerms = generateSearchTerms(clubName);
@@ -108,9 +142,23 @@ async function searchClubOnNuLiga(clubName) {
       // Lade HTML für weitere Analyse
       const html = await response.text();
       
-      // Prüfe ob "Keine Treffer" in der Antwort steht
-      if (html.includes('Keine Treffer')) {
-        console.log(`[find-club-numbers] ⚠️ Keine Treffer für "${searchTerm}"`);
+      // ✅ DEBUG: Log HTML-Länge und erste 500 Zeichen für Debugging
+      console.log(`[find-club-numbers] 📄 HTML-Response: ${html.length} Zeichen`);
+      console.log(`[find-club-numbers] 📄 HTML-Preview (erste 500 Zeichen): ${html.substring(0, 500)}`);
+      
+      // Prüfe verschiedene Varianten von "Keine Treffer"
+      const noResultsPatterns = [
+        /Keine Treffer/i,
+        /keine.*treffer/i,
+        /no.*results/i,
+        /nichts.*gefunden/i
+      ];
+      
+      const hasNoResults = noResultsPatterns.some(pattern => pattern.test(html));
+      
+      if (hasNoResults) {
+        console.log(`[find-club-numbers] ⚠️ "Keine Treffer" erkannt für "${searchTerm}"`);
+        // Prüfe auch, ob wir vielleicht auf einer Suchergebnis-Seite sind, aber ohne Ergebnisse
         if (termIndex < searchTerms.length - 1) {
           continue; // Versuche nächsten Suchbegriff
         }
@@ -126,20 +174,32 @@ async function searchClubOnNuLiga(clubName) {
         if (isSearchResultsPage) {
           console.log(`[find-club-numbers] 📋 Auf Suchergebnis-Seite gelandet, parse Ergebnisse...`);
           
+          // ✅ DEBUG: Suche nach typischen nuLiga-Strukturen
+          const hasClubTable = html.includes('Verein') || html.includes('club') || html.includes('Club');
+          const hasLinks = html.includes('href') && html.includes('club');
+          console.log(`[find-club-numbers] 🔍 HTML-Analyse: hasClubTable=${hasClubTable}, hasLinks=${hasLinks}`);
+          
           // Suche nach Club-Links in Suchergebnissen
           // Pattern: Links die zu clubInfoDisplay, clubPools, etc. führen
+          // ✅ VERBESSERT: Mehrere Pattern-Varianten für bessere Erkennung
           const clubLinkPatterns = [
             /href=["']([^"']*club(?:InfoDisplay|Pools|Portrait|Meetings|Teams)\?club=(\d+)[^"']*)["']/gi,
-            /href=["']([^"']*[?&]club=(\d+)[^"']*)["']/gi
+            /href=["']([^"']*[?&]club=(\d+)[^"']*)["']/gi,
+            /club(?:InfoDisplay|Pools|Portrait|Meetings|Teams)\?club=(\d+)/gi,
+            /[?&]club=(\d+)/gi,
+            // Auch ohne href (falls in JavaScript oder anderen Attributen)
+            /club=(\d+)/gi
           ];
           
           const foundClubs = new Map(); // Map<clubNumber, {url, context}>
           
-          clubLinkPatterns.forEach(pattern => {
+          clubLinkPatterns.forEach((pattern, patternIndex) => {
             const matches = [...html.matchAll(pattern)];
-            matches.forEach(match => {
-              const foundClubNumber = match[2] || match[1]?.match(/[?&]club=(\d+)/)?.[1];
-              if (foundClubNumber) {
+            console.log(`[find-club-numbers] 🔍 Pattern ${patternIndex + 1}: ${matches.length} Matches gefunden`);
+            matches.forEach((match, matchIndex) => {
+              // Extrahiere Club-Nummer aus verschiedenen Match-Positionen
+              const foundClubNumber = match[2] || match[1] || match[0]?.match(/club=(\d+)/)?.[1];
+              if (foundClubNumber && /^\d+$/.test(foundClubNumber)) {
                 // Extrahiere Kontext um den Link (Vereinsname)
                 const linkStart = match.index;
                 const contextStart = Math.max(0, linkStart - 200);
@@ -162,6 +222,32 @@ async function searchClubOnNuLiga(clubName) {
           });
           
           console.log(`[find-club-numbers] 🔍 ${foundClubs.size} verschiedene Club-Nummern in Suchergebnissen gefunden`);
+          
+          // ✅ DEBUG: Zeige alle gefundenen Club-Nummern
+          if (foundClubs.size > 0) {
+            console.log(`[find-club-numbers] 📋 Gefundene Club-Nummern:`);
+            foundClubs.forEach((data, num) => {
+              console.log(`  - Club ${num}: "${data.context || 'kein Name'}"`);
+            });
+          } else {
+            // ✅ DEBUG: Wenn keine Club-Nummern gefunden, zeige HTML-Ausschnitt
+            console.log(`[find-club-numbers] ⚠️ Keine Club-Nummern in HTML gefunden`);
+            // Suche nach typischen nuLiga-Strukturen
+            const clubSearchIndicators = [
+              html.includes('clubSearch'),
+              html.includes('Verein'),
+              html.includes('Suchergebnis'),
+              html.match(/club=\d+/g)?.length > 0
+            ];
+            console.log(`[find-club-numbers] 🔍 HTML-Indikatoren:`, clubSearchIndicators);
+            
+            // Zeige HTML-Ausschnitt um typische Suchbegriffe
+            const searchTermIndex = html.toLowerCase().indexOf(searchTerm.toLowerCase());
+            if (searchTermIndex !== -1) {
+              const snippet = html.substring(Math.max(0, searchTermIndex - 200), Math.min(html.length, searchTermIndex + 200));
+              console.log(`[find-club-numbers] 📄 HTML-Ausschnitt um "${searchTerm}": ${snippet}`);
+            }
+          }
           
           if (foundClubs.size > 0) {
             // Versuche das beste Match zu finden basierend auf Vereinsnamen
