@@ -62,3 +62,4 @@ Das Frontend sollte:
 - **Progress-Tracking**: WebSocket oder Polling für Status-Updates
 - **Smart Batching**: Gruppiert Vereine in intelligente Batches
 
+
