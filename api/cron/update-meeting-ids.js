@@ -289,13 +289,14 @@ async function updateScores(supabase) {
   };
   
   try {
-    // Finde Matchdays mit meeting_id aber ohne home_score/away_score
+    // Finde Matchdays mit meeting_id ODER meeting_report_url aber ohne home_score/away_score
     const { data: matchdays, error: fetchError } = await supabase
       .from('matchdays')
       .select(`
         id,
         match_date,
         meeting_id,
+        meeting_report_url,
         home_team_id,
         away_team_id,
         home_score,
@@ -305,7 +306,7 @@ async function updateScores(supabase) {
         home_team:team_info!matchdays_home_team_id_fkey(club_name, team_name),
         away_team:team_info!matchdays_away_team_id_fkey(club_name, team_name)
       `)
-      .not('meeting_id', 'is', null)
+      .or('meeting_id.not.is.null,meeting_report_url.not.is.null')
       .lt('match_date', today.toISOString())
       .neq('status', 'cancelled')
       .neq('status', 'postponed')
