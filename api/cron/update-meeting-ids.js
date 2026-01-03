@@ -32,6 +32,17 @@ async function loadMeetingReportFunctions() {
   }
 }
 
+// Helper: Extrahiere meeting_id aus meeting_report_url
+function extractMeetingIdFromUrl(url) {
+  if (!url) return null;
+  // Versuche zuerst das spezifische Pattern: meetingReport?meeting=(\d+)
+  let match = url.match(/meetingReport\?meeting=(\d+)/);
+  if (match) return match[1];
+  // Fallback: Suche nach meeting=(\d+) irgendwo in der URL
+  match = url.match(/[?&]meeting=(\d+)/);
+  return match ? match[1] : null;
+}
+
 // Helper: Normalisiere String (für Team-Matching)
 function normalizeString(str) {
   if (!str) return '';
@@ -324,11 +335,31 @@ async function updateScores(supabase) {
           ? `${matchday.away_team.club_name || ''} ${matchday.away_team.team_name || ''}`.trim()
           : 'Unbekannt';
         
-        console.log(`[update-meeting-ids] 📥 Hole Ergebnisse für: ${homeTeamName} vs. ${awayTeamName} (meeting_id: ${matchday.meeting_id})`);
+        // ✅ Extrahiere meeting_id aus URL falls nicht vorhanden
+        let effectiveMeetingId = matchday.meeting_id;
+        if (!effectiveMeetingId && matchday.meeting_report_url) {
+          effectiveMeetingId = extractMeetingIdFromUrl(matchday.meeting_report_url);
+          if (effectiveMeetingId) {
+            console.log(`[update-meeting-ids] 🔍 meeting_id aus URL extrahiert: ${effectiveMeetingId}`);
+            // Speichere extrahierte meeting_id in DB für nächste Runs
+            await supabase
+              .from('matchdays')
+              .update({ meeting_id: effectiveMeetingId })
+              .eq('id', matchday.id);
+          }
+        }
+        
+        if (!effectiveMeetingId) {
+          summary.skipped++;
+          console.log(`[update-meeting-ids] ⏭️ Keine meeting_id verfügbar für Matchday ${matchday.id}`);
+          continue;
+        }
+        
+        console.log(`[update-meeting-ids] 📥 Hole Ergebnisse für: ${homeTeamName} vs. ${awayTeamName} (meeting_id: ${effectiveMeetingId})`);
         
         // Schritt 1: Scrape Meeting-Report direkt
         const meetingData = await scrapeMeetingReport({
-          meetingId: matchday.meeting_id
+          meetingId: effectiveMeetingId
         });
         
         if (!meetingData || ((!meetingData.singles || meetingData.singles.length === 0) && (!meetingData.doubles || meetingData.doubles.length === 0))) {
