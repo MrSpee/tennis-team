@@ -68,6 +68,11 @@ function Dashboard() {
   // 🎾 State für bestes Ranking (aus team_roster)
   const [bestRanking, setBestRanking] = useState(null);
   
+  // 🎾 State für Badge-Daten
+  const [trainingCount, setTrainingCount] = useState(0);
+  const [winStreak, setWinStreak] = useState(0);
+  const [seasonMatchesCount, setSeasonMatchesCount] = useState(0);
+  
   // 🎾 Lade aktuelle Spieler-Daten neu, wenn Feed geladen wird (für aktuelle LK)
   const refreshPlayerData = useCallback(async () => {
     if (socialFeed.length === 0) {
@@ -613,6 +618,99 @@ function Dashboard() {
     
     loadBestRanking();
   }, [player?.id]);
+  
+  // 🎾 Lade Training-Count für Badge (inkl. Historie)
+  useEffect(() => {
+    const loadTrainingCount = async () => {
+      if (!player?.id) {
+        setTrainingCount(0);
+        return;
+      }
+      
+      try {
+        const allTrainingIds = new Set();
+        
+        // 1. Team-Trainings (wenn Spieler Teams hat)
+        if (playerTeams && playerTeams.length > 0) {
+          const playerTeamIds = playerTeams.map(t => t.id);
+          
+          const { data: teamTrainings, error: teamError } = await supabase
+            .from('training_sessions')
+            .select('id')
+            .in('team_id', playerTeamIds);
+          
+          if (teamError) {
+            console.error('Error loading team trainings:', teamError);
+          } else if (teamTrainings) {
+            teamTrainings.forEach(t => allTrainingIds.add(t.id));
+          }
+        }
+        
+        // 2. Private Trainings (als Organizer oder eingeladen)
+        const { data: privateTrainings, error: privateError } = await supabase
+          .from('training_sessions')
+          .select('id, organizer_id, invited_players, is_public, needs_substitute')
+          .is('team_id', null)
+          .eq('type', 'private');
+        
+        if (privateError) {
+          console.error('Error loading private trainings:', privateError);
+        } else if (privateTrainings) {
+          privateTrainings.forEach(t => {
+            const isOrganizer = t.organizer_id === player.id;
+            const isInvited = t.invited_players?.includes(player.id);
+            const isPublic = t.is_public && t.needs_substitute;
+            
+            if (isOrganizer || isInvited || isPublic) {
+              allTrainingIds.add(t.id);
+            }
+          });
+        }
+        
+        // 3. Trainings über Attendance (auch wenn nicht direkt eingeladen)
+        const { data: attendance, error: attendanceError } = await supabase
+          .from('training_attendance')
+          .select('session_id')
+          .eq('player_id', player.id);
+        
+        if (attendanceError) {
+          console.error('Error loading training attendance:', attendanceError);
+        } else if (attendance) {
+          attendance.forEach(a => allTrainingIds.add(a.session_id));
+        }
+        
+        setTrainingCount(allTrainingIds.size);
+      } catch (error) {
+        console.error('Error loading training count:', error);
+      }
+    };
+    
+    loadTrainingCount();
+  }, [player?.id, playerTeams]);
+  
+  // 🎾 Berechne Win-Streak und LK Spiele (kumuliert über alle Jahre) aus ownMatchResults
+  useEffect(() => {
+    if (!ownMatchResults || ownMatchResults.length === 0) {
+      setWinStreak(0);
+      setSeasonMatchesCount(0);
+      return;
+    }
+    
+    // LK Spiele: Alle Matches (kumuliert über alle Jahre)
+    setSeasonMatchesCount(ownMatchResults.length);
+    
+    // Berechne Win-Streak (aktuellste Spiele zuerst - already sorted)
+    let streak = 0;
+    for (const match of ownMatchResults) {
+      if (match.won) {
+        streak++;
+      } else {
+        break; // Streak endet bei erster Niederlage
+      }
+    }
+    
+    setWinStreak(streak);
+  }, [ownMatchResults]);
   
   // 🎾 Automatische LK-Berechnung bei neuen Match-Ergebnissen
   useEffect(() => {
@@ -2420,6 +2518,21 @@ function Dashboard() {
                     socialText = 'Ultra bekannt';
                   }
                   
+                  // Training-Badge Text
+                  let trainingText = trainingCount === 0 
+                    ? 'Zeit für Training!' 
+                    : `${trainingCount} Training${trainingCount !== 1 ? 's' : ''}`;
+                  
+                  // Win-Streak Text
+                  let winStreakText = winStreak === 0 
+                    ? 'Keine Serie' 
+                    : `${winStreak} Sieg${winStreak !== 1 ? 'e' : ''} in Folge`;
+                  
+                  // LK Spiele Text (kumuliert)
+                  let seasonMatchesText = seasonMatchesCount === 0 
+                    ? 'Keine Spiele' 
+                    : `${seasonMatchesCount} LK Spiel${seasonMatchesCount !== 1 ? 'e' : ''}`;
+                  
                   return (
                     <div style={{
                       marginTop: '1.5rem',
@@ -2458,33 +2571,35 @@ function Dashboard() {
                         </div>
                       </div>
                       
-                      {/* Badge: Aktivität */}
-                      <div className="badge-3d-card theme-secondary">
-                        <div className="badge-3d-circle-container">
-                          <div className="badge-3d-circle">
-                            <span className="badge-3d-icon">
-                              {activityIcon}
-                            </span>
+                      {/* Badge: Aktivität - NUR für andere Spieler, nicht für sich selbst */}
+                      {!isCurrentUser && (
+                        <div className="badge-3d-card theme-secondary">
+                          <div className="badge-3d-circle-container">
+                            <div className="badge-3d-circle">
+                              <span className="badge-3d-icon">
+                                {activityIcon}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                        <div className="badge-3d-number" style={{
-                          fontSize: '1rem',
-                          lineHeight: 1.4
-                        }}>
-                          {activityDisplayText}
-                        </div>
-                        {lastActiveTime && activityText !== 'Jetzt aktiv' && (
-                          <div style={{
-                            fontSize: '0.6rem',
-                            color: '#9ca3af',
-                            textAlign: 'center',
-                            marginTop: '0.25rem',
-                            fontWeight: '500'
+                          <div className="badge-3d-number" style={{
+                            fontSize: '1rem',
+                            lineHeight: 1.4
                           }}>
-                            {lastActiveTime}
+                            {activityDisplayText}
                           </div>
-                        )}
-                      </div>
+                          {lastActiveTime && activityText !== 'Jetzt aktiv' && (
+                            <div style={{
+                              fontSize: '0.6rem',
+                              color: '#9ca3af',
+                              textAlign: 'center',
+                              marginTop: '0.25rem',
+                              fontWeight: '500'
+                            }}>
+                              {lastActiveTime}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       
                       {/* Badge: Ranking */}
                       <div className="badge-3d-card theme-warning">
@@ -2536,6 +2651,75 @@ function Dashboard() {
                           lineHeight: 1.3
                         }}>
                           {socialText}
+                        </div>
+                      </div>
+                      
+                      {/* Badge: Training */}
+                      <div className="badge-3d-card theme-secondary">
+                        <div className="badge-3d-circle-container">
+                          <div className="badge-3d-circle">
+                            <span className="badge-3d-icon">
+                              🏃
+                            </span>
+                          </div>
+                        </div>
+                        <div className="badge-3d-number">
+                          {trainingCount}
+                        </div>
+                        <div style={{
+                          fontSize: '0.75rem',
+                          color: '#6b7280',
+                          textAlign: 'center',
+                          marginTop: '0.5rem',
+                          lineHeight: 1.3
+                        }}>
+                          {trainingText}
+                        </div>
+                      </div>
+                      
+                      {/* Badge: Win-Streak */}
+                      <div className="badge-3d-card theme-primary">
+                        <div className="badge-3d-circle-container">
+                          <div className="badge-3d-circle">
+                            <span className="badge-3d-icon">
+                              🔥
+                            </span>
+                          </div>
+                        </div>
+                        <div className="badge-3d-number">
+                          {winStreak}
+                        </div>
+                        <div style={{
+                          fontSize: '0.75rem',
+                          color: '#6b7280',
+                          textAlign: 'center',
+                          marginTop: '0.5rem',
+                          lineHeight: 1.3
+                        }}>
+                          {winStreakText}
+                        </div>
+                      </div>
+                      
+                      {/* Badge: Saisonspiele */}
+                      <div className="badge-3d-card theme-warning">
+                        <div className="badge-3d-circle-container">
+                          <div className="badge-3d-circle">
+                            <span className="badge-3d-icon">
+                              🎾
+                            </span>
+                          </div>
+                        </div>
+                        <div className="badge-3d-number">
+                          {seasonMatchesCount}
+                        </div>
+                        <div style={{
+                          fontSize: '0.75rem',
+                          color: '#6b7280',
+                          textAlign: 'center',
+                          marginTop: '0.5rem',
+                          lineHeight: 1.3
+                        }}>
+                          {seasonMatchesText}
                         </div>
                       </div>
                     </div>
