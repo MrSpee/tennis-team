@@ -1,14 +1,14 @@
 /**
  * Vercel Cron Job: Automatische meeting_id und Ergebnis-Update
  * 
- * Läuft stündlich (0 * * * *)
+ * Läuft täglich um 14:00 UTC (0 14 * * *)
  * 
  * Funktionalität:
- * 1. Findet alle vergangenen Matchdays ohne meeting_id und ohne Detailsergebnisse (max. 5)
+ * 1. Findet alle vergangenen Matchdays ohne meeting_id (max. 50)
  * 2. Gruppiert nach source_url aus team_seasons
  * 3. Scraped nuLiga für jede Gruppe
  * 4. Matcht Matches und aktualisiert meeting_id
- * 5. Findet Matchdays mit meeting_id aber ohne Ergebnisse (max. 5)
+ * 5. Findet Matchdays mit meeting_id aber ohne Ergebnisse (max. 50)
  * 6. Holt Ergebnisse via meeting-report API
  * 7. Loggt Ergebnisse und sendet Email bei Fehlern
  */
@@ -428,7 +428,7 @@ async function updateMeetingIds() {
       .lt('match_date', today.toISOString())
       // Kein Status-Filter (wie Dashboard) - auch cancelled/postponed können meeting_ids brauchen
       .order('match_date', { ascending: false })
-      .limit(5); // Batch-Größe: 5 Matchdays pro Lauf (kleine Batches für kurze Ausführungszeit)
+      .limit(50); // Batch-Größe: 50 Matchdays pro täglichem Lauf
     
     if (fetchError) {
       throw new Error(`Fehler beim Laden der Matchdays: ${fetchError.message}`);
