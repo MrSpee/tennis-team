@@ -398,9 +398,14 @@ async function updateMeetingIds() {
   };
   
   // Bestimme Base URL für interne API-Calls (wird für beide Schritte benötigt)
+  // ✅ FIX: Verwende VERCEL_PROJECT_PRODUCTION_URL als Fallback für Production
   const BASE_URL = process.env.VERCEL_URL 
     ? `https://${process.env.VERCEL_URL}`
-    : (process.env.VERCEL_ENV === 'development' ? 'http://localhost:3000' : process.env.VITE_SUPABASE_URL?.replace(/\.supabase\.co.*/, '') || 'http://localhost:3000');
+    : (process.env.VERCEL_PROJECT_PRODUCTION_URL 
+        ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+        : (process.env.VERCEL_ENV === 'development' 
+            ? 'http://localhost:3000' 
+            : 'https://tennis-team-gamma.vercel.app')); // Fallback zu Production URL
   
   console.log(`[update-meeting-ids] 🔗 Base URL für API-Calls: ${BASE_URL}`);
   
