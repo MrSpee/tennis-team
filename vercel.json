@@ -31,7 +31,7 @@
   "crons": [
     {
       "path": "/api/cron/update-meeting-ids",
-      "schedule": "0 * * * *"
+      "schedule": "0 14 * * *"
     }
   ]
 }
