@@ -384,8 +384,7 @@ async function updateMeetingIds() {
       `)
       .is('meeting_id', null)
       .lt('match_date', today.toISOString())
-      .neq('status', 'cancelled')
-      .neq('status', 'postponed')
+      // Kein Status-Filter (wie Dashboard) - auch cancelled/postponed können meeting_ids brauchen
       .order('match_date', { ascending: false })
       .limit(5); // Batch-Größe: 5 Matchdays pro Lauf (kleine Batches für kurze Ausführungszeit)
     
