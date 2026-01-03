@@ -15,6 +15,23 @@
 
 const { createSupabaseClient } = require('../_lib/supabaseAdmin');
 
+// ✅ DIREKTE INTEGRATION: Importiere Funktionen für Meeting-Report-Verarbeitung
+// Umgeht HTTP-Requests und löst HTTP 401 Problem
+let scrapeMeetingReport = null;
+let applyMeetingResults = null;
+
+// Lazy Load: Lade Module nur wenn benötigt
+async function loadMeetingReportFunctions() {
+  if (!scrapeMeetingReport) {
+    const nuligaScraper = await import('../../lib/nuligaScraper.mjs');
+    scrapeMeetingReport = nuligaScraper.scrapeMeetingReport;
+  }
+  if (!applyMeetingResults) {
+    const meetingReportModule = require('../import/meeting-report');
+    applyMeetingResults = meetingReportModule.applyMeetingResults;
+  }
+}
+
 // Helper: Normalisiere String (für Team-Matching)
 function normalizeString(str) {
   if (!str) return '';
@@ -246,7 +263,9 @@ async function logCronJobResult(supabase, summary) {
 }
 
 // Schritt 2: Update Ergebnisse (hole Scores für Matchdays mit meeting_id)
-async function updateScores(supabase, BASE_URL) {
+async function updateScores(supabase) {
+  // ✅ DIREKTE INTEGRATION: Lade Meeting-Report-Funktionen
+  await loadMeetingReportFunctions();
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   
@@ -295,7 +314,7 @@ async function updateScores(supabase, BASE_URL) {
     summary.totalProcessed = matchdays.length;
     console.log(`[update-meeting-ids] 🔍 Verarbeite ${matchdays.length} Matchdays für Ergebnis-Update...`);
     
-    // Rufe meeting-report API für jeden Matchday auf
+    // ✅ DIREKTE INTEGRATION: Nutze Meeting-Report-Funktionen direkt (umgeht HTTP 401)
     for (const matchday of matchdays) {
       try {
         const homeTeamName = matchday.home_team 
@@ -307,85 +326,41 @@ async function updateScores(supabase, BASE_URL) {
         
         console.log(`[update-meeting-ids] 📥 Hole Ergebnisse für: ${homeTeamName} vs. ${awayTeamName} (meeting_id: ${matchday.meeting_id})`);
         
-        const meetingReportUrl = `${BASE_URL}/api/import/meeting-report`;
-        const response = await fetch(meetingReportUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            meetingId: matchday.meeting_id,
-            matchdayId: matchday.id,
-            homeTeam: homeTeamName,
-            awayTeam: awayTeamName,
-            apply: true // Wichtig: apply=true bedeutet, dass Ergebnisse gespeichert werden
-          })
+        // Schritt 1: Scrape Meeting-Report direkt
+        const meetingData = await scrapeMeetingReport({
+          meetingId: matchday.meeting_id
         });
         
-        // ✅ FIX: Prüfe Content-Type und parse JSON sicher
-        let result;
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-          try {
-            result = await response.json();
-          } catch (jsonError) {
-            summary.failed++;
-            summary.errors.push({
-              type: 'RESULTS_ERROR',
-              matchdayId: matchday.id,
-              error: `JSON-Parse-Fehler: ${jsonError.message}`,
-              code: 'JSON_PARSE_ERROR'
-            });
-            console.error(`[update-meeting-ids] ❌ JSON-Parse-Fehler für Matchday ${matchday.id}:`, jsonError.message);
-            continue;
-          }
-        } else {
-          // Response ist nicht JSON (wahrscheinlich HTML-Fehlerseite)
-          const text = await response.text();
+        if (!meetingData || ((!meetingData.singles || meetingData.singles.length === 0) && (!meetingData.doubles || meetingData.doubles.length === 0))) {
+          summary.skipped++;
+          console.log(`[update-meeting-ids] ⏭️ Meeting-Report enthält keine Matches für Matchday ${matchday.id}`);
+          continue;
+        }
+        
+        // Schritt 2: Wende Ergebnisse direkt an
+        const applyResult = await applyMeetingResults({
+          supabase,
+          matchdayId: matchday.id,
+          singles: meetingData.singles || [],
+          doubles: meetingData.doubles || [],
+          metadata: meetingData.metadata || { homeTeam: homeTeamName, awayTeam: awayTeamName }
+        });
+        
+        if (applyResult.error && applyResult.inserted?.length === 0) {
           summary.failed++;
           summary.errors.push({
             type: 'RESULTS_ERROR',
             matchdayId: matchday.id,
-            error: `Ungültiger Content-Type: ${contentType || 'unbekannt'} (HTTP ${response.status})`,
-            code: 'INVALID_CONTENT_TYPE'
+            error: applyResult.error,
+            errorDetails: applyResult.errorDetails
           });
-          console.error(`[update-meeting-ids] ❌ Ungültiger Content-Type für Matchday ${matchday.id}: ${contentType} (HTTP ${response.status})`);
-          console.error(`[update-meeting-ids] Response-Preview: ${text.substring(0, 200)}`);
-          continue;
-        }
-        
-        if (!response.ok) {
-          // Spezielle Behandlung für nicht-kritische Fehler
-          if (result.errorCode === 'MEETING_NOT_FOUND' || result.errorCode === 'MEETING_ID_NOT_AVAILABLE') {
-            summary.skipped++;
-            console.log(`[update-meeting-ids] ⏭️ Meeting-Report noch nicht verfügbar für Matchday ${matchday.id}: ${result.errorCode}`);
-            continue;
-          }
-          
-          summary.failed++;
-          summary.errors.push({
-            type: 'RESULTS_ERROR',
-            matchdayId: matchday.id,
-            error: result.error || `HTTP ${response.status}`,
-            errorCode: result.errorCode
-          });
-          console.error(`[update-meeting-ids] ❌ Fehler beim Holen der Ergebnisse für Matchday ${matchday.id}:`, result.error);
-          continue;
-        }
-        
-        if (!result.success) {
-          summary.failed++;
-          summary.errors.push({
-            matchdayId: matchday.id,
-            error: result.error || 'Import fehlgeschlagen'
-          });
-          console.error(`[update-meeting-ids] ❌ Import fehlgeschlagen für Matchday ${matchday.id}:`, result.error);
+          console.error(`[update-meeting-ids] ❌ Fehler beim Anwenden der Ergebnisse für Matchday ${matchday.id}:`, applyResult.error);
           continue;
         }
         
         // Erfolgreich
         summary.updated++;
-        const inserted = result.applyResult?.inserted?.length || 0;
+        const inserted = applyResult.inserted?.length || 0;
         console.log(`[update-meeting-ids] ✅ Ergebnisse für Matchday ${matchday.id} erfolgreich importiert (${inserted} Match-Results)`);
         
       } catch (matchdayError) {
@@ -730,7 +705,7 @@ async function updateMeetingIds() {
     // Schritt 2: Hole Ergebnisse für Matchdays mit meeting_id aber ohne Scores
     // WICHTIG: Fehler in Schritt 2 brechen Schritt 1 nicht ab (isolierte Ausführung)
     try {
-      const resultsSummary = await updateScores(supabase, BASE_URL);
+      const resultsSummary = await updateScores(supabase);
       
       // Merge Ergebnisse in summary
       summary.resultsProcessed = resultsSummary.totalProcessed || 0;

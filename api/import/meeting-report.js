@@ -1182,6 +1182,9 @@ async function applyMeetingResults({ supabase, matchdayId, singles, doubles, met
   return stats;
 }
 
+// Export applyMeetingResults für direkte Nutzung in Cron-Jobs
+module.exports.applyMeetingResults = applyMeetingResults;
+
 const DEFAULT_IMPORTS = {
   cached: null,
   async get() {
