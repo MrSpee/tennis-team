@@ -2631,6 +2631,29 @@ function Dashboard() {
                         </div>
                       </div>
                       
+                      {/* Badge: LK Spiele (kumuliert) - ZUERST */}
+                      <div className="badge-3d-card theme-warning">
+                        <div className="badge-3d-circle-container">
+                          <div className="badge-3d-circle">
+                            <span className="badge-3d-icon">
+                              🎾
+                            </span>
+                          </div>
+                        </div>
+                        <div className="badge-3d-number">
+                          {seasonMatchesCount}
+                        </div>
+                        <div style={{
+                          fontSize: '0.75rem',
+                          color: '#6b7280',
+                          textAlign: 'center',
+                          marginTop: '0.5rem',
+                          lineHeight: 1.3
+                        }}>
+                          {seasonMatchesText}
+                        </div>
+                      </div>
+                      
                       {/* Badge: Social */}
                       <div className="badge-3d-card theme-danger">
                         <div className="badge-3d-circle-container">
@@ -2651,29 +2674,6 @@ function Dashboard() {
                           lineHeight: 1.3
                         }}>
                           {socialText}
-                        </div>
-                      </div>
-                      
-                      {/* Badge: Training */}
-                      <div className="badge-3d-card theme-secondary">
-                        <div className="badge-3d-circle-container">
-                          <div className="badge-3d-circle">
-                            <span className="badge-3d-icon">
-                              🏃
-                            </span>
-                          </div>
-                        </div>
-                        <div className="badge-3d-number">
-                          {trainingCount}
-                        </div>
-                        <div style={{
-                          fontSize: '0.75rem',
-                          color: '#6b7280',
-                          textAlign: 'center',
-                          marginTop: '0.5rem',
-                          lineHeight: 1.3
-                        }}>
-                          {trainingText}
                         </div>
                       </div>
                       
@@ -2700,17 +2700,17 @@ function Dashboard() {
                         </div>
                       </div>
                       
-                      {/* Badge: Saisonspiele */}
-                      <div className="badge-3d-card theme-warning">
+                      {/* Badge: Training */}
+                      <div className="badge-3d-card theme-secondary">
                         <div className="badge-3d-circle-container">
                           <div className="badge-3d-circle">
                             <span className="badge-3d-icon">
-                              🎾
+                              🏃
                             </span>
                           </div>
                         </div>
                         <div className="badge-3d-number">
-                          {seasonMatchesCount}
+                          {trainingCount}
                         </div>
                         <div style={{
                           fontSize: '0.75rem',
@@ -2719,7 +2719,7 @@ function Dashboard() {
                           marginTop: '0.5rem',
                           lineHeight: 1.3
                         }}>
-                          {seasonMatchesText}
+                          {trainingText}
                         </div>
                       </div>
                     </div>
