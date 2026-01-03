@@ -281,7 +281,7 @@ async function updateScores(supabase, BASE_URL) {
       .neq('status', 'postponed')
       .or('home_score.is.null,away_score.is.null')
       .order('match_date', { ascending: false })
-      .limit(5); // Batch-Größe: 5 Matchdays
+      .limit(50); // Batch-Größe: 50 Matchdays pro täglichem Lauf
     
     if (fetchError) {
       throw new Error(`Fehler beim Laden der Matchdays: ${fetchError.message}`);
