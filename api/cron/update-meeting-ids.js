@@ -323,9 +323,14 @@ async function updateMeetingIds() {
     // WICHTIG: Nutze scrape-nuliga API (intern über fetch)
     // Da wir server-side sind, können wir die API direkt aufrufen
     
+    // Bestimme Base URL für interne API-Calls
+    // In Production: Nutze VERCEL_URL (wird automatisch gesetzt)
+    // In Development: Nutze localhost
     const BASE_URL = process.env.VERCEL_URL 
       ? `https://${process.env.VERCEL_URL}`
-      : process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      : (process.env.VERCEL_ENV === 'development' ? 'http://localhost:3000' : process.env.VITE_SUPABASE_URL?.replace(/\.supabase\.co.*/, '') || 'http://localhost:3000');
+    
+    console.log(`[update-meeting-ids] 🔗 Base URL für API-Calls: ${BASE_URL}`);
     
     for (const [sourceUrl, matchdays] of groupedByUrl.entries()) {
       // Gruppiere nach groupId
