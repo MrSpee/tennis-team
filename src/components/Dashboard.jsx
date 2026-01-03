@@ -2542,32 +2542,26 @@ function Dashboard() {
                       flexWrap: 'wrap',
                       justifyContent: 'center'
                     }}>
-                      {/* Badge: Aktuelle Form */}
-                      <div className="badge-3d-card theme-primary">
+                      {/* Badge: LK Spiele (kumuliert) */}
+                      <div className="badge-3d-card theme-warning">
                         <div className="badge-3d-circle-container">
                           <div className="badge-3d-circle">
                             <span className="badge-3d-icon">
-                              {formTag.icon}
+                              🎾
                             </span>
                           </div>
                         </div>
-                        <div className="badge-3d-number">{formWinRate}%</div>
+                        <div className="badge-3d-number">
+                          {seasonMatchesCount}
+                        </div>
                         <div style={{
                           fontSize: '0.75rem',
                           color: '#6b7280',
                           textAlign: 'center',
-                          marginTop: '0.5rem'
+                          marginTop: '0.5rem',
+                          lineHeight: 1.3
                         }}>
-                          {formTag.text}
-                        </div>
-                        <div style={{
-                          fontSize: '0.65rem',
-                          color: '#9ca3af',
-                          textAlign: 'center',
-                          marginTop: '0.25rem',
-                          fontWeight: '600'
-                        }}>
-                          {recentWins} Sieg{recentWins !== 1 ? 'e' : ''}, {recentLosses} Niederlage{recentLosses !== 1 ? 'n' : ''}
+                          {seasonMatchesText}
                         </div>
                       </div>
                       
@@ -2628,29 +2622,6 @@ function Dashboard() {
                               </>
                             ) : 'Team-Ranking'
                           ) : 'Kein Ranking'}
-                        </div>
-                      </div>
-                      
-                      {/* Badge: LK Spiele (kumuliert) - ZUERST */}
-                      <div className="badge-3d-card theme-warning">
-                        <div className="badge-3d-circle-container">
-                          <div className="badge-3d-circle">
-                            <span className="badge-3d-icon">
-                              🎾
-                            </span>
-                          </div>
-                        </div>
-                        <div className="badge-3d-number">
-                          {seasonMatchesCount}
-                        </div>
-                        <div style={{
-                          fontSize: '0.75rem',
-                          color: '#6b7280',
-                          textAlign: 'center',
-                          marginTop: '0.5rem',
-                          lineHeight: 1.3
-                        }}>
-                          {seasonMatchesText}
                         </div>
                       </div>
                       
@@ -2722,6 +2693,39 @@ function Dashboard() {
                           {trainingText}
                         </div>
                       </div>
+                      
+                      {/* Button zum eigenen Profil */}
+                      {isCurrentUser && player?.name && (
+                        <div style={{ width: '100%', marginTop: '1rem', display: 'flex', justifyContent: 'center' }}>
+                          <button
+                            onClick={() => navigate(`/player/${encodeURIComponent(player.name)}`)}
+                            style={{
+                              padding: '0.5rem 1rem',
+                              background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '8px',
+                              fontSize: '0.875rem',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s ease',
+                              boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.target.style.background = 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)';
+                              e.target.style.transform = 'translateY(-1px)';
+                              e.target.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.15)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.background = 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)';
+                              e.target.style.transform = 'translateY(0)';
+                              e.target.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)';
+                            }}
+                          >
+                            📊 Zum Profil
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
