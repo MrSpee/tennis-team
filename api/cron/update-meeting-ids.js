@@ -367,6 +367,9 @@ async function updateMeetingIds() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
+    // Schritt 1: Finde Matchdays OHNE meeting_id (unabhängig von match_results)
+    // WICHTIG: Wir wollen ALLE ohne meeting_id holen, auch wenn sie bereits match_results haben
+    // (meeting_id ist nötig, um weitere/aktuelle Ergebnisse zu holen)
     const { data: matchdays, error: fetchError } = await supabase
       .from('matchdays')
       .select(`
@@ -377,8 +380,7 @@ async function updateMeetingIds() {
         home_team_id,
         away_team_id,
         season,
-        league,
-        match_results(count)
+        league
       `)
       .is('meeting_id', null)
       .lt('match_date', today.toISOString())
@@ -396,18 +398,8 @@ async function updateMeetingIds() {
       return summary;
     }
     
-    // Filtere nur die ohne Detailsergebnisse
-    const matchdaysWithoutResults = matchdays.filter(md => {
-      const resultsCount = Array.isArray(md.match_results) && md.match_results.length 
-        ? md.match_results[0]?.count || 0 
-        : 0;
-      return resultsCount === 0;
-    });
-    
-    if (matchdaysWithoutResults.length === 0) {
-      summary.message = 'Keine Matchdays ohne Detailsergebnisse gefunden.';
-      return summary;
-    }
+    // Verwende alle gefundenen Matchdays (ohne zusätzliche Filterung nach match_results)
+    const matchdaysWithoutResults = matchdays;
     
     summary.totalProcessed = matchdaysWithoutResults.length;
     console.log(`[update-meeting-ids] 🔍 Verarbeite ${matchdaysWithoutResults.length} Matchdays...`);
