@@ -1,64 +1,53 @@
 # Cron-Job Testing Guide
 
-## Lokales Testing
+## Production Testing
 
-### Option 1: Mit Vercel Dev (Empfohlen)
+### Option 1: Mit Test-Skript (Empfohlen)
 
 ```bash
-# Starte Vercel Dev Server
-npm run dev:api
-
-# In einem neuen Terminal: Teste den Cron-Job
-curl -X POST http://localhost:3000/api/cron/update-meeting-ids \
-  -H "Content-Type: application/json"
+# Test-Skript ausführen (lokal, testet Production)
+./test-cron-job.sh
 ```
 
-**Wichtig**: Der Cron-Job nutzt interne API-Calls zu `/api/import/scrape-nuliga`. Diese müssen verfügbar sein.
+Das Skript testet automatisch die Production-URL: `https://tennis-team-gamma.vercel.app/api/cron/update-meeting-ids`
 
-### Option 2: Direkt mit Node.js (nur Syntax-Check)
+### Option 2: Manuell mit curl
 
-```bash
-# Prüfe Syntax
-node -c api/cron/update-meeting-ids.js
-```
-
-### Option 3: Mit Environment Variables
+**Wichtig**: Der curl-Befehl wird **lokal in deinem Terminal** ausgeführt, testet aber die **Production-URL**.
 
 ```bash
-# Setze Environment Variables für lokales Testing
-export SUPABASE_URL="your-supabase-url"
-export SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
-export ADMIN_EMAIL="your-email@example.com"  # Optional
-export CRON_SECRET="test-secret"  # Optional
-
-# Teste mit Secret
-curl -X POST http://localhost:3000/api/cron/update-meeting-ids \
-  -H "Authorization: Bearer test-secret" \
-  -H "Content-Type: application/json"
-```
-
-## Production Testing (Vercel)
-
-### Manueller Test nach Deployment
-
-```bash
-# Nach Deployment auf Vercel
 curl -X POST https://tennis-team-gamma.vercel.app/api/cron/update-meeting-ids \
-  -H "Authorization: Bearer YOUR_CRON_SECRET" \
-  -H "Content-Type: application/json"
+  -H "Content-Type: application/json" \
+  -v
 ```
 
-**Wichtig**: 
-- Setze `CRON_SECRET` als Environment Variable in Vercel
-- Oder teste ohne Secret (wird nur eine Warnung loggen)
+**Wo ausführen?**
+- In deinem **lokalen Terminal** (z.B. iTerm, Terminal.app auf Mac)
+- Oder in jedem Terminal/Command Prompt
+- Der Befehl sendet eine HTTP-Request an die Production-URL
 
-### Automatischer Test (via Vercel Cron)
+### Option 3: Mit Browser oder Postman
 
-Der Cron-Job läuft automatisch alle 2 Tage um 14:00 UTC. Prüfe die Logs in Vercel Dashboard:
+**URL**: `https://tennis-team-gamma.vercel.app/api/cron/update-meeting-ids`
 
-1. Gehe zu **Vercel Dashboard** → Dein Projekt
-2. **Logs** → Filter nach `/api/cron/update-meeting-ids`
-3. Prüfe die Ausgabe für Fehler oder Erfolgsmeldungen
+**Method**: POST  
+**Headers**: `Content-Type: application/json`  
+**Body**: (leer oder `{}`)
+
+## Deployment
+
+Der Cron-Job wird automatisch deployed, wenn du auf `main` pusht:
+
+```bash
+git push origin main
+```
+
+**Vercel deployt automatisch** nach jedem Push auf `main`.
+
+**Prüfe Deployment Status:**
+1. Gehe zu: https://vercel.com/dashboard
+2. Wähle dein Projekt: `tennis-team`
+3. Prüfe die neuesten Deployments
 
 ## Erwartete Response
 
@@ -88,10 +77,47 @@ Der Cron-Job läuft automatisch alle 2 Tage um 14:00 UTC. Prüfe die Logs in Ver
 }
 ```
 
+### Keine Matchdays gefunden (auch Success)
+```json
+{
+  "success": true,
+  "summary": {
+    "message": "Keine Matchdays ohne meeting_id gefunden."
+  }
+}
+```
+
+## Logs prüfen
+
+### Vercel Dashboard
+
+1. Gehe zu: https://vercel.com/dashboard
+2. Wähle Projekt: `tennis-team`
+3. **Logs** → Filter nach `/api/cron/update-meeting-ids`
+4. Prüfe die Ausgabe für Details
+
+### Console Logs (im curl Output)
+
+Mit `-v` Flag siehst du:
+- HTTP Status Code
+- Response Headers
+- Response Body
+
+## Environment Variables prüfen
+
+Stelle sicher, dass folgende Environment Variables in Vercel gesetzt sind:
+
+1. **Vercel Dashboard** → Dein Projekt → **Settings** → **Environment Variables**
+2. Prüfe:
+   - `SUPABASE_URL` oder `VITE_SUPABASE_URL` ✅
+   - `SUPABASE_SERVICE_ROLE_KEY` ✅
+   - Optional: `ADMIN_EMAIL` (für zukünftige Email-Benachrichtigungen)
+   - Optional: `CRON_SECRET` (für zusätzliche Sicherheit)
+
 ## Häufige Probleme
 
 ### 1. "SUPABASE_URL fehlt in den Umgebungsvariablen"
-**Lösung**: Setze `SUPABASE_URL` und `SUPABASE_SERVICE_ROLE_KEY` als Environment Variables in Vercel
+**Lösung**: Setze `SUPABASE_URL` oder `VITE_SUPABASE_URL` in Vercel Environment Variables
 
 ### 2. "Fehler beim Laden der Matchdays"
 **Lösung**: Prüfe ob die Datenbank erreichbar ist und die Tabelle `matchdays` existiert
@@ -102,44 +128,25 @@ Der Cron-Job läuft automatisch alle 2 Tage um 14:00 UTC. Prüfe die Logs in Ver
 ### 4. "Keine Matchdays ohne meeting_id gefunden"
 **Lösung**: Das ist normal - der Cron-Job hat nichts zu tun. Teste mit Matchdays die noch keine meeting_id haben.
 
-## Debugging
-
-### Console Logs prüfen
-
-Der Cron-Job loggt ausführlich:
-- `[update-meeting-ids] 🚀 Cron Job gestartet`
-- `[update-meeting-ids] 🔍 Verarbeite X Matchdays...`
-- `[update-meeting-ids] ✅ meeting_id XXX für Matchday YYY aktualisiert`
-- `[update-meeting-ids] ❌ Fehler: ...`
-- `[update-meeting-ids] 📊 Cron Job Zusammenfassung: ...`
-
-### Vercel Logs
-
-1. **Vercel Dashboard** → Dein Projekt → **Logs**
-2. Filter: `/api/cron/update-meeting-ids`
-3. Prüfe die Logs für Fehler oder Warnungen
-
-### Lokale Logs (mit vercel dev)
-
+### 5. 401 Unauthorized
+**Lösung**: Wenn `CRON_SECRET` gesetzt ist, musst du den Header hinzufügen:
 ```bash
-npm run dev:api
-# Logs erscheinen im Terminal
+curl -X POST https://tennis-team-gamma.vercel.app/api/cron/update-meeting-ids \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_CRON_SECRET"
 ```
 
-## Test-Datenbank vorbereiten
+## Lokales Testing (Alternative)
 
-Für besseres Testing kannst du Test-Matchdays erstellen:
+Falls du lokal testen willst:
 
-```sql
--- Finde Matchdays ohne meeting_id
-SELECT id, match_date, group_name, league, home_team_id, away_team_id
-FROM matchdays
-WHERE meeting_id IS NULL
-  AND match_date < CURRENT_DATE
-  AND status != 'cancelled'
-  AND status != 'postponed'
-ORDER BY match_date DESC
-LIMIT 10;
+```bash
+# Terminal 1: Starte Dev Server
+npm run dev:api
+
+# Terminal 2: Teste lokal
+curl -X POST http://localhost:3000/api/cron/update-meeting-ids \
+  -H "Content-Type: application/json"
 ```
 
 ## Nächste Schritte nach Testing
@@ -149,4 +156,3 @@ LIMIT 10;
 3. ✅ Prüfe ob Fehler korrekt geloggt werden
 4. ⏳ Implementiere Email-Versand (wenn gewünscht)
 5. ⏳ Implementiere Datenbank-Logging (wenn gewünscht)
-
