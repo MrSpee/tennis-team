@@ -427,6 +427,8 @@ function SuperAdminDashboard() {
     isRunning: false,
     lastResult: null
   });
+  const [cronJobLogs, setCronJobLogs] = useState([]);
+  const [expandedCronLogId, setExpandedCronLogId] = useState(null);
 
   const buildInfo = useMemo(getDefaultBuildInfo, []);
 
@@ -1109,10 +1111,12 @@ function SuperAdminDashboard() {
         if ('requestIdleCallback' in window) {
           requestIdleCallback(loadMissingResults, { timeout: 5000 });
           requestIdleCallback(loadMatchdaysWithoutMeetingId, { timeout: 5000 });
+          requestIdleCallback(loadCronJobLogs, { timeout: 5000 });
         } else {
           // Fallback: setTimeout mit 0 - läuft asynchron nach dem ersten Render
           setTimeout(loadMissingResults, 0);
           setTimeout(loadMatchdaysWithoutMeetingId, 0);
+          setTimeout(loadCronJobLogs, 0);
         }
       };
       
@@ -5257,6 +5261,9 @@ function SuperAdminDashboard() {
       onLoadDetailsForAllMatches={handleLoadDetailsForAllMatches}
       loadingDetailsForAll={loadingDetailsForAll}
       autoImportStatus={autoImportStatus}
+      cronJobLogs={cronJobLogs}
+      expandedCronLogId={expandedCronLogId}
+      onToggleCronLog={(logId) => setExpandedCronLogId(expandedCronLogId === logId ? null : logId)}
     />
   );
 

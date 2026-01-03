@@ -1,3 +1,5 @@
+import CronJobLogCard from './CronJobLogCard';
+
 function OverviewTab({ 
   stats, 
   buildInfo, 
@@ -9,7 +11,10 @@ function OverviewTab({
   onNavigateToTab,
   onLoadDetailsForAllMatches,
   loadingDetailsForAll = false,
-  autoImportStatus = null
+  autoImportStatus = null,
+  cronJobLogs = [],
+  expandedCronLogId = null,
+  onToggleCronLog = () => {}
 }) {
   return (
     <div className="lk-card-full">
@@ -247,6 +252,44 @@ function OverviewTab({
                     Keine Matches ohne Ergebnisse nach 4+ Tagen. Der automatische Import funktioniert einwandfrei.
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+          
+          {/* ✅ NEU: Cron-Job Verlauf */}
+          {cronJobLogs.length > 0 && (
+            <div style={{
+              padding: '1.25rem',
+              marginBottom: '1rem',
+              background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(99, 102, 241, 0.08) 100%)',
+              border: '1px solid rgba(59, 130, 246, 0.2)',
+              borderRadius: '12px',
+              boxShadow: '0 4px 12px rgba(59, 130, 246, 0.1)'
+            }}>
+              <h3 style={{
+                margin: '0 0 1rem 0',
+                fontSize: '1rem',
+                fontWeight: '700',
+                color: '#1f2937',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}>
+                🔄 Cron-Job Verlauf
+              </h3>
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem'
+              }}>
+                {cronJobLogs.map(log => (
+                  <CronJobLogCard
+                    key={log.id}
+                    log={log}
+                    expanded={expandedCronLogId === log.id}
+                    onToggle={() => onToggleCronLog(log.id)}
+                  />
+                ))}
               </div>
             </div>
           )}

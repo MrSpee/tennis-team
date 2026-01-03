@@ -175,6 +175,58 @@ async function logCronJobResult(supabase, summary) {
   // TODO: Erstelle cron_job_logs Tabelle oder verwende bestehende Logging-Tabelle
   // Für jetzt: Nur Console-Logging
   
+  try {
+    // Bestimme Status basierend auf Ergebnis
+    let status = 'success';
+    if (summary.error || summary.failed > 0 || summary.resultsFailed > 0) {
+      status = 'error';
+    } else if (summary.updated === 0 && summary.resultsUpdated === 0 && summary.totalProcessed === 0 && summary.resultsProcessed === 0) {
+      status = 'warning';
+    }
+    
+    // Erstelle Summary-Objekt für JSONB
+    const summaryJson = {
+      resultsProcessed: summary.resultsProcessed || 0,
+      resultsUpdated: summary.resultsUpdated || 0,
+      resultsFailed: summary.resultsFailed || 0,
+      resultsSkipped: summary.resultsSkipped || 0,
+    };
+    
+    // Speichere in Datenbank
+    const { error } = await supabase
+      .from('cron_job_logs')
+      .insert({
+        job_name: 'update-meeting-ids',
+        start_time: summary.startTime,
+        end_time: summary.endTime,
+        status: status,
+        total_processed: summary.totalProcessed || 0,
+        updated: summary.updated || 0,
+        failed: summary.failed || 0,
+        skipped: summary.skipped || 0,
+        duration_ms: summary.durationMs || 0,
+        message: summary.message || null,
+        summary: summaryJson,
+        errors: summary.errors && summary.errors.length > 0 ? summary.errors : null
+      });
+    
+    if (error) {
+      console.error('[update-meeting-ids] ❌ Fehler beim Speichern des Logs:', error);
+    } else {
+      console.log('[update-meeting-ids] ✅ Cron Job Log gespeichert:', {
+        status,
+        totalProcessed: summary.totalProcessed || 0,
+        updated: summary.updated || 0,
+        failed: summary.failed || 0,
+        duration: summary.durationMs ? `${(summary.durationMs / 1000).toFixed(2)}s` : 'N/A'
+      });
+    }
+  } catch (error) {
+    console.error('[update-meeting-ids] ❌ Fehler in logCronJobResult:', error);
+    // Fehler beim Logging sollte den Cron-Job nicht abbrechen
+  }
+  
+  // Console-Logging bleibt für Debugging
   console.log('[update-meeting-ids] 📊 Cron Job Zusammenfassung:', {
     startTime: summary.startTime,
     endTime: summary.endTime,
@@ -185,22 +237,12 @@ async function logCronJobResult(supabase, summary) {
     skipped: summary.skipped,
     message: summary.message || null,
     error: summary.error || null,
-    errorsCount: summary.errors?.length || 0
+    errorsCount: summary.errors?.length || 0,
+    resultsProcessed: summary.resultsProcessed || 0,
+    resultsUpdated: summary.resultsUpdated || 0,
+    resultsFailed: summary.resultsFailed || 0,
+    resultsSkipped: summary.resultsSkipped || 0,
   });
-  
-  // TODO: Speichere in Datenbank-Tabelle
-  // CREATE TABLE IF NOT EXISTS cron_job_logs (
-  //   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  //   job_name TEXT NOT NULL,
-  //   start_time TIMESTAMPTZ NOT NULL,
-  //   end_time TIMESTAMPTZ,
-  //   status TEXT NOT NULL, -- 'success', 'error', 'warning'
-  //   total_processed INTEGER DEFAULT 0,
-  //   updated INTEGER DEFAULT 0,
-  //   failed INTEGER DEFAULT 0,
-  //   summary JSONB,
-  //   created_at TIMESTAMPTZ DEFAULT NOW()
-  // );
 }
 
 // Schritt 2: Update Ergebnisse (hole Scores für Matchdays mit meeting_id)
