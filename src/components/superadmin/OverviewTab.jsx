@@ -196,11 +196,6 @@ function OverviewTab({
                         {groupName && league && <span style={{ margin: '0 0.25rem', color: 'rgb(107, 114, 128)' }}>·</span>}
                         {league && <span style={{ color: 'rgb(107, 114, 128)' }}>{league}</span>}
                       </div>
-                      {match.meeting_id && (
-                        <div style={{ marginTop: '0.25rem', fontSize: '0.7rem', color: 'rgb(156, 163, 175)' }}>
-                          Meeting ID: {match.meeting_id}
-                        </div>
-                      )}
                     </div>
                   </div>
                 );
