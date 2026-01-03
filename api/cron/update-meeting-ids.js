@@ -322,7 +322,37 @@ async function updateScores(supabase, BASE_URL) {
           })
         });
         
-        const result = await response.json();
+        // ✅ FIX: Prüfe Content-Type und parse JSON sicher
+        let result;
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          try {
+            result = await response.json();
+          } catch (jsonError) {
+            summary.failed++;
+            summary.errors.push({
+              type: 'RESULTS_ERROR',
+              matchdayId: matchday.id,
+              error: `JSON-Parse-Fehler: ${jsonError.message}`,
+              code: 'JSON_PARSE_ERROR'
+            });
+            console.error(`[update-meeting-ids] ❌ JSON-Parse-Fehler für Matchday ${matchday.id}:`, jsonError.message);
+            continue;
+          }
+        } else {
+          // Response ist nicht JSON (wahrscheinlich HTML-Fehlerseite)
+          const text = await response.text();
+          summary.failed++;
+          summary.errors.push({
+            type: 'RESULTS_ERROR',
+            matchdayId: matchday.id,
+            error: `Ungültiger Content-Type: ${contentType || 'unbekannt'} (HTTP ${response.status})`,
+            code: 'INVALID_CONTENT_TYPE'
+          });
+          console.error(`[update-meeting-ids] ❌ Ungültiger Content-Type für Matchday ${matchday.id}: ${contentType} (HTTP ${response.status})`);
+          console.error(`[update-meeting-ids] Response-Preview: ${text.substring(0, 200)}`);
+          continue;
+        }
         
         if (!response.ok) {
           // Spezielle Behandlung für nicht-kritische Fehler
@@ -334,6 +364,7 @@ async function updateScores(supabase, BASE_URL) {
           
           summary.failed++;
           summary.errors.push({
+            type: 'RESULTS_ERROR',
             matchdayId: matchday.id,
             error: result.error || `HTTP ${response.status}`,
             errorCode: result.errorCode
