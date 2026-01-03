@@ -2406,29 +2406,6 @@ function Dashboard() {
                 
                 {/* 3D Badges - Form, Aktiv, Rank, Social */}
                 {(() => {
-                  // Berechne Form-Badge Daten aus eigenen Match-Ergebnissen
-                  const last5Matches = [...ownMatchResults].slice(0, 5); // Neueste 5 (bereits sortiert)
-                  const recentWins = last5Matches.filter(m => m.won).length;
-                  const recentLosses = last5Matches.filter(m => !m.won).length;
-                  const hasNoMatches = last5Matches.length === 0;
-                  const formWinRate = last5Matches.length > 0 ? Math.round((recentWins / last5Matches.length) * 100) : 0;
-                  
-                  // Form-Tag basierend auf Win-Rate (MOTIVIEREND wenn keine Spiele)
-                  let formTag = { text: 'Stabil', icon: '➡️' };
-                  if (hasNoMatches) {
-                    formTag = { text: 'Bereit für mehr!', icon: '🎾' };
-                  } else if (formWinRate >= 80) {
-                    formTag = { text: 'In Top-Form', icon: '🔥' };
-                  } else if (formWinRate >= 60) {
-                    formTag = { text: 'Gut in Form', icon: '📈' };
-                  } else if (formWinRate >= 40) {
-                    formTag = { text: 'Stabil', icon: '➡️' };
-                  } else if (formWinRate >= 20) {
-                    formTag = { text: 'Aufbauend', icon: '📉' };
-                  } else {
-                    formTag = { text: 'Schwacher Lauf', icon: '⚠️' };
-                  }
-                  
                   // Aktivitäts-Badge (Prüfe ob aktueller Spieler eingeloggt ist)
                   const hasUserAccount = player.user_id !== null && player.user_id !== undefined;
                   const isCurrentUser = currentUser && player.user_id === currentUser.id;
