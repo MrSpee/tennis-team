@@ -1,14 +1,16 @@
 /**
- * Vercel Cron Job: Automatische meeting_id Aktualisierung
+ * Vercel Cron Job: Automatische meeting_id und Ergebnis-Update
  * 
- * Läuft alle 2 Tage um 14:00 UTC (tagsüber für natürliches Verhalten)
+ * Läuft stündlich (0 * * * *)
  * 
  * Funktionalität:
- * 1. Findet alle vergangenen Matchdays ohne meeting_id und ohne Detailsergebnisse
+ * 1. Findet alle vergangenen Matchdays ohne meeting_id und ohne Detailsergebnisse (max. 5)
  * 2. Gruppiert nach source_url aus team_seasons
  * 3. Scraped nuLiga für jede Gruppe
  * 4. Matcht Matches und aktualisiert meeting_id
- * 5. Loggt Ergebnisse und sendet Email bei Fehlern
+ * 5. Findet Matchdays mit meeting_id aber ohne Ergebnisse (max. 5)
+ * 6. Holt Ergebnisse via meeting-report API
+ * 7. Loggt Ergebnisse und sendet Email bei Fehlern
  */
 
 const { createSupabaseClient } = require('../_lib/supabaseAdmin');
@@ -201,7 +203,145 @@ async function logCronJobResult(supabase, summary) {
   // );
 }
 
-// Hauptfunktion: Update meeting_ids
+// Schritt 2: Update Ergebnisse (hole Scores für Matchdays mit meeting_id)
+async function updateScores(supabase, BASE_URL) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const summary = {
+    totalProcessed: 0,
+    updated: 0,
+    failed: 0,
+    skipped: 0,
+    errors: []
+  };
+  
+  try {
+    // Finde Matchdays mit meeting_id aber ohne home_score/away_score
+    const { data: matchdays, error: fetchError } = await supabase
+      .from('matchdays')
+      .select(`
+        id,
+        match_date,
+        meeting_id,
+        home_team_id,
+        away_team_id,
+        home_score,
+        away_score,
+        final_score,
+        status,
+        home_team:team_info!matchdays_home_team_id_fkey(club_name, team_name),
+        away_team:team_info!matchdays_away_team_id_fkey(club_name, team_name)
+      `)
+      .not('meeting_id', 'is', null)
+      .lt('match_date', today.toISOString())
+      .neq('status', 'cancelled')
+      .neq('status', 'postponed')
+      .or('home_score.is.null,away_score.is.null')
+      .order('match_date', { ascending: false })
+      .limit(5); // Batch-Größe: 5 Matchdays
+    
+    if (fetchError) {
+      throw new Error(`Fehler beim Laden der Matchdays: ${fetchError.message}`);
+    }
+    
+    if (!matchdays || matchdays.length === 0) {
+      summary.message = 'Keine Matchdays mit meeting_id aber ohne Scores gefunden.';
+      return summary;
+    }
+    
+    summary.totalProcessed = matchdays.length;
+    console.log(`[update-meeting-ids] 🔍 Verarbeite ${matchdays.length} Matchdays für Ergebnis-Update...`);
+    
+    // Rufe meeting-report API für jeden Matchday auf
+    for (const matchday of matchdays) {
+      try {
+        const homeTeamName = matchday.home_team 
+          ? `${matchday.home_team.club_name || ''} ${matchday.home_team.team_name || ''}`.trim()
+          : 'Unbekannt';
+        const awayTeamName = matchday.away_team
+          ? `${matchday.away_team.club_name || ''} ${matchday.away_team.team_name || ''}`.trim()
+          : 'Unbekannt';
+        
+        console.log(`[update-meeting-ids] 📥 Hole Ergebnisse für: ${homeTeamName} vs. ${awayTeamName} (meeting_id: ${matchday.meeting_id})`);
+        
+        const meetingReportUrl = `${BASE_URL}/api/import/meeting-report`;
+        const response = await fetch(meetingReportUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            meetingId: matchday.meeting_id,
+            matchdayId: matchday.id,
+            homeTeam: homeTeamName,
+            awayTeam: awayTeamName,
+            apply: true // Wichtig: apply=true bedeutet, dass Ergebnisse gespeichert werden
+          })
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok) {
+          // Spezielle Behandlung für nicht-kritische Fehler
+          if (result.errorCode === 'MEETING_NOT_FOUND' || result.errorCode === 'MEETING_ID_NOT_AVAILABLE') {
+            summary.skipped++;
+            console.log(`[update-meeting-ids] ⏭️ Meeting-Report noch nicht verfügbar für Matchday ${matchday.id}: ${result.errorCode}`);
+            continue;
+          }
+          
+          summary.failed++;
+          summary.errors.push({
+            matchdayId: matchday.id,
+            error: result.error || `HTTP ${response.status}`,
+            errorCode: result.errorCode
+          });
+          console.error(`[update-meeting-ids] ❌ Fehler beim Holen der Ergebnisse für Matchday ${matchday.id}:`, result.error);
+          continue;
+        }
+        
+        if (!result.success) {
+          summary.failed++;
+          summary.errors.push({
+            matchdayId: matchday.id,
+            error: result.error || 'Import fehlgeschlagen'
+          });
+          console.error(`[update-meeting-ids] ❌ Import fehlgeschlagen für Matchday ${matchday.id}:`, result.error);
+          continue;
+        }
+        
+        // Erfolgreich
+        summary.updated++;
+        const inserted = result.applyResult?.inserted?.length || 0;
+        console.log(`[update-meeting-ids] ✅ Ergebnisse für Matchday ${matchday.id} erfolgreich importiert (${inserted} Match-Results)`);
+        
+      } catch (matchdayError) {
+        summary.failed++;
+        summary.errors.push({
+          matchdayId: matchday.id,
+          error: matchdayError.message,
+          stack: matchdayError.stack
+        });
+        console.error(`[update-meeting-ids] ❌ Fehler bei Matchday ${matchday.id}:`, matchdayError);
+        // Weiter mit nächstem Matchday
+      }
+    }
+    
+    return summary;
+    
+  } catch (error) {
+    console.error('[update-meeting-ids] ❌ Fehler in updateScores:', error);
+    summary.error = error.message;
+    summary.errors.push({
+      type: 'EXCEPTION',
+      message: error.message,
+      stack: error.stack
+    });
+    return summary;
+  }
+}
+
+// Hauptfunktion: Update meeting_ids und Ergebnisse
 async function updateMeetingIds() {
   const supabase = createSupabaseClient(true);
   const startTime = new Date();
@@ -214,6 +354,13 @@ async function updateMeetingIds() {
     skipped: 0,
     errors: []
   };
+  
+  // Bestimme Base URL für interne API-Calls (wird für beide Schritte benötigt)
+  const BASE_URL = process.env.VERCEL_URL 
+    ? `https://${process.env.VERCEL_URL}`
+    : (process.env.VERCEL_ENV === 'development' ? 'http://localhost:3000' : process.env.VITE_SUPABASE_URL?.replace(/\.supabase\.co.*/, '') || 'http://localhost:3000');
+  
+  console.log(`[update-meeting-ids] 🔗 Base URL für API-Calls: ${BASE_URL}`);
   
   try {
     // 1. Finde alle vergangenen Matchdays ohne meeting_id und ohne Detailsergebnisse
@@ -238,7 +385,7 @@ async function updateMeetingIds() {
       .neq('status', 'cancelled')
       .neq('status', 'postponed')
       .order('match_date', { ascending: false })
-      .limit(50); // Batch-Größe: 50 Matches pro Lauf
+      .limit(5); // Batch-Größe: 5 Matchdays pro Lauf (kleine Batches für kurze Ausführungszeit)
     
     if (fetchError) {
       throw new Error(`Fehler beim Laden der Matchdays: ${fetchError.message}`);
@@ -322,15 +469,6 @@ async function updateMeetingIds() {
     // 5. Für jede URL-Gruppe: Scrape nuLiga
     // WICHTIG: Nutze scrape-nuliga API (intern über fetch)
     // Da wir server-side sind, können wir die API direkt aufrufen
-    
-    // Bestimme Base URL für interne API-Calls
-    // In Production: Nutze VERCEL_URL (wird automatisch gesetzt)
-    // In Development: Nutze localhost
-    const BASE_URL = process.env.VERCEL_URL 
-      ? `https://${process.env.VERCEL_URL}`
-      : (process.env.VERCEL_ENV === 'development' ? 'http://localhost:3000' : process.env.VITE_SUPABASE_URL?.replace(/\.supabase\.co.*/, '') || 'http://localhost:3000');
-    
-    console.log(`[update-meeting-ids] 🔗 Base URL für API-Calls: ${BASE_URL}`);
     
     for (const [sourceUrl, matchdays] of groupedByUrl.entries()) {
       // Gruppiere nach groupId
@@ -519,6 +657,34 @@ async function updateMeetingIds() {
     }
     
     summary.message = `${summary.updated} meeting_ids aktualisiert, ${summary.failed} fehlgeschlagen, ${summary.skipped} übersprungen`;
+    
+    // Schritt 2: Hole Ergebnisse für Matchdays mit meeting_id aber ohne Scores
+    // WICHTIG: Fehler in Schritt 2 brechen Schritt 1 nicht ab (isolierte Ausführung)
+    try {
+      const resultsSummary = await updateScores(supabase, BASE_URL);
+      
+      // Merge Ergebnisse in summary
+      summary.resultsProcessed = resultsSummary.totalProcessed || 0;
+      summary.resultsUpdated = resultsSummary.updated || 0;
+      summary.resultsFailed = resultsSummary.failed || 0;
+      summary.resultsSkipped = resultsSummary.skipped || 0;
+      
+      if (resultsSummary.errors && resultsSummary.errors.length > 0) {
+        summary.errors = summary.errors || [];
+        summary.errors.push(...resultsSummary.errors.map(e => ({ type: 'RESULTS_ERROR', ...e })));
+      }
+      
+      summary.message = `${summary.message || ''} | ${resultsSummary.updated || 0} Ergebnisse aktualisiert, ${resultsSummary.failed || 0} fehlgeschlagen, ${resultsSummary.skipped || 0} übersprungen`;
+    } catch (resultsError) {
+      console.error('[update-meeting-ids] ❌ Fehler beim Holen der Ergebnisse:', resultsError);
+      summary.errors = summary.errors || [];
+      summary.errors.push({
+        type: 'RESULTS_EXCEPTION',
+        message: resultsError.message,
+        stack: resultsError.stack
+      });
+      // Fehler in Schritt 2 brechen nicht den gesamten Job ab
+    }
     
     return summary;
     
