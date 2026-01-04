@@ -130,18 +130,87 @@ async function getLeagueOverviewUrl(supabase, league, groupName, season) {
   if (league && league.includes('Köln-Leverkusen')) {
     baseUrl = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026';
     
+    // ✅ VERBESSERT: Versuche Kategorie aus verschiedenen Quellen zu extrahieren
+    let categoryForTab = null;
+    
+    // 1. Versuche aus league zu extrahieren
     const categoryMatch = league.match(/(Damen|Herren)(?:\s+(\d+))?/i);
-    let categoryForTab = categoryMatch ? categoryMatch[1] : '';
-    if (categoryMatch && categoryMatch[2]) {
-      const number = parseInt(categoryMatch[2], 10);
-      if (number >= 30) {
-        categoryForTab = `${categoryMatch[1]} ${number}`;
+    if (categoryMatch) {
+      if (categoryMatch[2]) {
+        const number = parseInt(categoryMatch[2], 10);
+        if (number >= 30) {
+          categoryForTab = `${categoryMatch[1]} ${number}`;
+        } else {
+          categoryForTab = categoryMatch[1]; // Nur "Herren" oder "Damen"
+        }
+      } else {
+        categoryForTab = categoryMatch[1];
       }
     }
     
-    if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(categoryForTab)) {
-      tab = 3;
+    // 2. Wenn keine Kategorie aus league, versuche aus team_seasons/team_info
+    if (!categoryForTab && groupName && supabase) {
+      try {
+        const { data: teamSeason } = await supabase
+          .from('team_seasons')
+          .select('team_id')
+          .eq('group_name', groupName)
+          .eq('season', season)
+          .eq('league', league)
+          .limit(1)
+          .maybeSingle();
+        
+        if (teamSeason?.team_id) {
+          const { data: teamInfo } = await supabase
+            .from('team_info')
+            .select('category')
+            .eq('id', teamSeason.team_id)
+            .maybeSingle();
+          
+          if (teamInfo?.category) {
+            const normalizedCategory = normalizeCategory(teamInfo.category);
+            // Extrahiere Kategorie (z.B. "Herren 40" aus "Herren 40 1. Kreisliga")
+            const catMatch = normalizedCategory.match(/(Damen|Herren)(?:\s+(\d+))?/i);
+            if (catMatch) {
+              if (catMatch[2]) {
+                const number = parseInt(catMatch[2], 10);
+                if (number >= 30) {
+                  categoryForTab = `${catMatch[1]} ${number}`;
+                } else {
+                  categoryForTab = catMatch[1];
+                }
+              } else {
+                categoryForTab = catMatch[1];
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('[update-meeting-ids] Fehler beim Laden der Kategorie aus team_info:', error.message);
+      }
     }
+    
+    // 3. Bestimme tab basierend auf Kategorie
+    if (categoryForTab) {
+      // Senioren-Gruppen (30+) sind auf tab=3
+      if (/Herren\s+[3-7]\d|Damen\s+[3-6]\d/.test(categoryForTab)) {
+        tab = 3;
+      }
+      // Spezialfall: Wenn nur "Herren" oder "Damen" (ohne Zahl), prüfe Gruppen-ID
+      else if (/^(Herren|Damen)$/i.test(categoryForTab) && groupName) {
+        const groupIdMatch = groupName.match(/Gr\.\s*(\d+)/i) || groupName.match(/(\d{3})/);
+        if (groupIdMatch) {
+          const groupId = parseInt(groupIdMatch[1], 10);
+          // Gruppen 030-099 sind typischerweise Senioren (tab=3)
+          if (groupId >= 30 && groupId < 100) {
+            tab = 3;
+          }
+        }
+      }
+    }
+    
+    // ✅ VERBESSERTES LOGGING
+    console.log(`[update-meeting-ids] 📋 Tab-Bestimmung: league="${league}", groupName="${groupName}", categoryForTab="${categoryForTab || 'N/A'}", tab=${tab}`);
     
     return `${baseUrl}&tab=${tab}`;
   } else {
@@ -604,7 +673,12 @@ async function updateMeetingIds() {
           // Bestimme Season Label aus firstMatchday
           const seasonLabel = firstMatchday.season || 'Winter 2025/2026';
           
+          // ✅ VERBESSERTES LOGGING: Zeige welche URL verwendet wird
           console.log(`[update-meeting-ids] 🔍 Scrape nuLiga direkt für Gruppe ${groupId}...`);
+          console.log(`[update-meeting-ids] 📋 URL: ${leagueOverviewUrl}`);
+          console.log(`[update-meeting-ids] 📋 League: ${firstMatchday.league || 'N/A'}`);
+          console.log(`[update-meeting-ids] 📋 Group Name: ${firstMatchday.group_name || 'N/A'}`);
+          console.log(`[update-meeting-ids] 📋 Group Filter: ${groupId}`);
           
           let scrapeResults = null;
           try {
@@ -622,13 +696,54 @@ async function updateMeetingIds() {
             
             scrapeResults = results;
           } catch (scrapeError) {
+            // ✅ VERBESSERTES ERROR-LOGGING: Zeige Details
             console.error(`[update-meeting-ids] ❌ Fehler beim Scrapen für Gruppe ${groupId}:`, scrapeError);
-            summary.failed += groupMatchdays.length;
-            summary.errors.push({ 
-              groupId, 
-              error: `Scraping fehlgeschlagen: ${scrapeError.message || scrapeError.toString()}`
-            });
-            continue;
+            if (scrapeError.details) {
+              console.error(`[update-meeting-ids] ❌ Fehler-Details:`, scrapeError.details);
+            }
+            
+            // ✅ FALLBACK: Wenn "Keine Gruppenlinks gefunden" und tab=2 verwendet wurde
+            // Versuche tab=3 als Fallback
+            if (scrapeError.message && scrapeError.message.includes('Keine Gruppenlinks') && leagueOverviewUrl.includes('&tab=2')) {
+              console.log(`[update-meeting-ids] 🔄 Fallback: Versuche tab=3 für Gruppe ${groupId}...`);
+              const fallbackUrl = leagueOverviewUrl.replace('&tab=2', '&tab=3');
+              console.log(`[update-meeting-ids] 📋 Fallback URL: ${fallbackUrl}`);
+              
+              try {
+                const { results: fallbackResults } = await scrapeNuLiga({
+                  leagueUrl: fallbackUrl,
+                  seasonLabel: seasonLabel,
+                  groupFilter: groupId,
+                  requestDelayMs: 350,
+                  teamIdMap: {},
+                  supabaseClient: null,
+                  applyChanges: false,
+                  outputDir: null,
+                  onLog: (...messages) => console.log(`[update-meeting-ids] [Fallback] ${messages.join(' ')}`)
+                });
+                
+                scrapeResults = fallbackResults;
+                console.log(`[update-meeting-ids] ✅ Fallback erfolgreich für Gruppe ${groupId}!`);
+              } catch (fallbackError) {
+                console.error(`[update-meeting-ids] ❌ Fallback fehlgeschlagen für Gruppe ${groupId}:`, fallbackError);
+                summary.failed += groupMatchdays.length;
+                summary.errors.push({ 
+                  groupId, 
+                  error: `Scraping fehlgeschlagen (auch Fallback tab=3): ${scrapeError.message || scrapeError.toString()}`,
+                  originalUrl: leagueOverviewUrl,
+                  fallbackUrl: fallbackUrl
+                });
+                continue;
+              }
+            } else {
+              summary.failed += groupMatchdays.length;
+              summary.errors.push({ 
+                groupId, 
+                error: `Scraping fehlgeschlagen: ${scrapeError.message || scrapeError.toString()}`,
+                url: leagueOverviewUrl
+              });
+              continue;
+            }
           }
           
           // Finde passende Gruppe in Ergebnissen

@@ -2519,28 +2519,30 @@ function Dashboard() {
                       flexWrap: 'wrap',
                       justifyContent: 'center'
                     }}>
-                      {/* Badge: LK Spiele (kumuliert) */}
-                      <div className="badge-3d-card theme-warning">
-                        <div className="badge-3d-circle-container">
-                          <div className="badge-3d-circle">
-                            <span className="badge-3d-icon">
-                              🎾
-                            </span>
+                      {/* Badge: LK Spiele (kumuliert) - NUR wenn > 0 */}
+                      {seasonMatchesCount > 0 && (
+                        <div className="badge-3d-card theme-warning">
+                          <div className="badge-3d-circle-container">
+                            <div className="badge-3d-circle">
+                              <span className="badge-3d-icon">
+                                🎾
+                              </span>
+                            </div>
+                          </div>
+                          <div className="badge-3d-number">
+                            {seasonMatchesCount}
+                          </div>
+                          <div style={{
+                            fontSize: '0.75rem',
+                            color: '#6b7280',
+                            textAlign: 'center',
+                            marginTop: '0.5rem',
+                            lineHeight: 1.3
+                          }}>
+                            {seasonMatchesText}
                           </div>
                         </div>
-                        <div className="badge-3d-number">
-                          {seasonMatchesCount}
-                        </div>
-                        <div style={{
-                          fontSize: '0.75rem',
-                          color: '#6b7280',
-                          textAlign: 'center',
-                          marginTop: '0.5rem',
-                          lineHeight: 1.3
-                        }}>
-                          {seasonMatchesText}
-                        </div>
-                      </div>
+                      )}
                       
                       {/* Badge: Aktivität - NUR für andere Spieler, nicht für sich selbst */}
                       {!isCurrentUser && (
@@ -2572,104 +2574,110 @@ function Dashboard() {
                         </div>
                       )}
                       
-                      {/* Badge: Ranking */}
-                      <div className="badge-3d-card theme-warning">
-                        <div className="badge-3d-circle-container">
-                          <div className="badge-3d-circle">
-                            <span className="badge-3d-icon">
-                              🏆
-                            </span>
+                      {/* Badge: Ranking - NUR wenn bestRank !== null */}
+                      {bestRank !== null && (
+                        <div className="badge-3d-card theme-warning">
+                          <div className="badge-3d-circle-container">
+                            <div className="badge-3d-circle">
+                              <span className="badge-3d-icon">
+                                🏆
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                        <div className="badge-3d-number">
-                          {bestRank !== null ? `#${bestRank}` : '–'}
-                        </div>
-                        <div style={{
-                          fontSize: '0.75rem',
-                          color: '#6b7280',
-                          textAlign: 'center',
-                          marginTop: '0.5rem',
-                          lineHeight: 1.3
-                        }}>
-                          {bestRank !== null ? (
-                            bestRankTeam ? (
+                          <div className="badge-3d-number">
+                            {`#${bestRank}`}
+                          </div>
+                          <div style={{
+                            fontSize: '0.75rem',
+                            color: '#6b7280',
+                            textAlign: 'center',
+                            marginTop: '0.5rem',
+                            lineHeight: 1.3
+                          }}>
+                            {bestRankTeam ? (
                               <>
                                 {bestRankTeam.category}
                                 {bestRankTeam.team_name ? ` ${bestRankTeam.team_name}` : ''}
                               </>
-                            ) : 'Team-Ranking'
-                          ) : 'Kein Ranking'}
-                        </div>
-                      </div>
-                      
-                      {/* Badge: Social */}
-                      <div className="badge-3d-card theme-danger">
-                        <div className="badge-3d-circle-container">
-                          <div className="badge-3d-circle">
-                            <span className="badge-3d-icon">
-                              👥
-                            </span>
+                            ) : 'Team-Ranking'}
                           </div>
                         </div>
-                        <div className="badge-3d-number">
-                          {totalSocialCount > 0 ? totalSocialCount : '0'}
-                        </div>
-                        <div style={{
-                          fontSize: '0.75rem',
-                          color: '#6b7280',
-                          textAlign: 'center',
-                          marginTop: '0.5rem',
-                          lineHeight: 1.3
-                        }}>
-                          {socialText}
-                        </div>
-                      </div>
+                      )}
                       
-                      {/* Badge: Win-Streak */}
-                      <div className="badge-3d-card theme-primary">
-                        <div className="badge-3d-circle-container">
-                          <div className="badge-3d-circle">
-                            <span className="badge-3d-icon">
-                              🔥
-                            </span>
+                      {/* Badge: Social - NUR wenn totalSocialCount > 0 */}
+                      {totalSocialCount > 0 && (
+                        <div className="badge-3d-card theme-danger">
+                          <div className="badge-3d-circle-container">
+                            <div className="badge-3d-circle">
+                              <span className="badge-3d-icon">
+                                👥
+                              </span>
+                            </div>
+                          </div>
+                          <div className="badge-3d-number">
+                            {totalSocialCount}
+                          </div>
+                          <div style={{
+                            fontSize: '0.75rem',
+                            color: '#6b7280',
+                            textAlign: 'center',
+                            marginTop: '0.5rem',
+                            lineHeight: 1.3
+                          }}>
+                            {socialText}
                           </div>
                         </div>
-                        <div className="badge-3d-number">
-                          {winStreak}
-                        </div>
-                        <div style={{
-                          fontSize: '0.75rem',
-                          color: '#6b7280',
-                          textAlign: 'center',
-                          marginTop: '0.5rem',
-                          lineHeight: 1.3
-                        }}>
-                          {winStreakText}
-                        </div>
-                      </div>
+                      )}
                       
-                      {/* Badge: Training */}
-                      <div className="badge-3d-card theme-secondary">
-                        <div className="badge-3d-circle-container">
-                          <div className="badge-3d-circle">
-                            <span className="badge-3d-icon">
-                              🏃
-                            </span>
+                      {/* Badge: Win-Streak - NUR wenn winStreak > 0 */}
+                      {winStreak > 0 && (
+                        <div className="badge-3d-card theme-primary">
+                          <div className="badge-3d-circle-container">
+                            <div className="badge-3d-circle">
+                              <span className="badge-3d-icon">
+                                🔥
+                              </span>
+                            </div>
+                          </div>
+                          <div className="badge-3d-number">
+                            {winStreak}
+                          </div>
+                          <div style={{
+                            fontSize: '0.75rem',
+                            color: '#6b7280',
+                            textAlign: 'center',
+                            marginTop: '0.5rem',
+                            lineHeight: 1.3
+                          }}>
+                            {winStreakText}
                           </div>
                         </div>
-                        <div className="badge-3d-number">
-                          {trainingCount}
+                      )}
+                      
+                      {/* Badge: Training - NUR wenn trainingCount > 0 */}
+                      {trainingCount > 0 && (
+                        <div className="badge-3d-card theme-secondary">
+                          <div className="badge-3d-circle-container">
+                            <div className="badge-3d-circle">
+                              <span className="badge-3d-icon">
+                                🏃
+                              </span>
+                            </div>
+                          </div>
+                          <div className="badge-3d-number">
+                            {trainingCount}
+                          </div>
+                          <div style={{
+                            fontSize: '0.75rem',
+                            color: '#6b7280',
+                            textAlign: 'center',
+                            marginTop: '0.5rem',
+                            lineHeight: 1.3
+                          }}>
+                            {trainingText}
+                          </div>
                         </div>
-                        <div style={{
-                          fontSize: '0.75rem',
-                          color: '#6b7280',
-                          textAlign: 'center',
-                          marginTop: '0.5rem',
-                          lineHeight: 1.3
-                        }}>
-                          {trainingText}
-                        </div>
-                      </div>
+                      )}
                       
                       {/* Button zum eigenen Profil */}
                       {isCurrentUser && player?.name && (

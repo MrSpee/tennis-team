@@ -116,13 +116,24 @@ function MatchdaysTab({
   
   // Filtere Matchdays basierend auf Vollständigkeit
   const filteredMatchdays = useMemo(() => {
+    let filtered = [];
+    
     if (showArchived) {
       // Zeige nur vollständige (archivierte) Matchdays
-      return seasonMatchdays.filter(match => hasCompleteResults(match));
+      filtered = seasonMatchdays.filter(match => hasCompleteResults(match));
+      
+      // ✅ Sortiere archivierte Matchdays nach Datum absteigend (neueste zuerst)
+      filtered.sort((a, b) => {
+        const dateA = a.match_date ? new Date(a.match_date) : (a.matchDateIso ? new Date(a.matchDateIso) : new Date(0));
+        const dateB = b.match_date ? new Date(b.match_date) : (b.matchDateIso ? new Date(b.matchDateIso) : new Date(0));
+        return dateB.getTime() - dateA.getTime(); // Absteigend: Neueste zuerst
+      });
     } else {
       // Zeige nur unvollständige Matchdays (Standard)
-      return seasonMatchdays.filter(match => !hasCompleteResults(match));
+      filtered = seasonMatchdays.filter(match => !hasCompleteResults(match));
     }
+    
+    return filtered;
   }, [seasonMatchdays, showArchived]);
   
   // Zähle vollständige und unvollständige Matchdays
