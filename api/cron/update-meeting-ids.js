@@ -609,14 +609,32 @@ async function updateMeetingIds() {
           try {
             scrapeData = scrapeText ? JSON.parse(scrapeText) : null;
           } catch (parseError) {
+            // ✅ VERBESSERTES LOGGING: Zeige tatsächliche Antwort
+            const contentType = scrapeResponse.headers.get('content-type') || 'unknown';
+            const textPreview = scrapeText ? scrapeText.substring(0, 200) : '(leer)';
+            console.error(`[update-meeting-ids] ❌ JSON-Parse-Fehler für Gruppe ${groupId}:`);
+            console.error(`  HTTP Status: ${scrapeResponse.status} ${scrapeResponse.statusText}`);
+            console.error(`  Content-Type: ${contentType}`);
+            console.error(`  Antwort-Vorschau: ${textPreview}${scrapeText?.length > 200 ? '...' : ''}`);
+            
             summary.failed += groupMatchdays.length;
-            summary.errors.push({ groupId, error: 'Scrape-Antwort konnte nicht geparst werden' });
+            summary.errors.push({ 
+              groupId, 
+              error: `Scrape-Antwort konnte nicht geparst werden (HTTP ${scrapeResponse.status}, Content-Type: ${contentType})`,
+              httpStatus: scrapeResponse.status,
+              contentType: contentType,
+              responsePreview: textPreview
+            });
             continue;
           }
           
           if (!scrapeResponse.ok || !scrapeData?.success) {
             summary.failed += groupMatchdays.length;
-            summary.errors.push({ groupId, error: scrapeData?.error || `HTTP ${scrapeResponse.status}` });
+            summary.errors.push({ 
+              groupId, 
+              error: scrapeData?.error || `HTTP ${scrapeResponse.status}`,
+              httpStatus: scrapeResponse.status
+            });
             continue;
           }
           
