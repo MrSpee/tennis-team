@@ -19,6 +19,7 @@ const { createSupabaseClient } = require('../_lib/supabaseAdmin');
 // Umgeht HTTP-Requests und löst HTTP 401 Problem
 let scrapeMeetingReport = null;
 let applyMeetingResults = null;
+let scrapeNuLiga = null;
 
 // Lazy Load: Lade Module nur wenn benötigt
 async function loadMeetingReportFunctions() {
@@ -29,6 +30,14 @@ async function loadMeetingReportFunctions() {
   if (!applyMeetingResults) {
     const meetingReportModule = require('../import/meeting-report');
     applyMeetingResults = meetingReportModule.applyMeetingResults;
+  }
+}
+
+// ✅ DIREKTE INTEGRATION: Lade scrapeNuLiga für Meeting-ID Fetching
+async function loadScrapingFunctions() {
+  if (!scrapeNuLiga) {
+    const nuligaScraper = await import('../../lib/nuligaScraper.mjs');
+    scrapeNuLiga = nuligaScraper.scrapeNuLiga;
   }
 }
 
@@ -435,8 +444,8 @@ async function updateMeetingIds() {
     errors: []
   };
   
-  // Bestimme Base URL für interne API-Calls (wird für beide Schritte benötigt)
-  // ✅ FIX: Verwende VERCEL_PROJECT_PRODUCTION_URL als Fallback für Production
+  // ✅ BASE_URL wird nicht mehr benötigt für Meeting-ID Fetching (direkte Integration)
+  // Wird nur noch für Logging verwendet, falls nötig
   const BASE_URL = process.env.VERCEL_URL 
     ? `https://${process.env.VERCEL_URL}`
     : (process.env.VERCEL_PROJECT_PRODUCTION_URL 
@@ -445,7 +454,7 @@ async function updateMeetingIds() {
             ? 'http://localhost:3000' 
             : 'https://tennis-team-gamma.vercel.app')); // Fallback zu Production URL
   
-  console.log(`[update-meeting-ids] 🔗 Base URL für API-Calls: ${BASE_URL}`);
+  // BASE_URL wird nicht mehr für HTTP-Requests verwendet (direkte Integration)
   
   try {
     // 1. Finde alle vergangenen Matchdays ohne meeting_id und ohne Detailsergebnisse
