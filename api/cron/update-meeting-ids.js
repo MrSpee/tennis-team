@@ -597,64 +597,47 @@ async function updateMeetingIds() {
             continue;
           }
           
-          // Rufe scrape-nuliga API auf
-          // WICHTIG: Da wir server-side sind, müssen wir die API über HTTP aufrufen
-          // Oder: Nutze die Scraper-Logik direkt (komplexer wegen ES modules)
-          // Für jetzt: Nutze API über HTTP
+          // ✅ DIREKTE INTEGRATION: Scrape nuLiga direkt (kein HTTP-Request)
+          // Umgeht HTTP 401 Problem
+          await loadScrapingFunctions();
           
-          const scrapeUrl = `${BASE_URL}/api/import/scrape-nuliga`;
-          const scrapeResponse = await fetch(scrapeUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              groups: groupId,
-              leagueUrl: leagueOverviewUrl,
-              includeMatches: true
-            })
-          });
+          // Bestimme Season Label aus firstMatchday
+          const seasonLabel = firstMatchday.season || 'Winter 2025/2026';
           
-          const scrapeText = await scrapeResponse.text();
-          let scrapeData = null;
+          console.log(`[update-meeting-ids] 🔍 Scrape nuLiga direkt für Gruppe ${groupId}...`);
+          
+          let scrapeResults = null;
           try {
-            scrapeData = scrapeText ? JSON.parse(scrapeText) : null;
-          } catch (parseError) {
-            // ✅ VERBESSERTES LOGGING: Zeige tatsächliche Antwort
-            const contentType = scrapeResponse.headers.get('content-type') || 'unknown';
-            const textPreview = scrapeText ? scrapeText.substring(0, 200) : '(leer)';
-            console.error(`[update-meeting-ids] ❌ JSON-Parse-Fehler für Gruppe ${groupId}:`);
-            console.error(`  HTTP Status: ${scrapeResponse.status} ${scrapeResponse.statusText}`);
-            console.error(`  Content-Type: ${contentType}`);
-            console.error(`  Antwort-Vorschau: ${textPreview}${scrapeText?.length > 200 ? '...' : ''}`);
-            
-            summary.failed += groupMatchdays.length;
-            summary.errors.push({ 
-              groupId, 
-              error: `Scrape-Antwort konnte nicht geparst werden (HTTP ${scrapeResponse.status}, Content-Type: ${contentType})`,
-              httpStatus: scrapeResponse.status,
-              contentType: contentType,
-              responsePreview: textPreview
+            const { results, unmappedTeams } = await scrapeNuLiga({
+              leagueUrl: leagueOverviewUrl,
+              seasonLabel: seasonLabel,
+              groupFilter: groupId,
+              requestDelayMs: 350,
+              teamIdMap: {}, // Kein Team-Mapping nötig für meeting_id Fetching
+              supabaseClient: null, // Kein apply-Modus
+              applyChanges: false,
+              outputDir: null,
+              onLog: (...messages) => console.log(`[update-meeting-ids] ${messages.join(' ')}`)
             });
-            continue;
-          }
-          
-          if (!scrapeResponse.ok || !scrapeData?.success) {
+            
+            scrapeResults = results;
+          } catch (scrapeError) {
+            console.error(`[update-meeting-ids] ❌ Fehler beim Scrapen für Gruppe ${groupId}:`, scrapeError);
             summary.failed += groupMatchdays.length;
             summary.errors.push({ 
               groupId, 
-              error: scrapeData?.error || `HTTP ${scrapeResponse.status}`,
-              httpStatus: scrapeResponse.status
+              error: `Scraping fehlgeschlagen: ${scrapeError.message || scrapeError.toString()}`
             });
             continue;
           }
           
           // Finde passende Gruppe in Ergebnissen
-          const details = Array.isArray(scrapeData.details) ? scrapeData.details : [];
-          const foundGroupDetail = details.find(entry => {
+          const foundGroupDetail = Array.isArray(scrapeResults) ? scrapeResults.find(entry => {
             const entryGroupId = entry.group?.groupId ? String(entry.group.groupId) : null;
             const normalizedEntryId = entryGroupId ? String(parseInt(entryGroupId, 10)) : null;
             const normalizedSearchId = String(parseInt(groupId, 10));
             return normalizedEntryId === normalizedSearchId;
-          });
+          }) : null;
           
           if (!foundGroupDetail || !foundGroupDetail.matches || foundGroupDetail.matches.length === 0) {
             summary.failed += groupMatchdays.length;
