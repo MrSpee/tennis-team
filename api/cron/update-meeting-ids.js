@@ -127,7 +127,13 @@ async function getLeagueOverviewUrl(supabase, league, groupName, season) {
   let baseUrl;
   let tab = 2;
   
-  if (league && league.includes('Köln-Leverkusen')) {
+  // ✅ VERBESSERT: Prüfe auch Gruppen-ID, um zu bestimmen, welche URL verwendet werden soll
+  // Gruppen 030-099 sind typischerweise Köln-Leverkusen (Senioren)
+  const groupIdMatch = groupName ? (groupName.match(/Gr\.\s*(\d+)/i) || groupName.match(/(\d{3})/)) : null;
+  const groupIdNum = groupIdMatch ? parseInt(groupIdMatch[1], 10) : null;
+  const isKolnLeverkusenGroup = groupIdNum && groupIdNum >= 30 && groupIdNum < 100;
+  
+  if ((league && league.includes('Köln-Leverkusen')) || isKolnLeverkusenGroup) {
     baseUrl = 'https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/leaguePage?championship=K%C3%B6ln-Leverkusen+Winter+2025%2F2026';
     
     // ✅ VERBESSERT: Versuche Kategorie aus verschiedenen Quellen zu extrahieren
