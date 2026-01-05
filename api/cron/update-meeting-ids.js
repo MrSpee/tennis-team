@@ -702,36 +702,65 @@ async function updateMeetingIds() {
               console.error(`[update-meeting-ids] ❌ Fehler-Details:`, scrapeError.details);
             }
             
-            // ✅ FALLBACK: Wenn "Keine Gruppenlinks gefunden" und tab=2 verwendet wurde
-            // Versuche tab=3 als Fallback
-            if (scrapeError.message && scrapeError.message.includes('Keine Gruppenlinks') && leagueOverviewUrl.includes('&tab=2')) {
-              console.log(`[update-meeting-ids] 🔄 Fallback: Versuche tab=3 für Gruppe ${groupId}...`);
-              const fallbackUrl = leagueOverviewUrl.replace('&tab=2', '&tab=3');
-              console.log(`[update-meeting-ids] 📋 Fallback URL: ${fallbackUrl}`);
+            // ✅ FALLBACK: Wenn "Keine Gruppenlinks gefunden", versuche anderen Tab
+            // Gruppen 030-099 sind typischerweise auf tab=3 (Senioren)
+            if (scrapeError.message && scrapeError.message.includes('Keine Gruppenlinks')) {
+              const groupIdNum = parseInt(groupId, 10);
+              const isSeniorGroup = groupIdNum >= 30 && groupIdNum < 100;
               
-              try {
-                const { results: fallbackResults } = await scrapeNuLiga({
-                  leagueUrl: fallbackUrl,
-                  seasonLabel: seasonLabel,
-                  groupFilter: groupId,
-                  requestDelayMs: 350,
-                  teamIdMap: {},
-                  supabaseClient: null,
-                  applyChanges: false,
-                  outputDir: null,
-                  onLog: (...messages) => console.log(`[update-meeting-ids] [Fallback] ${messages.join(' ')}`)
-                });
+              // Wenn aktuell tab=2 und es ist eine Senioren-Gruppe → versuche tab=3
+              // Wenn aktuell tab=3 und es ist keine Senioren-Gruppe → versuche tab=2
+              let fallbackUrl = null;
+              if (leagueOverviewUrl.includes('&tab=2') && isSeniorGroup) {
+                fallbackUrl = leagueOverviewUrl.replace('&tab=2', '&tab=3');
+                console.log(`[update-meeting-ids] 🔄 Fallback: Versuche tab=3 für Senioren-Gruppe ${groupId}...`);
+              } else if (leagueOverviewUrl.includes('&tab=3') && !isSeniorGroup) {
+                fallbackUrl = leagueOverviewUrl.replace('&tab=3', '&tab=2');
+                console.log(`[update-meeting-ids] 🔄 Fallback: Versuche tab=2 für Gruppe ${groupId}...`);
+              } else if (leagueOverviewUrl.includes('&tab=2')) {
+                // Generischer Fallback: Wenn tab=2 fehlschlägt, versuche tab=3
+                fallbackUrl = leagueOverviewUrl.replace('&tab=2', '&tab=3');
+                console.log(`[update-meeting-ids] 🔄 Fallback: Versuche tab=3 für Gruppe ${groupId}...`);
+              }
+              
+              if (fallbackUrl) {
+                console.log(`[update-meeting-ids] 📋 Fallback URL: ${fallbackUrl}`);
                 
-                scrapeResults = fallbackResults;
-                console.log(`[update-meeting-ids] ✅ Fallback erfolgreich für Gruppe ${groupId}!`);
-              } catch (fallbackError) {
-                console.error(`[update-meeting-ids] ❌ Fallback fehlgeschlagen für Gruppe ${groupId}:`, fallbackError);
+                try {
+                  const { results: fallbackResults } = await scrapeNuLiga({
+                    leagueUrl: fallbackUrl,
+                    seasonLabel: seasonLabel,
+                    groupFilter: groupId,
+                    requestDelayMs: 350,
+                    teamIdMap: {},
+                    supabaseClient: null,
+                    applyChanges: false,
+                    outputDir: null,
+                    onLog: (...messages) => console.log(`[update-meeting-ids] [Fallback] ${messages.join(' ')}`)
+                  });
+                  
+                  scrapeResults = fallbackResults;
+                  console.log(`[update-meeting-ids] ✅ Fallback erfolgreich für Gruppe ${groupId}!`);
+                } catch (fallbackError) {
+                  console.error(`[update-meeting-ids] ❌ Fallback fehlgeschlagen für Gruppe ${groupId}:`, fallbackError);
+                  summary.failed += groupMatchdays.length;
+                  summary.errors.push({ 
+                    groupId, 
+                    error: `Scraping fehlgeschlagen (auch Fallback): ${scrapeError.message || scrapeError.toString()}`,
+                    originalUrl: leagueOverviewUrl,
+                    fallbackUrl: fallbackUrl,
+                    errorDetails: scrapeError.details || null
+                  });
+                  continue;
+                }
+              } else {
+                // Kein Fallback möglich
                 summary.failed += groupMatchdays.length;
                 summary.errors.push({ 
                   groupId, 
-                  error: `Scraping fehlgeschlagen (auch Fallback tab=3): ${scrapeError.message || scrapeError.toString()}`,
-                  originalUrl: leagueOverviewUrl,
-                  fallbackUrl: fallbackUrl
+                  error: `Scraping fehlgeschlagen: ${scrapeError.message || scrapeError.toString()}`,
+                  url: leagueOverviewUrl,
+                  errorDetails: scrapeError.details || null
                 });
                 continue;
               }
@@ -740,7 +769,8 @@ async function updateMeetingIds() {
               summary.errors.push({ 
                 groupId, 
                 error: `Scraping fehlgeschlagen: ${scrapeError.message || scrapeError.toString()}`,
-                url: leagueOverviewUrl
+                url: leagueOverviewUrl,
+                errorDetails: scrapeError.details || null
               });
               continue;
             }
