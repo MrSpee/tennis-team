@@ -1105,6 +1105,25 @@ function SuperAdminDashboard() {
         }
       };
       
+      // ✅ LAZY LOADING: Lade Cron-Job Logs im Hintergrund
+      const loadCronJobLogs = async () => {
+        try {
+          console.log('[SuperAdminDashboard] 🔄 Lade Cron-Job Logs...');
+          const { data, error } = await supabase
+            .from('cron_job_logs')
+            .select('*')
+            .order('start_time', { ascending: false })
+            .limit(20); // Letzte 20 Logs
+          
+          if (error) throw error;
+          setCronJobLogs(data || []);
+          console.log(`[SuperAdminDashboard] ✅ ${data?.length || 0} Cron-Job Logs geladen.`);
+        } catch (error) {
+          console.error('❌ Fehler beim Laden der Cron-Job Logs:', error);
+          setCronJobLogs([]);
+        }
+      };
+      
       // ✅ OPTIMIERT: Verwende requestIdleCallback für bessere Performance
       // Falls nicht verfügbar, verwende setTimeout mit 0 (asynchron, blockiert nicht)
       const scheduleBackgroundLoads = () => {
