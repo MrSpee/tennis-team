@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import './Login.css';
 
@@ -14,6 +14,8 @@ function AppLogin() {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const [sendingReset, setSendingReset] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
   
   const auth = useAuth();
   const navigate = useNavigate();
@@ -64,10 +66,22 @@ function AppLogin() {
 
     try {
       if (isRegister) {
+        // Prüfe Zustimmung zu Nutzungsbedingungen und Datenschutz
+        if (!acceptedTerms || !acceptedPrivacy) {
+          setError('❌ Bitte akzeptiere die Nutzungsbedingungen und die Datenschutzerklärung, um fortzufahren.');
+          setLoading(false);
+          return;
+        }
+
         // Registrierung - nur E-Mail und Passwort
         const result = await auth.register(email, password, {
           name: email.split('@')[0], // Verwende E-Mail-Prefix als temporären Namen
           points: 0
+        }, {
+          acceptedTerms: true,
+          acceptedPrivacy: true,
+          acceptedTermsDate: new Date().toISOString(),
+          acceptedPrivacyDate: new Date().toISOString()
         });
 
         if (result.success) {
@@ -76,6 +90,8 @@ function AppLogin() {
           // Formular zurücksetzen
           setEmail('');
           setPassword('');
+          setAcceptedTerms(false);
+          setAcceptedPrivacy(false);
         } else {
           setError(result.error || '❌ Registrierung fehlgeschlagen. Versuche es nochmal!');
         }
@@ -230,6 +246,93 @@ function AppLogin() {
             )}
           </div>
 
+          {/* ✅ NEU: Zustimmung zu Nutzungsbedingungen und Datenschutz */}
+          {isRegister && (
+            <div style={{ marginBottom: '1.5rem' }}>
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ 
+                  display: 'flex', 
+                  alignItems: 'flex-start', 
+                  gap: '0.75rem',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  lineHeight: '1.5'
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={acceptedTerms}
+                    onChange={(e) => setAcceptedTerms(e.target.checked)}
+                    required={isRegister}
+                    style={{
+                      marginTop: '0.25rem',
+                      width: '18px',
+                      height: '18px',
+                      cursor: 'pointer',
+                      flexShrink: 0
+                    }}
+                  />
+                  <span>
+                    Ich akzeptiere die{' '}
+                    <Link 
+                      to="/terms" 
+                      target="_blank"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ 
+                        color: '#3498db', 
+                        textDecoration: 'underline',
+                        fontWeight: '600'
+                      }}
+                    >
+                      Nutzungsbedingungen
+                    </Link>
+                    {' '}*
+                  </span>
+                </label>
+              </div>
+
+              <div>
+                <label style={{ 
+                  display: 'flex', 
+                  alignItems: 'flex-start', 
+                  gap: '0.75rem',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  lineHeight: '1.5'
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={acceptedPrivacy}
+                    onChange={(e) => setAcceptedPrivacy(e.target.checked)}
+                    required={isRegister}
+                    style={{
+                      marginTop: '0.25rem',
+                      width: '18px',
+                      height: '18px',
+                      cursor: 'pointer',
+                      flexShrink: 0
+                    }}
+                  />
+                  <span>
+                    Ich akzeptiere die{' '}
+                    <Link 
+                      to="/privacy" 
+                      target="_blank"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ 
+                        color: '#3498db', 
+                        textDecoration: 'underline',
+                        fontWeight: '600'
+                      }}
+                    >
+                      Datenschutzerklärung
+                    </Link>
+                    {' '}*
+                  </span>
+                </label>
+              </div>
+            </div>
+          )}
+
           {error && (
             <div className="error-message" style={{ whiteSpace: 'pre-line' }}>
               {error}
@@ -272,6 +375,8 @@ function AppLogin() {
               setSuccess('');
               setEmail('');
               setPassword('');
+              setAcceptedTerms(false);
+              setAcceptedPrivacy(false);
             }}
             style={{
               width: '100%',

@@ -551,7 +551,7 @@ export function AuthProvider({ children }) {
   /**
    * Registrierung: Neuer User (Player wird automatisch via Trigger erstellt)
    */
-  const register = async (email, password, playerData) => {
+  const register = async (email, password, playerData, consentData = {}) => {
     try {
       console.log('📝 Starting registration for:', email);
       
@@ -563,7 +563,12 @@ export function AuthProvider({ children }) {
           data: {
             name: playerData.name,
             phone: playerData.phone,
-            ranking: playerData.ranking
+            ranking: playerData.ranking,
+            // ✅ Speichere Zustimmung in user metadata
+            acceptedTerms: consentData.acceptedTerms || false,
+            acceptedPrivacy: consentData.acceptedPrivacy || false,
+            acceptedTermsDate: consentData.acceptedTermsDate || null,
+            acceptedPrivacyDate: consentData.acceptedPrivacyDate || null
           },
           emailRedirectTo: window.location.origin
         }
@@ -573,6 +578,7 @@ export function AuthProvider({ children }) {
 
       console.log('✅ Auth user created:', authData.user.id);
       console.log('✅ Player wird automatisch via Trigger erstellt');
+      console.log('✅ Zustimmung zu Nutzungsbedingungen und Datenschutz gespeichert');
       
       return { 
         success: true, 

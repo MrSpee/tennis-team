@@ -28,6 +28,8 @@ import LeaderboardPage from './components/LeaderboardPage';
 import Navigation from './components/Navigation';
 import Header from './components/Header';
 import ScrollToTop from './components/ScrollToTop';
+import TermsOfService from './components/TermsOfService';
+import PrivacyPolicy from './components/PrivacyPolicy';
 import './index.css';
 
 // Hash Error Handler - Fängt Supabase Email-Fehler ab
@@ -181,6 +183,10 @@ function AppContent() {
           } />
           
           <Route path="/email-error" element={<EmailVerificationError />} />
+          
+          <Route path="/terms" element={<TermsOfService />} />
+          
+          <Route path="/privacy" element={<PrivacyPolicy />} />
           
           <Route path="/" element={
             <ProtectedRoute>
