@@ -716,16 +716,25 @@ const LiveResultsWithDB = () => {
           }
         }
         
-        // 1. Finde ALLE Teams des Gegner-Vereins
-        const { data: opponentClubTeams, error: opponentClubTeamsError } = await supabase
+        // 1. Finde Teams des Gegner-Vereins mit der GLEICHEN KATEGORIE (z.B. "Herren 30")
+        const awayTeamCategory = matchData.away_team?.category; // z.B. "Herren 30", "Damen", etc.
+        
+        let opponentClubTeamsQuery = supabase
           .from('team_info')
-          .select('id')
+          .select('id, category')
           .ilike('club_name', `%${awayClubName}%`);
+        
+        // ✅ WICHTIG: Filtere nach Kategorie, wenn vorhanden
+        if (awayTeamCategory) {
+          opponentClubTeamsQuery = opponentClubTeamsQuery.eq('category', awayTeamCategory);
+        }
+        
+        const { data: opponentClubTeams, error: opponentClubTeamsError } = await opponentClubTeamsQuery;
         
         if (!opponentClubTeamsError && opponentClubTeams && opponentClubTeams.length > 0) {
           const opponentClubTeamIds = opponentClubTeams.map(t => t.id);
           
-          // 2. Lade ALLE Spieler aus ALLEN Teams des Gegner-Vereins (NUR aktive Memberships)
+          // 2. Lade Spieler aus Teams des Gegner-Vereins mit der GLEICHEN KATEGORIE (NUR aktive Memberships)
           const { data: opponentTeamMembers, error: opponentTeamError } = await supabase
             .from('team_memberships')
             .select('player_id')
@@ -789,12 +798,13 @@ const LiveResultsWithDB = () => {
           // 5. Kombiniere Meldelisten-Spieler mit players_unified Spielern
           // Entferne Duplikate (priorisiere Meldelisten-Spieler)
           const combinedPlayers = [...rosterPlayers];
-          const rosterPlayerIds = new Set(rosterPlayers.map(p => p.id));
+          const addedPlayerIds = new Set(rosterPlayers.map(p => p.id)); // Track bereits hinzugefügte IDs
           
           playersFromUnified.forEach(player => {
-            // Nur hinzufügen, wenn nicht bereits in Meldeliste vorhanden
-            if (!rosterPlayerIds.has(player.id)) {
+            // Nur hinzufügen, wenn nicht bereits in Meldeliste vorhanden UND nicht bereits hinzugefügt
+            if (!addedPlayerIds.has(player.id)) {
               combinedPlayers.push(player);
+              addedPlayerIds.add(player.id); // Markiere als hinzugefügt
             }
           });
           
@@ -1152,12 +1162,19 @@ const LiveResultsWithDB = () => {
     if (!match?.away_team_id || !match?.away_team?.club_name) return;
     
     try {
-      // 1. Lade aus team_memberships
-      const { data: opponentClubTeams } = await supabase
+      // 1. Lade aus team_memberships (nur Teams mit gleicher Kategorie)
+      const awayTeamCategory = match?.away_team?.category;
+      let opponentClubTeamsQuery = supabase
         .from('team_info')
-        .select('id')
+        .select('id, category')
         .ilike('club_name', `%${match.away_team.club_name}%`);
       
+      // ✅ WICHTIG: Filtere nach Kategorie, wenn vorhanden
+      if (awayTeamCategory) {
+        opponentClubTeamsQuery = opponentClubTeamsQuery.eq('category', awayTeamCategory);
+      }
+      
+      const { data: opponentClubTeams } = await opponentClubTeamsQuery;
       const opponentClubTeamIds = (opponentClubTeams || []).map(t => t.id);
       
       const { data: opponentTeamMembers } = await supabase
@@ -2056,22 +2073,38 @@ const LiveResultsWithDB = () => {
               {/* Angemeldete Spieler */}
               {homePlayers.available && homePlayers.available.length > 0 && (
                 <optgroup label="✅ Angemeldete Spieler">
-                  {homePlayers.available.map(player => (
-                    <option key={player.id} value={player.id}>
-                      {player.name} {(player.current_lk || player.season_start_lk || player.ranking) && `(${player.current_lk || player.season_start_lk || player.ranking})`}
-                    </option>
-                  ))}
+                  {homePlayers.available.map(player => {
+                    const lkDisplay = (player.current_lk || player.season_start_lk || player.ranking) ? `LK ${player.current_lk || player.season_start_lk || player.ranking}` : '';
+                    const rankDisplay = player.rank ? `Rang ${player.rank}` : '';
+                    const displayParts = [rankDisplay, lkDisplay].filter(Boolean);
+                    const displaySuffix = displayParts.length > 0 ? ` (${displayParts.join(', ')})` : '';
+                    const rosterBadge = player.fromRoster ? '📋 ' : '';
+                    
+                    return (
+                      <option key={player.id} value={player.id}>
+                        {rosterBadge}{player.name}{displaySuffix}
+                      </option>
+                    );
+                  })}
                 </optgroup>
               )}
               
               {/* Alle anderen Spieler */}
               {homePlayers.others && homePlayers.others.length > 0 && (
                 <optgroup label="👥 Alle Spieler">
-                  {homePlayers.others.map(player => (
-                    <option key={player.id} value={player.id}>
-                      {player.name} {(player.current_lk || player.season_start_lk || player.ranking) && `(${player.current_lk || player.season_start_lk || player.ranking})`}
-                    </option>
-                  ))}
+                  {homePlayers.others.map(player => {
+                    const lkDisplay = (player.current_lk || player.season_start_lk || player.ranking) ? `LK ${player.current_lk || player.season_start_lk || player.ranking}` : '';
+                    const rankDisplay = player.rank ? `Rang ${player.rank}` : '';
+                    const displayParts = [rankDisplay, lkDisplay].filter(Boolean);
+                    const displaySuffix = displayParts.length > 0 ? ` (${displayParts.join(', ')})` : '';
+                    const rosterBadge = player.fromRoster ? '📋 ' : '';
+                    
+                    return (
+                      <option key={player.id} value={player.id}>
+                        {rosterBadge}{player.name}{displaySuffix}
+                      </option>
+                    );
+                  })}
                 </optgroup>
               )}
               
