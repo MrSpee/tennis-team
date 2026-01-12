@@ -1302,6 +1302,11 @@ const ImportTab = () => {
 
       console.log('📝 Creating matchdays:', matchdaysToCreate);
 
+      // Bestimme Saison für Roster-Import (nehme erste Saison aus matchdaysToCreate)
+      const rosterImportSeason = matchdaysToCreate.length > 0 
+        ? (matchdaysToCreate[0].season || 'Winter 2025/26')
+        : 'Winter 2025/26';
+
       // Insert in Supabase
       const { data, error: insertError } = await supabase
         .from('matchdays')
@@ -1311,6 +1316,93 @@ const ImportTab = () => {
       if (insertError) throw insertError;
 
       console.log('✅ Import successful:', data);
+
+      // ✅ NEU: Automatischer Roster-Import nach Matchday-Import
+      try {
+        // Sammle alle betroffenen Teams (Home + Away)
+        const importedTeamIds = [...new Set(
+          matchdaysToCreate.flatMap(m => [m.home_team_id, m.away_team_id]).filter(Boolean)
+        )];
+        
+        if (importedTeamIds.length > 0) {
+          console.log(`🔍 Prüfe automatischen Roster-Import für ${importedTeamIds.length} Teams...`);
+          
+          // Lade Teams mit club_number
+          const { data: teamsWithClubNumber, error: teamsError } = await supabase
+            .from('team_info')
+            .select('id, club_name, category, club_number, club_id')
+            .in('id', importedTeamIds)
+            .not('club_number', 'is', null);
+          
+          if (!teamsError && teamsWithClubNumber && teamsWithClubNumber.length > 0) {
+            console.log(`✅ ${teamsWithClubNumber.length} Teams mit club_number gefunden`);
+            
+            // Gruppiere Teams nach Club (ein API-Call pro Club ist effizienter)
+            const clubsByNumber = {};
+            teamsWithClubNumber.forEach(team => {
+              if (!clubsByNumber[team.club_number]) {
+                clubsByNumber[team.club_number] = {
+                  club_number: team.club_number,
+                  club_name: team.club_name,
+                  teams: []
+                };
+              }
+              clubsByNumber[team.club_number].teams.push(team);
+            });
+            
+            // Importiere Meldelisten für jeden Club (asynchron, nicht blockierend)
+            const rosterImportPromises = Object.values(clubsByNumber).map(async (clubData) => {
+              try {
+                const clubPoolsUrl = `https://tvm.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/clubPools?club=${clubData.club_number}`;
+                const targetSeason = rosterImportSeason;
+                
+                console.log(`📥 Importiere Meldelisten für ${clubData.club_name} (Club-Nr: ${clubData.club_number})...`);
+                
+                const response = await fetch('/api/import/parse-club-rosters', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    clubPoolsUrl,
+                    targetSeason,
+                    apply: true // Automatisch speichern
+                  })
+                });
+                
+                if (!response.ok) {
+                  const errorText = await response.text();
+                  throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 200)}`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                  console.log(`✅ Meldelisten für ${clubData.club_name} importiert: ${result.savedRosters?.length || 0} Teams`);
+                  return { success: true, club: clubData.club_name, teams: result.savedRosters?.length || 0 };
+                } else {
+                  throw new Error(result.error || 'Unbekannter Fehler');
+                }
+              } catch (error) {
+                console.warn(`⚠️ Fehler beim automatischen Roster-Import für ${clubData.club_name}:`, error.message);
+                return { success: false, club: clubData.club_name, error: error.message };
+              }
+            });
+            
+            // Warte auf alle Imports (nicht blockierend für Matchday-Import)
+            const rosterResults = await Promise.allSettled(rosterImportPromises);
+            const successful = rosterResults.filter(r => r.status === 'fulfilled' && r.value.success).length;
+            const failed = rosterResults.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.success)).length;
+            
+            if (successful > 0) {
+              console.log(`✅ Automatischer Roster-Import: ${successful} Clubs erfolgreich, ${failed} fehlgeschlagen`);
+            }
+          } else {
+            console.log('ℹ️ Keine Teams mit club_number gefunden - automatischer Roster-Import übersprungen');
+          }
+        }
+      } catch (rosterImportError) {
+        // Nicht blockierend - Matchdays sind bereits importiert
+        console.warn('⚠️ Fehler beim automatischen Roster-Import (nicht blockierend):', rosterImportError);
+      }
 
       // Log KI-Match Import Aktivität
       try {
